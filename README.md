@@ -1,5 +1,7 @@
 # Job Cannon
 
+
+
 A local job search command center that aggregates listings from Gmail alerts and APIs, scores them with AI, tracks your application pipeline, and generates tailored resumes.
 
 ## What It Does
