@@ -1,0 +1,293 @@
+{# Accordion expansion row. Inserted below the compact row via HTMX afterend swap. #}
+{% set sources_list = job.sources | from_json if job.sources else [] %}
+{% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
+{% set first_seen_date = job.first_seen[:10] if job.first_seen else "—" %}
+{% set last_seen_date = job.last_seen[:10] if job.last_seen else "—" %}
+{% set posted_date = job.posted_date[:10] if job.posted_date else "—" %}
+
+<tr class="border-b border-slate-700 bg-slate-800/40">
+  <td colspan="7" class="px-4 py-3">
+    <div class="flex gap-4">
+    {# Left column: main job content #}
+    <div class="flex-1 min-w-0 grid grid-cols-1 gap-3">
+
+      <!-- Header row: dates + stale badge -->
+      <div class="flex items-center text-xs text-slate-500">
+        <span>
+          Posted: <span class="text-slate-400">{{ posted_date }}</span>
+          &nbsp;&bull;&nbsp;
+          First seen: <span class="text-slate-400">{{ first_seen_date }}</span>
+          &nbsp;&bull;&nbsp;
+          Last seen: <span class="text-slate-400">{{ last_seen_date }}</span>
+          {% if job.is_stale %}
+          &nbsp;&bull;&nbsp;
+          <span class="text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>
+          {% endif %}
+        </span>
+      </div>
+
+      <!-- Error banner (from paste_jd / rescore routes) -->
+      {% if error %}
+      <div class="bg-red-900/50 border border-red-700/50 rounded px-3 py-2 text-xs text-red-300">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <!-- Description (hidden when full JD is available — jd_full is a superset) -->
+      {% if job.description and not job.jd_full %}
+      <div class="text-xs text-slate-300 leading-relaxed max-w-4xl">
+        {{ job.description | format_description }}
+      </div>
+      {% endif %}
+
+      <!-- JD Section: three-state (no JD / saved not scored / saved and scored) -->
+      {% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
+      <div id="jd-section-{{ jd_key_safe }}">
+
+        {% if jd_saved %}
+        <div id="jd-toast-{{ jd_key_safe }}"
+             class="bg-emerald-900/50 border border-emerald-700/50 rounded px-3 py-1.5 text-xs text-emerald-300 mt-2">
+          JD saved
+          <script>
+            setTimeout(function() {
+              var el = document.getElementById('jd-toast-{{ jd_key_safe }}');
+              if (el) el.remove();
+            }, 3000);
+          </script>
+        </div>
+        {% endif %}
+
+        {% if job.jd_full %}
+          {# --- JD Display mode (saved, possibly scored) --- #}
+          <details class="border-t border-slate-700 pt-2">
+            <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-300 select-none flex items-center gap-2">
+              Job Description (full)
+              {% if job.sonnet_score is none %}
+              <span class="text-xs text-amber-400 border border-amber-500/50 rounded px-1">Saved — not scored</span>
+              {% endif %}
+              <button type="button"
+                      hx-get="/jobs/{{ job.dedup_key | urlencode }}/jd-edit-form"
+                      hx-target="#jd-section-{{ jd_key_safe }}"
+                      hx-swap="outerHTML"
+                      hx-on:click="event.stopPropagation(); event.preventDefault()"
+                      class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded ml-auto">
+                Edit
+              </button>
+              {% if job.sonnet_score is none %}
+              <button type="button"
+                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/rescore"
+                      hx-target="closest tr"
+                      hx-swap="outerHTML"
+                      hx-disable-elt="this"
+                      hx-on:click="event.stopPropagation(); event.preventDefault()"
+                      class="px-2 py-0.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded">
+                Score now
+                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                </span>
+              </button>
+              {% endif %}
+            </summary>
+            <div class="mt-2 max-h-96 overflow-y-auto">
+              <div class="text-xs text-slate-300 leading-relaxed">{{ job.jd_full | format_description }}</div>
+            </div>
+          </details>
+
+        {% else %}
+          {# --- No JD: show paste form with two buttons, each driving its own route --- #}
+          <form class="border-t border-slate-700 pt-2">
+            <p class="text-xs text-slate-500 mb-1">Paste the full job description:</p>
+            <textarea name="jd_text" rows="4" placeholder="Paste the full job description here..."
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-slate-100 focus:border-violet-500 focus:outline-none resize-y"></textarea>
+            <div class="flex gap-2 mt-1">
+              <button type="button"
+                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/save-jd"
+                      hx-target="closest tr"
+                      hx-swap="outerHTML"
+                      hx-include="closest form"
+                      hx-disable-elt="this"
+                      class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+                Save JD
+                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                </span>
+              </button>
+              <button type="button"
+                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/paste-jd"
+                      hx-target="closest tr"
+                      hx-swap="outerHTML"
+                      hx-include="closest form"
+                      hx-disable-elt="this"
+                      class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+                Score with JD
+                <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+                  <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+                </span>
+              </button>
+            </div>
+          </form>
+        {% endif %}
+
+      </div>{# end jd-section #}
+
+      <!-- AI Fit Analysis (Sonnet-scored jobs) -->
+      {% if job.sonnet_score is not none and job.fit_analysis %}
+        {% set analysis = job.fit_analysis | from_json %}
+        <div class="space-y-2 text-xs border-t border-slate-700 pt-2">
+          <div class="text-slate-400 font-semibold text-xs uppercase tracking-wide mb-1">
+            AI Fit Analysis
+            <span class="text-amber-400 ml-1">*</span>
+            <span class="text-slate-600 font-normal ml-1">(Sonnet score: {{ job.sonnet_score | int }})</span>
+          </div>
+          {% if analysis.strengths %}
+          <div>
+            <span class="text-green-400 font-semibold">Strengths</span>
+            <ul class="list-disc list-inside text-slate-300 mt-1">
+              {% for s in analysis.strengths %}<li>{{ s }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          {% if analysis.gaps %}
+          <div>
+            <span class="text-amber-400 font-semibold">Gaps</span>
+            <ul class="list-disc list-inside text-slate-300 mt-1">
+              {% for g in analysis.gaps %}<li>{{ g }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          {% if analysis.resume_priority_skills %}
+          <div>
+            <span class="text-blue-400 font-semibold">Resume Priority Skills</span>
+            <div class="flex flex-wrap gap-1 mt-1">
+              {% for skill in analysis.resume_priority_skills %}
+                <span class="px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50">{{ skill }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      {% elif job.haiku_summary %}
+      <!-- Haiku-only jobs: show one-line summary -->
+      <div class="text-xs text-slate-400 italic border-t border-slate-700 pt-2">
+        <span class="text-slate-500 not-italic">Haiku score: {{ job.haiku_score | int if job.haiku_score is not none else "?" }}/100 &mdash;</span> {{ job.haiku_summary }}
+      </div>
+      {% elif job.haiku_score is none %}
+      <!-- Unscored job: explain AI scoring status -->
+      <div class="text-xs text-slate-500 border-t border-slate-700 pt-2">
+        <span class="text-violet-400 font-semibold">No AI score yet.</span>
+        Use "Score All Jobs" on the Dashboard to run Haiku AI scoring on all existing jobs,
+        or paste the job description below to score this job with Sonnet directly.
+      </div>
+      {% endif %}
+
+      <!-- Status dropdown -->
+      <div class="flex items-center gap-3 text-xs">
+        <span class="text-slate-500">Status:</span>
+        {% include "jobs/_status_cell.html" %}
+      </div>
+
+      <!-- Resume section -->
+      {% include "jobs/_resume_section.html" %}
+
+      <!-- Sources with links + source count badge for merged jobs -->
+      {% if sources_list %}
+      <div class="flex flex-wrap gap-2 text-xs items-center">
+        {% if sources_list | length > 1 %}
+        <span class="px-2 py-0.5 rounded-full bg-slate-600 text-slate-300 text-xs font-medium">
+          {{ sources_list | length }} sources
+        </span>
+        <span class="text-slate-500" title="Combined from multiple sources">&#10024;</span>
+        {% endif %}
+        {% for i in range(sources_list | length) %}
+          {% set src_name = sources_list[i] %}
+          {% set src_url = urls_list[i] if i < urls_list | length else None %}
+          {% if src_url %}
+            <a href="{{ src_url }}" target="_blank" rel="noopener noreferrer"
+               class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50">
+              {{ src_name }} &rarr;
+            </a>
+          {% else %}
+            <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-400">{{ src_name }}</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Action buttons -->
+      <div class="flex items-center gap-3 text-xs">
+        <button type="button"
+                hx-get="/jobs/{{ job.dedup_key | urlencode }}/detail-inline"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-disable-elt="this"
+                class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded transition-colors disabled:opacity-50">
+          View Full Detail
+          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+            <span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+          </span>
+        </button>
+        {% if job.jd_full %}
+        <button type="button"
+                hx-post="/jobs/{{ job.dedup_key | urlencode }}/rescore"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-disable-elt="this"
+                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors disabled:opacity-50">
+          Re-score
+          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+            Scoring...
+          </span>
+        </button>
+        {% endif %}
+        <button type="button"
+                hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
+                hx-vals='{"pipeline_status": "archived"}'
+                hx-target="#status-cell-{{ jd_key_safe }}"
+                hx-swap="innerHTML"
+                hx-confirm="Archive this job?"
+                hx-disable-elt="this"
+                hx-on::after-request="archiveRow(this)"
+                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors disabled:opacity-50">
+          Archive
+          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+          </span>
+        </button>
+        <span class="text-slate-600">Add Note (coming soon)</span>
+      </div>
+
+      <!-- Bottom collapse button (reachable without scrolling up) -->
+      <div class="flex justify-end border-t border-slate-700 pt-2">
+        <button type="button"
+                hx-get="/jobs/{{ job.dedup_key | urlencode }}/collapse"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-on::after-request="var cr = this.closest('tr').previousElementSibling; cr.dataset.expanded = 'false'; setTimeout(function(){ cr.scrollIntoView({behavior: 'smooth', block: 'nearest'}); cr.classList.remove('highlight-flash'); void cr.offsetWidth; cr.classList.add('highlight-flash'); }, 100);"
+                hx-disable-elt="this"
+                class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors disabled:opacity-50">
+          Collapse
+          <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+            <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+          </span>
+        </button>
+      </div>
+
+    </div>{# end left column grid #}
+
+    {# Right column: interview prep (shown only for applied jobs with prep data) #}
+    {% if prep_row and prep_row['status'] in ('generating', 'done') %}
+    <div class="w-[800px] flex-shrink-0 hidden lg:block border-l border-slate-700/50 pl-4">
+      {% if prep_row['status'] == 'generating' %}
+        {% include "jobs/_interview_prep_generating.html" %}
+      {% elif prep_row['status'] == 'done' %}
+        {% set prep = prep_row %}
+        {% include "jobs/_interview_prep.html" %}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    </div>{# end flex outer #}
+
+  </td>
+</tr>

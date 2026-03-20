@@ -1,0 +1,110 @@
+"""Per-request Google Drive status helper.
+
+Provides a single function get_drive_status() that checks whether Drive
+integration is ready for use. Results are cached on Flask g for the duration
+of the request.
+
+Usage:
+    from job_finder.web.drive_status import get_drive_status
+
+    status = get_drive_status(config)
+    if not status["ok"]:
+        # show error UI based on status["error_code"]
+        pass
+
+Error codes:
+    no_token       -- token.json does not exist
+    missing_scope  -- token exists but lacks drive.file scope
+    refresh_failed -- token refresh raised an exception
+    no_folder_id   -- token is valid but Drive folder is not configured
+"""
+
+from pathlib import Path
+
+from flask import g
+
+_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+
+def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
+    """Return a structured dict describing current Google Drive readiness.
+
+    Caches the result on ``flask.g.drive_status`` for the duration of the
+    request so multiple callers in the same request cycle pay the I/O cost
+    only once.
+
+    Args:
+        config: Application config dict (reads ``config["drive"]["folder_id"]``).
+        token_path: Path to the saved OAuth token JSON file.
+
+    Returns:
+        dict with keys:
+            ok          -- bool, True only when Drive is fully ready
+            error       -- human-readable error string (None when ok=True)
+            error_code  -- machine-readable code (None when ok=True):
+                           "no_token" | "missing_scope" | "refresh_failed" |
+                           "no_folder_id"
+    """
+    if hasattr(g, "drive_status"):
+        return g.drive_status
+
+    result = _compute_drive_status(config, token_path)
+    g.drive_status = result
+    return result
+
+
+def _compute_drive_status(config: dict, token_path: str) -> dict:
+    """Internal: compute Drive status without caching."""
+    # Lazy import to avoid triggering google-auth at module load time in tests
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+
+    try:
+        # 1. Token file must exist
+        if not Path(token_path).exists():
+            return {
+                "ok": False,
+                "error": f"Token file not found: '{token_path}'. Run: python -m job_finder.gmail_auth",
+                "error_code": "no_token",
+            }
+
+        # 2. Load with scopes=None for honest scope detection
+        creds = Credentials.from_authorized_user_file(token_path, scopes=None)
+
+        # 3. Check that drive.file scope was actually granted
+        if not creds.scopes or _DRIVE_FILE_SCOPE not in creds.scopes:
+            return {
+                "ok": False,
+                "error": "Token lacks drive.file scope. Run: python -m job_finder.gmail_auth",
+                "error_code": "missing_scope",
+            }
+
+        # 4. Refresh expired token
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": f"Token refresh failed: {exc}. Run: python -m job_finder.gmail_auth",
+                    "error_code": "refresh_failed",
+                }
+
+        # 5. Drive folder must be configured
+        folder_id = config.get("drive", {}).get("folder_id", "")
+        if not folder_id:
+            return {
+                "ok": False,
+                "error": "Drive folder not configured. Run: python -m job_finder.gmail_auth",
+                "error_code": "no_folder_id",
+            }
+
+        return {"ok": True, "error": None, "error_code": None}
+
+    except Exception as exc:
+        # Catch-all: never crash the caller
+        return {
+            "ok": False,
+            "error": f"Unexpected error checking Drive status: {exc}",
+            "error_code": "unknown",
+        }

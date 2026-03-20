@@ -1,0 +1,36 @@
+{# JD edit form fragment -- returned by /jobs/<key>/jd-edit-form route.
+   Replaces the jd-section div via HTMX outerHTML swap. #}
+{% set jd_key_safe = job.dedup_key | urlencode | replace('%', '') %}
+<div id="jd-section-{{ jd_key_safe }}">
+  <form class="border-t border-slate-700 pt-2">
+    <p class="text-xs text-slate-500 mb-1">Paste the full job description:</p>
+    <textarea name="jd_text" rows="4" placeholder="Paste the full job description here..."
+              class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-slate-100 focus:border-violet-500 focus:outline-none resize-y">{{ job.jd_full or '' }}</textarea>
+    <div class="flex gap-2 mt-1">
+      <button type="button"
+              hx-post="/jobs/{{ job.dedup_key | urlencode }}/save-jd"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-include="closest form"
+              hx-disable-elt="this"
+              class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+        Save JD
+        <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+          <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+        </span>
+      </button>
+      <button type="button"
+              hx-post="/jobs/{{ job.dedup_key | urlencode }}/paste-jd"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-include="closest form"
+              hx-disable-elt="this"
+              class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded transition-colors disabled:opacity-50">
+        Score with JD
+        <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+          <span class="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin"></span>
+        </span>
+      </button>
+    </div>
+  </form>
+</div>

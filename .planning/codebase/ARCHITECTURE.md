@@ -1,0 +1,245 @@
+# Architecture
+
+**Analysis Date:** 2026-03-17
+
+## Pattern Overview
+
+**Overall:** Layered request-response web app with background job pipeline
+
+Job Finder follows a classic 3-tier architecture:
+1. **Ingestion Layer** — Data fetching and parsing (Gmail, SerpAPI)
+2. **Scoring Layer** — Two-tier AI evaluation (Haiku fast-filter → Sonnet deep-eval)
+3. **Web Layer** — Flask blueprints with HTMX-driven interactivity and per-request database access
+
+**Key Characteristics:**
+- Single-process Flask development server on localhost:5000 (no ASGI, no WSGI app server)
+- Background APScheduler ingestion every 30 minutes (separate SQLite connection)
+- Per-request SQLite connections via Flask g.db context variable
+- Raw SQL (no ORM) with parameterized queries and composite indexes
+- Two-tier AI scoring: Haiku handles volume fast (~$0.01/job), Sonnet for deep eval (~$0.05/job for selected jobs)
+- Budget gating: Sonnet and Opus blocked when monthly cap is reached (Haiku always allowed)
+- Deduplication by company+title (location intentionally excluded)
+
+## Layers
+
+**Ingestion Layer:**
+- Purpose: Fetch job postings from external sources, parse into normalized Job objects
+- Location: `job_finder/sources/` (Gmail, SerpAPI), `job_finder/parsers/` (email format parsing)
+- Contains: Source adapters, email format parsers
+- Depends on: Job model, Gmail API v1, SerpAPI REST API
+- Used by: `pipeline_runner.py` (orchestrator)
+
+**Persistence Layer:**
+- Purpose: SQLite database access with deduplication, migrations, cost tracking
+- Location: `job_finder/db.py` (JobDB class, CLI-era module-level functions), `job_finder/web/db_migrate.py` (schema + migrations)
+- Contains: JobDB class (insert/update/query), migration definitions, per-request connection helpers
+- Depends on: sqlite3 standard library, Job model
+- Used by: All blueprints, pipeline_runner, background jobs
+
+**Scoring Layer:**
+- Purpose: Two-tier AI evaluation with cost tracking and budget gating
+- Location: `job_finder/web/haiku_scorer.py`, `job_finder/web/sonnet_evaluator.py`, `job_finder/web/claude_client.py`
+- Contains: Score computation, structured output schemas, budget tracking
+- Depends on: Anthropic SDK, Claude models
+- Used by: `pipeline_runner.py`, Dashboard UI for manual rescoring
+
+**Web/Request Layer:**
+- Purpose: HTTP endpoints, form processing, template rendering, user interactions
+- Location: `job_finder/web/blueprints/` (jobs, dashboard, pipeline, profile, settings, etc.), `job_finder/web/templates/`
+- Contains: Route handlers, HTMX fragment responses, Jinja2 templates
+- Depends on: Flask, Jinja2, database connection from context
+- Used by: Browser (user)
+
+**Background Tasks:**
+- Purpose: Long-running operations outside the request cycle
+- Location: `job_finder/web/scheduler.py` (APScheduler init), pipeline_runner, stale_detector, interview_prep
+- Contains: Scheduled jobs (30-min ingestion), one-time backfills (description reformat, data enrichment)
+- Depends on: APScheduler (background thread), separate DB connections
+- Used by: APScheduler event loop
+
+## Data Flow
+
+**Ingestion → Persistence → Scoring (Main Pipeline):**
+
+1. **APScheduler timer fires** (every 30 minutes)
+   - Calls `run_ingestion(config, db_path)` in background thread
+
+2. **run_ingestion orchestrates:**
+   - Gmail fetch via `GmailSource.fetch_recent()` → emails with sender address
+   - Email parsing via `SENDER_PARSERS[sender]()` → list of Job objects per email
+   - SerpAPI fetch via `SerpAPISource.search()` → list of Job objects
+   - Per-source error isolation (Gmail failure doesn't stop SerpAPI)
+
+3. **Deduplication & Persistence:**
+   - For each Job, check exclusion filters (`exclusion_filter.py`)
+   - Call `JobDB.upsert_job(job)` → returns True if new, False if updated
+   - Merge sources, locations (Remote/Hybrid first), descriptions (keep longer or append)
+
+4. **Haiku Scoring (First Tier):**
+   - For NEW jobs only (skip if haiku_score IS NOT NULL)
+   - Call `score_job_haiku(job_row, profile)` with structured output schema
+   - Returns: score (0-100), summary, title_fit, location_fit, salary_meets_floor
+   - Cost: ~$0.005-$0.02 per job
+   - Cost recorded to `scoring_costs` table with purpose="haiku_score"
+
+5. **Sonnet Evaluation (Second Tier):**
+   - For jobs with haiku_score >= haiku_threshold AND jd_full present
+   - Call `evaluate_job_sonnet(job_row, profile)` (budget-gated)
+   - Returns: score (0-100), summary, fit_analysis (strengths, gaps, talking_points, resume_priority_skills)
+   - Skipped if jd_full is missing (no cost without full JD)
+   - Skipped if monthly budget cap reached (returns None, not an error)
+   - Cost: ~$0.04-$0.08 per job
+
+6. **Summary returned to scheduler:**
+   - gmail_fetched, gmail_errors, serpapi_fetched, serpapi_errors
+   - jobs_new, jobs_updated, jobs_scored, job_errors
+   - haiku_scored, sonnet_queued, sonnet_evaluated
+
+**User Interaction (Request/Response):**
+
+1. User browses `/jobs/` — renders full page with filter bar
+2. User applies filter (status, score, salary, source, date range) → GET /jobs/?status=...&min_score=...
+3. Fragment routes (HTMX): GET /jobs/_table?filters=... → returns rows only
+4. User clicks expand → GET /jobs/{dedup_key}/detail → shows full description + AI analysis
+5. User changes status dropdown → POST /jobs/{dedup_key}/status?value=applied → updates DB + triggers interview prep
+6. User pastes full JD → POST /jobs/{dedup_key}/paste-jd → stores jd_full + triggers Sonnet rescoring
+7. User rescores manually → POST /jobs/{dedup_key}/rescore → calls Haiku + Sonnet (budget-gated)
+
+**State Management:**
+
+Job state transitions are tracked in the database:
+- `pipeline_status` on jobs table (discovered → reviewing → applied → phone_screen → ... → archived/rejected)
+- `pipeline_events` table logs all transitions with source (manual/detected/automated) and evidence
+- `pipeline_detections` table holds AI-detected transitions (awaiting manual confirmation)
+- Transitions trigger side effects:
+  - Status → "applied" triggers interview prep generation in background thread
+  - Status transitions logged to activity_tracker for audit trail
+
+## Key Abstractions
+
+**Job Model (`job_finder/models.py`):**
+- Purpose: Normalized representation across all job sources
+- Examples: `job_finder/models.py` line 9-55
+- Pattern: Python dataclass with immutable dedup_key property (company+title only)
+- Used by: All parsers, DB layer, scoring layer
+
+**JobDB Class (`job_finder/db.py`):**
+- Purpose: SQLite query interface with deduplication logic
+- Examples: `upsert_job()`, `get_filtered_jobs()`, `load_job_context()`
+- Pattern: Module-level functions take Connection object (per-request in web layer, custom in batch jobs)
+- Instance method initialization deprecated in favor of function-based API
+
+**Scoring Abstractions:**
+- `call_claude()` — Anthropic API wrapper with cost recording
+- `score_job_haiku()` — Fast-filter scoring returning structured output
+- `evaluate_job_sonnet()` — Deep evaluation with fit analysis
+- Pattern: Takes (job_row: dict, profile: dict, config: dict) → returns dict or None (on budget limit)
+
+**Flask Blueprints:**
+- Purpose: Modular route groups
+- Examples: `jobs_bp`, `dashboard_bp`, `pipeline_bp`, `profile_bp`, `resume_bp`, etc.
+- Pattern: Registered in order (detail routes BEFORE catch-alls to prevent shadowing)
+- HTMX partials check `request.headers.get('HX-Request')` to return fragments vs. full pages
+
+**Pipeline Detector (`job_finder/web/pipeline_detector.py`):**
+- Purpose: Multi-signal email classification to auto-detect pipeline state changes
+- Examples: Rejection email patterns, interview confirmation patterns, offer patterns
+- Pattern: Analyzes rejection/confirmation emails to emit pipeline events
+- Used by: Background pipeline watcher, manual confirmation UI
+
+## Entry Points
+
+**Main Web App:**
+- Location: `run.py` (CLI entry) → `job_finder/web/__init__.py:create_app()` (factory)
+- Triggers: `python run.py` starts Flask development server on localhost:5000
+- Responsibilities:
+  - Load config.yaml
+  - Run database migrations
+  - Register all blueprints
+  - Initialize APScheduler background tasks
+  - Set up Jinja2 filters and globals
+
+**Background Ingestion:**
+- Location: `job_finder/web/scheduler.py:init_scheduler()` → `pipeline_runner.run_ingestion()`
+- Triggers: APScheduler fires every 30 minutes
+- Responsibilities:
+  - Fetch from Gmail and SerpAPI
+  - Parse emails
+  - Deduplicate and persist
+  - Score with Haiku and Sonnet
+  - Track costs
+
+**Manual Ingestion (Batch):**
+- Location: `job_finder/main.py` (CLI interface)
+- Triggers: `python -m job_finder.main` (used for backfills, one-time operations)
+- Responsibilities: Triggered backfill operations (description reformat, company enrichment)
+
+**API Routes (from Blueprints):**
+- `/jobs/` — Job board index (GET full page)
+- `/jobs/_table` — Fragment route (GET rows only)
+- `/jobs/{dedup_key}/detail` — Expand row detail (GET fragment)
+- `/jobs/{dedup_key}/status` — Change status (POST)
+- `/jobs/{dedup_key}/paste-jd` — Store full JD and trigger scoring (POST)
+- `/dashboard/` — Summary dashboard
+- `/pipeline/` — Pipeline event viewer
+- `/profile/` — Candidate profile editor
+- `/resume/` — Resume generation interface
+- `/settings/` — App config editor
+- `/costs/` — Cost tracking dashboard
+- `/feedback/` — User preference feedback
+
+## Error Handling
+
+**Strategy:** Per-layer isolation with graceful degradation
+
+**Ingestion Layer:**
+- Per-source error isolation: Gmail failure does not stop SerpAPI
+- Per-email error isolation: One bad email doesn't stop the batch
+- Errors logged to email_parse_log table with sender, message_id, error text
+- Archive failures: Bad email bodies saved to `data/parse_failures/` for later inspection
+
+**Scoring Layer:**
+- `BudgetExceededError` raised by `call_claude()` when monthly cap reached
+- Callers (pipeline_runner, manual rescore) handle this and skip remaining Sonnet calls
+- Haiku always allowed (never budget-gated); Sonnet/Opus gated
+- Returned None (not error) when jd_full absent for Sonnet
+
+**Web Layer (Request Handling):**
+- HTMX fragment routes check `HX-Request` header, return full page if missing (for direct browser access)
+- Form endpoints return empty response `('', 200)` for dismiss/success (not 204; HTMX needs 200)
+- Job not found → 404
+- Database connection errors → 500 (Flask default)
+
+**Database:**
+- Migration errors caught per-statement (avoid aborting entire migration on duplicate column)
+- Query errors bubble up (no retry logic; explicit transaction control)
+
+## Cross-Cutting Concerns
+
+**Logging:** Python stdlib logging module
+- Root logger configured with RotatingFileHandler (logs/app.log, 5MB max, 3 backups)
+- Per-module loggers for structured debugging
+- APScheduler logs background job lifecycle
+
+**Validation:**
+- Config: `load_config()` raises FileNotFoundError if config.yaml missing (fail-fast)
+- Sort parameters: Allowlist check before SQL interpolation (no parameterized column names in SQLite)
+- Job objects: Dataclass validators (minimal; rely on parser quality)
+
+**Authentication:** None (single-user local app)
+- Gmail OAuth 2.0 for API access only (not user auth)
+- Google Drive/Docs OAuth for resume generation only
+
+**Cost Tracking:**
+- Every Claude call recorded to `scoring_costs` table (job_id, purpose, model, tokens, cost_usd, timestamp)
+- Aggregated by purpose/model for dashboard display
+- Monthly budget gating applied only to Sonnet/Opus (not Haiku)
+
+**Activity Tracking:**
+- User actions logged to `activity_log` table (action, job_id, metadata, timestamp)
+- Actions: expand_job, status_change, paste_jd, rescore, scheduled_sync, etc.
+- Used for audit trail and UX insights
+
+---
+
+*Architecture analysis: 2026-03-17*

@@ -1,0 +1,77 @@
+{
+  "positions": [
+    {
+      "title": "Senior Data Scientist",
+      "company": "TechCorp Solutions",
+      "start_date": "Mar 2022",
+      "end_date": null,
+      "achievements": [
+        "Built ML pipeline processing 2M+ daily transactions, reducing fraud detection latency by 40%",
+        "Led cross-functional team of 4 to ship recommendation engine that increased user engagement by 25%",
+        "Designed A/B testing framework adopted by 3 product teams, standardizing experiment analysis",
+        "Mentored 2 junior data scientists through onboarding and first project delivery"
+      ],
+      "skills": [
+        "Python",
+        "PyTorch",
+        "SQL",
+        "Spark",
+        "A/B Testing",
+        "MLOps"
+      ]
+    },
+    {
+      "title": "Data Scientist",
+      "company": "DataDriven Analytics",
+      "start_date": "Jun 2019",
+      "end_date": "Feb 2022",
+      "achievements": [
+        "Developed customer churn prediction model (AUC 0.89) saving $1.2M annually in retention costs",
+        "Automated weekly reporting pipeline, reducing analyst time from 8 hours to 15 minutes",
+        "Collaborated with engineering to deploy 5 models to production via REST APIs",
+        "Presented quarterly insights to C-suite, influencing product roadmap priorities"
+      ],
+      "skills": [
+        "Python",
+        "scikit-learn",
+        "SQL",
+        "Tableau",
+        "Statistical Analysis"
+      ]
+    }
+  ],
+  "skills": [
+    "Python",
+    "SQL",
+    "Machine Learning",
+    "PyTorch",
+    "scikit-learn",
+    "Spark",
+    "A/B Testing",
+    "Statistical Analysis",
+    "Data Visualization",
+    "MLOps"
+  ],
+  "resume_preferences": {
+    "summary_style": "concise",
+    "emphasis": [
+      "machine_learning",
+      "cross_functional_leadership",
+      "quantified_impact"
+    ]
+  },
+  "education": [
+    {
+      "degree": "M.S. Computer Science",
+      "institution": "State University",
+      "location": "San Francisco, CA",
+      "graduation": "2019"
+    },
+    {
+      "degree": "B.S. Mathematics",
+      "institution": "Liberal Arts College",
+      "location": "Portland, OR",
+      "graduation": "2017"
+    }
+  ]
+}

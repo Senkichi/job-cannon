@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+
+{% block title %}Job Board — Job Finder{% endblock %}
+
+{% block content %}
+<div class="overflow-hidden">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-xl font-bold text-slate-100">Job Board</h1>
+    <span class="text-xs text-slate-500">{{ jobs | length }} jobs shown</span>
+  </div>
+
+  <!-- Filter bar -->
+  <form id="filter-form"
+        hx-get="/jobs/table"
+        hx-target="#job-table-body"
+        hx-trigger="change from:select, change from:input"
+        hx-swap="innerHTML"
+        class="flex flex-wrap gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+
+    <!-- Status filter -->
+    <select name="status"
+            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+      <option value="">All Statuses</option>
+      {% for s in pipeline_statuses %}
+        <option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>
+          {{ s | replace('_', ' ') | title }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <!-- Location filter -->
+    <select name="location"
+            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+      <option value="">All Locations</option>
+      {% for loc in locations %}
+        <option value="{{ loc }}" {% if filters.get('location') == loc %}selected{% endif %}>{{ loc }}</option>
+      {% endfor %}
+    </select>
+
+    <!-- Source filter -->
+    <select name="source"
+            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+      <option value="">All Sources</option>
+      {% for src in sources %}
+        <option value="{{ src }}" {% if filters.get('source') == src %}selected{% endif %}>{{ src }}</option>
+      {% endfor %}
+    </select>
+
+    <!-- Min score -->
+    <input type="number" name="min_score" min="0" max="10" step="0.5"
+           value="{{ filters.get('min_score', '') }}"
+           placeholder="Min score"
+           class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+
+    <!-- Max score -->
+    <input type="number" name="max_score" min="0" max="10" step="0.5"
+           value="{{ filters.get('max_score', '') }}"
+           placeholder="Max score"
+           class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+
+    <!-- Salary min -->
+    <input type="number" name="salary_min" step="10000"
+           value="{{ filters.get('salary_min', '') }}"
+           placeholder="Min salary $"
+           class="w-28 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+
+    <!-- Date from -->
+    <input type="date" name="date_from"
+           value="{{ filters.get('date_from', '') }}"
+           class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
+
+    <!-- Date to -->
+    <input type="date" name="date_to"
+           value="{{ filters.get('date_to', '') }}"
+           class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
+
+    <!-- Sort -->
+    <select name="sort_by"
+            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+      <option value="score" {% if filters.get('sort_by', 'score') == 'score' %}selected{% endif %}>Score</option>
+      <option value="first_seen" {% if filters.get('sort_by') == 'first_seen' %}selected{% endif %}>Date</option>
+      <option value="salary_max" {% if filters.get('sort_by') == 'salary_max' %}selected{% endif %}>Salary</option>
+      <option value="company" {% if filters.get('sort_by') == 'company' %}selected{% endif %}>Company</option>
+    </select>
+
+    <select name="sort_dir"
+            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+      <option value="DESC" {% if filters.get('sort_dir', 'DESC') == 'DESC' %}selected{% endif %}>Desc</option>
+      <option value="ASC" {% if filters.get('sort_dir') == 'ASC' %}selected{% endif %}>Asc</option>
+    </select>
+
+    <!-- Hide stale checkbox -->
+    <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+      <input type="checkbox" name="hide_stale" value="on"
+             {% if filters.get('hide_stale') == 'on' %}checked{% endif %}
+             hx-get="/jobs/table" hx-trigger="change" hx-target="#job-table-body"
+             hx-include="[name='status'],[name='location'],[name='min_score'],[name='max_score'],[name='salary_min'],[name='source'],[name='date_from'],[name='date_to'],[name='sort_by'],[name='sort_dir'],[name='hide_stale']"
+             class="w-3.5 h-3.5 accent-violet-500">
+      Hide stale
+      {% if stale_count > 0 %}
+        <span class="px-1 py-0.5 rounded text-xs bg-amber-900/50 text-amber-400 border border-amber-700/50 not-italic font-mono">{{ stale_count }}</span>
+      {% endif %}
+    </label>
+
+  </form>
+
+  <!-- Job table -->
+  <div class="overflow-x-auto">
+    <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
+      <colgroup>
+        <col style="width: 5%;">
+        <col style="width: 28%;">
+        <col style="width: 16%;">
+        <col style="width: 14%;">
+        <col style="width: 10%;">
+        <col style="width: 12%;">
+        <col style="width: 15%;">
+      </colgroup>
+      <thead>
+        <tr class="border-b border-slate-700 text-slate-400 uppercase tracking-wide">
+          <th class="px-1 py-2">Score</th>
+          <th class="px-2 py-2">Title</th>
+          <th class="px-2 py-2">Company</th>
+          <th class="px-2 py-2">Location</th>
+          <th class="px-1 py-2">Salary</th>
+          <th class="px-2 py-2">Posted</th>
+          <th class="px-1 py-2">Status</th>
+        </tr>
+      </thead>
+      <tbody id="job-table-body"
+             hx-get="/jobs/table"
+             hx-trigger="jobs-updated from:body"
+             hx-include="#filter-form"
+             hx-swap="innerHTML">
+        {% include "jobs/_table.html" %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if archived_count > 0 %}
+  <div id="archived-section" class="mt-6">
+    <button type="button" onclick="toggleArchived()"
+            class="w-full flex items-center gap-3 px-4 py-3 bg-slate-800/70 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors cursor-pointer">
+      <span id="archived-arrow" class="text-slate-400 text-sm" style="display: inline-block; transition: transform 0.2s;">&#9654;</span>
+      <span class="text-sm font-medium text-slate-300">Archived Jobs</span>
+      <span id="archived-count" class="px-2 py-0.5 rounded text-xs bg-slate-600 text-slate-300">{{ archived_count }}</span>
+    </button>
+    <div id="archived-body" class="hidden mt-2">
+      <div class="overflow-x-auto">
+        <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
+          <colgroup>
+            <col style="width: 5%;">
+            <col style="width: 28%;">
+            <col style="width: 16%;">
+            <col style="width: 14%;">
+            <col style="width: 10%;">
+            <col style="width: 12%;">
+            <col style="width: 15%;">
+          </colgroup>
+          <thead>
+            <tr class="border-b border-slate-700 text-slate-400 uppercase tracking-wide">
+              <th class="px-1 py-2">Score</th>
+              <th class="px-2 py-2">Title</th>
+              <th class="px-2 py-2">Company</th>
+              <th class="px-2 py-2">Location</th>
+              <th class="px-1 py-2">Salary</th>
+              <th class="px-2 py-2">Posted</th>
+              <th class="px-1 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody id="archived-table-body">
+            <tr><td colspan="7" class="px-4 py-6 text-center text-slate-500 text-sm">
+              <span class="inline-block w-4 h-4 border-2 border-slate-500 border-t-transparent rounded-full animate-spin mr-2"></span>
+              Loading archived jobs...
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/**
+ * Fade out and remove both compact and expanded rows after archiving a job.
+ * Called via hx-on::after-request on the archive button in _row_expanded.html.
+ */
+function archiveRow(el) {
+  var expandedRow = el.closest('tr');
+  if (!expandedRow) return;
+  var compactRow = expandedRow.previousElementSibling;
+  if (expandedRow) expandedRow.classList.add('archive-fadeout');
+  if (compactRow) compactRow.classList.add('archive-fadeout');
+  setTimeout(function() {
+    if (expandedRow) expandedRow.remove();
+    if (compactRow) compactRow.remove();
+  }, 800);
+}
+
+/**
+ * Toggle collapsible archived jobs section with lazy-load on first expand.
+ */
+function toggleArchived() {
+  var body = document.getElementById('archived-body');
+  var arrow = document.getElementById('archived-arrow');
+  if (!body || !arrow) return;
+
+  var isHidden = body.classList.contains('hidden');
+  if (isHidden) {
+    body.classList.remove('hidden');
+    arrow.style.transform = 'rotate(90deg)';
+    // Lazy-load: only fetch on first expand
+    if (!body.dataset.loaded) {
+      htmx.ajax('GET', '/jobs/archived-table', {target: '#archived-table-body', swap: 'innerHTML'});
+      body.dataset.loaded = 'true';
+    }
+  } else {
+    body.classList.add('hidden');
+    arrow.style.transform = 'rotate(0deg)';
+  }
+}
+
+/**
+ * Client-side re-sort after OOB score cell swap.
+ *
+ * When a rescore/paste-jd response updates a score cell via OOB swap,
+ * the row stays in its original DOM position. This listener detects
+ * the OOB swap and re-sorts rows if currently sorting by score.
+ *
+ * Rows in the tbody come in pairs: compact <tr> + expand-slot/expanded <tr>.
+ * Both must move together to preserve the accordion structure.
+ */
+(function() {
+  var tbody = document.getElementById('job-table-body');
+  if (!tbody) return;
+
+  function getActiveSortColumn() {
+    var sel = document.querySelector('#filter-form select[name="sort_by"]');
+    return sel ? sel.value : 'score';
+  }
+
+  function getActiveSortDir() {
+    var sel = document.querySelector('#filter-form select[name="sort_dir"]');
+    return sel ? sel.value : 'DESC';
+  }
+
+  function getScoreFromTd(td) {
+    var val = td ? td.getAttribute('data-sort-score') : '';
+    return val !== '' && val !== null ? parseInt(val, 10) : -1;
+  }
+
+  function resortByScore() {
+    // Only re-sort when sorting by score
+    if (getActiveSortColumn() !== 'score') return;
+
+    var isDesc = getActiveSortDir() === 'DESC';
+
+    // Collect row pairs: [compactTr, slotTr, score]
+    var pairs = [];
+    var rows = Array.from(tbody.children);
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      // Compact rows have data-expand-url; expanded/slot rows do not
+      if (row.hasAttribute('data-expand-url')) {
+        var scoreTd = row.querySelector('td[data-sort-score]');
+        var score = getScoreFromTd(scoreTd);
+        var nextRow = rows[i + 1] || null;
+        pairs.push({ compact: row, slot: nextRow, score: score });
+        i++; // skip the slot/expanded row
+      }
+    }
+
+    // Sort pairs by score
+    pairs.sort(function(a, b) {
+      if (isDesc) return b.score - a.score;
+      return a.score - b.score;
+    });
+
+    // Re-insert in sorted order (DocumentFragment avoids repeated reflows)
+    var frag = document.createDocumentFragment();
+    for (var j = 0; j < pairs.length; j++) {
+      frag.appendChild(pairs[j].compact);
+      if (pairs[j].slot) frag.appendChild(pairs[j].slot);
+    }
+    tbody.appendChild(frag);
+  }
+
+  // Listen for htmx:afterSettle to detect OOB score cell swaps.
+  // This fires after the main swap AND OOB swaps have settled.
+  document.body.addEventListener('htmx:afterSettle', function(evt) {
+    // Check if this settle involved an OOB score cell update.
+    // The OOB swap targets a <td id="score-..."> inside the tbody.
+    // We detect this by checking if the settled element is inside a rescore/paste-jd response.
+    var detail = evt.detail;
+    if (!detail || !detail.xhr) return;
+    var url = detail.pathInfo ? detail.pathInfo.requestPath : '';
+    if (url.indexOf('/rescore') !== -1 || url.indexOf('/paste-jd') !== -1) {
+      // Small delay to ensure OOB swap has fully settled
+      setTimeout(resortByScore, 50);
+    }
+  });
+})();
+</script>
+{% endblock %}

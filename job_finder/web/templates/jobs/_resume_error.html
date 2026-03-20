@@ -1,0 +1,17 @@
+{# Resume error fragment -- NO hx-trigger so polling stops.
+   Retry button re-POSTs to /generate to start a new generation attempt. #}
+<div class="flex items-start gap-3 text-xs py-1">
+  <div class="flex-1">
+    <span class="text-red-400 font-semibold">Resume generation failed</span>
+    {% if error_msg %}
+    <span class="text-slate-400 ml-2">{{ error_msg }}</span>
+    {% endif %}
+  </div>
+  <button type="button"
+          hx-post="/jobs/{{ dedup_key | urlencode }}/resume/generate"
+          hx-target="this"
+          hx-swap="outerHTML"
+          class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors shrink-0">
+    Retry
+  </button>
+</div>

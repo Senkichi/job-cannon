@@ -1,0 +1,5 @@
+{# HTMX collapse response: restores the hidden placeholder <tr> that originally followed the compact row.
+   The collapse button in _row_expanded.html targets "closest tr" (the expanded row) via outerHTML swap.
+   This template replaces that expanded row with a hidden placeholder, returning the DOM to its
+   pre-expansion state (compact row still in place above; hidden placeholder restored below). #}
+<tr data-expand-slot="{{ job.dedup_key | urlencode }}" class="hidden"><td></td></tr>

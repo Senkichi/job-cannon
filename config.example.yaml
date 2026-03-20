@@ -1,0 +1,130 @@
+# Job Cannon Configuration
+# Copy this file to config.yaml and customize for your job search.
+
+# --- Your job search profile ---
+profile:
+  # Job titles you're targeting (matched against listing titles)
+  target_titles:
+    - Data Scientist
+    - Senior Data Scientist
+  # Preferred work locations (use "Remote" for remote jobs)
+  target_locations:
+    - Remote
+  # Minimum acceptable salary in USD (jobs below 85% of this are auto-excluded)
+  min_salary: 100000
+  # Industries you're interested in (used by AI scoring)
+  industries:
+    - Tech
+    - SaaS
+  # Exclusion rules — jobs matching these are skipped before AI scoring (zero cost)
+  exclusions:
+    # Title substrings to exclude (case-insensitive)
+    title_keywords:
+      - intern
+      - junior
+    # Specific company names to exclude
+    companies: []
+  # Your key skills (used by AI for fit scoring)
+  skills:
+    - Python
+    - SQL
+
+# --- Job sources ---
+sources:
+  gmail:
+    # Set to true once you've run: python -m job_finder.gmail_auth
+    enabled: false
+    # How many days back to search for job alert emails
+    lookback_days: 7
+    # Sender addresses for job alert emails (defaults work for standard alerts)
+    senders:
+      linkedin_alerts: jobalerts-noreply@linkedin.com
+      linkedin_jobs: jobs-noreply@linkedin.com
+      glassdoor: noreply@glassdoor.com
+      indeed: alert@indeed.com
+      ziprecruiter: no-reply@ziprecruiter.com
+  serpapi:
+    # Optional: SerpAPI for Google Jobs search (requires paid API key)
+    enabled: false
+    # Get your key at: https://serpapi.com/manage-api-key
+    api_key: ""
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
+  jsearch:
+    # Optional: JSearch via RapidAPI (alternative job search)
+    enabled: false
+    rapidapi_key: ""
+
+# --- AI scoring configuration ---
+scoring:
+  # How much each factor contributes to the overall score (must sum to 1.0)
+  weights:
+    title_match: 0.3
+    seniority_alignment: 0.2
+    location_fit: 0.15
+    salary_range: 0.15
+    industry_relevance: 0.1
+    company_signals: 0.05
+    recency: 0.05
+  # Jobs scoring below this threshold are auto-dismissed
+  min_score_threshold: 40
+  # Monthly API spending cap in USD (scoring pauses when reached)
+  monthly_budget_usd: 25.0
+  # Haiku fast-filter threshold — jobs below this skip Sonnet deep evaluation
+  haiku_threshold: 55
+  # AI models (defaults are recommended; change only if you know what you're doing)
+  models:
+    haiku: claude-haiku-4-5
+    sonnet: claude-sonnet-4-6
+  # Score threshold for generating multiple resume versions
+  multi_version_threshold: 80
+
+# --- Output settings ---
+output:
+  default_format: cli
+  markdown_path: reports/
+  max_results: 50
+
+# --- Database ---
+db:
+  # SQLite database file path (created automatically on first run)
+  path: jobs.db
+
+# --- Google Drive (for resume export) ---
+drive:
+  # Folder ID is auto-created when you run gmail_auth — leave empty initially
+  folder_id: ""
+  convert_to_gdoc: true
+
+# --- Desktop notifications (Windows only, requires win11toast) ---
+notifications:
+  # Notify when a job scores above the haiku_threshold
+  high_score: true
+  # Notify when pipeline status changes (rejection, interview invite, etc.)
+  pipeline_change: true
+  # Notify when monthly API budget reaches 80% or 100%
+  budget_alert: true
+
+# --- ATS (Applicant Tracking System) scanning ---
+ats:
+  scan_enabled: true
+  # Days of the week to run ATS scans (comma-separated, lowercase)
+  scan_days: mon,fri
+  # Hour of day to run scans (24-hour format)
+  scan_hour: 8
+
+# --- Development server ---
+server:
+  # Host to bind Flask to (use 0.0.0.0 to accept connections from other machines)
+  host: "127.0.0.1"
+  # Port number
+  port: 5000
+  # Debug mode (set to false in production-like environments)
+  debug: true
+
+# --- Filtering ---
+filters:
+  # Additional companies to auto-exclude (merged with built-in denylist)
+  # Add staffing agencies or spam companies you keep seeing
+  company_denylist: []

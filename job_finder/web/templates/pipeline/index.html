@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline — Job Finder{% endblock %}
+
+{% block content %}
+<div class="flex flex-col h-full">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-slate-100">Pipeline</h1>
+    <span class="text-sm text-slate-400">Drag cards between columns to update status</span>
+  </div>
+
+  <!-- ── Kanban Board ── -->
+  <!-- Horizontal scroll container so all columns fit on wide screens -->
+  <div class="flex gap-4 overflow-x-auto pb-4 min-h-[600px]">
+
+    {% for col in columns %}
+    <div class="flex-none w-72 flex flex-col bg-slate-800 rounded-xl border border-slate-700">
+
+      <!-- Column header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+        <span class="font-semibold text-slate-200 text-sm">{{ col.label }}</span>
+        <span class="text-xs bg-slate-700 text-slate-300 rounded-full px-2 py-0.5 font-mono">
+          {{ col.jobs | length }}
+        </span>
+      </div>
+
+      {% if col.status == 'rejected' %}
+        <!-- Rejected column: collapsed by default, expand toggle -->
+        <div id="rejected-toggle-bar"
+             class="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-slate-700/50 transition-colors"
+             onclick="toggleRejected()">
+          <span class="text-xs text-slate-400">
+            <span id="rejected-toggle-label">Show {{ col.jobs | length }} rejected</span>
+          </span>
+          <svg id="rejected-chevron"
+               class="w-4 h-4 text-slate-400 transition-transform duration-200 rotate-0"
+               fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+
+        <!-- Card list: hidden by default for rejected -->
+        <div id="rejected-body"
+             class="kanban-column-body flex-1 overflow-y-auto p-2 space-y-2 hidden"
+             data-status="{{ col.status }}">
+          {% for job in col.jobs %}
+            {% include "pipeline/_card.html" %}
+          {% endfor %}
+          <p data-empty-placeholder class="text-slate-600 text-xs text-center py-4 {% if col.jobs %}hidden{% endif %}">Empty</p>
+        </div>
+
+      {% else %}
+        <!-- Normal column: cards always visible -->
+        <div class="kanban-column-body flex-1 overflow-y-auto p-2 space-y-2"
+             data-status="{{ col.status }}">
+          {% for job in col.jobs %}
+            {% include "pipeline/_card.html" %}
+          {% endfor %}
+          <p data-empty-placeholder class="text-slate-600 text-xs text-center py-4 {% if col.jobs %}hidden{% endif %}">Empty</p>
+        </div>
+
+      {% endif %}
+
+    </div>
+    {% endfor %}
+
+  </div><!-- end kanban board -->
+
+</div>
+
+<script>
+  // ── Rejected column toggle ──────────────────────────────────────────────
+  function toggleRejected() {
+    const body = document.getElementById('rejected-body');
+    const chevron = document.getElementById('rejected-chevron');
+    const label = document.getElementById('rejected-toggle-label');
+
+    const isHidden = body.classList.contains('hidden');
+    if (isHidden) {
+      body.classList.remove('hidden');
+      chevron.style.transform = 'rotate(180deg)';
+      label.textContent = 'Hide rejected';
+    } else {
+      body.classList.add('hidden');
+      chevron.style.transform = 'rotate(0deg)';
+      const count = body.querySelectorAll('[data-job-id]').length;
+      label.textContent = 'Show ' + count + ' rejected';
+    }
+  }
+
+  // ── Placeholder visibility helper ──────────────────────────────────────
+  function updatePlaceholder(columnEl) {
+    var placeholder = columnEl.querySelector('[data-empty-placeholder]');
+    if (!placeholder) return;
+    var cardCount = columnEl.querySelectorAll('[data-job-id]').length;
+    if (cardCount > 0) {
+      placeholder.classList.add('hidden');
+    } else {
+      placeholder.classList.remove('hidden');
+    }
+  }
+
+  // ── SortableJS — drag-and-drop between Kanban columns ──────────────────
+  document.querySelectorAll('.kanban-column-body').forEach(function(col) {
+    new Sortable(col, {
+      group: 'kanban',
+      animation: 150,
+      ghostClass: 'opacity-30',
+      onAdd: function(evt) {
+        updatePlaceholder(evt.to);
+      },
+      onRemove: function(evt) {
+        updatePlaceholder(evt.from);
+      },
+      onEnd: function(evt) {
+        var jobId = evt.item.dataset.jobId;
+        var newStatus = evt.to.dataset.status;
+        if (!jobId || !newStatus) return;
+        htmx.ajax('POST', '/pipeline/move', {
+          values: { job_id: jobId, new_status: newStatus },
+          swap: 'none'
+        });
+      }
+    });
+  });
+</script>
+{% endblock %}

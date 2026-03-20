@@ -1,0 +1,373 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Job Finder{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-8">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-slate-100">Dashboard</h1>
+    <span class="text-sm text-slate-400">At-a-glance overview</span>
+  </div>
+
+  <!-- Budget exceeded persistent banner -->
+  {% set budget_pct = (cost_stats.month / budget_cap * 100) if budget_cap > 0 else 0 %}
+  {% if budget_pct >= 100 %}
+  <div class="bg-red-900/60 border border-red-700 rounded-lg px-4 py-3 flex items-center justify-between">
+    <span class="text-red-200 text-sm">
+      Budget cap reached. Sonnet and Opus paused. Haiku active.
+    </span>
+    <div class="flex gap-3 text-xs">
+      <button hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML"
+              class="text-red-300 hover:text-red-200 underline">View costs</button>
+      <a href="/settings" class="text-red-300 hover:text-red-200 underline">Adjust in Settings</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Stat Cards ── -->
+  <section aria-label="Key metrics">
+    <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+
+      <!-- Total Jobs -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Jobs</span>
+        <span class="text-4xl font-bold text-slate-100">{{ stats.total_jobs }}</span>
+        {% if stats.stale_count > 0 %}
+        <span class="text-xs text-amber-500">{{ stats.stale_count }} stale</span>
+        {% endif %}
+      </div>
+
+      <!-- New Today -->
+      <div class="bg-slate-800 rounded-xl border {% if stats.new_today > 0 %}border-emerald-600{% else %}border-slate-700{% endif %} p-5 flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">New Today</span>
+        <span class="text-4xl font-bold {% if stats.new_today > 0 %}text-emerald-400{% else %}text-slate-100{% endif %}">
+          {{ stats.new_today }}
+        </span>
+      </div>
+
+      <!-- In Review -->
+      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">In Review</span>
+        <span class="text-4xl font-bold text-slate-100">{{ stats.reviewing_count }}</span>
+      </div>
+
+      <!-- Today's Cost -->
+      {% if budget_pct >= 100 %}
+        {% set cost_border = "border-red-600" %}
+        {% set cost_text = "text-red-400" %}
+      {% elif budget_pct >= 80 %}
+        {% set cost_border = "border-amber-600" %}
+        {% set cost_text = "text-amber-400" %}
+      {% else %}
+        {% set cost_border = "border-slate-700" %}
+        {% set cost_text = "text-slate-100" %}
+      {% endif %}
+
+      <div class="bg-slate-800 rounded-xl border {{ cost_border }} p-5 flex flex-col gap-1 cursor-pointer"
+           hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Today's Cost</span>
+        <span class="text-4xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
+        <span class="text-xs text-slate-500">${{ "%.2f" | format(cost_stats.month) }} / ${{ "%.0f" | format(budget_cap) }} this month</span>
+        <a href="/costs"
+           class="text-xs text-violet-400 hover:text-violet-300 transition-colors mt-1"
+           hx-on:click="event.stopPropagation()">View details &rarr;</a>
+      </div>
+
+      <!-- Pending Review -->
+      <div class="bg-slate-800 rounded-xl border {% if pending_count > 0 %}border-amber-600{% else %}border-slate-700{% endif %} p-5 flex flex-col gap-1">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Pending Review</span>
+        <span class="text-4xl font-bold {% if pending_count > 0 %}text-amber-400{% else %}text-slate-100{% endif %}">
+          {{ pending_count }}
+        </span>
+      </div>
+
+    </div>
+
+    <!-- ATS Discovery stat card (below main stats row) -->
+    <div class="mt-4">
+      <a href="/companies" class="block bg-slate-800 rounded-xl border border-slate-700 p-4 hover:border-indigo-600 transition-colors">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+            </svg>
+            <div>
+              <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">ATS Discovery</span>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-sm font-semibold text-slate-100">{{ company_count }} companies tracked</span>
+                {% if ats_tracked_count > 0 %}
+                <span class="text-xs text-slate-400">({{ ats_tracked_count }} on ATS)</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="text-right">
+            {% if ats_last_scan %}
+            <div class="text-xs text-slate-400">Last scan: {{ ats_last_scan.scanned_at | relative_date }}</div>
+            <div class="text-xs text-emerald-400 mt-0.5">
+              +{{ ats_last_scan.total_found or 0 }} jobs from {{ ats_last_scan.companies_scanned }} companies
+            </div>
+            {% else %}
+            <span class="text-xs text-slate-500">No ATS scans yet</span>
+            {% endif %}
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <!-- Cost detail expandable panel -->
+    <div id="cost-detail-panel"></div>
+
+  </section>
+
+  <!-- ── Quick Actions ── -->
+  <section aria-label="Quick actions">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
+    <div class="flex flex-wrap gap-3 items-start">
+      <!-- Sync Now -->
+      <form method="POST" action="/dashboard/sync">
+        <button type="submit"
+                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
+          Sync Now
+        </button>
+      </form>
+
+      <!-- Batch Haiku Score — async with HTMX polling progress bar -->
+      <div id="batch-score-haiku-status">
+        <form hx-post="/dashboard/batch-score/haiku/start"
+              hx-target="#batch-score-haiku-status"
+              hx-swap="outerHTML">
+          <button type="submit"
+                  class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
+                  title="Run Haiku AI scoring on all unscored jobs in the database">
+            Batch Haiku Score
+          </button>
+        </form>
+      </div>
+
+      <!-- Batch Sonnet Eval — disabled when no qualifying jobs -->
+      <div id="batch-score-sonnet-status">
+        {% if sonnet_eligible_count > 0 %}
+          <form hx-post="/dashboard/batch-score/sonnet/start"
+                hx-target="#batch-score-sonnet-status"
+                hx-swap="outerHTML">
+            <button type="submit"
+                    class="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium rounded-lg transition-colors"
+                    title="Run Sonnet deep evaluation on jobs with Haiku score above threshold">
+              Batch Sonnet Eval
+              <span class="ml-1 bg-indigo-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ sonnet_eligible_count }}</span>
+            </button>
+          </form>
+        {% else %}
+          <button type="button"
+                  disabled
+                  class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
+                  title="No jobs with Haiku score above threshold and full job description available">
+            Batch Sonnet Eval
+          </button>
+        {% endif %}
+      </div>
+
+      <!-- Add Job Manually — placeholder link -->
+      <a href="/jobs/add"
+         class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors">
+        Add Job Manually
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Pipeline Review Queue ── -->
+  <section aria-label="Pipeline review queue">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
+      Pipeline Review
+      {% if pending_count > 0 %}
+        <span class="ml-2 bg-amber-600 text-white text-xs rounded-full px-2 py-0.5">
+          {{ pending_count }}
+        </span>
+      {% endif %}
+    </h2>
+    <div id="review-queue-container">
+      {% include "dashboard/_review_queue.html" %}
+    </div>
+  </section>
+
+  <!-- ── Pipeline Summary ── -->
+  <section aria-label="Pipeline summary">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Pipeline Summary</h2>
+    {% if pipeline_summary %}
+      <div class="flex flex-wrap gap-3">
+        {% for status, count in pipeline_summary.items() %}
+          <div class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 flex flex-col items-center min-w-[90px]">
+            <span class="text-2xl font-bold text-slate-100">{{ count }}</span>
+            <span class="text-xs text-slate-400 mt-1 text-center">{{ status | replace('_', ' ') | title }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-slate-500 text-sm">No pipeline data yet — jobs will appear here once ingestion runs.</p>
+    {% endif %}
+  </section>
+
+  <!-- ── Recent Activity Feed ── -->
+  <section aria-label="Recent activity">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Recent Activity</h2>
+    {% if recent_runs %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-left">
+              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Source</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">Fetched</th>
+              <th class="px-4 py-3 text-slate-400 font-medium text-right">New</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in recent_runs %}
+              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
+                  {{ run.timestamp[:19] | replace('T', ' ') }}
+                </td>
+                <td class="px-4 py-3 text-slate-200">{{ run.source }}</td>
+                <td class="px-4 py-3 text-slate-300 text-right">{{ run.jobs_fetched }}</td>
+                <td class="px-4 py-3 text-right">
+                  <span class="{% if run.jobs_new > 0 %}text-emerald-400 font-semibold{% else %}text-slate-500{% endif %}">
+                    {{ run.jobs_new }}
+                  </span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-10 text-center">
+        <p class="text-slate-500 text-sm">No ingestion runs yet. Click "Sync Now" to trigger your first run.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <!-- ── User Activity ── -->
+  <section aria-label="User activity">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">User Activity</h2>
+    {% if user_activity %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-left">
+              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Action</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Entity</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in user_activity %}
+              {% set meta = item.metadata | from_json if item.metadata else {} %}
+              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
+                  {{ item.occurred_at[:19] | replace('T', ' ') }}
+                </td>
+                <td class="px-4 py-3 text-slate-200">
+                  {{ item.action | replace('_', ' ') | title }}
+                </td>
+                <td class="px-4 py-3 text-slate-400 text-xs">
+                  {{ item.entity_id or '' }}
+                </td>
+                <td class="px-4 py-3 text-slate-400 text-xs">
+                  {% if meta.jobs_new is defined %}
+                    {{ meta.jobs_new }} new jobs
+                  {% elif meta.scored is defined %}
+                    {{ meta.scored }}/{{ meta.total }} scored
+                  {% elif meta.status is defined %}
+                    {{ meta.status }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-8 text-center">
+        <p class="text-slate-500 text-sm">No user activity recorded yet.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <!-- ── Pipeline Changes ── -->
+  <section aria-label="Pipeline changes">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Pipeline Changes</h2>
+    {% if pipeline_events %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-left">
+              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Job</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Change</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for event in pipeline_events %}
+              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
+                  {{ event.timestamp[:19] | replace('T', ' ') }}
+                </td>
+                <td class="px-4 py-3 text-slate-200 text-xs max-w-[200px] truncate">
+                  {% if event.job_title %}
+                    {{ event.job_title }}
+                    {% if event.job_company %}
+                      <span class="text-slate-500">— {{ event.job_company }}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="text-slate-500">{{ event.job_id }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  <span class="text-slate-400">{{ event.from_status | replace('_', ' ') | title }}</span>
+                  <span class="text-slate-600 mx-1">&rarr;</span>
+                  <span class="text-slate-200 font-medium">{{ event.to_status | replace('_', ' ') | title }}</span>
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  {% if event.source == 'auto-detected' %}
+                    <span class="bg-amber-900/40 text-amber-400 border border-amber-700/50 rounded px-2 py-0.5">
+                      auto-detected
+                    </span>
+                  {% elif event.source == 'email' %}
+                    <span class="bg-blue-900/40 text-blue-400 border border-blue-700/50 rounded px-2 py-0.5">
+                      email
+                    </span>
+                  {% elif event.source == 'kanban drag' %}
+                    <span class="bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 rounded px-2 py-0.5">
+                      kanban drag
+                    </span>
+                  {% else %}
+                    <span class="bg-slate-700/60 text-slate-400 border border-slate-600/50 rounded px-2 py-0.5">
+                      {{ event.source or 'manual' }}
+                    </span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-8 text-center">
+        <p class="text-slate-500 text-sm">No pipeline changes yet — status updates will appear here.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <!-- ── Rejection Insights ── -->
+  <section aria-label="Rejection insights">
+    {% include "dashboard/_rejection_insights.html" %}
+  </section>
+
+</div>
+{% endblock %}

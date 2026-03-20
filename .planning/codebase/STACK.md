@@ -1,0 +1,143 @@
+# Technology Stack
+
+**Analysis Date:** 2026-03-17
+
+## Languages
+
+**Primary:**
+- Python 3.13 - Backend logic, data processing, API integrations
+
+## Runtime
+
+**Environment:**
+- Python 3.13.5
+- Flask development server (localhost:5000)
+
+**Package Manager:**
+- pip
+- Lockfile: requirements.txt (pinned versions)
+
+## Frameworks
+
+**Core Web:**
+- Flask 3.1 - Web application framework
+- Jinja2 + jinja2-fragments 1.0 - Template rendering with fragment support
+- Werkzeug (via Flask) - WSGI application server
+
+**Frontend:**
+- HTMX 2.x (CDN) - Dynamic UI updates without page reloads
+- Tailwind CSS (CDN) - Utility-first CSS framework
+- SortableJS (vanilla JS) - Drag-and-drop list reordering
+- Vanilla JavaScript (no frameworks) - Event handlers and DOM manipulation
+
+**Background:**
+- APScheduler 3.11 - Pinned <4.0 (4.x has breaking async API changes)
+  - BackgroundScheduler for daemon thread execution
+  - CronTrigger and IntervalTrigger for scheduled jobs
+
+**Testing:**
+- pytest 8.0.0+ - Test runner and assertions
+- Custom fixtures in `conftest.py` - App factory, test database, mocked Claude client
+
+## Key Dependencies
+
+**Critical:**
+- anthropic >=0.84.0 - Anthropic API client for Claude models (Haiku, Sonnet, Opus)
+- google-api-python-client >=2.100.0 - Gmail API v1 client (email ingestion)
+- google-auth-oauthlib >=1.2.0 - OAuth 2.0 flow for Gmail authentication
+- google-auth-httplib2 >=0.2.0 - Transport layer for Google API authentication
+- requests >=2.31.0 - HTTP client for SerpAPI and other external APIs
+
+**Data & Parsing:**
+- beautifulsoup4 >=4.12.0 - HTML parsing for job alert emails
+- pyyaml >=6.0 - YAML configuration file parsing
+- thefuzz[speedup] >=0.22.0 - Fuzzy string matching (formerly fuzzywuzzy) for deduplication
+
+**Output & Presentation:**
+- rich >=13.7.0 - Beautiful terminal output (tables, formatting)
+- tabulate >=0.9.0 - ASCII table generation
+- PyMuPDF >=1.24.0 - PDF extraction and manipulation for resume handling
+
+**Optional Sources:**
+- google-search-results >=2.4.0 - SerpAPI Python SDK (Google Jobs aggregation)
+  - Free tier: 100 searches/month
+  - Used for job search queries alongside Gmail alerts
+
+**Notifications (Phase 5):**
+- win11toast >=0.35 - Windows 11 toast notifications with click-through URLs
+  - Fails silently if unavailable (non-Windows environments)
+  - Platform-specific; no-op on non-Windows systems
+
+**Development:**
+- dotenv - Environment variable loading from .env file
+- RotatingFileHandler (from logging) - Log file rotation (5MB, 3 backups)
+
+## Database
+
+**Primary:**
+- SQLite with WAL mode - Persistent storage at `jobs.db`
+- WAL (Write-Ahead Logging) enabled via `PRAGMA journal_mode=WAL`
+- Automatic checkpoint at 1000 pages for durability
+
+**Schema:**
+- Raw SQL (no ORM) - Database layer in `job_finder/db.py` and `job_finder/web/db_migrate.py`
+- Migrations via `PRAGMA user_version` - Schema versioning without migration frameworks
+- Tables: jobs, runs, pipeline_events, email_parse_log, resume_generations, scoring_costs, pipeline_detections
+
+**Per-Request Pattern:**
+- `g.db` context variable - Flask `request` context bound database connection
+- Teardown handler `close_db()` - Automatic connection cleanup on request end
+- Thread-safe for stale detector job (own sqlite3.Connection, not Flask g.db)
+
+## Configuration
+
+**Environment:**
+- `.env` file - Secrets (ANTHROPIC_API_KEY, Flask secret key)
+- Environment variable: `ANTHROPIC_API_KEY` - Anthropic API authentication (required)
+- Environment variable: `FLASK_SECRET_KEY` - Flask session signing (optional; defaults to "dev-secret-key-change-in-production")
+
+**Application Config:**
+- `config.yaml` - User-editable configuration (profile, sources, scoring, output)
+- `config.example.yaml` - Template with all required sections and defaults
+- YAML structure: profile, sources, scoring, output, db, drive, notifications, ats
+
+**Logging:**
+- RotatingFileHandler to `logs/app.log` - Structured app logging
+- Max file size: 5MB, backup count: 3
+- Idempotent setup guard for multiple create_app() calls
+
+## AI Models
+
+**Anthropic Claude:**
+- claude-haiku-4-5 - Fast filtering ($1.00/$5.00 per million input/output tokens)
+- claude-sonnet-4-6 - Deep evaluation ($3.00/$15.00 per million input/output tokens)
+- claude-opus-4-6 - Profile extraction ($5.00/$25.00 per million input/output tokens)
+
+**Cost Tracking:**
+- Stored in `scoring_costs` table with cost_usd, model, purpose, tokens
+- Budget gating: monthly cap (default $25.00 USD)
+- Haiku always allowed; Sonnet/Opus blocked at budget cap
+
+## Platform Requirements
+
+**Development:**
+- Windows 11 (primary development environment)
+- Bash shell (Unix-style, not PowerShell)
+- Python 3.13 with pip
+- Google OAuth credentials (credentials.json) for Gmail API
+
+**Gmail API:**
+- OAuth 2.0 credentials from Google Cloud Console
+- Scopes: `gmail.readonly`, `drive.file` (Phase 4+)
+- Stored token: `token.json` (generated by oauth flow)
+
+**Database:**
+- SQLite 3.x (bundled with Python)
+- No external database server required
+
+**Production:**
+- Not applicable - single-user local app (no deployment)
+
+---
+
+*Stack analysis: 2026-03-17*

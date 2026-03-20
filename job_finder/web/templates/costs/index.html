@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Cost Monitor -- Job Finder{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-6">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-slate-100">Cost Monitor</h1>
+    <span class="text-sm text-slate-400">30-day overview</span>
+  </div>
+
+  <!-- 30-day stacked bar chart -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">API Spend by Feature (30 Days)</h2>
+    <div style="position: relative; height: 320px;">
+      <canvas id="cost-chart"></canvas>
+    </div>
+    <div id="cost-chart-empty" class="hidden items-center justify-center" style="height: 320px;">
+      <p class="text-slate-500 text-sm">No API calls recorded yet.</p>
+    </div>
+  </div>
+
+  <!-- Budget progress bar -->
+  {% set budget_pct = (cost_stats.month / budget_cap * 100) if budget_cap > 0 else 0 %}
+  {% if budget_pct >= 100 %}
+    {% set bar_color = "bg-red-500" %}
+    {% set pct_text = "text-red-400" %}
+  {% elif budget_pct >= 80 %}
+    {% set bar_color = "bg-amber-500" %}
+    {% set pct_text = "text-amber-400" %}
+  {% else %}
+    {% set bar_color = "bg-emerald-500" %}
+    {% set pct_text = "text-emerald-400" %}
+  {% endif %}
+
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-3">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-slate-300">Budget Usage</h2>
+      <span class="{{ pct_text }} text-sm font-semibold">{{ "%.0f" | format(budget_pct) }}% of cap used</span>
+    </div>
+    <div>
+      <div class="flex justify-between text-xs text-slate-500 mb-1">
+        <span>This month: ${{ "%.2f" | format(cost_stats.month) }}</span>
+        <span>Cap: ${{ "%.0f" | format(budget_cap) }}</span>
+      </div>
+      <div id="budget-progress-bar" class="w-full bg-slate-700 rounded-full h-2">
+        <div class="{{ bar_color }} h-2 rounded-full transition-all"
+             style="width: {{ [budget_pct, 100] | min }}%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Period stat cards -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 text-center">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">Today</div>
+      <div class="text-2xl font-bold text-slate-100 mt-1">${{ "%.3f" | format(cost_stats.today) }}</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 text-center">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">This Week</div>
+      <div class="text-2xl font-bold text-slate-100 mt-1">${{ "%.3f" | format(cost_stats.week) }}</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 text-center">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">This Month</div>
+      <div class="text-2xl font-bold text-slate-100 mt-1">${{ "%.2f" | format(cost_stats.month) }}</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-4 text-center">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">Projected / mo</div>
+      <div class="text-2xl font-bold text-slate-100 mt-1">${{ "%.2f" | format(cost_stats.projected_monthly) }}</div>
+    </div>
+  </div>
+
+  <!-- Feature breakdown table (current calendar month) -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Feature</h2>
+    {% if monthly_breakdown %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-2 font-medium">Feature</th>
+          <th class="pb-2 font-medium text-right">Calls</th>
+          <th class="pb-2 font-medium text-right">Spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in monthly_breakdown %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
+          <td class="py-2 text-slate-300 font-mono">{{ item.purpose }}</td>
+          <td class="py-2 text-slate-400 text-right">{{ item.calls }}</td>
+          <td class="py-2 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const rawData = {{ daily_breakdown | tojson }};
+  const budgetCap = {{ budget_cap | tojson }};
+
+  if (rawData.length === 0) {
+    const canvas = document.getElementById('cost-chart');
+    const empty = document.getElementById('cost-chart-empty');
+    if (canvas) canvas.style.display = 'none';
+    if (empty) { empty.classList.remove('hidden'); empty.style.display = 'flex'; }
+    return;
+  }
+
+  const FEATURE_COLORS = {
+    'haiku_score':        'rgba(139, 92, 246, 0.8)',
+    'sonnet_eval':        'rgba(99, 102, 241, 0.8)',
+    'resume_gen':         'rgba(16, 185, 129, 0.8)',
+    'interview_prep':     'rgba(245, 158, 11, 0.8)',
+    'rejection_analysis': 'rgba(239, 68, 68, 0.8)',
+    'enrichment':         'rgba(14, 165, 233, 0.8)',
+  };
+  const DEFAULT_COLOR = 'rgba(100, 116, 139, 0.8)';
+
+  // Extract unique dates and purposes
+  const dateSet = new Set();
+  const purposeSet = new Set();
+  rawData.forEach(d => {
+    dateSet.add(d.date);
+    purposeSet.add(d.purpose);
+  });
+  const dates = Array.from(dateSet).sort();
+  const purposes = Array.from(purposeSet);
+
+  // Build lookup: date+purpose -> spend
+  const lookup = {};
+  rawData.forEach(d => {
+    lookup[d.date + '|' + d.purpose] = d.spend;
+  });
+
+  // Build bar datasets (one per purpose)
+  const barDatasets = purposes.map(purpose => ({
+    type: 'bar',
+    label: purpose,
+    data: dates.map(date => lookup[date + '|' + purpose] || 0),
+    backgroundColor: FEATURE_COLORS[purpose] || DEFAULT_COLOR,
+    stack: 'costs',
+  }));
+
+  // Budget pace line dataset
+  const budgetPerDay = budgetCap / 30;
+  const paceDataset = {
+    type: 'line',
+    label: 'Budget pace',
+    data: Array(dates.length).fill(budgetPerDay),
+    borderColor: 'rgba(148, 163, 184, 0.6)',
+    borderDash: [5, 5],
+    pointRadius: 0,
+    fill: false,
+    order: 0,
+  };
+
+  const datasets = [...barDatasets, paceDataset];
+
+  const ctx = document.getElementById('cost-chart');
+  if (!ctx) return;
+
+  new Chart(ctx, {
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: 'rgb(148, 163, 184)' },
+          grid: { color: 'rgba(100, 116, 139, 0.3)' },
+        },
+        y: {
+          stacked: true,
+          ticks: { color: 'rgb(148, 163, 184)' },
+          grid: { color: 'rgba(100, 116, 139, 0.3)' },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: 'rgb(148, 163, 184)' },
+        },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0].label,
+            label: (item) => {
+              if (item.dataset.type === 'line') return null;
+              const value = item.raw;
+              return `${item.dataset.label}: $${value.toFixed(4)}`;
+            },
+            footer: (items) => {
+              const total = items
+                .filter(i => i.dataset.type !== 'line')
+                .reduce((sum, i) => sum + i.raw, 0);
+              return `Day total: $${total.toFixed(4)}`;
+            },
+          },
+        },
+      },
+    },
+  });
+})();
+</script>
+{% endblock %}

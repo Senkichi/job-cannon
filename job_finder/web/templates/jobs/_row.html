@@ -1,0 +1,54 @@
+{# Compact job row. Click to expand inline accordion below. #}
+
+{# Salary formatting #}
+{% if job.salary_min and job.salary_max %}
+  {% set salary = "$%dk–$%dk" | format((job.salary_min // 1000), (job.salary_max // 1000)) %}
+{% elif job.salary_max %}
+  {% set salary = "up to $%dk" | format(job.salary_max // 1000) %}
+{% elif job.salary_min %}
+  {% set salary = "$%dk+" | format(job.salary_min // 1000) %}
+{% else %}
+  {% set salary = "N/A" %}
+{% endif %}
+
+{# Posted date: use posted_date if available, else fall back to first_seen #}
+{% set posted = job.posted_date if job.posted_date else job.first_seen %}
+
+<tr class="border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors {% if job.is_stale %}opacity-50{% endif %}"
+    data-expand-url="/jobs/{{ job.dedup_key | urlencode }}/expand"
+    data-collapse-url="/jobs/{{ job.dedup_key | urlencode }}/collapse"
+    hx-push-url="false"
+    onclick="
+      var compactRow = this;
+      var nextTr = this.nextElementSibling;
+      var url = this.dataset.expanded === 'true' ? this.dataset.collapseUrl : this.dataset.expandUrl;
+      var isExpanding = this.dataset.expanded !== 'true';
+      this.dataset.expanded = isExpanding ? 'true' : 'false';
+      htmx.ajax('GET', url, {target: nextTr, swap: 'outerHTML'}).then(function() {
+        if (isExpanding) {
+          setTimeout(function() {
+            var row = compactRow.nextElementSibling;
+            if (row && !row.classList.contains('hidden')) {
+              row.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }
+          }, 100);
+        } else {
+          setTimeout(function() {
+            compactRow.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            compactRow.classList.remove('highlight-flash'); void compactRow.offsetWidth; compactRow.classList.add('highlight-flash');
+          }, 100);
+        }
+      });
+    ">
+  {% with oob=false %}{% include "jobs/_score_cell.html" %}{% endwith %}
+  <td class="px-2 py-1.5 text-slate-100 font-medium truncate">
+    {{ job.title }}{% if job.is_stale %} <span class="text-xs text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>{% endif %}
+  </td>
+  <td class="px-2 py-1.5 text-slate-300 truncate">{{ job.company }}</td>
+  <td class="px-2 py-1.5 text-slate-400 truncate">{{ job.location }}</td>
+  <td class="px-1 py-1.5 text-slate-300 whitespace-nowrap">{{ salary }}</td>
+  <td class="px-2 py-1.5 text-slate-500 whitespace-nowrap text-xs">{{ posted | relative_date }}</td>
+  <td class="px-1 py-1.5" id="status-cell-{{ job.dedup_key | urlencode | replace('%', '') }}">
+    {% include "jobs/_status_cell.html" %}
+  </td>
+</tr>

@@ -1,0 +1,311 @@
+"""Haiku fast-filter scorer for job postings.
+
+Provides score_job_haiku(), which evaluates a job row against the candidate
+profile using Claude Haiku's structured output. This is the first tier of
+AI scoring — every new job gets a quick assessment of title fit, location fit,
+and salary floor, producing a 0-100 score and a one-line summary.
+
+Output schema:
+  score (int 0-100): Overall fit score.
+  summary (str): One-sentence rationale for the score.
+  title_fit (str): "strong" | "partial" | "weak" | "reject"
+  location_fit (str): "remote" | "target" | "other" | "unknown"
+  salary_meets_floor (bool): True if salary >= candidate's min_salary.
+"""
+
+import logging
+import re
+from typing import Any
+
+from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.claude_client import call_claude, BudgetExceededError
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Structured output schema for Haiku scoring
+# ---------------------------------------------------------------------------
+
+HAIKU_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "score": {
+            "type": "integer",
+            "description": "Score 0-100 based on title/location/salary fit against candidate profile",
+        },
+        "summary": {
+            "type": "string",
+            "description": "One-sentence summary of fit rationale",
+        },
+        "title_fit": {
+            "type": "string",
+            "enum": ["strong", "partial", "weak", "reject"],
+        },
+        "location_fit": {
+            "type": "string",
+            "enum": ["remote", "target", "other", "unknown"],
+        },
+        "salary_meets_floor": {
+            "type": "boolean",
+        },
+    },
+    "required": ["score", "summary", "title_fit", "location_fit", "salary_meets_floor"],
+    "additionalProperties": False,
+}
+
+# System prompt for Haiku scoring
+_SYSTEM_PROMPT = (
+    "You are a job fit evaluator. Score this job posting against the candidate's profile. "
+    "Consider title match, location fit, salary floor, industry relevance, and seniority alignment. "
+    "Be calibrated: 70+ = strong match worth reviewing, 50-69 = partial match, <50 = poor fit."
+)
+
+
+def _build_comp_context(job_row: dict) -> str | None:
+    """Build a concise compensation context string from comp_data_json.
+
+    Extracts equity, bonus, and benefits summaries from ATS-sourced
+    compensation data (stored as JSON). Returns a short summary string
+    suitable for inclusion in the Haiku scoring prompt, or None if no
+    additional compensation data is available.
+
+    Kept concise to minimize token cost — just the summary, not raw JSON.
+
+    Args:
+        job_row: Job record dict. May contain 'comp_data_json' field.
+
+    Returns:
+        Short compensation summary string, or None if no data available.
+    """
+    import json as _json
+
+    comp_data_raw = job_row.get("comp_data_json")
+    if not comp_data_raw:
+        return None
+
+    try:
+        comp = _json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
+    except (ValueError, TypeError):
+        return None
+
+    if not comp or not isinstance(comp, dict):
+        return None
+
+    parts = []
+
+    # Ashby: compensationTierSummary is a human-readable summary
+    tier_summary = comp.get("compensationTierSummary")
+    if tier_summary and isinstance(tier_summary, str):
+        parts.append(tier_summary.strip())
+
+    # Lever: if it's a salaryRange dict with currency info
+    currency = comp.get("currency")
+    if currency and not tier_summary:
+        comp_min = comp.get("min")
+        comp_max = comp.get("max")
+        if comp_min and comp_max:
+            parts.append(f"{currency} {comp_min:,}-{comp_max:,}")
+
+    return "; ".join(parts) if parts else None
+
+
+def build_description_snippet(
+    description: str,
+    profile_skills: list[str],
+    max_chars: int = 2000,
+) -> str:
+    """Build an intelligent snippet: first 1200 chars + skill keyword summary + requirements extraction.
+
+    Replaces the old 500-char truncation. Gives Haiku access to requirements/qualifications
+    sections and skill match counts from the full description, without sending the entire
+    posting text.
+
+    Args:
+        description: Full job description text.
+        profile_skills: List of candidate skill strings from config.yaml profile.skills.
+        max_chars: Maximum total snippet length (default 2000).
+
+    Returns:
+        Snippet string of at most max_chars characters.
+    """
+    if not description:
+        return ""
+
+    # Primary snippet: first 1200 characters (covers intro + start of requirements)
+    snippet = description[:1200].strip()
+
+    # Skill keyword count from FULL description (zero extra tokens vs sending full text)
+    description_lower = description.lower()
+    skill_matches = {}
+    for skill in profile_skills:
+        if not skill:
+            continue
+        count = description_lower.count(skill.lower())
+        if count > 0:
+            skill_matches[skill] = count
+
+    # Build keyword summary
+    if skill_matches:
+        matches_str = ", ".join(
+            f"{skill} ({count}x)"
+            for skill, count in sorted(skill_matches.items(), key=lambda x: -x[1])
+        )
+        keyword_summary = f"\n\n[Skill keyword matches in full posting: {matches_str}]"
+    else:
+        keyword_summary = "\n\n[No candidate skill keywords found in full posting text]"
+
+    # Budget remaining characters for requirements section extraction
+    remaining_chars = max_chars - len(snippet) - len(keyword_summary)
+    if remaining_chars > 200 and len(description) > 1200:
+        req_pattern = re.compile(
+            r'(requirements|qualifications|what you.ll bring|what we.re looking for|'
+            r'about you|your background|skills|experience required|must.have)',
+            re.IGNORECASE,
+        )
+        match = req_pattern.search(description, 800)
+        if match:
+            req_start = max(0, match.start() - 20)
+            req_section = description[req_start : req_start + remaining_chars].strip()
+            if req_section and req_section not in snippet:
+                snippet += f"\n\n[...Requirements section:]\n{req_section}"
+
+    return (snippet + keyword_summary)[:max_chars]
+
+
+def score_job_haiku(
+    client: Any,
+    job_row: dict,
+    profile: dict,
+    conn: Any,
+    config: dict,
+    max_chars: int = 2000,
+    purpose: str = "haiku_score",
+) -> dict | None:
+    """Score a single job against the candidate profile using Claude Haiku.
+
+    Args:
+        client: Anthropic client instance (injected for testability).
+        job_row: Job record dict with keys: dedup_key, title, company, location,
+                 salary_min (optional), salary_max (optional), description (optional).
+        profile: Profile dict. May be the full config dict (containing a "profile"
+                 sub-key) or a standalone profile dict with target_titles, etc.
+        conn: Open SQLite connection for cost recording.
+        config: Application config dict (reads scoring.models.haiku, scoring.monthly_budget_usd).
+        max_chars: Maximum characters for description snippet (default 2000).
+                   Pass 4000 for borderline re-evaluation to expand context.
+        purpose: Cost tracking purpose label (default "haiku_score", use "haiku_reeval"
+                 for the borderline second-pass call).
+
+    Returns:
+        Dict with keys: score, summary, title_fit, location_fit, salary_meets_floor.
+        Returns None on any error (BudgetExceededError, API error, parse error).
+    """
+    # Resolve profile section — accept both full-config dicts and raw profile dicts
+    profile_section: dict = profile.get("profile", profile)
+
+    # Build job context snippet
+    title = job_row.get("title", "Unknown Title")
+    company = job_row.get("company", "Unknown Company")
+    location = job_row.get("location", "Unknown Location")
+    salary_min = job_row.get("salary_min")
+    salary_max = job_row.get("salary_max")
+    description = job_row.get("description") or ""
+
+    # Build an intelligent snippet (C1): first 1200 chars + skill keyword summary
+    # + requirements section extraction (replaces old 500-char truncation).
+    # max_chars is 2000 by default; pass 4000 for borderline re-evaluation (C2).
+    profile_skills = profile_section.get("skills", [])
+    description_snippet = build_description_snippet(description, profile_skills, max_chars=max_chars)
+
+    # Build salary string
+    if salary_min is not None and salary_max is not None:
+        salary_str = f"${salary_min:,} - ${salary_max:,}"
+    elif salary_min is not None:
+        salary_str = f"${salary_min:,}+"
+    elif salary_max is not None:
+        salary_str = f"up to ${salary_max:,}"
+    else:
+        salary_str = "Not disclosed"
+
+    # Build compensation context from comp_data_json when available
+    # Kept concise to minimize token cost — summary only, not raw JSON
+    comp_context = _build_comp_context(job_row)
+
+    # Build profile context
+    target_titles = profile_section.get("target_titles", [])
+    target_locations = profile_section.get("target_locations", [])
+    min_salary = profile_section.get("min_salary")
+    skills = profile_section.get("skills", [])
+    industries = profile_section.get("industries", [])
+
+    target_titles_str = ", ".join(target_titles) if target_titles else "Not specified"
+    target_locations_str = ", ".join(target_locations) if target_locations else "Not specified"
+    min_salary_str = f"${min_salary:,}" if min_salary is not None else "Not specified"
+    skills_str = ", ".join(skills[:10]) if skills else "Not specified"
+    industries_str = ", ".join(industries[:5]) if industries else "Not specified"
+
+    user_prompt = (
+        f"## Job Posting\n"
+        f"Title: {title}\n"
+        f"Company: {company}\n"
+        f"Location: {location}\n"
+        f"Salary: {salary_str}\n"
+        + (f"Additional Compensation: {comp_context}\n" if comp_context else "")
+        + f"Description: {description_snippet}\n"
+        f"\n"
+        f"## Candidate Profile\n"
+        f"Target Titles: {target_titles_str}\n"
+        f"Target Locations: {target_locations_str}\n"
+        f"Minimum Salary: {min_salary_str}\n"
+        f"Key Skills: {skills_str}\n"
+        f"Target Industries: {industries_str}\n"
+        f"\n"
+        f"Score this job posting against the candidate profile. "
+        f"Use the structured output format."
+    )
+
+    # Get Haiku model from config
+    model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("haiku", DEFAULT_MODEL_HAIKU)
+    )
+
+    job_id = job_row.get("dedup_key")
+
+    try:
+        result, cost_usd = call_claude(
+            client=client,
+            model=model,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+            output_schema=HAIKU_SCHEMA,
+            conn=conn,
+            job_id=job_id,
+            purpose=purpose,
+            config=config,
+        )
+        logger.debug(
+            "Haiku scored '%s' @ '%s': score=%s (cost=$%.5f)",
+            title,
+            company,
+            result.get("score"),
+            cost_usd,
+        )
+        return result
+    except BudgetExceededError:
+        # Haiku should never hit budget cap, but handle defensively
+        logger.warning(
+            "BudgetExceededError for Haiku scoring of '%s' @ '%s' -- returning None",
+            title,
+            company,
+        )
+        return None
+    except Exception as e:
+        logger.warning(
+            "Haiku scoring failed for '%s' @ '%s': %s -- returning None",
+            title,
+            company,
+            e,
+        )
+        return None

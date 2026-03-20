@@ -1,0 +1,32 @@
+{% for rec in recommendations %}
+<div class="mt-2 p-3 bg-slate-800/50 border border-slate-700 rounded-lg" id="batch-rec-{{ loop.index0 }}">
+  <div class="flex items-center gap-2 mb-1">
+    <span class="text-xs font-medium text-amber-400">{{ rec.field }}</span>
+  </div>
+  <p class="text-sm text-slate-300 mb-2">{{ rec.guidance }}</p>
+  {% if rec.actions %}
+  <div class="flex flex-wrap gap-2">
+    {% for action in rec.actions %}
+    <form method="post" action="/profile/apply-fix" class="inline">
+      <input type="hidden" name="action_type" value="{{ action.type }}">
+      <input type="hidden" name="field" value="{{ action.field if action.field is defined else rec.field }}">
+      <input type="hidden" name="value" value="{{ action.value }}">
+      <button type="submit"
+              class="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-800 hover:bg-violet-700 text-violet-100 text-xs rounded-lg transition-colors">
+        {% if action.type == "add_skill" %}
+          + Add: {{ action.value }}
+        {% elif action.type == "update_field" %}
+          Update: {{ action.value }}
+        {% else %}
+          {{ action.value }}
+        {% endif %}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% if not recommendations %}
+<p class="text-xs text-slate-500 italic">No recommendations generated.</p>
+{% endif %}
