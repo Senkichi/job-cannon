@@ -1,5 +1,6 @@
 # Job Cannon
 
+![job_cannon(3)](https://github.com/user-attachments/assets/bbf703cf-b916-4c21-b6fd-8e5db4f932ef)
 
 
 A local job search command center that aggregates listings from Gmail alerts and APIs, scores them with AI, tracks your application pipeline, and generates tailored resumes.
