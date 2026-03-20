@@ -1,0 +1,887 @@
+"""Tests for the ingestion pipeline runner.
+
+Tests:
+- email_parse_log entry created after successful Gmail run
+- email_parse_log entry created with error when Gmail fails
+- Gmail failure does not stop SerpAPI ingestion (per-source error isolation)
+- Single job persistence failure does not halt other jobs (per-job error isolation)
+- run_ingestion returns summary dict with correct counts
+- ZipRecruiter parser returns list (even when HTML is unrecognized)
+"""
+
+import sqlite3
+import tempfile
+import os
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from job_finder.models import Job
+from job_finder.web.db_migrate import run_migrations
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def migrated_db_path():
+    """Create a fully migrated temp DB, yield path, clean up after.
+
+    # intentional — local fixture yields path only, unlike conftest migrated_db
+    # which yields (path, conn). This file's tests only need the path.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    run_migrations(path)
+    yield path
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture
+def minimal_config(migrated_db_path):
+    """Minimal config dict with both sources enabled (mocked in tests)."""
+    return {
+        "db": {"path": migrated_db_path},
+        "sources": {
+            "gmail": {"enabled": True, "lookback_days": 7},
+            "serpapi": {
+                "enabled": True,
+                "api_key": "test-key",
+                "queries": [{"query": "Data Scientist", "location": "Remote"}],
+            },
+        },
+        "profile": {
+            "target_titles": ["Senior Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 100000,
+            "exclusions": {"title_keywords": [], "companies": []},
+            "industries": [],
+            "skills": [],
+        },
+        "scoring": {
+            "weights": {
+                "title_match": 0.30,
+                "seniority_alignment": 0.20,
+                "location_fit": 0.15,
+                "salary_range": 0.15,
+                "industry_relevance": 0.10,
+                "company_signals": 0.05,
+                "recency": 0.05,
+            },
+            "min_score_threshold": 0,  # accept all jobs in tests
+        },
+    }
+
+
+def _make_job(title="Senior Data Scientist", company="Acme", location="Remote") -> Job:
+    """Create a minimal Job for testing."""
+    return Job(
+        title=title,
+        company=company,
+        location=location,
+        source="test",
+        source_url=f"https://example.com/{title.lower().replace(' ', '-')}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test: email_parse_log entry created on success
+# ---------------------------------------------------------------------------
+
+class TestEmailParseLog:
+    def test_gmail_success_creates_log_entry(self, minimal_config, migrated_db_path):
+        """After a successful Gmail run, an email_parse_log entry is written."""
+        fake_jobs = [_make_job()]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = fake_jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # Verify email_parse_log has an entry
+        conn = sqlite3.connect(migrated_db_path)
+        rows = conn.execute("SELECT * FROM email_parse_log").fetchall()
+        conn.close()
+
+        assert len(rows) >= 1
+        # The entry should be for gmail source
+        senders = [row[2] for row in rows]  # sender column
+        assert "gmail" in senders
+
+    def test_gmail_failure_creates_error_log_entry(self, minimal_config, migrated_db_path):
+        """When GmailSource raises, an error entry is written to email_parse_log."""
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.side_effect = Exception("OAuth token expired")
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # Verify error is in summary
+        assert len(summary["gmail_errors"]) >= 1
+        assert "OAuth token expired" in summary["gmail_errors"][0]
+
+        # Verify email_parse_log has an error entry
+        conn = sqlite3.connect(migrated_db_path)
+        rows = conn.execute(
+            "SELECT * FROM email_parse_log WHERE error IS NOT NULL"
+        ).fetchall()
+        conn.close()
+
+        assert len(rows) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Per-source error isolation
+# ---------------------------------------------------------------------------
+
+class TestSourceErrorIsolation:
+    def test_gmail_failure_does_not_stop_serpapi(self, minimal_config, migrated_db_path):
+        """If Gmail throws an exception, SerpAPI still runs."""
+        serpapi_jobs = [_make_job(title="Staff DS", company="TechCorp")]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.side_effect = Exception("Gmail OAuth failed")
+            mock_serp_instance = MockSerpAPI.return_value
+            mock_serp_instance.fetch_jobs.return_value = serpapi_jobs
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # Gmail should have errored
+        assert len(summary["gmail_errors"]) >= 1
+        # SerpAPI should have succeeded
+        assert summary["serpapi_fetched"] == 1
+        # The SerpAPI job should be in the database
+        conn = sqlite3.connect(migrated_db_path)
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        conn.close()
+        assert count >= 1
+
+    def test_serpapi_failure_does_not_stop_gmail(self, minimal_config, migrated_db_path):
+        """If SerpAPI throws, Gmail still persists its jobs."""
+        gmail_jobs = [_make_job(title="Senior DS", company="StartupCo")]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            mock_gmail_instance = MockGmail.return_value
+            mock_gmail_instance.fetch_jobs.return_value = gmail_jobs
+            MockSerpAPI.side_effect = Exception("SerpAPI quota exceeded")
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # SerpAPI should have errored
+        assert len(summary["serpapi_errors"]) >= 1
+        # Gmail job should be persisted
+        assert summary["gmail_fetched"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        conn.close()
+        assert count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Test: Per-job error isolation
+# ---------------------------------------------------------------------------
+
+class TestJobErrorIsolation:
+    def test_single_job_failure_does_not_halt_others(self, minimal_config, migrated_db_path):
+        """If one job fails to persist, other jobs are still saved."""
+        jobs = [
+            _make_job(title="Senior Data Scientist", company="GoodCo"),
+            _make_job(title="Staff Data Scientist", company="AlsoCo"),
+            _make_job(title="Principal DS", company="ThirdCo"),
+        ]
+
+        call_count = 0
+
+        def mock_upsert(job):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:  # second job fails
+                raise sqlite3.OperationalError("disk full")
+            return True
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.db.JobDB.upsert_job", side_effect=mock_upsert), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            mock_gmail_instance = MockGmail.return_value
+            mock_gmail_instance.fetch_jobs.return_value = jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # Should have 1 error for the failing job
+        assert len(summary["job_errors"]) == 1
+        # But the other 2 jobs should be accounted for
+        assert summary["jobs_new"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Test: Summary dict structure
+# ---------------------------------------------------------------------------
+
+class TestSummaryDict:
+    def test_run_ingestion_returns_summary_dict(self, minimal_config, migrated_db_path):
+        """run_ingestion always returns a dict with the expected keys."""
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = []
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        expected_keys = {
+            "gmail_fetched",
+            "gmail_errors",
+            "serpapi_fetched",
+            "serpapi_errors",
+            "jobs_new",
+            "jobs_updated",
+            "jobs_scored",
+            "job_errors",
+            "duration_seconds",
+        }
+        assert expected_keys.issubset(set(summary.keys()))
+
+    def test_summary_counts_are_accurate(self, minimal_config, migrated_db_path):
+        """Summary counts reflect the actual number of jobs fetched and saved."""
+        gmail_jobs = [_make_job(title="Senior DS", company="Co1")]
+        serp_jobs = [_make_job(title="Staff DS", company="Co2")]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = gmail_jobs
+            # SerpAPISource is instantiated with an api_key, so mock the class
+            MockSerpAPI.return_value.fetch_jobs.return_value = serp_jobs
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        assert summary["gmail_fetched"] == 1
+        assert summary["serpapi_fetched"] == 1
+        assert summary["jobs_new"] == 2
+        assert summary["duration_seconds"] >= 0
+
+    def test_empty_run_returns_zero_counts(self, minimal_config, migrated_db_path):
+        """When no jobs are fetched, all counts are zero and no errors."""
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = []
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        assert summary["gmail_fetched"] == 0
+        assert summary["serpapi_fetched"] == 0
+        assert summary["jobs_new"] == 0
+        assert summary["gmail_errors"] == []
+        assert summary["serpapi_errors"] == []
+
+
+# ---------------------------------------------------------------------------
+# Test: ZipRecruiter parser
+# ---------------------------------------------------------------------------
+
+class TestZipRecruiterParser:
+    def test_parser_returns_list_on_empty_body(self):
+        """parse_ziprecruiter_alert returns an empty list for empty input."""
+        from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+        result = parse_ziprecruiter_alert("", email_date=None)
+        assert isinstance(result, list)
+        assert result == []
+
+    def test_parser_returns_list_on_unrecognized_html(self):
+        """parse_ziprecruiter_alert returns empty list for unrecognized HTML."""
+        from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+        html = "<html><body><p>Some random content with no job structure.</p></body></html>"
+        result = parse_ziprecruiter_alert(html, email_date=None)
+        assert isinstance(result, list)
+
+    def test_parser_returns_list_on_malformed_html(self):
+        """parse_ziprecruiter_alert does not raise on malformed HTML."""
+        from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+        html = "<html><unclosed><div>bad html"
+        result = parse_ziprecruiter_alert(html)
+        assert isinstance(result, list)
+
+    def test_parser_extracts_jobs_from_link_structure(self):
+        """parse_ziprecruiter_alert extracts jobs when ZipRecruiter links are present."""
+        from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
+        html = """
+        <html><body>
+        <table>
+          <tr>
+            <td>
+              <a href="https://www.ziprecruiter.com/jobs/acme-corp-senior-data-scientist-abcd1234">
+                Senior Data Scientist
+              </a>
+              <span>Acme Corp</span>
+              <span>San Francisco, CA</span>
+            </td>
+          </tr>
+        </table>
+        </body></html>
+        """
+        result = parse_ziprecruiter_alert(html, email_date=datetime(2026, 3, 10))
+        assert isinstance(result, list)
+        # Should find at least one job
+        if result:
+            job = result[0]
+            assert job.source == "ziprecruiter"
+            assert "data scientist" in job.title.lower()
+
+    def test_parser_returns_job_objects(self):
+        """If jobs are found, they are Job instances."""
+        from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
+        html = """
+        <html><body>
+          <a href="https://www.ziprecruiter.com/jobs/staff-engineer-xyz789">Staff Engineer</a>
+        </body></html>
+        """
+        result = parse_ziprecruiter_alert(html)
+        assert isinstance(result, list)
+        for job in result:
+            assert isinstance(job, Job)
+            assert job.source == "ziprecruiter"
+
+
+# ---------------------------------------------------------------------------
+# Test: first_seen uses email date (Phase 6 requirement)
+# ---------------------------------------------------------------------------
+
+class TestFirstSeenEmailDate:
+    """Tests that upsert_job uses posted_date as first_seen for Gmail jobs."""
+
+    def test_upsert_job_uses_posted_date_as_first_seen(self, migrated_db_path):
+        """When a Job has posted_date set, upsert_job stores it as first_seen."""
+        from job_finder.db import JobDB
+
+        # conftest migrated_db fixture yields (path, conn)
+        # test_ingestion has its own migrated_db_path fixture that yields just path
+        fd, path = __import__("tempfile").mkstemp(suffix=".db")
+        __import__("os").close(fd)
+        run_migrations(path)
+
+        try:
+            email_date = datetime(2026, 3, 5, 9, 30, 0)
+            job = Job(
+                title="Senior Data Scientist",
+                company="TestCo",
+                location="Remote",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/view/123/",
+                source_id="123",
+                posted_date=email_date,
+            )
+
+            db = JobDB(path)
+            is_new = db.upsert_job(job)
+            db.conn.close()
+
+            assert is_new is True
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT first_seen FROM jobs WHERE dedup_key = ?",
+                (job.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            # first_seen should be the email date, not ingestion time
+            first_seen = row[0]
+            assert first_seen.startswith("2026-03-05"), (
+                f"Expected first_seen to start with 2026-03-05 (email date), got: {first_seen}"
+            )
+        finally:
+            if __import__("os").path.exists(path):
+                __import__("os").remove(path)
+
+    def test_upsert_job_uses_now_when_posted_date_none(self, migrated_db_path):
+        """When a Job has posted_date=None, upsert_job stores current time as first_seen."""
+        from job_finder.db import JobDB
+
+        fd, path = __import__("tempfile").mkstemp(suffix=".db")
+        __import__("os").close(fd)
+        run_migrations(path)
+
+        try:
+            before = datetime.now()
+            job = Job(
+                title="Staff Engineer",
+                company="SerpCo",
+                location="Remote",
+                source="serpapi",
+                source_url="https://example.com/job/456",
+                source_id="456",
+                posted_date=None,  # SerpAPI jobs have no email date
+            )
+
+            db = JobDB(path)
+            db.upsert_job(job)
+            after = datetime.now()
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT first_seen FROM jobs WHERE dedup_key = ?",
+                (job.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            first_seen_dt = datetime.fromisoformat(row[0])
+            # first_seen should be between before and after (ingestion time)
+            assert before <= first_seen_dt <= after, (
+                f"Expected first_seen between {before} and {after}, got {first_seen_dt}"
+            )
+        finally:
+            if __import__("os").path.exists(path):
+                __import__("os").remove(path)
+
+
+# ---------------------------------------------------------------------------
+# Test: Smart upsert_job merge — locations_raw, location concatenation,
+#       description dedup (Phase 6 Plan 02 requirement)
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+
+class TestSmartUpsertJobMerge:
+    """Tests for the smart upsert_job merge behavior added in Plan 06-02."""
+
+    def _make_db(self):
+        """Create a fresh migrated temp DB, return (path, db_instance)."""
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        run_migrations(path)
+        from job_finder.db import JobDB
+        return path, JobDB(path)
+
+    def test_insert_initializes_locations_raw(self):
+        """INSERT branch stores initial location in locations_raw JSON array."""
+        path, db = self._make_db()
+        try:
+            job = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="San Francisco, CA",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+            )
+            db.upsert_job(job)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT locations_raw FROM jobs WHERE dedup_key = ?",
+                (job.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            locations_raw = _json.loads(row[0])
+            assert isinstance(locations_raw, list)
+            assert "San Francisco, CA" in locations_raw
+        finally:
+            try:
+                db.conn.close()
+            except Exception:
+                pass
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_update_appends_new_location_to_locations_raw(self):
+        """UPDATE branch appends new location to locations_raw array."""
+        path, db = self._make_db()
+        try:
+            # Insert the same job from two different locations
+            job1 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="San Francisco, CA",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+            )
+            job2 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="New York, NY",
+                source="glassdoor",
+                source_url="https://glassdoor.com/jobs/2",
+            )
+            db.upsert_job(job1)
+            db.upsert_job(job2)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT locations_raw, location FROM jobs WHERE dedup_key = ?",
+                (job1.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            locations_raw = _json.loads(row[0])
+            # Both locations should be in the array
+            assert "San Francisco, CA" in locations_raw
+            assert "New York, NY" in locations_raw
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_remote_location_prioritized_in_merge(self):
+        """Remote location appears first in merged locations_raw."""
+        path, db = self._make_db()
+        try:
+            job1 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="San Francisco, CA",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+            )
+            job2 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",
+                source="glassdoor",
+                source_url="https://glassdoor.com/jobs/2",
+            )
+            db.upsert_job(job1)
+            db.upsert_job(job2)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT locations_raw FROM jobs WHERE dedup_key = ?",
+                (job1.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            locations_raw = _json.loads(row[0])
+            # Remote should be first
+            assert locations_raw[0] == "Remote"
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_duplicate_location_not_added_twice(self):
+        """Same location is not duplicated in locations_raw on second upsert."""
+        path, db = self._make_db()
+        try:
+            job1 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+            )
+            job2 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",  # Same location again
+                source="glassdoor",
+                source_url="https://glassdoor.com/jobs/2",
+            )
+            db.upsert_job(job1)
+            db.upsert_job(job2)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT locations_raw FROM jobs WHERE dedup_key = ?",
+                (job1.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            locations_raw = _json.loads(row[0])
+            assert locations_raw.count("Remote") == 1
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_description_substring_not_duplicated(self):
+        """If new description is substring of existing, it is not appended."""
+        path, db = self._make_db()
+        try:
+            long_desc = "We are hiring a Senior Engineer. You will build scalable systems."
+            short_desc = "We are hiring a Senior Engineer."
+
+            job1 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+                description=long_desc,
+            )
+            job2 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",
+                source="glassdoor",
+                source_url="https://glassdoor.com/jobs/2",
+                description=short_desc,  # Substring of first
+            )
+            db.upsert_job(job1)
+            db.upsert_job(job2)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT description FROM jobs WHERE dedup_key = ?",
+                (job1.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            # Description should be the long one, not doubled
+            assert row[0] == long_desc
+            assert "---" not in row[0]
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_different_description_appended_with_separator(self):
+        """If new description is substantially different, it is appended with separator."""
+        path, db = self._make_db()
+        try:
+            desc1 = "We are building the future of cloud infrastructure."
+            desc2 = "Join our team to work on machine learning products."
+
+            job1 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="Remote",
+                source="linkedin",
+                source_url="https://linkedin.com/jobs/1",
+                description=desc1,
+            )
+            job2 = Job(
+                title="Senior Engineer",
+                company="Acme",
+                location="NYC",
+                source="glassdoor",
+                source_url="https://glassdoor.com/jobs/2",
+                description=desc2,
+            )
+            db.upsert_job(job1)
+            db.upsert_job(job2)
+            db.conn.close()
+
+            conn = sqlite3.connect(path)
+            row = conn.execute(
+                "SELECT description FROM jobs WHERE dedup_key = ?",
+                (job1.dedup_key,),
+            ).fetchone()
+            conn.close()
+
+            assert row is not None
+            # Both descriptions should be present
+            assert desc1 in row[0]
+            assert desc2 in row[0]
+            # Separator should be present
+            assert "---" in row[0]
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+
+# ---------------------------------------------------------------------------
+# Test: Company auto-population hook (Phase 7 Plan 01)
+# ---------------------------------------------------------------------------
+
+class TestCompanyAutoPopulation:
+    """Tests for company auto-population in pipeline_runner._score_and_persist."""
+
+    @pytest.fixture
+    def lever_job(self):
+        """Job with a Lever source URL."""
+        return Job(
+            title="Senior Data Scientist",
+            company="Stripe",
+            location="Remote",
+            source="linkedin",
+            source_url="https://jobs.lever.co/stripe/abc-123",
+        )
+
+    @pytest.fixture
+    def non_ats_job(self):
+        """Job with a non-ATS source URL."""
+        return Job(
+            title="Staff Data Scientist",
+            company="BetterHelp",
+            location="San Jose, CA",
+            source="linkedin",
+            source_url="https://www.linkedin.com/jobs/view/999/",
+        )
+
+    def test_lever_job_creates_company_with_ats_platform(
+        self, minimal_config, migrated_db_path
+    ):
+        """After ingesting a Lever job, company record has ats_platform='lever' and correct slug."""
+        lever_jobs = [
+            Job(
+                title="Senior Data Scientist",
+                company="Stripe",
+                location="Remote",
+                source="linkedin",
+                source_url="https://jobs.lever.co/stripe/job-abc-123",
+            )
+        ]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = lever_jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(minimal_config, migrated_db_path)
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company = conn.execute(
+            "SELECT * FROM companies WHERE name = 'stripe'"
+        ).fetchone()
+        conn.close()
+
+        assert company is not None, "Company record should be created after ingestion"
+        assert company["ats_platform"] == "lever"
+        assert company["ats_slug"] == "stripe"
+        assert company["ats_probe_status"] == "hit"
+
+    def test_non_ats_job_creates_company_with_pending_status(
+        self, minimal_config, migrated_db_path
+    ):
+        """After ingesting a non-ATS job, company record exists with ats_probe_status='pending'."""
+        non_ats_jobs = [
+            Job(
+                title="Staff Data Scientist",
+                company="BetterHelp",
+                location="San Jose, CA",
+                source="linkedin",
+                source_url="https://www.linkedin.com/jobs/view/9999/",
+            )
+        ]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = non_ats_jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(minimal_config, migrated_db_path)
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company = conn.execute(
+            "SELECT * FROM companies WHERE name = 'betterhelp'"
+        ).fetchone()
+        conn.close()
+
+        assert company is not None, "Company record should be created for non-ATS jobs too"
+        assert company["ats_probe_status"] == "pending"
+        assert company["ats_platform"] is None
+
+    def test_company_upsert_failure_does_not_crash_ingestion(
+        self, minimal_config, migrated_db_path
+    ):
+        """Company upsert failure is non-fatal — ingestion continues and returns summary."""
+        jobs = [
+            Job(
+                title="Senior Data Scientist",
+                company="TestCo",
+                location="Remote",
+                source="linkedin",
+                source_url="https://www.linkedin.com/jobs/view/111/",
+            )
+        ]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch(
+                 "job_finder.web.ats_scanner.upsert_company",
+                 side_effect=Exception("DB connection failed"),
+             ), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(minimal_config, migrated_db_path)
+
+        # Ingestion should complete successfully despite company upsert failure
+        assert summary["jobs_new"] >= 1
+        assert summary["job_errors"] == []
+
+    def test_jobs_table_has_company_id_linked(self, minimal_config, migrated_db_path):
+        """After ingestion, jobs.company_id is linked to the company record."""
+        jobs = [
+            Job(
+                title="Senior Data Scientist",
+                company="Acme",
+                location="Remote",
+                source="linkedin",
+                source_url="https://jobs.lever.co/acme/job-xyz",
+            )
+        ]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(minimal_config, migrated_db_path)
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        job_row = conn.execute("SELECT company_id FROM jobs WHERE company = 'Acme'").fetchone()
+        company_row = conn.execute("SELECT id FROM companies WHERE name = 'acme'").fetchone()
+        conn.close()
+
+        assert job_row is not None
+        assert company_row is not None
+        assert job_row["company_id"] == company_row["id"], (
+            "Job should be linked to its company via company_id"
+        )

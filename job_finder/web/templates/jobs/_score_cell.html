@@ -1,0 +1,28 @@
+{# Score cell partial. Renders the score <td> with color tiers and sonnet star indicator.
+   Variables expected in scope:
+     job          — job object with sonnet_score, haiku_score, dedup_key
+   Optional:
+     oob          — when truthy, adds hx-swap-oob="outerHTML" for out-of-band targeting
+#}
+
+{% set display_score = job.sonnet_score if job.sonnet_score is not none else job.haiku_score %}
+{% set is_sonnet = job.sonnet_score is not none %}
+
+{% if display_score is not none %}
+  {% if display_score >= 70 %}
+    {% set score_class = "text-green-400 font-bold" %}
+  {% elif display_score >= 50 %}
+    {% set score_class = "text-yellow-400" %}
+  {% else %}
+    {% set score_class = "text-red-400 opacity-60" %}
+  {% endif %}
+{% else %}
+  {% set score_class = "text-slate-600" %}
+{% endif %}
+
+<td id="score-{{ job.dedup_key | urlencode }}"
+    class="px-1 py-1.5 {{ score_class }} whitespace-nowrap"
+    data-sort-score="{{ display_score | int if display_score is not none else '' }}"
+    {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
+  {{ display_score | int if display_score is not none else "---" }}{% if is_sonnet %}<span class="text-amber-400 text-xs ml-0.5">*</span>{% endif %}
+</td>

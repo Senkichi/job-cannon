@@ -1,0 +1,47 @@
+{# Scan result fragment — returned after POST /companies/scan #}
+{# Auto-dismisses after 8 seconds via JS #}
+
+<div id="ats-scan-result"
+     class="{% if error %}bg-red-900/40 border-red-700{% else %}bg-emerald-900/40 border-emerald-700{% endif %} border rounded-lg px-4 py-3 flex items-center justify-between"
+     x-data="{ show: true }" x-show="show">
+
+  <div class="flex items-center gap-3">
+    {% if error %}
+    <svg class="w-5 h-5 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <span class="text-red-200 text-sm">ATS scan failed: {{ error }}</span>
+    {% else %}
+    <svg class="w-5 h-5 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div class="text-emerald-200 text-sm">
+      <span class="font-medium">ATS scan complete.</span>
+      Scanned {{ result.companies_scanned }} companies,
+      discovered {{ result.jobs_discovered }} jobs
+      ({{ result.jobs_new }} new).
+      {% if result.html_scraped > 0 %}
+      HTML-scraped {{ result.html_scraped }} listings from careers pages.
+      {% endif %}
+      {% if result.errors %}
+      <span class="text-amber-400">{{ result.errors | length }} errors.</span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <button onclick="document.getElementById('ats-scan-result').remove()"
+          class="text-slate-400 hover:text-slate-200 flex-shrink-0 ml-3">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    </svg>
+  </button>
+</div>
+
+<script>
+// Auto-dismiss after 8 seconds
+setTimeout(function() {
+  var el = document.getElementById('ats-scan-result');
+  if (el) el.remove();
+}, 8000);
+</script>

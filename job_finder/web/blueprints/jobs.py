@@ -1,0 +1,676 @@
+"""Jobs blueprint -- full Job Board routes with HTMX partials."""
+
+import logging
+from datetime import datetime
+
+from flask import Blueprint, current_app, make_response, render_template, request
+
+from job_finder.db import (
+    get_distinct_locations,
+    get_distinct_sources,
+    get_filtered_jobs,
+    get_job,
+    get_pipeline_events,
+    load_job_context,
+    update_pipeline_status,
+)
+from job_finder.web.activity_tracker import (
+    log_activity,
+    ACTION_EXPAND_JOB,
+    ACTION_STATUS_CHANGE,
+    ACTION_PASTE_JD,
+    ACTION_RESCORE,
+    ACTION_SAVE_JD,
+)
+
+def _get_stale_count(conn) -> int:
+    """Return count of jobs with is_stale = 1."""
+    row = conn.execute("SELECT COUNT(*) FROM jobs WHERE is_stale = 1").fetchone()
+    return row[0] if row else 0
+from job_finder.web.blueprints import PIPELINE_STATUSES, trigger_interview_prep_if_applied
+from job_finder.web.db_helpers import get_db
+from job_finder.web.drive_status import get_drive_status
+
+logger = logging.getLogger(__name__)
+
+jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
+
+
+def _get_filter_kwargs() -> dict:
+    """Extract and coerce filter query parameters from request.args."""
+    args = request.args
+
+    min_score_raw = args.get("min_score", "")
+    max_score_raw = args.get("max_score", "")
+    salary_min_raw = args.get("salary_min", "")
+
+    return {
+        "status": args.get("status") or None,
+        "location": args.get("location") or None,
+        "min_score": float(min_score_raw) if min_score_raw else None,
+        "max_score": float(max_score_raw) if max_score_raw else None,
+        "salary_min": int(salary_min_raw) if salary_min_raw else None,
+        "source": args.get("source") or None,
+        "date_from": args.get("date_from") or None,
+        "date_to": args.get("date_to") or None,
+        "sort_by": args.get("sort_by", "score"),
+        "sort_dir": args.get("sort_dir", "DESC"),
+        "limit": 200,
+        "hide_stale": args.get("hide_stale") == "on",
+    }
+
+
+def relative_date(iso_str):
+    """Format date as 'Mar 3 (1w ago)' — absolute then relative.
+
+    Per locked user decision: format MUST be 'Mar 3 (1w ago)'
+    (absolute date then relative in parentheses).
+    """
+    if not iso_str:
+        return "---"
+    try:
+        dt = datetime.fromisoformat(iso_str[:19])
+    except (ValueError, TypeError):
+        return iso_str[:10] if iso_str else "---"
+
+    # Absolute part: "Mar 3" — handle Windows (%#d) vs Unix (%-d)
+    try:
+        abs_part = dt.strftime("%b %-d")
+    except ValueError:
+        abs_part = dt.strftime("%b %#d")
+
+    now = datetime.now()
+    delta = now - dt
+    days = delta.days
+
+    if days < 0:
+        rel = "future"
+    elif days == 0:
+        rel = "today"
+    elif days == 1:
+        rel = "1d ago"
+    elif days < 7:
+        rel = f"{days}d ago"
+    elif days < 30:
+        weeks = days // 7
+        rel = f"{weeks}w ago"
+    elif days < 365:
+        months = days // 30
+        rel = f"{months}mo ago"
+    else:
+        years = days // 365
+        rel = f"{years}y ago"
+
+    return f"{abs_part} ({rel})"
+
+
+@jobs_bp.record_once
+def _register_filters(state):
+    """Register the relative_date Jinja2 filter when blueprint is registered."""
+    state.app.jinja_env.filters["relative_date"] = relative_date
+
+
+@jobs_bp.route("/", strict_slashes=False)
+def index():
+    """Job Board landing page -- full page render with filter bar."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    filters = _get_filter_kwargs()
+    jobs = get_filtered_jobs(conn, **filters)
+    locations = get_distinct_locations(conn)
+    sources = get_distinct_sources(conn)
+    stale_count = _get_stale_count(conn)
+    archived_count = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
+    ).fetchone()[0]
+
+    return render_template(
+        "jobs/index.html",
+        jobs=jobs,
+        filters=request.args,
+        pipeline_statuses=PIPELINE_STATUSES,
+        locations=locations,
+        sources=sources,
+        stale_count=stale_count,
+        archived_count=archived_count,
+    )
+
+
+@jobs_bp.route("/table", strict_slashes=False)
+def table():
+    """HTMX partial -- returns only the table body rows (no full page)."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    filters = _get_filter_kwargs()
+    jobs = get_filtered_jobs(conn, **filters)
+
+    return render_template(
+        "jobs/_table.html",
+        jobs=jobs,
+        pipeline_statuses=PIPELINE_STATUSES,
+    )
+
+
+@jobs_bp.route("/archived-table", strict_slashes=False)
+def archived_table():
+    """HTMX partial -- archived job rows for the collapsible section."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    jobs = get_filtered_jobs(conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200)
+    return render_template(
+        "jobs/_table.html",
+        jobs=jobs,
+        pipeline_statuses=PIPELINE_STATUSES,
+    )
+
+
+@jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
+def expand(dedup_key: str):
+    """HTMX partial -- returns accordion expansion row for a job."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+
+    job = ctx["job"]
+    resume_history = ctx["resume_history"]
+    prep_row = ctx["prep_row"]
+
+    config = current_app.config.get("JF_CONFIG", {})
+    drive_status = get_drive_status(config)
+
+    try:
+        log_activity(
+            current_app.config["DB_PATH"],
+            ACTION_EXPAND_JOB,
+            entity_id=dedup_key,
+            metadata={"title": job.get("title"), "company": job.get("company"), "status": "success"},
+        )
+    except Exception:
+        pass
+
+    return render_template(
+        "jobs/_row_expanded.html",
+        job=job,
+        pipeline_statuses=PIPELINE_STATUSES,
+        resume_history=resume_history,
+        prep_row=prep_row,
+        drive_status=drive_status,
+    )
+
+
+@jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
+def collapse(dedup_key: str):
+    """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+
+    return render_template(
+        "jobs/_row_collapse_response.html",
+        job=job,
+    )
+
+
+@jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)
+def update_status(dedup_key: str):
+    """HTMX POST -- change pipeline status and return updated status cell."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    new_status = request.form.get("pipeline_status", "")
+    if new_status not in PIPELINE_STATUSES:
+        return "Invalid status", 400
+
+    # Capture old status before update for activity metadata
+    old_job = get_job(conn, dedup_key)
+    old_status = old_job.get("pipeline_status") if old_job else None
+
+    update_pipeline_status(conn, dedup_key, new_status, source="manual")
+
+    # Trigger interview prep generation in background when status moves to "applied"
+    trigger_interview_prep_if_applied(
+        dedup_key,
+        new_status,
+        current_app.config["DB_PATH"],
+        current_app.config.get("JF_CONFIG", {}),
+        testing=current_app.config.get("TESTING", False),
+    )
+
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+
+    try:
+        log_activity(
+            current_app.config["DB_PATH"],
+            ACTION_STATUS_CHANGE,
+            entity_id=dedup_key,
+            metadata={
+                "old_status": old_status,
+                "new_status": new_status,
+                "title": (old_job.get("title") if old_job else None),
+                "company": (old_job.get("company") if old_job else None),
+            },
+        )
+    except Exception:
+        pass
+
+    status_html = render_template(
+        "jobs/_status_cell.html",
+        job=job,
+        pipeline_statuses=PIPELINE_STATUSES,
+    )
+
+    if new_status == "archived":
+        # OOB update: refresh the archived count badge.
+        # Do NOT set HX-Trigger: jobs-updated — it causes tbody refetch
+        # that kills the in-flight archive fadeout animation.
+        archived_count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
+        ).fetchone()[0]
+        oob_counter = f'<span id="archived-count" hx-swap-oob="innerHTML">{archived_count}</span>'
+        resp = make_response(status_html + oob_counter)
+    else:
+        resp = make_response(status_html)
+
+    return resp
+
+
+@jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
+def detail_inline(dedup_key: str):
+    """HTMX partial -- returns full detail as inline table row."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+    events = get_pipeline_events(conn, dedup_key)
+    return render_template(
+        "jobs/_row_detail.html",
+        job=job,
+        events=events,
+        pipeline_statuses=PIPELINE_STATUSES,
+    )
+
+
+@jobs_bp.route("/<path:dedup_key>/paste-jd", methods=["POST"], strict_slashes=False)
+def paste_jd(dedup_key: str):
+    """HTMX POST -- accept pasted JD text, store it, trigger Sonnet eval.
+
+    Stores jd_text in jobs.jd_full, then calls evaluate_job_sonnet.
+    Budget-gated via cost_gate. Returns updated expanded row partial.
+    """
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+
+    job = ctx["job"]
+
+    jd_text = request.form.get("jd_text", "").strip()
+    if not jd_text:
+        return render_template(
+            "jobs/_row_expanded.html",
+            job=job,
+            pipeline_statuses=PIPELINE_STATUSES,
+            error="Please provide a job description.",
+            resume_history=ctx["resume_history"],
+            prep_row=ctx["prep_row"],
+            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+        )
+
+    # Store the JD text
+    conn.execute(
+        "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
+        (jd_text, dedup_key),
+    )
+    conn.commit()
+
+    try:
+        log_activity(
+            current_app.config["DB_PATH"],
+            ACTION_PASTE_JD,
+            entity_id=dedup_key,
+            metadata={
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "jd_length": len(jd_text),
+                "status": "success",
+            },
+        )
+    except Exception:
+        pass
+
+    # Attempt Sonnet evaluation (budget-gated)
+    error = None
+    try:
+        from job_finder.web.claude_client import cost_gate
+        from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
+
+        config = current_app.config.get("JF_CONFIG", {})
+        if cost_gate(conn, config, "sonnet"):
+            import anthropic
+            import json as _json
+            client = anthropic.Anthropic()
+
+            # Load experience profile
+            try:
+                with open("experience_profile.json", encoding="utf-8") as f:
+                    profile = _json.load(f)
+            except (FileNotFoundError, _json.JSONDecodeError):
+                profile = {}
+
+            # Refresh job row with jd_full
+            job = get_job(conn, dedup_key)
+            result = evaluate_job_sonnet(client, job, profile, conn, config)
+            if result:
+                conn.execute(
+                    "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
+                    (
+                        result.get("score"),
+                        _json.dumps(result.get("fit_analysis", {})),
+                        dedup_key,
+                    ),
+                )
+                conn.commit()
+        else:
+            logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+            error = "Budget cap reached. Sonnet scoring skipped."
+
+    except ImportError as e:
+        logger.warning("paste-jd: Sonnet evaluator not available: %s", e)
+        error = "Scoring unavailable. JD saved for later."
+    except Exception as e:
+        logger.error("paste-jd: Sonnet eval failed for %s: %s", dedup_key, e)
+        error = "Re-scoring failed. Try again later."
+
+    # Return updated expanded row + OOB score cell (updates compact row in-place)
+    ctx = load_job_context(conn, dedup_key)
+    expanded = render_template(
+        "jobs/_row_expanded.html",
+        job=ctx["job"],
+        pipeline_statuses=PIPELINE_STATUSES,
+        error=error,
+        resume_history=ctx["resume_history"],
+        prep_row=ctx["prep_row"],
+        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+    )
+    oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
+    return make_response(expanded + "<template>" + oob_score + "</template>")
+
+
+@jobs_bp.route("/<path:dedup_key>/rescore", methods=["POST"], strict_slashes=False)
+def rescore(dedup_key: str):
+    """HTMX POST -- re-trigger Sonnet evaluation for a job that already has jd_full.
+
+    Returns updated expanded row partial.
+    """
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+
+    job = ctx["job"]
+
+    if not job.get("jd_full"):
+        return render_template(
+            "jobs/_row_expanded.html",
+            job=job,
+            pipeline_statuses=PIPELINE_STATUSES,
+            error="No JD available for re-scoring. Paste a JD first.",
+            resume_history=ctx["resume_history"],
+            prep_row=ctx["prep_row"],
+            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+        )
+
+    # Capture old score before re-evaluation
+    old_score = job.get("sonnet_score")
+
+    # Attempt Sonnet re-evaluation (budget-gated)
+    import time as _time
+    error = None
+    t0 = _time.time()
+    try:
+        from job_finder.web.claude_client import cost_gate
+        from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
+
+        config = current_app.config.get("JF_CONFIG", {})
+        if cost_gate(conn, config, "sonnet"):
+            import anthropic
+            import json as _json
+            client = anthropic.Anthropic()
+
+            try:
+                with open("experience_profile.json", encoding="utf-8") as f:
+                    profile = _json.load(f)
+            except (FileNotFoundError, _json.JSONDecodeError):
+                profile = {}
+
+            result = evaluate_job_sonnet(client, job, profile, conn, config)
+            if result:
+                conn.execute(
+                    "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
+                    (
+                        result.get("score"),
+                        _json.dumps(result.get("fit_analysis", {})),
+                        dedup_key,
+                    ),
+                )
+                conn.commit()
+                try:
+                    log_activity(
+                        db_path,
+                        ACTION_RESCORE,
+                        entity_id=dedup_key,
+                        metadata={
+                            "old_score": old_score,
+                            "new_score": result.get("score"),
+                            "duration_seconds": round(_time.time() - t0, 2),
+                            "status": "success",
+                        },
+                    )
+                except Exception:
+                    pass
+        else:
+            logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+            error = "Budget cap reached. Sonnet scoring skipped."
+
+    except ImportError as e:
+        logger.warning("rescore: Sonnet evaluator not available: %s", e)
+        error = "Re-scoring failed. Try again later."
+        try:
+            log_activity(
+                db_path,
+                ACTION_RESCORE,
+                entity_id=dedup_key,
+                metadata={"status": "failed", "error": "ImportError",
+                          "duration_seconds": round(_time.time() - t0, 2)},
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("rescore: Sonnet eval failed for %s: %s", dedup_key, e)
+        error = "Re-scoring failed. Try again later."
+        try:
+            log_activity(
+                db_path,
+                ACTION_RESCORE,
+                entity_id=dedup_key,
+                metadata={"status": "failed", "error": type(e).__name__,
+                          "duration_seconds": round(_time.time() - t0, 2)},
+            )
+        except Exception:
+            pass
+
+    ctx = load_job_context(conn, dedup_key)
+    expanded = render_template(
+        "jobs/_row_expanded.html",
+        job=ctx["job"],
+        pipeline_statuses=PIPELINE_STATUSES,
+        error=error,
+        resume_history=ctx["resume_history"],
+        prep_row=ctx["prep_row"],
+        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+    )
+    oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
+    return make_response(expanded + "<template>" + oob_score + "</template>")
+
+
+@jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
+def score_cell(dedup_key: str):
+    """HTMX partial -- returns just the score <td> for a single job."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+    return render_template("jobs/_score_cell.html", job=job)
+
+
+@jobs_bp.route("/<path:dedup_key>/interview-prep/status", strict_slashes=False)
+def interview_prep_status(dedup_key: str):
+    """HTMX poll endpoint -- returns current interview prep state for a job.
+
+    Called every 2s by hx-trigger="every 2s" in _interview_prep_generating.html.
+    Returns:
+    - _interview_prep_generating.html (with hx-trigger) while status='generating'
+    - _interview_prep.html (static, no hx-trigger -- stops polling) when status='done'
+    - error fragment when status='error'
+    - empty string (200) if no prep row exists yet
+    """
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+
+    prep_row = conn.execute(
+        "SELECT status, company_brief, predicted_questions, gap_mitigation, "
+        "questions_to_ask, error_msg "
+        "FROM interview_preps WHERE job_id = ? ORDER BY id DESC LIMIT 1",
+        (dedup_key,),
+    ).fetchone()
+
+    if prep_row is None:
+        return "", 200
+
+    status = prep_row["status"] if prep_row else None
+
+    if status == "generating":
+        return render_template(
+            "jobs/_interview_prep_generating.html",
+            job=job,
+        )
+    elif status == "done":
+        return render_template(
+            "jobs/_interview_prep.html",
+            job=job,
+            prep=prep_row,
+        )
+    elif status == "error":
+        error_msg = prep_row["error_msg"] or "Interview prep failed."
+        return (
+            f'<div class="text-xs text-red-400 p-3">Interview prep error: {error_msg}</div>',
+            200,
+        )
+
+    return "", 200
+
+
+@jobs_bp.route("/<path:dedup_key>/save-jd", methods=["POST"], strict_slashes=False)
+def save_jd(dedup_key: str):
+    """HTMX POST -- save jd_full without triggering scoring."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
+
+    job = ctx["job"]
+    jd_text = request.form.get("jd_text", "").strip()
+    if not jd_text:
+        return render_template(
+            "jobs/_row_expanded.html",
+            job=job,
+            pipeline_statuses=PIPELINE_STATUSES,
+            error="Please provide a job description.",
+            resume_history=ctx["resume_history"],
+            prep_row=ctx["prep_row"],
+            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+        )
+
+    conn.execute(
+        "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
+        (jd_text, dedup_key),
+    )
+    conn.commit()
+
+    try:
+        log_activity(
+            db_path,
+            ACTION_SAVE_JD,
+            entity_id=dedup_key,
+            metadata={
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "jd_length": len(jd_text),
+                "status": "success",
+            },
+        )
+    except Exception:
+        pass
+
+    ctx = load_job_context(conn, dedup_key)
+    return render_template(
+        "jobs/_row_expanded.html",
+        job=ctx["job"],
+        pipeline_statuses=PIPELINE_STATUSES,
+        jd_saved=True,
+        resume_history=ctx["resume_history"],
+        prep_row=ctx["prep_row"],
+        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
+    )
+
+
+@jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
+def jd_edit_form(dedup_key: str):
+    """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return "", 404
+    return render_template("jobs/_jd_edit_form.html", job=job)
+
+
+@jobs_bp.route("/<path:dedup_key>", strict_slashes=False)
+def detail(dedup_key: str):
+    """Full job detail page at /jobs/<dedup_key>."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    job = get_job(conn, dedup_key)
+    if job is None:
+        return render_template("jobs/detail.html", job=None), 404
+
+    events = get_pipeline_events(conn, dedup_key)
+
+    return render_template(
+        "jobs/detail.html",
+        job=job,
+        events=events,
+        pipeline_statuses=PIPELINE_STATUSES,
+    )

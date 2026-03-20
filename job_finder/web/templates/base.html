@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Job Finder{% endblock %}</title>
+
+  <!-- HTMX 2.0.8 -->
+  <script src="https://unpkg.com/htmx.org@2.0.8/dist/htmx.min.js"></script>
+
+  <!-- Tailwind v4.0.6 -->
+  <script src="https://unpkg.com/@tailwindcss/browser@4.0.6"></script>
+
+  <!-- SortableJS 1.15.6 -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @custom-variant dark (&:where(.dark, .dark *));
+  </style>
+  <style>
+    @keyframes highlight-flash {
+      0% { background-color: rgba(99, 102, 241, 0.25); }
+      100% { background-color: transparent; }
+    }
+    .highlight-flash { animation: highlight-flash 1.5s ease-out; }
+    @keyframes archive-fadeout {
+      0% { opacity: 1; }
+      60% { opacity: 0; max-height: 200px; }
+      100% { opacity: 0; max-height: 0; padding: 0; overflow: hidden; }
+    }
+    .archive-fadeout {
+      animation: archive-fadeout 0.8s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex">
+
+  <!-- Sidebar -->
+  {% include "components/_sidebar.html" %}
+
+  <!-- Main content area -->
+  <div id="main-content" class="flex-1 flex flex-col min-h-screen transition-all duration-300" style="min-width: 0;">
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="p-4 space-y-2">
+          {% for category, message in messages %}
+            <div class="px-4 py-3 rounded-lg text-sm
+              {% if category == 'error' %}bg-red-900/50 text-red-200 border border-red-700
+              {% elif category == 'success' %}bg-green-900/50 text-green-200 border border-green-700
+              {% else %}bg-slate-700/50 text-slate-200 border border-slate-600{% endif %}">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- Page content -->
+    <main class="flex-1 p-6">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

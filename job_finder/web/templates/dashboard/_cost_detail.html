@@ -1,0 +1,80 @@
+{# HTMX partial: cost breakdown panel. Loaded on click of the cost stat card. #}
+{% set month_spend = cost_stats.month %}
+{% set budget_pct = (month_spend / budget_cap * 100) if budget_cap > 0 else 0 %}
+
+{% if budget_pct >= 100 %}
+  {% set bar_color = "bg-red-500" %}
+  {% set pct_text = "text-red-400" %}
+{% elif budget_pct >= 80 %}
+  {% set bar_color = "bg-amber-500" %}
+  {% set pct_text = "text-amber-400" %}
+{% else %}
+  {% set bar_color = "bg-emerald-500" %}
+  {% set pct_text = "text-emerald-400" %}
+{% endif %}
+
+<div class="bg-slate-800 rounded-xl border border-slate-700 p-5 space-y-4 mt-4">
+  <div class="flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-slate-300">Cost Breakdown</h3>
+    <span class="{{ pct_text }} text-sm font-semibold">{{ "%.0f" | format(budget_pct) }}% of budget used</span>
+  </div>
+
+  <!-- Budget progress bar -->
+  <div>
+    <div class="flex justify-between text-xs text-slate-500 mb-1">
+      <span>This month: ${{ "%.2f" | format(month_spend) }}</span>
+      <span>Cap: ${{ "%.0f" | format(budget_cap) }}</span>
+    </div>
+    <div class="w-full bg-slate-700 rounded-full h-2">
+      <div class="{{ bar_color }} h-2 rounded-full transition-all"
+           style="width: {{ [budget_pct, 100] | min }}%"></div>
+    </div>
+  </div>
+
+  <!-- Spend by period -->
+  <div class="grid grid-cols-3 gap-4 text-center">
+    <div class="bg-slate-900/50 rounded-lg p-3">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">Today</div>
+      <div class="text-lg font-bold text-slate-100 mt-1">${{ "%.3f" | format(cost_stats.today) }}</div>
+    </div>
+    <div class="bg-slate-900/50 rounded-lg p-3">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">This Week</div>
+      <div class="text-lg font-bold text-slate-100 mt-1">${{ "%.3f" | format(cost_stats.week) }}</div>
+    </div>
+    <div class="bg-slate-900/50 rounded-lg p-3">
+      <div class="text-xs text-slate-500 uppercase tracking-wide">Projected/mo</div>
+      <div class="text-lg font-bold text-slate-100 mt-1">${{ "%.2f" | format(cost_stats.projected_monthly) }}</div>
+    </div>
+  </div>
+
+  <!-- By-feature breakdown -->
+  {% if cost_stats.by_feature %}
+  <div>
+    <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">By Feature</div>
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-1 font-medium">Feature</th>
+          <th class="pb-1 font-medium text-right">Calls</th>
+          <th class="pb-1 font-medium text-right">Spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in cost_stats.by_feature %}
+        <tr class="border-b border-slate-800/50">
+          <td class="py-1 text-slate-300 font-mono">{{ item.purpose }}</td>
+          <td class="py-1 text-slate-400 text-right">{{ item.calls }}</td>
+          <td class="py-1 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-xs text-slate-500 text-center py-2">No API calls recorded yet.</p>
+  {% endif %}
+
+  <div class="text-right">
+    <a href="/settings" class="text-xs text-violet-400 hover:text-violet-300 transition-colors">Adjust budget in Settings →</a>
+  </div>
+</div>

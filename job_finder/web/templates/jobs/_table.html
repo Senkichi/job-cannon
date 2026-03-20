@@ -1,0 +1,13 @@
+{# HTMX partial: table body rows. Rendered for both full page and /jobs/table partial. #}
+{% if jobs %}
+  {% for job in jobs %}
+    {% include "jobs/_row.html" %}
+    <tr data-expand-slot="{{ job.dedup_key | urlencode }}" class="hidden"><td></td></tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="7" class="px-4 py-8 text-center text-slate-500 text-sm">
+      No jobs match the current filters.
+    </td>
+  </tr>
+{% endif %}

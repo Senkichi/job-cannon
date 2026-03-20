@@ -1,0 +1,386 @@
+"""Shared test fixtures for job-finder test suite."""
+
+import json
+import os
+import sqlite3
+import tempfile
+from unittest.mock import MagicMock
+
+import pytest
+
+
+@pytest.fixture
+def tmp_db_path():
+    """Create a temporary SQLite database file, yield path, clean up after."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    yield path
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture
+def sample_db_with_jobs():
+    """Create a temp DB with the OLD schema (matching db.py._init_tables).
+
+    Inserts 3 sample job rows with realistic data. Simulates the existing
+    jobs.db before migration.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    conn = sqlite3.connect(path)
+    # Create the old schema exactly as in job_finder/db.py
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            dedup_key TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            location TEXT NOT NULL,
+            sources TEXT DEFAULT '[]',
+            source_urls TEXT DEFAULT '[]',
+            source_id TEXT DEFAULT '',
+            salary_min INTEGER,
+            salary_max INTEGER,
+            description TEXT,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            score REAL DEFAULT 0,
+            score_breakdown TEXT DEFAULT '{}',
+            user_interest TEXT DEFAULT 'unreviewed'
+        );
+
+        CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            source TEXT NOT NULL,
+            jobs_fetched INTEGER DEFAULT 0,
+            jobs_new INTEGER DEFAULT 0,
+            jobs_scored INTEGER DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(score DESC);
+        CREATE INDEX IF NOT EXISTS idx_jobs_interest ON jobs(user_interest);
+        CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen DESC);
+        """
+    )
+
+    # Insert 3 sample job rows with realistic data
+    conn.executemany(
+        """INSERT INTO jobs
+            (dedup_key, title, company, location, sources, source_urls,
+             source_id, salary_min, salary_max, description,
+             first_seen, last_seen, score, score_breakdown, user_interest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                "thumbtack|senior data scientist|united states",
+                "Senior Data Scientist",
+                "Thumbtack",
+                "United States",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/4364166509/"]',
+                "4364166509",
+                180000,
+                240000,
+                "Build data products at Thumbtack.",
+                "2026-03-01T10:00:00",
+                "2026-03-09T10:00:00",
+                8.5,
+                '{"skills": 0.9, "title": 0.85}',
+                "reviewing",
+            ),
+            (
+                "betterhelp|data scientist experimentation|san jose ca",
+                "Data Scientist, Experimentation",
+                "BetterHelp",
+                "San Jose, CA",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/4248973844/"]',
+                "4248973844",
+                150000,
+                200000,
+                "Run A/B tests at scale.",
+                "2026-03-02T11:00:00",
+                "2026-03-09T11:00:00",
+                7.2,
+                '{"skills": 0.75, "title": 0.7}',
+                "unreviewed",
+            ),
+            (
+                "toast|staff data scientist|united states",
+                "Staff Data Scientist",
+                "Toast",
+                "United States",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/4337163287/"]',
+                "4337163287",
+                200000,
+                280000,
+                "Lead data science for restaurant tech platform.",
+                "2026-03-03T12:00:00",
+                "2026-03-09T12:00:00",
+                9.1,
+                '{"skills": 0.95, "title": 0.9}',
+                "interested",
+            ),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    yield path
+
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture
+def app_config():
+    """Return a dict with test configuration values."""
+    return {
+        "db": {"path": ":memory:"},
+        "scoring": {"min_score": 5.0},
+        "polling": {"interval_minutes": 30},
+    }
+
+
+@pytest.fixture
+def app(tmp_db_path):
+    """Standard test Flask app with full config superset.
+
+    Includes all config keys needed by any test file to avoid KeyErrors
+    in blueprints. Individual test files that need custom DB setup
+    (e.g., test_pipeline.py with pre-inserted jobs) should define
+    their own local app fixture.
+    """
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {
+            "min_score_threshold": 40,
+            "monthly_budget_usd": 25.0,
+        },
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    application = create_app(config=test_config)
+    application.config["TESTING"] = True
+    return application
+
+
+@pytest.fixture
+def client(app):
+    """Flask test client from the shared app fixture."""
+    return app.test_client()
+
+
+@pytest.fixture
+def migrated_db():
+    """Create a temp DB, run ALL migrations (including Migration 2), yield (path, conn).
+
+    This is the standard fixture for all Phase 2 AI scoring tests.
+    Closes connection and removes file on teardown.
+    """
+    from job_finder.web.db_migrate import run_migrations
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    run_migrations(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+
+    yield path, conn
+
+    conn.close()
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture(scope="class")
+def migrated_db_class():
+    """Shared migrated DB for test classes that don't depend on clean initial state.
+
+    Each test in the class shares the same DB. Only safe for classes where ALL
+    tests are either pure schema reads (PRAGMA queries, sqlite_master reads) or
+    insert rows with unique keys and never assert on initial row counts.
+
+    Safe candidates confirmed by audit (Plan 20-01):
+    - TestMigration13: pure PRAGMA reads (schema verification only)
+    - TestMigration2: pure PRAGMA reads (schema verification only)
+    - TestMigration3: schema checks + unique constraint test (no cross-test row count assertions)
+
+    NOT safe (cross-test state pollution via row counts):
+    - TestDbHelpers: tests assert len(pending_detections)==1 but accumulate rows across tests
+    """
+    from job_finder.web.db_migrate import run_migrations
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    run_migrations(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+
+    yield path, conn
+
+    conn.close()
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture
+def migrated_db_with_jobs():
+    """Create a temp DB, run ALL migrations (including Migration 3), insert 3 sample jobs.
+
+    Extends migrated_db with pre-inserted jobs that have pipeline_status so
+    pipeline_detector integration tests have realistic data to work with.
+    Yields (path, conn). Closes and removes file on teardown.
+    """
+    from job_finder.web.db_migrate import run_migrations
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    run_migrations(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+
+    from datetime import datetime, timedelta
+
+    now = datetime.now().isoformat()
+    five_days_ago = (datetime.now() - timedelta(days=5)).isoformat()
+
+    conn.executemany(
+        """INSERT INTO jobs
+            (dedup_key, title, company, location, sources, source_urls,
+             source_id, salary_min, salary_max, description,
+             first_seen, last_seen, score, score_breakdown, user_interest,
+             pipeline_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                "stripe|senior data scientist|remote",
+                "Senior Data Scientist",
+                "Stripe",
+                "Remote",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/1111/"]',
+                "1111",
+                180000, 240000,
+                "Build data products at Stripe.",
+                five_days_ago, now, 8.5, '{}', "interested", "reviewing",
+            ),
+            (
+                "betterhelp|data scientist|san jose ca",
+                "Data Scientist",
+                "BetterHelp",
+                "San Jose, CA",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/2222/"]',
+                "2222",
+                150000, 200000,
+                "Run experiments at BetterHelp.",
+                five_days_ago, now, 7.2, '{}', "unreviewed", "reviewing",
+            ),
+            (
+                "thumbtack|staff data scientist|united states",
+                "Staff Data Scientist",
+                "Thumbtack",
+                "United States",
+                '["linkedin"]',
+                '["https://www.linkedin.com/jobs/view/3333/"]',
+                "3333",
+                200000, 280000,
+                "Lead data science at Thumbtack.",
+                five_days_ago, now, 9.1, '{}', "interested", "applied",
+            ),
+        ],
+    )
+    conn.commit()
+
+    yield path, conn
+
+    conn.close()
+    if os.path.exists(path):
+        os.remove(path)
+
+
+@pytest.fixture
+def sample_resume_data():
+    """Return a structured resume dict for use across resume test classes.
+
+    Contains name, contact_line, summary, skills, positions (2 entries with
+    achievements), and education (1 entry). Reusable across all resume tests.
+    """
+    return {
+        "name": "Jane Doe",
+        "contact_line": "jane@example.com | (555) 555-1234 | linkedin.com/in/janedoe | San Francisco, CA",
+        "summary": (
+            "Data scientist with 8 years of experience building machine learning systems "
+            "at scale. Specializes in experimentation platforms and causal inference."
+        ),
+        "skills": ["Python", "SQL", "Machine Learning", "A/B Testing", "Spark", "dbt"],
+        "positions": [
+            {
+                "title": "Senior Data Scientist",
+                "company": "Acme Corp",
+                "dates": "Jan 2021 - Present",
+                "achievements": [
+                    "Led A/B testing platform serving 10M daily active users",
+                    "Reduced model inference latency by 40% via feature store refactoring",
+                ],
+            },
+            {
+                "title": "Data Scientist",
+                "company": "Beta Inc",
+                "dates": "Mar 2018 - Dec 2020",
+                "achievements": [
+                    "Built customer churn model with 87% AUC, saving $2M annually",
+                    "Mentored 3 junior data scientists and established team best practices",
+                ],
+            },
+        ],
+        "education": [
+            {
+                "degree": "M.S. Statistics",
+                "institution": "Stanford University",
+                "year": "2018",
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def mock_anthropic_client():
+    """Return a MagicMock mimicking anthropic.Anthropic() client.
+
+    mock.messages.create() returns a response with:
+    - content[0].text: JSON string '{"score": 75, "summary": "Good match"}'
+    - usage.input_tokens: 100
+    - usage.output_tokens: 50
+    """
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock()]
+    mock_response.content[0].text = json.dumps({"score": 75, "summary": "Good match"})
+    mock_response.usage.input_tokens = 100
+    mock_response.usage.output_tokens = 50
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_response
+
+    return mock_client

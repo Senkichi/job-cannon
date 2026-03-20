@@ -1,0 +1,247 @@
+"""Gmail source - fetches and parses job alert emails via the Gmail API.
+
+Requires OAuth credentials (credentials.json) and a saved token (token.json).
+Run `python -m job_finder.gmail_auth` to set up authentication.
+"""
+
+import base64
+import logging
+import os
+from datetime import datetime, timedelta
+from datetime import datetime as _dt
+from typing import Optional
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+from job_finder.models import Job
+from job_finder.parsers.linkedin_parser import parse_linkedin_alert
+from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
+from job_finder.parsers.indeed_parser import parse_indeed_alert
+from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
+logger = logging.getLogger(__name__)
+
+# Map sender addresses to parser functions
+SENDER_PARSERS = {
+    "jobalerts-noreply@linkedin.com": parse_linkedin_alert,
+    "jobs-noreply@linkedin.com": parse_linkedin_alert,
+    "noreply@glassdoor.com": parse_glassdoor_alert,
+    "alert@indeed.com": parse_indeed_alert,
+    "no-reply@ziprecruiter.com": parse_ziprecruiter_alert,
+}
+
+TOKEN_PATH = "token.json"
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+# Meta-email indicator phrases (checked against lowercased first 200 chars of body)
+_ARCHIVE_META_INDICATORS = [
+    "job alert digest",
+    "weekly digest",
+    "unsubscribe from",
+    "confirm your email",
+    "email preferences",
+]
+
+
+def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
+    """Return True if this parser result should trigger failure archival.
+
+    Archival is triggered when:
+    - Parser found zero jobs (jobs is empty)
+    - Body is non-meta (not a digest/confirmation email)
+    - Body is long enough to be a real email (>= 500 chars after stripping)
+
+    Args:
+        body: Raw email body string.
+        jobs: List of Job objects returned by the parser (empty = parse failure).
+        sender: Sender email address.
+
+    Returns:
+        True if the failure should be archived.
+    """
+    if jobs:
+        return False
+    if not body or len(body.strip()) < 500:
+        return False
+    preamble = body[:200].lower()
+    if any(indicator in preamble for indicator in _ARCHIVE_META_INDICATORS):
+        return False
+    return True
+
+
+def _archive_parse_failure(sender: str, body: str) -> None:
+    """Archive HTML body from a failed parse to data/parse_failures/.
+
+    Filename: {sender_domain}_{ISO_timestamp}.html
+    Creates directory if needed. Logs warning on write failure — never raises.
+
+    Args:
+        sender: Sender email address (used for filename prefix).
+        body: Raw email body HTML to archive.
+    """
+    try:
+        os.makedirs("data/parse_failures", exist_ok=True)
+        domain = sender.split("@")[-1].replace(".", "_") if "@" in sender else sender
+        ts = _dt.now().strftime("%Y-%m-%dT%H-%M-%S")
+        path = f"data/parse_failures/{domain}_{ts}.html"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        logger.info("Parse failure archived: %s", path)
+    except Exception as e:
+        logger.warning("Failed to archive parse failure: %s", e)
+
+
+class GmailSource:
+    """Fetch and parse job alert emails from Gmail."""
+
+    def __init__(self, token_path: str = TOKEN_PATH):
+        self.service = self._authenticate(token_path)
+        self.parse_failures: list[dict] = []
+
+    def _authenticate(self, token_path: str):
+        """Load saved OAuth credentials and build the Gmail service."""
+        if not os.path.exists(token_path):
+            raise FileNotFoundError(
+                f"Gmail OAuth token not found: {token_path}\n\n"
+                f"Run this command to authenticate:\n"
+                f"  python -m job_finder.gmail_auth\n\n"
+                f"This will open a browser for Google sign-in.\n"
+                f"See docs/SETUP.md for full OAuth setup instructions."
+            )
+        try:
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            return build("gmail", "v1", credentials=creds)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to authenticate with Gmail: {exc}\n\n"
+                f"Try deleting {token_path} and re-running:\n"
+                f"  python -m job_finder.gmail_auth"
+            ) from exc
+
+    def fetch_jobs(self, lookback_days: int = 7) -> list[Job]:
+        """Fetch all job alert emails from the last N days and parse them.
+
+        Args:
+            lookback_days: How many days back to search.
+
+        Returns:
+            List of parsed Job objects from all sources.
+        """
+        all_jobs = []
+        after_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y/%m/%d")
+
+        for sender, parser_fn in SENDER_PARSERS.items():
+            query = f"from:{sender} after:{after_date}"
+            messages = self._search_messages(query)
+
+            for msg_meta in messages:
+                msg = self._get_message(msg_meta["id"])
+                if not msg:
+                    continue
+
+                body = self._extract_body(msg)
+                email_date = self._extract_date(msg)
+
+                if body:
+                    jobs = parser_fn(body, email_date)
+                    all_jobs.extend(jobs)
+
+                    if _should_archive_failure(body, jobs, sender):
+                        _archive_parse_failure(sender, body)
+                        self.parse_failures.append({"sender": sender})
+
+        return all_jobs
+
+    def _search_messages(self, query: str) -> list[dict]:
+        """Search Gmail and return all matching message metadata."""
+        messages = []
+        page_token = None
+
+        while True:
+            result = (
+                self.service.users()
+                .messages()
+                .list(userId="me", q=query, pageToken=page_token, maxResults=100)
+                .execute()
+            )
+            messages.extend(result.get("messages", []))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+
+        return messages
+
+    def _get_message(self, message_id: str) -> Optional[dict]:
+        """Fetch a single message by ID."""
+        try:
+            return (
+                self.service.users()
+                .messages()
+                .get(userId="me", id=message_id, format="full")
+                .execute()
+            )
+        except Exception as e:
+            logger.warning("failed to fetch message %s: %s", message_id, e)
+            return None
+
+    def _extract_body(self, message: dict) -> Optional[str]:
+        """Extract the email body (prefers text/plain, falls back to text/html)."""
+        payload = message.get("payload", {})
+
+        # Try top-level body first
+        body_data = payload.get("body", {}).get("data")
+        if body_data:
+            return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+
+        # Check parts (multipart emails)
+        parts = payload.get("parts", [])
+        text_body = None
+        html_body = None
+
+        for part in parts:
+            mime = part.get("mimeType", "")
+            data = part.get("body", {}).get("data")
+            if not data:
+                # Check nested parts (multipart/alternative inside multipart/mixed)
+                for subpart in part.get("parts", []):
+                    sub_data = subpart.get("body", {}).get("data")
+                    sub_mime = subpart.get("mimeType", "")
+                    if sub_data and sub_mime == "text/plain":
+                        text_body = base64.urlsafe_b64decode(sub_data).decode(
+                            "utf-8", errors="replace"
+                        )
+                    elif sub_data and sub_mime == "text/html":
+                        html_body = base64.urlsafe_b64decode(sub_data).decode(
+                            "utf-8", errors="replace"
+                        )
+                continue
+
+            if mime == "text/plain":
+                text_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            elif mime == "text/html":
+                html_body = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+        # Prefer plain text for LinkedIn (cleaner parsing), HTML for Glassdoor
+        return text_body or html_body
+
+    def _extract_date(self, message: dict) -> Optional[datetime]:
+        """Extract the email date from headers."""
+        headers = message.get("payload", {}).get("headers", [])
+        for header in headers:
+            if header["name"].lower() == "date":
+                try:
+                    from email.utils import parsedate_to_datetime
+                    return parsedate_to_datetime(header["value"])
+                except Exception:
+                    logger.debug("email date parse failed", exc_info=True)
+
+        # Fallback to internalDate
+        internal_date = message.get("internalDate")
+        if internal_date:
+            return datetime.fromtimestamp(int(internal_date) / 1000)
+
+        return None

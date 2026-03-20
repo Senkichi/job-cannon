@@ -1,0 +1,166 @@
+{# Expanded company view — jobs list, scan history, inline ATS edit, collapse button #}
+{# Replaces the inner content of #company-{id} via HTMX outerHTML swap #}
+
+<div class="bg-slate-750 border-b border-slate-700">
+
+  <!-- Company header bar -->
+  <div class="flex items-center justify-between px-4 py-3 bg-slate-700/50 border-b border-slate-600">
+    <div class="flex items-center gap-3">
+      <span class="text-sm font-semibold text-slate-100">{{ company.name_raw }}</span>
+      {% if company.ats_probe_status == 'error' %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-700 text-amber-200">
+        Error ({{ company.retry_count or 0 }}/3)
+      </span>
+      {% elif company.ats_probe_status == 'miss' and company.miss_reason == 'unreachable' %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-red-700 text-red-300">
+        Unreachable
+      </span>
+      {% elif company.ats_platform == 'lever' %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-green-700 text-green-200">Lever</span>
+      {% elif company.ats_platform == 'greenhouse' %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-teal-700 text-teal-200">Greenhouse</span>
+      {% elif company.ats_platform == 'ashby' %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-purple-700 text-purple-200">Ashby</span>
+      {% else %}
+      <span class="px-2 py-0.5 rounded text-xs font-medium bg-slate-600 text-slate-400">No ATS</span>
+      {% endif %}
+      {% if company.homepage_url %}
+      <a href="{{ company.homepage_url }}" target="_blank" rel="noopener"
+         class="text-xs text-slate-400 hover:text-slate-200 underline truncate max-w-xs">
+        {{ company.homepage_url }}
+      </a>
+      {% endif %}
+    </div>
+    <!-- Right side: Retry button (if error/unreachable) + Collapse button -->
+    <div class="flex items-center gap-2">
+      {% if company.ats_probe_status == 'error' or (company.ats_probe_status == 'miss' and company.miss_reason == 'unreachable') %}
+      <button
+        hx-post="/companies/{{ company.id }}/retry"
+        hx-target="#company-{{ company.id }}"
+        hx-swap="innerHTML"
+        hx-indicator="#retry-spinner-exp-{{ company.id }}"
+        hx-on:click="event.stopPropagation()"
+        title="Retry ATS probe"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-amber-100 text-xs rounded-lg transition-colors">
+        <span class="htmx-indicator hidden" id="retry-spinner-exp-{{ company.id }}">
+          <svg class="animate-spin h-3 w-3 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </span>
+        Retry
+      </button>
+      {% endif %}
+      <button
+        hx-get="/companies/{{ company.id }}/collapse"
+        hx-target="#company-{{ company.id }}"
+        hx-swap="innerHTML"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
+        </svg>
+        Collapse
+      </button>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-0 divide-x divide-slate-700">
+
+    <!-- Jobs from this company -->
+    <div class="col-span-2 p-4">
+      <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+        Recent Jobs
+        <span class="text-slate-600 normal-case font-normal">({{ jobs | length }})</span>
+      </h4>
+      {% if jobs %}
+      <div class="space-y-1.5">
+        {% for job in jobs %}
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <a href="/jobs?search={{ job.company | urlencode }}"
+             class="text-slate-200 hover:text-violet-300 transition-colors truncate flex-1">
+            {{ job.title }}
+          </a>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            {% set eff_score = job.effective_score %}
+            {% if eff_score %}
+            <span class="text-xs {% if eff_score >= 80 %}text-emerald-400{% elif eff_score >= 60 %}text-amber-400{% else %}text-slate-400{% endif %}">
+              {{ eff_score | int }}
+            </span>
+            {% endif %}
+            <span class="text-xs px-1.5 py-0.5 rounded
+              {% if job.pipeline_status == 'applied' %}bg-blue-900/60 text-blue-300
+              {% elif job.pipeline_status == 'reviewing' %}bg-amber-900/60 text-amber-300
+              {% elif job.pipeline_status == 'discovered' %}bg-slate-700 text-slate-400
+              {% else %}bg-slate-700 text-slate-400
+              {% endif %}">
+              {{ job.pipeline_status }}
+            </span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="text-xs text-slate-500">No jobs found from this company yet.</p>
+      {% endif %}
+    </div>
+
+    <!-- Scan history + ATS edit -->
+    <div class="p-4 space-y-4">
+
+      <!-- Scan history -->
+      <div>
+        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Scan History</h4>
+        {% if scan_history %}
+        <div class="space-y-1.5">
+          {% for log in scan_history %}
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-400">{{ log.scanned_at | relative_date }}</span>
+            <span class="{% if log.error %}text-red-400{% elif log.jobs_found > 0 %}text-emerald-400{% else %}text-slate-500{% endif %}">
+              {% if log.error %}
+              Error
+              {% else %}
+              {{ log.jobs_found }} jobs
+              {% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-xs text-slate-500">No scans yet.</p>
+        {% endif %}
+      </div>
+
+      <!-- Inline ATS slug edit -->
+      <div>
+        <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ATS Settings</h4>
+        <form hx-post="/companies/{{ company.id }}/update-slug"
+              hx-target="#company-{{ company.id }}"
+              hx-swap="innerHTML"
+              class="space-y-2">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Platform</label>
+            <select name="ats_platform"
+                    class="w-full appearance-auto bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-100 focus:border-violet-500 focus:outline-none">
+              <option value="" {% if not company.ats_platform %}selected{% endif %}>None</option>
+              <option value="lever" {% if company.ats_platform == 'lever' %}selected{% endif %}>Lever</option>
+              <option value="greenhouse" {% if company.ats_platform == 'greenhouse' %}selected{% endif %}>Greenhouse</option>
+              <option value="ashby" {% if company.ats_platform == 'ashby' %}selected{% endif %}>Ashby</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Slug</label>
+            <input type="text" name="ats_slug" value="{{ company.ats_slug or '' }}"
+                   placeholder="e.g. stripe"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs font-mono text-slate-100 focus:border-violet-500 focus:outline-none">
+          </div>
+          <button type="submit"
+                  class="w-full px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs rounded transition-colors">
+            Save ATS Info
+          </button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+</div>

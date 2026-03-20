@@ -1,0 +1,11 @@
+{% if pending_detections %}
+  <div class="flex flex-col gap-3">
+    {% for d in pending_detections %}
+      {% include "dashboard/_detection_card.html" %}
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-8 text-center">
+    <p class="text-slate-500 text-sm">No pending detections — pipeline is up to date.</p>
+  </div>
+{% endif %}

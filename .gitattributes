@@ -1,0 +1,14 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Force LF line endings for shell scripts (prevents "bad interpreter" on Mac/Linux)
+*.sh text eol=lf
+
+# Force LF for Python files (cross-platform consistency)
+*.py text eol=lf
+
+# Binary files -- don't touch
+*.db binary
+*.png binary
+*.jpg binary
+*.pdf binary

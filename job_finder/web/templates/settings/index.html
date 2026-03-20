@@ -1,0 +1,715 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Job Finder{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-6">
+
+  <!-- Page header -->
+  <div>
+    <h1 class="text-2xl font-bold text-slate-100">Settings</h1>
+    <p class="text-slate-400 text-sm mt-1">Configure job search preferences, sources, and scoring. Changes persist to config.yaml.</p>
+  </div>
+
+  <form action="/settings/save" method="post" class="space-y-6">
+    <input type="hidden" name="_config_mtime" value="{{ config_mtime | default(0) }}">
+
+    <!-- Profile Targets section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Profile Targets</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Target Titles <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="target_titles" rows="5"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('target_titles', []) | join('\n') }}</textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Target Locations <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="target_locations" rows="5"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('target_locations', []) | join('\n') }}</textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Minimum Salary (USD/year)</label>
+            <input type="number" name="min_salary" step="1000" min="0"
+                   value="{{ config.get('profile', {}).get('min_salary', 0) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Industries <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="industries" rows="4"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('industries', []) | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Exclude Title Keywords <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="exclusion_title_keywords" rows="5"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('exclusions', {}).get('title_keywords', []) | join('\n') }}</textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Exclude Companies <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="exclusion_companies" rows="5"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('exclusions', {}).get('companies', []) | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Skills to Match <span class="text-slate-500 font-normal">(one per line — used for job scoring)</span></label>
+          <textarea name="profile_skills" rows="4"
+                    class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('profile', {}).get('skills', []) | join('\n') }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sources section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Sources</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-6">
+        <!-- Gmail -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            Gmail
+          </h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="gmail_enabled" value="">
+                <input type="checkbox" name="gmail_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('gmail', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Lookback Days</label>
+              <input type="number" name="gmail_lookback_days" min="1" max="365"
+                     value="{{ config.get('sources', {}).get('gmail', {}).get('lookback_days', DEFAULT_LOOKBACK_DAYS) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+          {% set gmail_senders = config.get('sources', {}).get('gmail', {}).get('senders', {}) %}
+          <div class="mt-3 grid grid-cols-2 gap-3">
+            {% set sender_fields = [
+              ('linkedin_alerts', 'LinkedIn Alerts'),
+              ('linkedin_jobs', 'LinkedIn Jobs'),
+              ('glassdoor', 'Glassdoor'),
+              ('indeed', 'Indeed'),
+              ('ziprecruiter', 'ZipRecruiter')
+            ] %}
+            {% for key, label in sender_fields %}
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">{{ label }}</label>
+              <input type="email" name="gmail_sender_{{ key }}"
+                     value="{{ gmail_senders.get(key, '') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
+        <!-- SerpAPI -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+            SerpAPI (Google Jobs)
+          </h3>
+          <div class="grid grid-cols-2 gap-4 mb-3">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="serpapi_enabled" value="">
+                <input type="checkbox" name="serpapi_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('serpapi', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
+              <input type="password" name="serpapi_api_key"
+                     value="{{ config.get('sources', {}).get('serpapi', {}).get('api_key', '') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-2">Search Queries</label>
+            <input type="hidden" name="_serpapi_queries_present" value="1">
+            <div id="serpapi-queries" class="space-y-2">
+              {% for q in config.get('sources', {}).get('serpapi', {}).get('queries', []) %}
+              <div class="flex gap-2 items-center serpapi-query-row">
+                <input type="text" name="serpapi_query_{{ loop.index0 }}" value="{{ q.get('query', '') }}"
+                       placeholder="Query (e.g. Staff Data Scientist)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <input type="text" name="serpapi_location_{{ loop.index0 }}" value="{{ q.get('location', '') }}"
+                       placeholder="Location (e.g. San Francisco Bay Area)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <button type="button" onclick="removeSerpApiRow(this)"
+                        class="text-slate-600 hover:text-red-400 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" onclick="addSerpApiRow()"
+                    class="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors">+ Add Query</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scoring section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Scoring</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        {% set weights = config.get('scoring', {}).get('weights', {}) %}
+        {% set weight_total = (weights.get('title_match', 0) + weights.get('seniority_alignment', 0) +
+                               weights.get('location_fit', 0) + weights.get('salary_range', 0) +
+                               weights.get('industry_relevance', 0) + weights.get('company_signals', 0) +
+                               weights.get('recency', 0)) %}
+
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-sm text-slate-300 font-medium">Scoring Weights</span>
+          <span class="text-xs px-2 py-0.5 rounded-full {% if (weight_total - 1.0)|abs < 0.001 %}bg-green-900/60 text-green-300 border border-green-700/50{% else %}bg-amber-900/60 text-amber-300 border border-amber-700/50{% endif %}"
+                id="weights-sum-badge">
+            Sum: {{ "%.2f"|format(weight_total) }}{% if (weight_total - 1.0)|abs >= 0.001 %} ⚠ must equal 1.0{% endif %}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          {% set weight_fields = [
+            ('title_match', 'Title Match'),
+            ('seniority_alignment', 'Seniority Alignment'),
+            ('location_fit', 'Location Fit'),
+            ('salary_range', 'Salary Range'),
+            ('industry_relevance', 'Industry Relevance'),
+            ('company_signals', 'Company Signals'),
+            ('recency', 'Recency'),
+          ] %}
+          {% for key, label in weight_fields %}
+          <div class="flex items-center gap-3">
+            <label class="text-sm text-slate-300 w-48 flex-shrink-0">{{ label }}</label>
+            <input type="number" name="weight_{{ key }}" step="0.01" min="0" max="1"
+                   value="{{ weights.get(key, 0.0) }}"
+                   oninput="updateWeightsSum()"
+                   class="w-24 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center gap-3 pt-2 border-t border-slate-700 mt-2">
+          <label class="text-sm text-slate-300 w-48">Minimum Score Threshold</label>
+          <input type="number" name="min_score_threshold" min="0" max="100"
+                 value="{{ config.get('scoring', {}).get('min_score_threshold', DEFAULT_MIN_SCORE_THRESHOLD) }}"
+                 class="w-24 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none text-right font-mono">
+          <span class="text-xs text-slate-500">Jobs below this score are hidden</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cost & Budget section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Cost & Budget</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <p class="text-xs text-slate-500">Control API spending. Sonnet calls are paused when monthly spend reaches the cap. Haiku is always allowed.</p>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Monthly Budget Cap (USD)</label>
+            <input type="number" name="monthly_budget_usd" step="1" min="0"
+                   value="{{ config.get('scoring', {}).get('monthly_budget_usd', DEFAULT_MONTHLY_BUDGET_USD) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            <p class="text-xs text-slate-600 mt-1">Default: $25/month</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Haiku Score Threshold</label>
+            <input type="number" name="haiku_threshold" min="0" max="100"
+                   value="{{ config.get('scoring', {}).get('haiku_threshold', DEFAULT_HAIKU_THRESHOLD) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            <p class="text-xs text-slate-600 mt-1">Jobs above this score are queued for Sonnet deep eval</p>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-slate-700">
+          <p class="text-sm text-slate-400 font-medium mb-3">Model Selection <span class="text-slate-600 font-normal text-xs">(advanced — change only if you know the exact model IDs)</span></p>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Haiku Model</label>
+              <input type="text" name="model_haiku"
+                     value="{{ config.get('scoring', {}).get('models', {}).get('haiku', DEFAULT_MODEL_HAIKU) }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Sonnet Model</label>
+              <input type="text" name="model_sonnet"
+                     value="{{ config.get('scoring', {}).get('models', {}).get('sonnet', DEFAULT_MODEL_SONNET) }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resume & Drive section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Resume &amp; Drive</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <p class="text-xs text-slate-500">Configure Google Drive integration for resume uploads. The folder ID appears in the folder's URL after /folders/.</p>
+
+        {% if drive_status.ok %}
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+          <span class="text-green-400 font-medium">Connected</span>
+        </div>
+        {% else %}
+        <div class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+          <span class="text-red-400 font-medium">Not connected</span>
+          <span class="text-slate-500"> -- Run: <code class="font-mono bg-slate-900 px-1">python -m job_finder.gmail_auth</code></span>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Drive Folder ID</label>
+            <input type="text" name="drive_folder_id"
+                   value="{{ config.get('drive', {}).get('folder_id', '') }}"
+                   placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            <p class="text-xs text-slate-600 mt-1">Find this in the folder URL after /folders/</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Multi-version Threshold</label>
+            <input type="number" name="multi_version_threshold" min="0" max="100"
+                   value="{{ config.get('scoring', {}).get('multi_version_threshold', DEFAULT_MULTI_VERSION_THRESHOLD) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            <p class="text-xs text-slate-600 mt-1">Jobs at or above this Sonnet score get 3-variant synthesis</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Output Format</label>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="drive_convert_to_gdoc" value="on"
+                     class="w-4 h-4 accent-violet-500"
+                     {% if config.get('drive', {}).get('convert_to_gdoc', True) %}checked{% endif %}>
+              <span class="text-sm text-slate-300">Google Docs (native)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="drive_convert_to_gdoc" value="false"
+                     class="w-4 h-4 accent-violet-500"
+                     {% if not config.get('drive', {}).get('convert_to_gdoc', True) %}checked{% endif %}>
+              <span class="text-sm text-slate-300">.docx file</span>
+            </label>
+          </div>
+          <p class="text-xs text-slate-600 mt-1">Google Docs allows direct editing; .docx preserves exact formatting for download</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ATS Scanning section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+          </svg>
+          <span class="font-semibold text-slate-100">ATS Scanning</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <p class="text-xs text-slate-500">
+          ATS scanning queries Lever, Greenhouse, and Ashby public APIs for new job postings at tracked companies.
+          No AI API calls are used during discovery — only keyword matching against your target titles.
+        </p>
+
+        {% set ats_cfg = config.get('ats', {}) %}
+
+        <div class="flex items-start gap-3">
+          <label class="flex items-center gap-2 cursor-pointer mt-0.5">
+            <input type="hidden" name="ats_scan_enabled" value="">
+            <input type="checkbox" name="ats_scan_enabled" value="on"
+                   class="w-4 h-4 accent-violet-500"
+                   {% if ats_cfg.get('scan_enabled', True) %}checked{% endif %}>
+            <span class="text-sm font-medium text-slate-200">Enable ATS Scanning</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Scan Days</label>
+            <input type="text" name="ats_scan_days"
+                   value="{{ ats_cfg.get('scan_days', 'mon,wed') }}"
+                   placeholder="mon,wed"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            <p class="text-xs text-slate-600 mt-1">Comma-separated: mon,tue,wed,thu,fri,sat,sun</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Scan Hour (24h)</label>
+            <input type="number" name="ats_scan_hour" min="0" max="23"
+                   value="{{ ats_cfg.get('scan_hour', 7) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            <p class="text-xs text-slate-600 mt-1">Hour to run scan (default: 7 AM)</p>
+          </div>
+        </div>
+
+        <div class="bg-slate-900/50 rounded px-3 py-2 text-xs text-slate-400">
+          Current schedule: Scans run on
+          <span class="text-slate-200 font-medium">{{ ats_cfg.get('scan_days', 'mon,wed') | upper }}</span>
+          at <span class="text-slate-200 font-medium">{{ ats_cfg.get('scan_hour', 7) }}:00</span>.
+          Slug probing runs 30 minutes after the scan to pick up newly-added companies.
+        </div>
+      </div>
+    </div>
+
+    <!-- Desktop Notifications section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Desktop Notifications</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        <p class="text-xs text-slate-500">Notifications appear as Windows 11 toasts. Click a notification to open the relevant page.</p>
+
+        {% set notif_cfg = config.get('notifications', {}) %}
+        <div class="space-y-3">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="hidden" name="notification_high_score" value="">
+            <input type="checkbox" name="notification_high_score" value="on"
+                   class="w-4 h-4 mt-0.5 accent-violet-500"
+                   {% if notif_cfg.get('high_score', True) %}checked{% endif %}>
+            <div>
+              <span class="text-sm font-medium text-slate-200">High Score Jobs</span>
+              <p class="text-xs text-slate-500 mt-0.5">Notify when a new job scores above the Haiku threshold</p>
+            </div>
+          </label>
+
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="hidden" name="notification_pipeline_change" value="">
+            <input type="checkbox" name="notification_pipeline_change" value="on"
+                   class="w-4 h-4 mt-0.5 accent-violet-500"
+                   {% if notif_cfg.get('pipeline_change', True) %}checked{% endif %}>
+            <div>
+              <span class="text-sm font-medium text-slate-200">Pipeline Changes</span>
+              <p class="text-xs text-slate-500 mt-0.5">Notify when pipeline status changes are auto-detected (rejection, interview, confirmation)</p>
+            </div>
+          </label>
+
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="hidden" name="notification_budget_alert" value="">
+            <input type="checkbox" name="notification_budget_alert" value="on"
+                   class="w-4 h-4 mt-0.5 accent-violet-500"
+                   {% if notif_cfg.get('budget_alert', True) %}checked{% endif %}>
+            <div>
+              <span class="text-sm font-medium text-slate-200">Budget Alerts</span>
+              <p class="text-xs text-slate-500 mt-0.5">Notify at 80% and 100% of monthly API budget</p>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Output</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6 space-y-4">
+        {% set output_cfg = config.get('output', {}) %}
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Default Format</label>
+            <select name="output_default_format"
+                    class="w-full appearance-auto bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+              {% for fmt in ['cli', 'markdown', 'json'] %}
+              <option value="{{ fmt }}" {% if output_cfg.get('default_format') == fmt %}selected{% endif %}>{{ fmt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Markdown Report Path</label>
+            <input type="text" name="output_markdown_path"
+                   value="{{ output_cfg.get('markdown_path', 'reports/') }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Max Results</label>
+            <input type="number" name="output_max_results" min="1" max="500"
+                   value="{{ output_cfg.get('max_results', 50) }}"
+                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Database section -->
+    <div class="bg-slate-800 rounded-lg overflow-hidden">
+      <button type="button" onclick="toggleSection(this)"
+              class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+        <div class="flex items-center gap-3">
+          <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+          </svg>
+          <span class="font-semibold text-slate-100">Database</span>
+        </div>
+        <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="section-body border-t border-slate-700 p-6">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Database Path</label>
+          <div class="flex items-center gap-3">
+            <input type="text" name="db_path" readonly
+                   value="{{ config.get('db', {}).get('path', 'jobs.db') }}"
+                   class="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-400 font-mono cursor-not-allowed">
+            <span class="text-xs text-slate-500">Read-only — change via config.yaml directly</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save button -->
+    <div class="flex items-center justify-between pb-8">
+      <p class="text-slate-500 text-sm">Changes are written to config.yaml and take effect immediately.</p>
+      <button type="submit"
+              class="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-lg transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+        </svg>
+        Save Settings
+      </button>
+    </div>
+
+  </form>
+</div>
+
+<!-- Resume Quality section (outside main form -- independent HTMX action) -->
+<div class="max-w-4xl mx-auto space-y-6 mt-6">
+  <div class="bg-slate-800 rounded-lg overflow-hidden">
+    <button type="button" onclick="toggleSection(this)"
+            class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-slate-750 transition-colors">
+      <div class="flex items-center gap-3">
+        <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="font-semibold text-slate-100">Resume Quality</span>
+      </div>
+      <svg class="section-chevron w-4 h-4 text-slate-400 transition-transform duration-200 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div class="section-body border-t border-slate-700 p-6 space-y-4">
+      <p class="text-xs text-slate-500">
+        Merge your resume generation guidelines document into the style guide.
+        Run this after updating docs/resume_generation_guidelines.md or when new guideline fields become available.
+      </p>
+      <p class="text-xs text-slate-400">
+        Style guide: {{ new_fields_present }} of 9 guideline fields populated. {{ new_fields_available }} new fields available for migration.
+      </p>
+      <div id="style-guide-migrate-section">
+        <button type="button"
+                hx-post="/settings/migrate-style-guide"
+                hx-target="#style-guide-migrate-section"
+                hx-swap="outerHTML"
+                hx-disabled-elt="this"
+                hx-indicator="#migrate-spinner"
+                class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-sm transition-colors">
+          Migrate Style Guide
+        </button>
+        <span id="migrate-spinner" class="htmx-indicator text-xs text-slate-400 ml-2">Migrating... (this calls Sonnet and may take 15-20s)</span>
+      </div>
+
+      <hr class="border-slate-700 my-4">
+
+      <h3 class="text-sm font-semibold text-slate-200 mb-2">Update Guidelines</h3>
+      <p class="text-xs text-slate-500 mb-3">
+        Paste updated resume guidelines below, preview what will change, then apply.
+        The preview calls Sonnet once; applying uses the cached result (no extra API cost).
+      </p>
+
+      <textarea id="guidelines-textarea" name="guidelines_text" rows="10"
+                class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono mb-3"
+                placeholder="Paste your updated resume generation guidelines here...">{{ guidelines_text }}</textarea>
+
+      <div class="flex items-center gap-3">
+        <button type="button"
+                hx-post="/settings/preview-guidelines-merge"
+                hx-target="#guidelines-diff-container"
+                hx-swap="innerHTML"
+                hx-include="#guidelines-textarea"
+                hx-disabled-elt="this"
+                hx-indicator="#preview-spinner"
+                class="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-sm transition-colors">
+          Preview Changes
+        </button>
+        <span id="preview-spinner" class="htmx-indicator text-xs text-slate-400 ml-2">
+          Analyzing guidelines... (Sonnet call, may take 15-20s)
+        </span>
+      </div>
+
+      <div id="guidelines-diff-container" class="mt-4"></div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Collapsible sections
+// ---------------------------------------------------------------------------
+function toggleSection(btn) {
+  const body = btn.nextElementSibling;
+  const chevron = btn.querySelector('.section-chevron');
+  const isExpanded = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', isExpanded);
+  if (chevron) {
+    chevron.style.transform = isExpanded ? '' : 'rotate(180deg)';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scoring weights live sum
+// ---------------------------------------------------------------------------
+function updateWeightsSum() {
+  const inputs = document.querySelectorAll('input[name^="weight_"]');
+  let total = 0;
+  inputs.forEach(function(inp) { total += parseFloat(inp.value) || 0; });
+  const badge = document.getElementById('weights-sum-badge');
+  if (!badge) return;
+  const formatted = total.toFixed(2);
+  const ok = Math.abs(total - 1.0) < 0.001;
+  badge.textContent = 'Sum: ' + formatted + (ok ? '' : ' ⚠ must equal 1.0');
+  badge.className = 'text-xs px-2 py-0.5 rounded-full ' +
+    (ok ? 'bg-green-900/60 text-green-300 border border-green-700/50'
+        : 'bg-amber-900/60 text-amber-300 border border-amber-700/50');
+}
+
+// ---------------------------------------------------------------------------
+// SerpAPI dynamic query rows
+// ---------------------------------------------------------------------------
+function addSerpApiRow() {
+  const container = document.getElementById('serpapi-queries');
+  const idx = container.querySelectorAll('.serpapi-query-row').length;
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 items-center serpapi-query-row';
+  row.innerHTML = `
+    <input type="text" name="serpapi_query_${idx}" placeholder="Query (e.g. Staff Data Scientist)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <input type="text" name="serpapi_location_${idx}" placeholder="Location (e.g. San Francisco Bay Area)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <button type="button" onclick="removeSerpApiRow(this)"
+            class="text-slate-600 hover:text-red-400 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  `;
+  container.appendChild(row);
+}
+
+function removeSerpApiRow(btn) {
+  btn.closest('.serpapi-query-row').remove();
+  // Re-index remaining rows so names stay sequential
+  const container = document.getElementById('serpapi-queries');
+  container.querySelectorAll('.serpapi-query-row').forEach(function(row, i) {
+    const inputs = row.querySelectorAll('input[type="text"]');
+    if (inputs[0]) inputs[0].name = 'serpapi_query_' + i;
+    if (inputs[1]) inputs[1].name = 'serpapi_location_' + i;
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if job %}{{ job.title }} — {{ job.company }}{% else %}Job Not Found{% endif %} — Job Finder
+{% endblock %}
+
+{% block content %}
+{% if job is none %}
+<div class="max-w-3xl mx-auto py-12 text-center">
+  <p class="text-slate-400 text-lg">Job not found.</p>
+  <a href="/jobs" class="mt-4 inline-block text-indigo-400 hover:text-indigo-300 text-sm">
+    &larr; Back to Job Board
+  </a>
+</div>
+{% else %}
+
+{% set sources_list = job.sources | from_json if job.sources else [] %}
+{% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
+{% set score = job.score | float %}
+{% if score >= 8 %}
+  {% set score_badge_class = "bg-green-900/60 text-green-300 border-green-700" %}
+{% elif score >= 6 %}
+  {% set score_badge_class = "bg-yellow-900/60 text-yellow-300 border-yellow-700" %}
+{% else %}
+  {% set score_badge_class = "bg-red-900/60 text-red-300 border-red-700" %}
+{% endif %}
+
+<div class="max-w-4xl mx-auto space-y-6">
+
+  <!-- Back link -->
+  <a href="/jobs" class="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+    &larr; Back to Job Board
+  </a>
+
+  <!-- Header card -->
+  <div class="bg-slate-800/60 rounded-xl border border-slate-700 p-6">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-100">{{ job.title }}</h1>
+        <p class="text-slate-400 mt-1 text-sm">{{ job.company }} &mdash; {{ job.location }}</p>
+        {% if job.salary_min or job.salary_max %}
+        <p class="text-slate-300 mt-1 text-sm">
+          Salary:
+          {% if job.salary_min and job.salary_max %}
+            ${{ "{:,}".format(job.salary_min) }} – ${{ "{:,}".format(job.salary_max) }}
+          {% elif job.salary_max %}
+            up to ${{ "{:,}".format(job.salary_max) }}
+          {% else %}
+            ${{ "{:,}".format(job.salary_min) }}+
+          {% endif %}
+        </p>
+        {% endif %}
+        <div class="flex flex-wrap gap-2 mt-3 text-xs text-slate-500">
+          <span>First seen: {{ job.first_seen[:10] if job.first_seen else "—" }}</span>
+          <span>&bull;</span>
+          <span>Last seen: {{ job.last_seen[:10] if job.last_seen else "—" }}</span>
+          {% if job.posted_date %}
+          <span>&bull;</span>
+          <span>Posted: {{ job.posted_date[:10] }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <!-- Score badge -->
+      <div class="flex flex-col items-center gap-2 shrink-0">
+        <span class="text-3xl font-black {{ score_badge_class.split(' ')[1] }}">
+          {{ "%.1f" | format(score) }}
+        </span>
+        <span class="text-xs text-slate-500">score</span>
+      </div>
+    </div>
+
+    <!-- Status update -->
+    <div class="mt-4 flex items-center gap-3">
+      <span class="text-xs text-slate-500">Status:</span>
+      <select name="pipeline_status"
+              hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
+              hx-trigger="change"
+              hx-target="this"
+              hx-swap="outerHTML"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        {% for s in pipeline_statuses %}
+          <option value="{{ s }}" {% if job.pipeline_status == s %}selected{% endif %}>
+            {{ s | replace('_', ' ') | title }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Sources -->
+  {% if sources_list %}
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-3">Sources</h2>
+    <div class="flex flex-wrap gap-2">
+      {% for i in range(sources_list | length) %}
+        {% set src_name = sources_list[i] %}
+        {% set src_url = urls_list[i] if i < urls_list | length else None %}
+        {% if src_url %}
+          <a href="{{ src_url }}" target="_blank" rel="noopener noreferrer"
+             class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-900/40 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 text-sm">
+            {{ src_name }} &rarr;
+          </a>
+        {% else %}
+          <span class="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-400 text-sm">{{ src_name }}</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Full description -->
+  {% if job.description %}
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-3">Description</h2>
+    <div class="text-sm text-slate-300 leading-relaxed">{{ job.description | format_description }}</div>
+  </div>
+  {% endif %}
+
+  <!-- Pipeline timeline -->
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-3">Pipeline Timeline</h2>
+    {% if events %}
+      <ol class="relative border-l border-slate-700 ml-3 space-y-4">
+        {% for event in events %}
+        <li class="ml-4">
+          <div class="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-indigo-500 border-2 border-slate-900"></div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-slate-400">{{ event.timestamp[:16] | replace("T", " ") }}</span>
+            <span class="text-slate-600">&bull;</span>
+            {% if event.from_status %}
+              <span class="text-slate-500">{{ event.from_status }}</span>
+              <span class="text-slate-600">&rarr;</span>
+            {% endif %}
+            <span class="text-slate-200 font-medium">{{ event.to_status }}</span>
+            {% if event.source != 'manual' %}
+              <span class="text-slate-600 italic">via {{ event.source }}</span>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="text-xs text-slate-500">No pipeline events yet.</p>
+    {% endif %}
+  </div>
+
+  <!-- Notes (placeholder) -->
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-3">Notes</h2>
+    <textarea class="w-full bg-slate-900 text-slate-300 text-sm rounded border border-slate-700 p-3 focus:outline-none focus:border-indigo-500 min-h-[80px] resize-y"
+              placeholder="Add notes about this job...">{{ job.notes or "" }}</textarea>
+  </div>
+
+  <!-- Placeholder tabs for Phase 2/4 -->
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4 text-xs text-slate-600">
+    <div class="flex gap-4">
+      <span class="text-slate-500 font-medium">Claude Analysis</span>
+      <span class="text-slate-700">|</span>
+      <span class="text-slate-500 font-medium">Resume</span>
+    </div>
+    <p class="mt-2 text-slate-700">Coming in Phase 2 / Phase 4</p>
+  </div>
+
+</div>
+{% endif %}
+{% endblock %}

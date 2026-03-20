@@ -1,0 +1,57 @@
+# Auth & secrets
+credentials.json
+token.json
+.env
+
+# User data (personal profile, config with API keys, resume artifacts)
+config.yaml
+experience_profile.json
+experience_reference.md
+resume_style_guide.json
+
+# Database
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Reports
+reports/
+
+# IDE
+.vscode/
+.idea/
+
+# Application logs
+logs/
+
+# Backups
+backups/
+
+# Application data (parse failure archives, resume uploads)
+data/
+
+# Development tooling (not for distribution)
+.claude/
+AUDIT_LOG.md
+
+# GSD planning artifacts (codebase/ docs are retained separately in clean export)
+.planning/STATE.md
+.planning/ROADMAP.md
+.planning/REQUIREMENTS.md
+.planning/PROJECT.md
+.planning/SHARING-READINESS-SPEC.md
+.planning/CHANGELOG.md
+.planning/MILESTONES.md
+.planning/RETROSPECTIVE.md
+.planning/config.json
+.planning/phases/
+.planning/milestones/
+.planning/research/
+.planning/reviews/
+.planning/scoring_evaluation/
+.planning/todos/
+.planning/debug/
