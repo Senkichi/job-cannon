@@ -1017,6 +1017,7 @@ class TestImportMarkdown:
         import io
         from unittest.mock import patch
 
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         with patch(
             "job_finder.web.blueprints.profile.extract_profile_from_markdown",
             return_value=self._MINIMAL_PROFILE,
@@ -1039,6 +1040,7 @@ class TestImportMarkdown:
         import io
         from unittest.mock import patch
 
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         with patch(
             "job_finder.web.blueprints.profile.extract_profile_from_markdown",
             return_value=self._MINIMAL_PROFILE,
