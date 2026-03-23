@@ -60,6 +60,7 @@ class TestSendNotification(unittest.TestCase):
 
     def test_passes_url_as_on_click(self):
         """send_notification passes url as on_click kwarg to toast."""
+        import sys
         from job_finder.web.notifier import send_notification
 
         with patch("threading.Thread") as mock_thread:
@@ -69,11 +70,20 @@ class TestSendNotification(unittest.TestCase):
             send_notification("Title", "Body", url="http://localhost:5000/jobs/abc")
 
             mock_thread.assert_called_once()
-            # Get the target function and call it to verify on_click is passed
+            # Get the target function and invoke it to verify on_click is passed
             target_fn = mock_thread.call_args.kwargs["target"]
 
-            with patch("job_finder.web.notifier.send_notification"):
-                pass  # we check via thread target below
+        # Call the target function with win11toast.toast mocked
+        mock_toast = MagicMock()
+        fake_win11toast = MagicMock()
+        fake_win11toast.toast = mock_toast
+        with patch.dict(sys.modules, {"win11toast": fake_win11toast}):
+            target_fn()
+
+        mock_toast.assert_called_once()
+        _, toast_kwargs = mock_toast.call_args
+        assert "on_click" in toast_kwargs, "toast must receive on_click kwarg when url is provided"
+        assert toast_kwargs["on_click"] == "http://localhost:5000/jobs/abc"
 
     def test_no_url_omits_on_click(self):
         """send_notification without url does not pass on_click to toast."""
