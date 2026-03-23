@@ -19,16 +19,28 @@
         hx-swap="innerHTML"
         class="flex flex-wrap gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
 
-    <!-- Status filter -->
-    <select name="status"
-            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-      <option value="">All Statuses</option>
+    <!-- Status filter: checkbox pills with "All" toggle -->
+    <div class="flex flex-wrap items-center gap-1">
+      <!-- All toggle button -->
+      <button type="button" id="status-all-btn"
+              onclick="toggleAllStatus(this)"
+              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer">
+        All
+      </button>
+      {% set active_statuses = filters.getlist('status') if filters.getlist is defined else ([filters.get('status')] if filters.get('status') else []) %}
       {% for s in pipeline_statuses %}
-        <option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>
-          {{ s | replace('_', ' ') | title }}
-        </option>
+        <label class="flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" name="status" value="{{ s }}"
+                 {% if s in active_statuses %}checked{% endif %}
+                 class="hidden status-pill-cb">
+          <span class="px-2 py-1 text-xs rounded border transition-colors cursor-pointer
+                        {% if s in active_statuses %}bg-indigo-600 border-indigo-500 text-white{% else %}bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600{% endif %}
+                        status-pill-label">
+            {{ s | replace('_', ' ') | title }}
+          </span>
+        </label>
       {% endfor %}
-    </select>
+    </div>
 
     <!-- Location filter -->
     <select name="location"
@@ -187,6 +199,46 @@
 
 {% block extra_scripts %}
 <script>
+/**
+ * Toggle visual state of status pills when clicked (checked ↔ unchecked).
+ * Wires up all status pill checkboxes to update their label's visual state.
+ */
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.status-pill-cb').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      var label = cb.nextElementSibling;
+      if (cb.checked) {
+        label.classList.remove('bg-slate-700', 'border-slate-600', 'text-slate-300', 'hover:bg-slate-600');
+        label.classList.add('bg-indigo-600', 'border-indigo-500', 'text-white');
+      } else {
+        label.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
+        label.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-300', 'hover:bg-slate-600');
+      }
+    });
+  });
+});
+
+/**
+ * "All" button: check all status pills if any are unchecked, otherwise uncheck all.
+ * After toggling, manually trigger the HTMX form submit.
+ */
+function toggleAllStatus(btn) {
+  var checkboxes = document.querySelectorAll('.status-pill-cb');
+  var allChecked = Array.from(checkboxes).every(function(cb) { return cb.checked; });
+
+  checkboxes.forEach(function(cb) {
+    var wasChecked = cb.checked;
+    cb.checked = !allChecked;
+    // Fire change event to update visual state if state actually changed
+    if (wasChecked !== cb.checked) {
+      cb.dispatchEvent(new Event('change'));
+    }
+  });
+
+  // Trigger HTMX request with updated filter state
+  htmx.trigger(document.getElementById('filter-form'), 'change');
+}
+
 /**
  * Fade out and remove both compact and expanded rows after archiving a job.
  * Called via hx-on::after-request on the archive button in _row_expanded.html.
