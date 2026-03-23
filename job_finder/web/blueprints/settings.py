@@ -89,7 +89,7 @@ def index():
 
     guidelines_text = ""
     try:
-        guidelines_path = Path(__file__).resolve().parent.parent.parent / "docs" / "resume_generation_guidelines.md"
+        guidelines_path = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "resume_generation_guidelines.md"
         guidelines_text = guidelines_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         pass
@@ -275,6 +275,17 @@ def preview_guidelines_merge():
                     f'<span class="text-emerald-400">{new_str}</span>'
                     f"</div>"
                 )
+            elif old_str and not new_str:
+                # Sonnet returned empty for a field that had content — likely
+                # a token-limit truncation.  Preserve the existing value and
+                # warn instead of showing a destructive diff.
+                result[field] = old_val  # patch the merged result
+                diff_rows.append(
+                    f'<div class="flex items-start gap-2 py-1 border-b border-slate-700/50">'
+                    f'<span class="text-amber-400 w-40 flex-shrink-0 font-medium">{label}</span>'
+                    f'<span class="text-amber-400 text-xs italic">Kept existing (model returned empty)</span>'
+                    f"</div>"
+                )
             else:
                 diff_rows.append(
                     f'<div class="flex items-start gap-2 py-1 border-b border-slate-700/50">'
@@ -347,7 +358,7 @@ def apply_guidelines_merge():
         # Also persist the guidelines text to docs/resume_generation_guidelines.md if provided
         guidelines_text = request.form.get("guidelines_text", "").strip()
         if guidelines_text:
-            guidelines_path = Path(__file__).resolve().parent.parent.parent / "docs" / "resume_generation_guidelines.md"
+            guidelines_path = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "resume_generation_guidelines.md"
             guidelines_path.write_text(guidelines_text, encoding="utf-8")
             logger.info("apply_guidelines_merge: updated resume_generation_guidelines.md")
 
