@@ -5,7 +5,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, flash, redirect, render_template, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
 from job_finder.db import (
     get_dashboard_stats,
@@ -92,11 +92,11 @@ def index():
     recent_runs = get_recent_runs(conn, limit=10)
     user_activity = get_recent_activity(conn, limit=15)
     pipeline_summary = get_pipeline_summary(conn)
-    cost_stats = get_cost_stats(conn)
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
     config = current_app.config.get("JF_CONFIG", {})
     budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
     pending_count = stats.get("pending_detections", 0)
     rejection_ctx = _get_rejection_context(conn)
     ats_ctx = _get_ats_context(conn)
@@ -135,11 +135,13 @@ def index():
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
 def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("dashboard.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
-    cost_stats = get_cost_stats(conn)
     config = current_app.config.get("JF_CONFIG", {})
     budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
 
     return render_template(
         "dashboard/_cost_detail.html",
@@ -301,6 +303,35 @@ def batch_score_status(session_id):
     label = "Haiku" if session["session_type"] == "haiku" else "Sonnet"
     status = session["status"]
 
+    # Timeout safety net: if session has been running for >30 minutes, auto-mark as error
+    if status in ("running", "cancelling") and session["started_at"]:
+        try:
+            started = datetime.fromisoformat(session["started_at"])
+            elapsed_minutes = (datetime.now(timezone.utc).replace(tzinfo=None) - started).total_seconds() / 60
+            if elapsed_minutes > 30:
+                logger.warning("Batch session %s timed out after %.1f minutes", session_id, elapsed_minutes)
+                timeout_conn = sqlite3.connect(db_path)
+                try:
+                    timeout_conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? "
+                        "WHERE id = ? AND status IN ('running', 'cancelling')",
+                        ("Session timed out (>30 min)", datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+                    )
+                    timeout_conn.commit()
+                finally:
+                    timeout_conn.close()
+                return render_template(
+                    "dashboard/_batch_score_done.html",
+                    label=label,
+                    scored=session["scored"],
+                    skipped=session["skipped"],
+                    status="error",
+                    message=None,
+                    error_msg="Session timed out (>30 min)",
+                )
+        except (ValueError, TypeError):
+            pass
+
     # Terminal states: done, error, cancelled — return done fragment (NO hx-trigger)
     if status in ("done", "error", "cancelled"):
         return render_template(
@@ -376,8 +407,9 @@ def batch_score_cancel(session_id):
 def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     """Background thread: run Haiku scoring for all unscored jobs.
 
-    Opens its own sqlite3 connection (thread-safe — not Flask g.db).
-    Checks session status before each job to support cancellation.
+    Delegates per-job scoring + persistence to scoring_orchestrator.score_and_persist_haiku.
+    This function handles thread-own DB connection, cancellation checks, exclusion filtering,
+    session progress tracking, and activity logging.
 
     Args:
         db_path: Absolute path to the SQLite database.
@@ -387,10 +419,9 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     try:
         import anthropic
 
-        from job_finder.web.haiku_scorer import score_job_haiku
-        from job_finder.web.pipeline_runner import _load_profile
+        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_haiku
 
-        profile = _load_profile(config)
+        profile = load_scoring_profile(config)
         client = anthropic.Anthropic()
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
@@ -425,117 +456,25 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
             excluded, reason = should_exclude(job_row, exclusions, profile_min_salary)
             if excluded:
                 logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
-                conn.execute(
-                    "UPDATE batch_score_sessions SET skipped = skipped + 1 WHERE id = ?",
-                    (session_id,),
-                )
-                conn.commit()
+                _update_session_counter(conn, session_id, "skipped")
                 continue
 
             try:
-                result = score_job_haiku(client, job_row, profile, conn, config)
-                if result is not None:
-                    score = result.get("score", 0)
-                    summary_text = result.get("summary", "")
-                    conn.execute(
-                        "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-                        (score, summary_text, job_row["dedup_key"]),
-                    )
-                    conn.commit()
-
-                    # --- Borderline re-evaluation band (matches pipeline_runner) ---
-                    threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-                    borderline_high = 54
-                    if threshold <= score <= borderline_high:
-                        logger.info(
-                            "Batch Haiku borderline re-eval for '%s' (initial=%d, band=%d-%d)",
-                            job_row.get("dedup_key"), score, threshold, borderline_high,
-                        )
-                        reeval_result = score_job_haiku(
-                            client, job_row, profile, conn, config,
-                            max_chars=4000, purpose="haiku_reeval",
-                        )
-                        if reeval_result is not None:
-                            score = reeval_result.get("score", 0)
-                            summary_text = reeval_result.get("summary", "")
-                            conn.execute(
-                                "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-                                (score, summary_text, job_row["dedup_key"]),
-                            )
-                            conn.commit()
-                            logger.info(
-                                "Batch Haiku borderline re-eval result for '%s': %d",
-                                job_row.get("dedup_key"), score,
-                            )
-
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET scored = scored + 1 WHERE id = ?",
-                        (session_id,),
-                    )
-                    conn.commit()
-                else:
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET skipped = skipped + 1 WHERE id = ?",
-                        (session_id,),
-                    )
-                    conn.commit()
+                result = score_and_persist_haiku(conn, job_row, config, client, profile)
+                _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
             except Exception as e:
                 logger.warning(
                     "Batch Haiku: error scoring job '%s': %s -- continuing",
                     job_row.get("dedup_key"), e,
                 )
-                conn.execute(
-                    "UPDATE batch_score_sessions SET skipped = skipped + 1 WHERE id = ?",
-                    (session_id,),
-                )
-                conn.commit()
+                _update_session_counter(conn, session_id, "skipped")
 
         # All jobs processed — mark done
-        conn.execute(
-            "UPDATE batch_score_sessions SET status = 'done', finished_at = ? WHERE id = ?",
-            (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
-        )
-        conn.commit()
-
-        try:
-            from job_finder.web.activity_tracker import log_activity, ACTION_BATCH_SCORE_HAIKU
-            session_row = conn.execute(
-                "SELECT scored, skipped, total FROM batch_score_sessions WHERE id = ?",
-                (session_id,),
-            ).fetchone()
-            log_activity(
-                db_path,
-                ACTION_BATCH_SCORE_HAIKU,
-                metadata={
-                    "session_type": "haiku",
-                    "scored": session_row["scored"] if session_row else 0,
-                    "skipped": session_row["skipped"] if session_row else 0,
-                    "total": session_row["total"] if session_row else 0,
-                    "status": "success",
-                },
-            )
-        except Exception:
-            pass
+        _finish_session(conn, db_path, session_id, "done", "haiku")
 
     except Exception as e:
         logger.error("Batch Haiku background thread failed: %s", e)
-        try:
-            conn.execute(
-                "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-                (str(e), datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
-            )
-            conn.commit()
-        except Exception:
-            pass
-        try:
-            from job_finder.web.activity_tracker import log_activity, ACTION_BATCH_SCORE_HAIKU
-            log_activity(
-                db_path,
-                ACTION_BATCH_SCORE_HAIKU,
-                metadata={"session_type": "haiku", "status": "failed", "error": type(e).__name__},
-            )
-        except Exception:
-            pass
+        _fail_session(conn, db_path, session_id, e, "haiku")
     finally:
         conn.close()
 
@@ -543,9 +482,9 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
 def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     """Background thread: run Sonnet evaluation for qualifying jobs.
 
-    Qualifying: haiku_score >= threshold, sonnet_score IS NULL, jd_full IS NOT NULL.
-    Opens its own sqlite3 connection (thread-safe — not Flask g.db).
-    Checks session status before each job to support cancellation.
+    Delegates per-job scoring + persistence to scoring_orchestrator.score_and_persist_sonnet.
+    This function handles thread-own DB connection, cancellation checks, session progress
+    tracking, and activity logging.
 
     Args:
         db_path: Absolute path to the SQLite database.
@@ -555,16 +494,13 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     try:
         import anthropic
 
-        from job_finder.web.pipeline_runner import _load_profile
-        from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
+        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
 
-    import json as _json
-
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-    profile = _load_profile(config)
+    profile = load_scoring_profile(config)
     client = anthropic.Anthropic()
 
     conn = sqlite3.connect(db_path)
@@ -592,84 +528,92 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
 
             job_row = dict(row)
             try:
-                result = evaluate_job_sonnet(client, job_row, experience_profile=profile, conn=conn, config=config)
-                if result is not None:
-                    sonnet_score = result.get("score")
-                    fit_analysis = _json.dumps(result.get("fit_analysis", {}))
-                    conn.execute(
-                        "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
-                        (sonnet_score, fit_analysis, job_row["dedup_key"]),
-                    )
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET scored = scored + 1 WHERE id = ?",
-                        (session_id,),
-                    )
-                    conn.commit()
-                else:
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET skipped = skipped + 1 WHERE id = ?",
-                        (session_id,),
-                    )
-                    conn.commit()
+                result = score_and_persist_sonnet(conn, job_row, config, client, profile)
+                _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
             except Exception as e:
                 logger.warning(
                     "Batch Sonnet: error evaluating job '%s': %s -- continuing",
                     job_row.get("dedup_key"), e,
                 )
-                conn.execute(
-                    "UPDATE batch_score_sessions SET skipped = skipped + 1 WHERE id = ?",
-                    (session_id,),
-                )
-                conn.commit()
+                _update_session_counter(conn, session_id, "skipped")
 
         # All jobs processed — mark done
-        conn.execute(
-            "UPDATE batch_score_sessions SET status = 'done', finished_at = ? WHERE id = ?",
-            (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
-        )
-        conn.commit()
-
-        try:
-            from job_finder.web.activity_tracker import log_activity, ACTION_BATCH_SCORE_SONNET
-            session_row = conn.execute(
-                "SELECT scored, skipped, total FROM batch_score_sessions WHERE id = ?",
-                (session_id,),
-            ).fetchone()
-            log_activity(
-                db_path,
-                ACTION_BATCH_SCORE_SONNET,
-                metadata={
-                    "session_type": "sonnet",
-                    "scored": session_row["scored"] if session_row else 0,
-                    "skipped": session_row["skipped"] if session_row else 0,
-                    "total": session_row["total"] if session_row else 0,
-                    "status": "success",
-                },
-            )
-        except Exception:
-            pass
+        _finish_session(conn, db_path, session_id, "done", "sonnet")
 
     except Exception as e:
         logger.error("Batch Sonnet background thread failed: %s", e)
-        try:
-            conn.execute(
-                "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-                (str(e), datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
-            )
-            conn.commit()
-        except Exception:
-            pass
-        try:
-            from job_finder.web.activity_tracker import log_activity, ACTION_BATCH_SCORE_SONNET
-            log_activity(
-                db_path,
-                ACTION_BATCH_SCORE_SONNET,
-                metadata={"session_type": "sonnet", "status": "failed", "error": type(e).__name__},
-            )
-        except Exception:
-            pass
+        _fail_session(conn, db_path, session_id, e, "sonnet")
     finally:
         conn.close()
+
+
+def _update_session_counter(conn, session_id: int, counter: str) -> None:
+    """Increment a batch session counter ('scored' or 'skipped') and commit."""
+    conn.execute(
+        f"UPDATE batch_score_sessions SET {counter} = {counter} + 1 WHERE id = ?",
+        (session_id,),
+    )
+    conn.commit()
+
+
+def _finish_session(conn, db_path: str, session_id: int, status: str, session_type: str) -> None:
+    """Mark a batch session as done and log the activity."""
+    conn.execute(
+        "UPDATE batch_score_sessions SET status = ?, finished_at = ? WHERE id = ?",
+        (status, datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+    )
+    conn.commit()
+
+    try:
+        from job_finder.web.activity_tracker import (
+            ACTION_BATCH_SCORE_HAIKU,
+            ACTION_BATCH_SCORE_SONNET,
+            log_activity,
+        )
+        action = ACTION_BATCH_SCORE_HAIKU if session_type == "haiku" else ACTION_BATCH_SCORE_SONNET
+        session_row = conn.execute(
+            "SELECT scored, skipped, total FROM batch_score_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        log_activity(
+            db_path,
+            action,
+            metadata={
+                "session_type": session_type,
+                "scored": session_row["scored"] if session_row else 0,
+                "skipped": session_row["skipped"] if session_row else 0,
+                "total": session_row["total"] if session_row else 0,
+                "status": "success",
+            },
+        )
+    except Exception:
+        pass
+
+
+def _fail_session(conn, db_path: str, session_id: int, error: Exception, session_type: str) -> None:
+    """Mark a batch session as errored and log the failure."""
+    try:
+        conn.execute(
+            "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
+            (str(error), datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    try:
+        from job_finder.web.activity_tracker import (
+            ACTION_BATCH_SCORE_HAIKU,
+            ACTION_BATCH_SCORE_SONNET,
+            log_activity,
+        )
+        action = ACTION_BATCH_SCORE_HAIKU if session_type == "haiku" else ACTION_BATCH_SCORE_SONNET
+        log_activity(
+            db_path,
+            action,
+            metadata={"session_type": session_type, "status": "failed", "error": type(error).__name__},
+        )
+    except Exception:
+        pass
 
 
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
@@ -683,7 +627,7 @@ def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
         conn.commit()
         conn.close()
     except Exception:
-        pass
+        logger.warning("Failed to mark session %s as error: %s", session_id, error_msg, exc_info=True)
 
 
 @dashboard_bp.route("/sync", methods=["POST"], strict_slashes=False)
