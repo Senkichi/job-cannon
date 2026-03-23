@@ -19,6 +19,7 @@ from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude, BudgetExceededError
+from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _build_comp_context(job_row: dict) -> str | None:
+def _build_comp_context(job_row: JobRow) -> str | None:
     """Build a concise compensation context string from comp_data_json.
 
     Extracts equity, bonus, and benefits summaries from ATS-sourced
@@ -174,21 +175,21 @@ def build_description_snippet(
 
 def score_job_haiku(
     client: Any,
-    job_row: dict,
-    profile: dict,
+    job_row: JobRow,
+    experience_profile: dict,
     conn: Any,
     config: dict,
     max_chars: int = 2000,
     purpose: str = "haiku_score",
-) -> dict | None:
+) -> ScoringResult:
     """Score a single job against the candidate profile using Claude Haiku.
 
     Args:
         client: Anthropic client instance (injected for testability).
         job_row: Job record dict with keys: dedup_key, title, company, location,
                  salary_min (optional), salary_max (optional), description (optional).
-        profile: Profile dict. May be the full config dict (containing a "profile"
-                 sub-key) or a standalone profile dict with target_titles, etc.
+        experience_profile: Profile dict with target_titles, target_locations,
+                 min_salary, skills, industries keys.
         conn: Open SQLite connection for cost recording.
         config: Application config dict (reads scoring.models.haiku, scoring.monthly_budget_usd).
         max_chars: Maximum characters for description snippet (default 2000).
@@ -197,11 +198,11 @@ def score_job_haiku(
                  for the borderline second-pass call).
 
     Returns:
-        Dict with keys: score, summary, title_fit, location_fit, salary_meets_floor.
-        Returns None on any error (BudgetExceededError, API error, parse error).
+        ScoringResult with status='success' and data dict containing score,
+        summary, title_fit, location_fit, salary_meets_floor.
+        On failure: status='budget_exceeded' or status='error', data=None.
     """
-    # Resolve profile section — accept both full-config dicts and raw profile dicts
-    profile_section: dict = profile.get("profile", profile)
+    profile_section: dict = experience_profile
 
     # Build job context snippet
     title = job_row.get("title", "Unknown Title")
@@ -218,14 +219,7 @@ def score_job_haiku(
     description_snippet = build_description_snippet(description, profile_skills, max_chars=max_chars)
 
     # Build salary string
-    if salary_min is not None and salary_max is not None:
-        salary_str = f"${salary_min:,} - ${salary_max:,}"
-    elif salary_min is not None:
-        salary_str = f"${salary_min:,}+"
-    elif salary_max is not None:
-        salary_str = f"up to ${salary_max:,}"
-    else:
-        salary_str = "Not disclosed"
+    salary_str = format_salary_range(salary_min, salary_max)
 
     # Build compensation context from comp_data_json when available
     # Kept concise to minimize token cost — summary only, not raw JSON
@@ -292,20 +286,20 @@ def score_job_haiku(
             result.get("score"),
             cost_usd,
         )
-        return result
+        return ScoringResult(data=result, status="success")
     except BudgetExceededError:
         # Haiku should never hit budget cap, but handle defensively
         logger.warning(
-            "BudgetExceededError for Haiku scoring of '%s' @ '%s' -- returning None",
+            "BudgetExceededError for Haiku scoring of '%s' @ '%s'",
             title,
             company,
         )
-        return None
+        return ScoringResult(data=None, status="budget_exceeded")
     except Exception as e:
         logger.warning(
-            "Haiku scoring failed for '%s' @ '%s': %s -- returning None",
+            "Haiku scoring failed for '%s' @ '%s': %s",
             title,
             company,
             e,
         )
-        return None
+        return ScoringResult(data=None, status="error")
