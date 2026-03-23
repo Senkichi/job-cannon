@@ -14,11 +14,16 @@ Model pricing (per million tokens):
 """
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_API_TIMEOUT_SECONDS: int = 120
 
 # ---------------------------------------------------------------------------
 # Pricing table — price per million tokens (USD)
@@ -48,12 +53,18 @@ def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
         output_tokens: Number of output tokens generated.
 
     Returns:
-        Cost in USD as a float.
-
-    Raises:
-        KeyError: If model is not in MODEL_PRICING.
+        Cost in USD as a float.  Uses the most expensive known model pricing
+        as a conservative fallback for unrecognised model identifiers.
     """
-    pricing = MODEL_PRICING[model]
+    pricing = MODEL_PRICING.get(model)
+    if pricing is None:
+        logger.warning(
+            "Unknown model '%s' in compute_cost — using highest known pricing as fallback",
+            model,
+        )
+        pricing = max(
+            MODEL_PRICING.values(), key=lambda p: p["input"] + p["output"]
+        )
     return (input_tokens / 1_000_000) * pricing["input"] + \
            (output_tokens / 1_000_000) * pricing["output"]
 
@@ -142,7 +153,7 @@ def cost_gate(
 # Cost statistics
 # ---------------------------------------------------------------------------
 
-def get_cost_stats(conn: sqlite3.Connection) -> dict:
+def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) -> dict:
     """Return aggregated cost statistics.
 
     Returns a dict with keys:
@@ -151,19 +162,23 @@ def get_cost_stats(conn: sqlite3.Connection) -> dict:
         month (float): Total spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
         by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose.
-        budget_cap (float): Always 25.0 (future: read from config).
+        budget_cap (float): The monthly budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
+        budget_cap: Override the default monthly budget cap.  When None,
+            uses DEFAULT_MONTHLY_BUDGET_USD from config.
 
     Returns:
         Stats dict as described above.
     """
+    if budget_cap is None:
+        budget_cap = DEFAULT_MONTHLY_BUDGET_USD
     now = datetime.now(timezone.utc)
 
     today_start = now.strftime("%Y-%m-%dT00:00:00Z")
     week_start = (now.replace(hour=0, minute=0, second=0, microsecond=0) -
-                  __import__("datetime").timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                  timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
     def _sum(query: str, params: tuple) -> float:
@@ -205,7 +220,7 @@ def get_cost_stats(conn: sqlite3.Connection) -> dict:
         "month": month_spend,
         "projected_monthly": projected_monthly,
         "by_feature": by_feature,
-        "budget_cap": 25.0,
+        "budget_cap": budget_cap,
     }
 
 
@@ -285,6 +300,7 @@ def call_claude(
     purpose: str,
     config: dict,
     max_tokens: int = 1024,
+    timeout: float | None = None,
 ) -> tuple[dict, float]:
     """Call Claude API with cost gating and automatic cost recording.
 
@@ -299,6 +315,7 @@ def call_claude(
         purpose: Feature label for cost attribution.
         config: Application config dict.
         max_tokens: Maximum output tokens. Defaults to 1024.
+        timeout: Request timeout in seconds.  Defaults to DEFAULT_API_TIMEOUT_SECONDS (120).
 
     Returns:
         Tuple of (parsed_json_result: dict, cost_usd: float).
@@ -317,12 +334,15 @@ def call_claude(
             f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
         )
 
+    effective_timeout = timeout if timeout is not None else DEFAULT_API_TIMEOUT_SECONDS
+
     # Build API call kwargs
     call_kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
         "system": system,
         "messages": messages,
+        "timeout": effective_timeout,
     }
 
     # Add structured output config if schema provided
