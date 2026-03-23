@@ -143,7 +143,7 @@ def init_scheduler(app) -> None:
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 t0 = _time.time()
                 try:
-                    summary = run_ingestion(db_path, config)
+                    summary = run_ingestion(config, db_path)
                     logger.info(
                         "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d)",
                         summary["jobs_new"],
@@ -214,7 +214,7 @@ def init_scheduler(app) -> None:
 
         def _import_detection():
             from job_finder.web.pipeline_detector import run_pipeline_detection
-            return run_pipeline_detection
+            return lambda db_path, config: run_pipeline_detection(config, db_path)
 
         def _import_detection_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_PIPELINE_DETECTION
@@ -390,7 +390,7 @@ def trigger_sync(app) -> dict:
     db_path = app.config.get("DB_PATH", "jobs.db")
 
     try:
-        summary = run_ingestion(db_path, config)
+        summary = run_ingestion(config, db_path)
         logger.info("Manual sync triggered: %d new jobs", summary.get("jobs_new", 0))
     except Exception as e:
         logger.error("Manual sync failed: %s", e)
@@ -410,7 +410,7 @@ def trigger_sync(app) -> dict:
     # Run pipeline detection after ingestion (non-blocking on failure)
     try:
         from job_finder.web.pipeline_detector import run_pipeline_detection
-        detection_result = run_pipeline_detection(db_path, config)
+        detection_result = run_pipeline_detection(config, db_path)
         summary["detection_auto_updated"] = detection_result.get("auto_updated", 0)
         summary["detection_queued"] = detection_result.get("queued", 0)
         logger.info(
