@@ -769,12 +769,16 @@ class TestBatchScoreStatus:
     def test_status_returns_progress_when_running(self, app_with_unscored_jobs):
         """GET /dashboard/batch-score/status/<id> returns progress fragment (hx-trigger) when running."""
         import sqlite3
+        from datetime import datetime, timezone
 
         db_path = app_with_unscored_jobs.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
+        # Use current time so the 30-min timeout does not trigger
+        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
-            "VALUES ('haiku', 'running', 10, 3, '2026-03-12T00:00:00')"
+            "VALUES ('haiku', 'running', 10, 3, ?)",
+            (now_iso,),
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -1289,12 +1293,12 @@ class TestCostDetailRoute:
 
     def test_cost_detail_returns_200(self, client):
         """GET /dashboard/cost-detail returns 200."""
-        response = client.get("/dashboard/cost-detail")
+        response = client.get("/dashboard/cost-detail", headers={"HX-Request": "true"})
         assert response.status_code == 200
 
     def test_cost_detail_contains_cost_breakdown_elements(self, client):
         """GET /dashboard/cost-detail renders cost breakdown partial with today/week/projected stats."""
-        response = client.get("/dashboard/cost-detail")
+        response = client.get("/dashboard/cost-detail", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
         assert "Cost Breakdown" in data
