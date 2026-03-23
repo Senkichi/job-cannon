@@ -889,3 +889,187 @@ class TestCompanyAutoPopulation:
         assert job_row["company_id"] == company_row["id"], (
             "Job should be linked to its company via company_id"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: ScoringResult unwrap (Phase 11 plan 01)
+# ---------------------------------------------------------------------------
+
+
+class TestScoringResultUnwrap:
+    """Regression tests: _run_haiku_scoring and _run_sonnet_evaluation correctly
+    unwrap ScoringResult via .data and .status instead of treating it as a dict."""
+
+    def _make_job_row(self, db_path: str, dedup_key: str = "testco|data scientist|remote",
+                      jd_full: str | None = None) -> str:
+        """Insert a minimal job row using correct schema, return dedup_key."""
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, jd_full)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (dedup_key, "Data Scientist", "TestCo", "Remote",
+             "2026-01-01T00:00:00", "2026-01-01T00:00:00", jd_full),
+        )
+        conn.commit()
+        conn.close()
+        return dedup_key
+
+    def test_haiku_scoring_unwraps_scoring_result(self, migrated_db_path):
+        """_run_haiku_scoring correctly extracts score from ScoringResult.data."""
+        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_types import ScoringResult
+
+        dedup_key = self._make_job_row(migrated_db_path)
+
+        scoring_result = ScoringResult(
+            data={
+                "score": 75,
+                "summary": "Good match",
+                "title_fit": "strong",
+                "location_fit": "remote",
+                "salary_meets_floor": True,
+            },
+            status="success",
+        )
+
+        config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
+
+        with patch("job_finder.web.pipeline_runner.score_job_haiku", return_value=scoring_result), \
+             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.pipeline_runner.should_exclude", return_value=(False, None)), \
+             patch("job_finder.web.pipeline_runner.enrich_job", None):
+            mock_anthropic.Anthropic.return_value = MagicMock()
+
+            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], config, migrated_db_path)
+
+        assert haiku_scored == 1, f"Expected 1 haiku-scored job, got {haiku_scored}"
+
+        conn = sqlite3.connect(migrated_db_path)
+        row = conn.execute(
+            "SELECT haiku_score FROM jobs WHERE dedup_key = ?", (dedup_key,)
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == 75, f"Expected haiku_score=75, got {row[0]}"
+
+    def test_haiku_scoring_handles_error_scoring_result(self, migrated_db_path):
+        """_run_haiku_scoring gracefully handles ScoringResult with data=None (error status)."""
+        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_types import ScoringResult
+
+        dedup_key = self._make_job_row(migrated_db_path, dedup_key="testco|engineer|remote")
+
+        error_result = ScoringResult(data=None, status="error")
+
+        config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
+
+        with patch("job_finder.web.pipeline_runner.score_job_haiku", return_value=error_result), \
+             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.pipeline_runner.should_exclude", return_value=(False, None)), \
+             patch("job_finder.web.pipeline_runner.enrich_job", None):
+            mock_anthropic.Anthropic.return_value = MagicMock()
+
+            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], config, migrated_db_path)
+
+        assert haiku_scored == 0, f"Expected 0 scored jobs on error, got {haiku_scored}"
+
+    def test_sonnet_evaluation_unwraps_scoring_result(self, migrated_db_path):
+        """_run_sonnet_evaluation correctly extracts score from ScoringResult.data."""
+        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        from job_finder.web.scoring_types import ScoringResult
+
+        dedup_key = self._make_job_row(
+            migrated_db_path,
+            dedup_key="corp|scientist|nyc",
+            jd_full="Full job description text for Sonnet evaluation.",
+        )
+
+        scoring_result = ScoringResult(
+            data={
+                "score": 82,
+                "summary": "Great fit for this role",
+                "fit_analysis": {
+                    "strengths": ["Python"],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+            },
+            status="success",
+        )
+
+        config = {"scoring": {}, "profile": {}}
+
+        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=scoring_result), \
+             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.pipeline_runner.enrich_company_info", None):
+            mock_anthropic.Anthropic.return_value = MagicMock()
+
+            count = _run_sonnet_evaluation([dedup_key], config, migrated_db_path)
+
+        assert count == 1, f"Expected 1 sonnet-evaluated job, got {count}"
+
+        conn = sqlite3.connect(migrated_db_path)
+        row = conn.execute(
+            "SELECT sonnet_score FROM jobs WHERE dedup_key = ?", (dedup_key,)
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == 82, f"Expected sonnet_score=82, got {row[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Gmail pagination cap (SAFE-03, Phase 11 plan 01)
+# ---------------------------------------------------------------------------
+
+
+class TestGmailPaginationCap:
+    """Regression tests: GmailSource._search_messages respects max_messages=500 cap."""
+
+    def test_gmail_pagination_cap_stops_at_500(self):
+        """_search_messages stops paginating when it reaches 500 messages."""
+        from job_finder.sources.gmail_source import GmailSource
+
+        # Build a mock service that always returns 100 messages with a nextPageToken
+        page_call_count = 0
+
+        def make_page(page_num: int) -> dict:
+            start = page_num * 100
+            return {
+                "messages": [{"id": str(start + i)} for i in range(100)],
+                "nextPageToken": f"token_{page_num + 1}",
+            }
+
+        mock_execute = MagicMock()
+        mock_execute.execute.side_effect = lambda: make_page(page_call_count)
+
+        mock_list = MagicMock(return_value=mock_execute)
+
+        def counting_execute():
+            nonlocal page_call_count
+            result = make_page(page_call_count)
+            page_call_count += 1
+            return result
+
+        mock_execute.execute.side_effect = counting_execute
+
+        mock_service = MagicMock()
+        mock_service.users.return_value.messages.return_value.list.return_value = mock_execute
+
+        # Create GmailSource with mocked service
+        source = GmailSource.__new__(GmailSource)
+        source.service = mock_service
+        source.parse_failures = []
+
+        result = source._search_messages("test query")
+
+        assert len(result) == 500, (
+            f"Expected exactly 500 messages (cap), got {len(result)}"
+        )
+        # Should have called .list().execute() at most 5 times (5 pages × 100 = 500)
+        # Possibly 6 times if the cap check happens after the 5th page extends to 500
+        assert page_call_count <= 6, (
+            f"Expected at most 6 API pages fetched, got {page_call_count}"
+        )
