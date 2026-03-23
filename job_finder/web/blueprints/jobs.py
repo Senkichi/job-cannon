@@ -1,9 +1,10 @@
 """Jobs blueprint -- full Job Board routes with HTMX partials."""
 
 import logging
+import time as _time
 from datetime import datetime
 
-from flask import Blueprint, current_app, make_response, render_template, request
+from flask import Blueprint, abort, current_app, make_response, redirect, render_template, request, url_for
 
 from job_finder.db import (
     get_distinct_locations,
@@ -36,20 +37,39 @@ logger = logging.getLogger(__name__)
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
 
 
+def _safe_float(raw: str, param_name: str) -> float | None:
+    """Coerce a query-string value to float, or abort 400 on malformed input."""
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
+
+
+def _safe_int(raw: str, param_name: str) -> int | None:
+    """Coerce a query-string value to int, or abort 400 on malformed input."""
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
+
+
 def _get_filter_kwargs() -> dict:
     """Extract and coerce filter query parameters from request.args."""
     args = request.args
 
-    min_score_raw = args.get("min_score", "")
-    max_score_raw = args.get("max_score", "")
-    salary_min_raw = args.get("salary_min", "")
+    # Multi-select status: getlist returns [] when absent, or [""] for a blank submit
+    statuses = [s for s in args.getlist("status") if s]
 
     return {
-        "status": args.get("status") or None,
+        "status": statuses if len(statuses) > 1 else (statuses[0] if statuses else None),
         "location": args.get("location") or None,
-        "min_score": float(min_score_raw) if min_score_raw else None,
-        "max_score": float(max_score_raw) if max_score_raw else None,
-        "salary_min": int(salary_min_raw) if salary_min_raw else None,
+        "min_score": _safe_float(args.get("min_score", ""), "min_score"),
+        "max_score": _safe_float(args.get("max_score", ""), "max_score"),
+        "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
         "source": args.get("source") or None,
         "date_from": args.get("date_from") or None,
         "date_to": args.get("date_to") or None,
@@ -140,6 +160,8 @@ def index():
 @jobs_bp.route("/table", strict_slashes=False)
 def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -156,6 +178,8 @@ def table():
 @jobs_bp.route("/archived-table", strict_slashes=False)
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     jobs = get_filtered_jobs(conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200)
@@ -169,6 +193,8 @@ def archived_table():
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
 def expand(dedup_key: str):
     """HTMX partial -- returns accordion expansion row for a job."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -206,6 +232,8 @@ def expand(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
@@ -286,6 +314,8 @@ def update_status(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
@@ -354,34 +384,17 @@ def paste_jd(dedup_key: str):
     error = None
     try:
         from job_finder.web.claude_client import cost_gate
-        from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
+        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
         config = current_app.config.get("JF_CONFIG", {})
         if cost_gate(conn, config, "sonnet"):
             import anthropic
-            import json as _json
             client = anthropic.Anthropic()
-
-            # Load experience profile
-            try:
-                with open("experience_profile.json", encoding="utf-8") as f:
-                    profile = _json.load(f)
-            except (FileNotFoundError, _json.JSONDecodeError):
-                profile = {}
+            profile = load_scoring_profile(config)
 
             # Refresh job row with jd_full
             job = get_job(conn, dedup_key)
-            result = evaluate_job_sonnet(client, job, profile, conn, config)
-            if result:
-                conn.execute(
-                    "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
-                    (
-                        result.get("score"),
-                        _json.dumps(result.get("fit_analysis", {})),
-                        dedup_key,
-                    ),
-                )
-                conn.commit()
+            score_and_persist_sonnet(conn, job, config, client, profile)
         else:
             logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
             error = "Budget cap reached. Sonnet scoring skipped."
@@ -438,36 +451,20 @@ def rescore(dedup_key: str):
     old_score = job.get("sonnet_score")
 
     # Attempt Sonnet re-evaluation (budget-gated)
-    import time as _time
     error = None
     t0 = _time.time()
     try:
         from job_finder.web.claude_client import cost_gate
-        from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
+        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
         config = current_app.config.get("JF_CONFIG", {})
         if cost_gate(conn, config, "sonnet"):
             import anthropic
-            import json as _json
             client = anthropic.Anthropic()
+            profile = load_scoring_profile(config)
 
-            try:
-                with open("experience_profile.json", encoding="utf-8") as f:
-                    profile = _json.load(f)
-            except (FileNotFoundError, _json.JSONDecodeError):
-                profile = {}
-
-            result = evaluate_job_sonnet(client, job, profile, conn, config)
+            result = score_and_persist_sonnet(conn, job, config, client, profile)
             if result:
-                conn.execute(
-                    "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
-                    (
-                        result.get("score"),
-                        _json.dumps(result.get("fit_analysis", {})),
-                        dedup_key,
-                    ),
-                )
-                conn.commit()
                 try:
                     log_activity(
                         db_path,
