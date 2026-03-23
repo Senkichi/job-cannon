@@ -29,7 +29,7 @@ from job_finder.config import (
 from job_finder.db import JobDB
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
-from job_finder.utils import safe_json_load
+from job_finder.json_utils import safe_json_load
 
 console = Console()
 

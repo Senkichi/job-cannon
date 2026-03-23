@@ -13,7 +13,7 @@ import sqlite3
 
 from flask import g
 
-from job_finder.utils import safe_json_load  # noqa: F401 -- re-exported for backward compatibility
+from job_finder.json_utils import safe_json_load  # noqa: F401 -- re-exported for backward compatibility
 
 logger = logging.getLogger(__name__)
 
