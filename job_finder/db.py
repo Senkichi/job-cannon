@@ -7,7 +7,7 @@ from datetime import datetime, date
 from typing import Optional
 
 from job_finder.models import Job
-from job_finder.web.db_helpers import safe_json_load
+from job_finder.utils import safe_json_load
 
 
 def _merge_description(existing: Optional[str], new: Optional[str]) -> Optional[str]:

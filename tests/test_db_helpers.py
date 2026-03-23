@@ -1,4 +1,8 @@
-"""Unit tests for safe_json_load utility in db_helpers.py."""
+"""Unit tests for safe_json_load utility (now in job_finder/utils.py).
+
+The function is re-exported from job_finder.web.db_helpers for backward
+compatibility, so both import paths are valid.
+"""
 
 import pytest
 
@@ -59,7 +63,7 @@ class TestSafeJsonLoad:
         """safe_json_load logs at DEBUG level when JSONDecodeError occurs."""
         import logging
 
-        with caplog.at_level(logging.DEBUG, logger="job_finder.web.db_helpers"):
+        with caplog.at_level(logging.DEBUG, logger="job_finder.utils"):
             safe_json_load("[broken", default=[])
 
         assert len(caplog.records) >= 1
