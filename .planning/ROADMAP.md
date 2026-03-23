@@ -49,11 +49,13 @@ Plans:
 
 **Phase Numbering:** Continues from v1.0. Phases 6-10.
 
-- [ ] **Phase 6: Foundation Types & Constants** - New utility modules, constants, delete dead files
-- [ ] **Phase 7: Core Module Refactors** - db.py rewrite, scoring orchestrator, description formatter, claude_client hardening
-- [ ] **Phase 8: Consumers** - Scorers, pipeline runner, scheduler updated to new APIs
-- [ ] **Phase 9: Blueprints + Multi-Select Filter** - Fragment guards, safe params, batch timeout, filter UI
+- [x] **Phase 6: Foundation Types & Constants** - New utility modules, constants, delete dead files (completed 2026-03-23)
+- [x] **Phase 7: Core Module Refactors** - db.py rewrite, scoring orchestrator, description formatter, claude_client hardening (completed 2026-03-23)
+- [x] **Phase 8: Consumers** - Scorers, pipeline runner, scheduler updated to new APIs (completed 2026-03-23)
+- [x] **Phase 9: Blueprints + Multi-Select Filter** - Fragment guards, safe params, batch timeout, filter UI (completed 2026-03-23)
 - [x] **Phase 10: Safety, Tests & Cleanup** - Status validation, test updates, dead code removal, db migration (completed 2026-03-23)
+- [ ] **Phase 11: Fix Critical Runtime Bugs** - Scheduler arg swap, ScoringResult unwrap, regression tests (gap closure)
+- [ ] **Phase 12: Milestone Verification Backfill** - Missing artifacts, requirements checkboxes, state updates (gap closure)
 
 ## Phase Details
 
@@ -126,6 +128,30 @@ Plans:
   4. companies table has company_size and industry columns (migration at user_version 15)
 **Plans**: TBD
 
+### Phase 11: Fix Critical Runtime Bugs
+**Goal**: Two critical runtime bugs (scheduler arg swap, ScoringResult unwrap) are fixed with regression tests, restoring all E2E flows
+**Depends on**: Phase 10
+**Requirements**: REFAC-06, SAFE-03, CLN-02, CLN-06
+**Gap Closure:** Closes critical bugs from v1.1 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. `run_ingestion(config, db_path)` is called with correct argument order in both scheduler closures (lines 146, 393)
+  2. `pipeline_runner._run_haiku_scoring` and `_run_sonnet_evaluation` access ScoringResult fields via attribute access (not .get())
+  3. Regression tests exist that would catch both bugs (scheduler args, ScoringResult unwrap)
+  4. Scheduled ingestion and "Sync Now" complete without AttributeError
+**Plans**: TBD
+
+### Phase 12: Milestone Verification Backfill
+**Goal**: All v1.1 phases have complete artifacts (VERIFICATION.md, SUMMARY.md), requirements checkboxes are accurate, and planning state is current
+**Depends on**: Phase 11
+**Requirements**: CLN-03, SAFE-04, CLN-04, CLN-05, CLN-01, BP-01, BP-02, BP-03, BP-04, BP-05, FILT-01, FILT-02, FILT-04, SAFE-05
+**Gap Closure:** Closes artifact gaps from v1.1 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. Phases 8, 9, 10 each have VERIFICATION.md confirming their requirements are met
+  2. All 27 REQUIREMENTS.md checkboxes reflect actual satisfaction status
+  3. STATE.md completed_phases and ROADMAP.md progress table are current
+  4. Stale docstrings in test_db_helpers.py and pipeline_runner.py are fixed
+**Plans**: TBD
+
 ---
 
 ## Progress
@@ -137,8 +163,10 @@ Plans:
 | 3. Pipeline Automation | v1.0 | 2/2 | Complete | 2026-03-23 |
 | 4. Resume Generation | v1.0 | 0/? | Deferred | - |
 | 5. Intelligence | v1.0 | 0/? | Deferred | - |
-| 6. Foundation Types & Constants | v1.1 | 0/2 | Planning complete | - |
-| 7. Core Module Refactors | v1.1 | 0/3 | Planning complete | - |
-| 8. Consumers | v1.1 | 0/? | Not started | - |
-| 9. Blueprints + Multi-Select Filter | v1.1 | 0/? | Not started | - |
-| 10. Safety, Tests & Cleanup | v1.1 | 0/? | Complete    | 2026-03-23 |
+| 6. Foundation Types & Constants | v1.1 | 2/2 | Complete | 2026-03-23 |
+| 7. Core Module Refactors | v1.1 | 3/3 | Complete | 2026-03-23 |
+| 8. Consumers | v1.1 | —/— | Complete (bugs found) | 2026-03-23 |
+| 9. Blueprints + Multi-Select Filter | v1.1 | —/— | Complete | 2026-03-23 |
+| 10. Safety, Tests & Cleanup | v1.1 | —/— | Complete | 2026-03-23 |
+| 11. Fix Critical Runtime Bugs | v1.1 | 0/? | Not started | - |
+| 12. Milestone Verification Backfill | v1.1 | 0/? | Not started | - |
