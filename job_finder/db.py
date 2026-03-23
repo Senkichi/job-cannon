@@ -10,6 +10,26 @@ from job_finder.models import Job
 from job_finder.json_utils import safe_json_load
 
 
+# Explicit column lists for high-traffic queries. Avoids SELECT * so that
+# schema changes don't silently alter what callers receive.
+
+# Full jobs table columns — used by get_job() and get_filtered_jobs() which
+# return complete row dicts to templates and callers.
+_JOBS_ALL_COLUMNS = (
+    "dedup_key, title, company, location, sources, source_urls, source_id, "
+    "salary_min, salary_max, description, first_seen, last_seen, score, "
+    "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
+    "haiku_score, haiku_summary, sonnet_score, fit_analysis, jd_full, is_stale, "
+    "company_id, comp_data_json, enrichment_tier, rejection_reviewed, "
+    "locations_raw, description_reformatted, expiry_checked_at"
+)
+
+# Columns read by upsert_job() for merge logic — only what the UPDATE branch needs.
+_UPSERT_MERGE_COLUMNS = (
+    "sources, source_urls, locations_raw, description, jd_full, pipeline_status"
+)
+
+
 def _merge_description(existing: Optional[str], new: Optional[str]) -> Optional[str]:
     """Merge two description strings for the smart upsert_job UPDATE branch.
 
@@ -40,226 +60,217 @@ def _merge_description(existing: Optional[str], new: Optional[str]) -> Optional[
     return f"{existing}\n\n---\n\n{new}"
 
 
-class JobDB:
-    """SQLite-backed job storage with deduplication."""
+def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
+    """Insert or update a job. Returns True if it's new.
 
-    def __init__(self, db_path: str = "jobs.db"):
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
-        self._init_tables()
+    Deduplication: if the same job (by dedup_key) already exists,
+    merge source URLs, locations (Remote/Hybrid first), and descriptions
+    (substring dedup -- keep longer; append different content with separator).
+    Keep first_seen from the original row.
 
-    def _init_tables(self):
-        """Create tables if they don't exist."""
-        self.conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                dedup_key TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                company TEXT NOT NULL,
-                location TEXT NOT NULL,
-                sources TEXT DEFAULT '[]',     -- JSON array of source names
-                source_urls TEXT DEFAULT '[]',  -- JSON array of URLs
-                source_id TEXT DEFAULT '',
-                salary_min INTEGER,
-                salary_max INTEGER,
-                description TEXT,
-                first_seen TEXT NOT NULL,
-                last_seen TEXT NOT NULL,
-                score REAL DEFAULT 0,
-                score_breakdown TEXT DEFAULT '{}',
-                user_interest TEXT DEFAULT 'unreviewed'  -- unreviewed, interested, skipped, applied
-            );
+    INSERT branch initializes locations_raw as a JSON array with the
+    initial location so the UPDATE merge logic always has a base array.
 
-            CREATE TABLE IF NOT EXISTS runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                source TEXT NOT NULL,
-                jobs_fetched INTEGER DEFAULT 0,
-                jobs_new INTEGER DEFAULT 0,
-                jobs_scored INTEGER DEFAULT 0
-            );
+    Args:
+        conn: Open sqlite3 connection.
+        job: Job object to insert or update.
 
-            CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(score DESC);
-            CREATE INDEX IF NOT EXISTS idx_jobs_interest ON jobs(user_interest);
-            CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen DESC);
-        """
+    Returns:
+        True if the job is new (inserted), False if existing (updated).
+    """
+    existing = conn.execute(
+        f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
+        (job.dedup_key,),
+    ).fetchone()
+
+    now = datetime.now().isoformat()
+
+    if existing:
+        # Merge sources
+        sources = safe_json_load(existing["sources"], default=[])
+        urls = safe_json_load(existing["source_urls"], default=[])
+        if job.source not in sources:
+            sources.append(job.source)
+        if job.source_url and job.source_url not in urls:
+            urls.append(job.source_url)
+
+        # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
+        existing_locs_raw = existing["locations_raw"]
+        try:
+            locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
+        except (json.JSONDecodeError, TypeError):
+            locs_list = []
+        if not isinstance(locs_list, list):
+            locs_list = [locs_list] if locs_list else []
+
+        new_loc = job.location or ""
+        if new_loc and new_loc not in locs_list:
+            if re.search(r"\b(remote|hybrid)\b", new_loc, re.IGNORECASE):
+                locs_list.insert(0, new_loc)
+            else:
+                locs_list.append(new_loc)
+
+        # Build merged location string: ordered, deduplicated
+        merged_location = ", ".join(dict.fromkeys(locs_list))
+
+        # Smart description merge: keep longer; append different content
+        merged_description = _merge_description(
+            existing["description"], job.description
         )
-        self.conn.commit()
 
-    def upsert_job(self, job: Job) -> bool:
-        """Insert or update a job. Returns True if it's new.
+        # Eager promotion: if jd_full is NULL and merged description is
+        # substantial, promote it so enrichment has a baseline to beat.
+        jd_full_clause = ""
+        jd_full_value = ()
+        if not existing["jd_full"] and merged_description and len(merged_description) > 200:
+            jd_full_clause = ", jd_full = ?"
+            jd_full_value = (merged_description[:8000],)
 
-        Deduplication: if the same job (by dedup_key) already exists,
-        merge source URLs, locations (Remote/Hybrid first), and descriptions
-        (substring dedup — keep longer; append different content with separator).
-        Keep first_seen from the original row.
-
-        INSERT branch initializes locations_raw as a JSON array with the
-        initial location so the UPDATE merge logic always has a base array.
-        """
-        existing = self.conn.execute(
-            "SELECT * FROM jobs WHERE dedup_key = ?", (job.dedup_key,)
-        ).fetchone()
-
-        now = datetime.now().isoformat()
-
-        if existing:
-            # Merge sources
-            sources = safe_json_load(existing["sources"], default=[])
-            urls = safe_json_load(existing["source_urls"], default=[])
-            if job.source not in sources:
-                sources.append(job.source)
-            if job.source_url and job.source_url not in urls:
-                urls.append(job.source_url)
-
-            # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
-            existing_locs_raw = existing["locations_raw"]
-            try:
-                locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
-            except (json.JSONDecodeError, TypeError):
-                locs_list = []
-            if not isinstance(locs_list, list):
-                locs_list = [locs_list] if locs_list else []
-
-            new_loc = job.location or ""
-            if new_loc and new_loc not in locs_list:
-                if re.search(r"\b(remote|hybrid)\b", new_loc, re.IGNORECASE):
-                    locs_list.insert(0, new_loc)
-                else:
-                    locs_list.append(new_loc)
-
-            # Build merged location string: ordered, deduplicated
-            merged_location = ", ".join(dict.fromkeys(locs_list))
-
-            # Smart description merge: keep longer; append different content
-            merged_description = _merge_description(
-                existing["description"], job.description
+        conn.execute(
+            f"""UPDATE jobs SET
+                sources = ?, source_urls = ?, last_seen = ?,
+                score = ?, score_breakdown = ?,
+                salary_min = COALESCE(?, salary_min),
+                salary_max = COALESCE(?, salary_max),
+                description = ?,
+                locations_raw = ?,
+                location = ?{jd_full_clause}
+            WHERE dedup_key = ?""",
+            (
+                json.dumps(sources),
+                json.dumps(urls),
+                now,
+                job.score,
+                json.dumps(job.score_breakdown),
+                job.salary_min,
+                job.salary_max,
+                merged_description,
+                json.dumps(locs_list),
+                merged_location,
+                *jd_full_value,
+                job.dedup_key,
+            ),
+        )
+        conn.commit()
+        # Auto-reopen: if an archived job re-appears in ingestion, treat
+        # re-appearance as proof the job is live again (per CONTEXT.md decision)
+        if existing["pipeline_status"] == "archived":
+            update_pipeline_status(
+                conn, job.dedup_key, "discovered",
+                source="ingestion", evidence="re_appeared",
             )
-
-            self.conn.execute(
-                """UPDATE jobs SET
-                    sources = ?, source_urls = ?, last_seen = ?,
-                    score = ?, score_breakdown = ?,
-                    salary_min = COALESCE(?, salary_min),
-                    salary_max = COALESCE(?, salary_max),
-                    description = ?,
-                    locations_raw = ?,
-                    location = ?
-                WHERE dedup_key = ?""",
-                (
-                    json.dumps(sources),
-                    json.dumps(urls),
-                    now,
-                    job.score,
-                    json.dumps(job.score_breakdown),
-                    job.salary_min,
-                    job.salary_max,
-                    merged_description,
-                    json.dumps(locs_list),
-                    merged_location,
-                    job.dedup_key,
-                ),
-            )
-            self.conn.commit()
-            # Auto-reopen: if an archived job re-appears in ingestion, treat
-            # re-appearance as proof the job is live again (per CONTEXT.md decision)
-            if existing["pipeline_status"] == "archived":
-                update_pipeline_status(
-                    self.conn, job.dedup_key, "discovered",
-                    source="ingestion", evidence="re_appeared",
-                )
-            return False
-        else:
-            # Use the email date as first_seen when available (Gmail-sourced jobs).
-            # SerpAPI jobs have no email date, so they use the current ingestion time.
-            first_seen = job.posted_date.isoformat() if job.posted_date else now
-            # Initialize locations_raw as a JSON array with the initial location
-            initial_locs = [job.location] if job.location else []
-            self.conn.execute(
-                """INSERT INTO jobs
-                    (dedup_key, title, company, location, sources, source_urls,
-                     source_id, salary_min, salary_max, description,
-                     first_seen, last_seen, score, score_breakdown, locations_raw)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    job.dedup_key,
-                    job.title,
-                    job.company,
-                    job.location,
-                    json.dumps([job.source]),
-                    json.dumps([job.source_url]),
-                    job.source_id,
-                    job.salary_min,
-                    job.salary_max,
-                    job.description,
-                    first_seen,
-                    now,
-                    job.score,
-                    json.dumps(job.score_breakdown),
-                    json.dumps(initial_locs),
-                ),
-            )
-            self.conn.commit()
-            return True
-
-    def get_top_jobs(
-        self,
-        limit: int = 50,
-        min_score: float = 0,
-        interest_filter: Optional[str] = None,
-    ) -> list[dict]:
-        """Get top-scored jobs."""
-        query = "SELECT * FROM jobs WHERE score >= ?"
-        params: list = [min_score]
-
-        if interest_filter:
-            query += " AND user_interest = ?"
-            params.append(interest_filter)
-
-        query += " ORDER BY score DESC LIMIT ?"
-        params.append(limit)
-
-        rows = self.conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
-
-    def mark_interest(self, dedup_key: str, interest: str):
-        """Mark a job as interested, skipped, or applied."""
-        self.conn.execute(
-            "UPDATE jobs SET user_interest = ? WHERE dedup_key = ?",
-            (interest, dedup_key),
+        return False
+    else:
+        # Use the email date as first_seen when available (Gmail-sourced jobs).
+        # SerpAPI jobs have no email date, so they use the current ingestion time.
+        first_seen = job.posted_date.isoformat() if job.posted_date else now
+        # Initialize locations_raw as a JSON array with the initial location
+        initial_locs = [job.location] if job.location else []
+        # Eager promotion: if description is substantial, set jd_full immediately
+        # so enrichment always has a quality baseline to beat.
+        initial_jd_full = None
+        if job.description and len(job.description) > 200:
+            initial_jd_full = job.description[:8000]
+        conn.execute(
+            """INSERT INTO jobs
+                (dedup_key, title, company, location, sources, source_urls,
+                 source_id, salary_min, salary_max, description,
+                 first_seen, last_seen, score, score_breakdown, locations_raw,
+                 jd_full)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job.dedup_key,
+                job.title,
+                job.company,
+                job.location,
+                json.dumps([job.source]),
+                json.dumps([job.source_url]),
+                job.source_id,
+                job.salary_min,
+                job.salary_max,
+                job.description,
+                first_seen,
+                now,
+                job.score,
+                json.dumps(job.score_breakdown),
+                json.dumps(initial_locs),
+                initial_jd_full,
+            ),
         )
-        self.conn.commit()
+        conn.commit()
+        return True
 
-    def log_run(self, source: str, fetched: int, new: int, scored: int):
-        """Log a pipeline run for auditing."""
-        self.conn.execute(
-            "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
-            (datetime.now().isoformat(), source, fetched, new, scored),
-        )
-        self.conn.commit()
 
-    def stats(self) -> dict:
-        """Get database statistics."""
-        total = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        by_interest = dict(
-            self.conn.execute(
-                "SELECT user_interest, COUNT(*) FROM jobs GROUP BY user_interest"
-            ).fetchall()
-        )
-        recent_runs = self.conn.execute(
-            "SELECT * FROM runs ORDER BY timestamp DESC LIMIT 5"
-        ).fetchall()
+def log_run(
+    conn: sqlite3.Connection, source: str, fetched: int, new: int, scored: int
+) -> None:
+    """Log a pipeline run for auditing.
 
-        return {
-            "total_jobs": total,
-            "by_interest": by_interest,
-            "recent_runs": [dict(r) for r in recent_runs],
-        }
+    Args:
+        conn: Open sqlite3 connection.
+        source: Source label (e.g., "gmail", "serpapi").
+        fetched: Number of jobs fetched.
+        new: Number of new jobs inserted.
+        scored: Number of jobs scored.
+    """
+    conn.execute(
+        "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
+        (datetime.now().isoformat(), source, fetched, new, scored),
+    )
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------
 # Module-level DB functions for Flask views (use sqlite3.Connection directly)
 # ---------------------------------------------------------------------------
+
+
+def persist_haiku_score(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    haiku_score: float,
+    haiku_summary: str,
+) -> None:
+    """Persist Haiku scoring results for a job.
+
+    Single point of truth for the haiku_score UPDATE statement.
+    Called from scoring_orchestrator, backfill_enrichment, and scoring_evaluator.
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        haiku_score: Numeric score from Haiku fast-filter.
+        haiku_summary: Summary text from Haiku evaluation.
+    """
+    conn.execute(
+        "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
+        (haiku_score, haiku_summary, dedup_key),
+    )
+    conn.commit()
+
+
+def persist_sonnet_score(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    sonnet_score: float,
+    fit_analysis: str,
+) -> None:
+    """Persist Sonnet evaluation results for a job.
+
+    Single point of truth for the sonnet_score UPDATE statement.
+    Called from scoring_orchestrator, backfill_enrichment, and scoring_evaluator.
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        sonnet_score: Numeric score from Sonnet deep evaluation.
+        fit_analysis: JSON string containing fit analysis details.
+    """
+    conn.execute(
+        "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
+        (sonnet_score, fit_analysis, dedup_key),
+    )
+    conn.commit()
 
 
 def get_job(conn: sqlite3.Connection, dedup_key: str) -> Optional[dict]:
@@ -273,7 +284,8 @@ def get_job(conn: sqlite3.Connection, dedup_key: str) -> Optional[dict]:
         Job as dict with all columns, or None if not found.
     """
     row = conn.execute(
-        "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
+        f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?",
+        (dedup_key,),
     ).fetchone()
     return dict(row) if row is not None else None
 
@@ -378,7 +390,8 @@ def get_recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list:
         List of dicts with keys: id, source, jobs_fetched, jobs_new, timestamp.
     """
     rows = conn.execute(
-        "SELECT * FROM runs ORDER BY timestamp DESC LIMIT ?",
+        "SELECT id, timestamp, source, jobs_fetched, jobs_new, jobs_scored "
+        "FROM runs ORDER BY timestamp DESC LIMIT ?",
         (limit,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -461,7 +474,18 @@ def update_pipeline_status(
         source: Who triggered the move ('manual', 'email', 'ai', etc.).
         evidence: Optional evidence string describing what triggered the change
             (e.g., "lever_api 404"). Defaults to empty string.
+
+    Raises:
+        ValueError: If new_status is not a recognized pipeline status.
     """
+    from job_finder.web.blueprints import VALID_PIPELINE_STATUSES
+
+    if new_status not in VALID_PIPELINE_STATUSES:
+        raise ValueError(
+            f"Invalid pipeline status: {new_status!r}. "
+            f"Must be one of: {sorted(VALID_PIPELINE_STATUSES)}"
+        )
+
     row = conn.execute(
         "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
         (dedup_key,),
@@ -490,7 +514,7 @@ def update_pipeline_status(
 
 def get_filtered_jobs(
     conn: sqlite3.Connection,
-    status: Optional[str] = None,
+    status: Optional[str | list[str]] = None,
     location: Optional[str] = None,
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
@@ -506,6 +530,8 @@ def get_filtered_jobs(
     """Return jobs matching the given filters, sorted and limited.
 
     All filters are optional; passing None skips that filter.
+    status accepts a single string or a list of strings for multi-select
+    filtering (builds WHERE pipeline_status IN (?, ?, ...) clause).
     sort_by is validated against an allowlist to prevent SQL injection.
     When sort_by is "score", uses COALESCE(sonnet_score, haiku_score, score)
     to prefer the best available AI score over the heuristic score.
@@ -547,8 +573,13 @@ def get_filtered_jobs(
     params: list = []
 
     if status:
-        conditions.append("pipeline_status = ?")
-        params.append(status)
+        if isinstance(status, list):
+            placeholders = ", ".join("?" * len(status))
+            conditions.append(f"pipeline_status IN ({placeholders})")
+            params.extend(status)
+        else:
+            conditions.append("pipeline_status = ?")
+            params.append(status)
     if location:
         conditions.append("location LIKE ?")
         params.append(f"%{location}%")
@@ -574,7 +605,7 @@ def get_filtered_jobs(
         conditions.append("is_stale = 0")
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    query = f"SELECT * FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"
+    query = f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"
     params.append(limit)
 
     rows = conn.execute(query, params).fetchall()
@@ -584,7 +615,8 @@ def get_filtered_jobs(
 def get_pipeline_events(conn: sqlite3.Connection, dedup_key: str) -> list[dict]:
     """Return all pipeline events for a job, newest first."""
     rows = conn.execute(
-        "SELECT * FROM pipeline_events WHERE job_id = ? ORDER BY timestamp DESC",
+        "SELECT id, job_id, from_status, to_status, timestamp, source, evidence "
+        "FROM pipeline_events WHERE job_id = ? ORDER BY timestamp DESC",
         (dedup_key,),
     ).fetchall()
     return [dict(row) for row in rows]
