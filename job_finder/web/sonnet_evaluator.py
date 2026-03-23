@@ -25,6 +25,7 @@ from typing import Any, Optional
 
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import BudgetExceededError, call_claude
+from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
 
@@ -90,18 +91,15 @@ _SYSTEM_PROMPT = (
 
 def evaluate_job_sonnet(
     client: Any,
-    job_row: dict,
+    job_row: JobRow,
     experience_profile: dict,
     conn: Any,
     config: dict,
-) -> Optional[dict]:
+) -> ScoringResult:
     """Evaluate a job against the candidate profile using Claude Sonnet.
 
     Reads the full job description (jd_full) and produces a comprehensive fit
-    analysis. Returns None when:
-    - jd_full is absent (Sonnet requires the full posting text)
-    - Monthly budget cap is reached (BudgetExceededError)
-    - Any other error occurs
+    analysis.
 
     Args:
         client: Anthropic client instance (injected for testability).
@@ -113,8 +111,9 @@ def evaluate_job_sonnet(
                 profile section for candidate preferences).
 
     Returns:
-        Dict with keys: score (int), summary (str), fit_analysis (dict).
-        Returns None if jd_full is absent, budget exceeded, or any error.
+        ScoringResult with status='success' and data dict containing score,
+        summary, fit_analysis. On failure: status='skipped' (jd_full absent),
+        status='budget_exceeded', or status='error', with data=None.
     """
     jd_full = job_row.get("jd_full")
     if not jd_full:
@@ -123,7 +122,7 @@ def evaluate_job_sonnet(
             job_row.get("title"),
             job_row.get("company"),
         )
-        return None
+        return ScoringResult(data=None, status="skipped")
 
     model = (
         config.get("scoring", {})
@@ -134,14 +133,7 @@ def evaluate_job_sonnet(
     # Build salary string
     salary_min = job_row.get("salary_min")
     salary_max = job_row.get("salary_max")
-    if salary_min is not None and salary_max is not None:
-        salary_str = f"${salary_min:,} - ${salary_max:,}"
-    elif salary_min is not None:
-        salary_str = f"${salary_min:,}+"
-    elif salary_max is not None:
-        salary_str = f"up to ${salary_max:,}"
-    else:
-        salary_str = "Not specified"
+    salary_str = format_salary_range(salary_min, salary_max)
 
     # Build experience profile section
     positions = experience_profile.get("positions", [])
@@ -177,9 +169,9 @@ def evaluate_job_sonnet(
 
     user_message = (
         f"## Full Job Description\n\n"
-        f"**Title:** {job_row.get('title', 'Unknown')}\n"
-        f"**Company:** {job_row.get('company', 'Unknown')}\n"
-        f"**Location:** {job_row.get('location', 'Unknown')}\n"
+        f"**Title:** {job_row.get('title', 'Unknown Title')}\n"
+        f"**Company:** {job_row.get('company', 'Unknown Company')}\n"
+        f"**Location:** {job_row.get('location', 'Unknown Location')}\n"
         f"**Salary:** {salary_str}\n\n"
         f"{jd_full}\n\n"
         f"---\n\n"
@@ -226,21 +218,21 @@ def evaluate_job_sonnet(
             job_row.get("company"),
             result.get("score"),
         )
-        return result
+        return ScoringResult(data=result, status="success")
 
     except BudgetExceededError:
         logger.info(
-            "Sonnet eval budget exceeded for '%s' @ '%s' -- returning None",
+            "Sonnet eval budget exceeded for '%s' @ '%s'",
             job_row.get("title"),
             job_row.get("company"),
         )
-        return None
+        return ScoringResult(data=None, status="budget_exceeded")
 
     except Exception as e:
         logger.warning(
-            "Sonnet eval error for '%s' @ '%s': %s -- returning None",
+            "Sonnet eval error for '%s' @ '%s': %s",
             job_row.get("title"),
             job_row.get("company"),
             e,
         )
-        return None
+        return ScoringResult(data=None, status="error")

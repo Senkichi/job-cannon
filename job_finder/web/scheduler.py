@@ -27,6 +27,80 @@ _scheduler: BackgroundScheduler | None = None
 _scheduler_lock = threading.Lock()
 
 
+# ---------------------------------------------------------------------------
+# Job closure factories -- reduce per-job boilerplate
+# ---------------------------------------------------------------------------
+
+def _make_simple_job(app, name, import_func):
+    """Factory for scheduler jobs that need only config + db_path + try/except.
+
+    Args:
+        app: Flask application instance.
+        name: Human-readable job name for log messages.
+        import_func: No-arg callable that returns the job function.
+            Called lazily inside the closure to defer imports.
+            The returned function must accept (db_path, config).
+    """
+    def wrapper():
+        with app.app_context():
+            config = app.config.get("JF_CONFIG", {})
+            db_path = app.config.get("DB_PATH", "jobs.db")
+            try:
+                result = import_func()(db_path, config)
+                logger.info("%s: %s", name, result)
+            except Exception as e:
+                logger.error("%s failed: %s", name, e)
+    return wrapper
+
+
+def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
+                      *, guard=None):
+    """Factory for scheduler jobs with timing and activity logging.
+
+    Args:
+        app: Flask application instance.
+        name: Human-readable job name for log messages.
+        import_func: No-arg callable that returns the job function.
+            The returned function must accept (db_path, config).
+        import_action: No-arg callable that returns the activity action constant.
+        extract_metadata: Callable(result) -> dict of metadata fields for
+            the success activity log entry. duration_seconds and status are
+            added automatically.
+        guard: Optional callable(config) -> bool. If provided and returns
+            False, the job exits early without running.
+    """
+    def wrapper():
+        import time as _time
+        with app.app_context():
+            from job_finder.web.activity_tracker import log_activity
+            config = app.config.get("JF_CONFIG", {})
+            db_path = app.config.get("DB_PATH", "jobs.db")
+            action = import_action()
+
+            if guard is not None and not guard(config):
+                return
+
+            t0 = _time.time()
+            try:
+                result = import_func()(db_path, config)
+                logger.info("%s: %s", name, result)
+                metadata = extract_metadata(result)
+                metadata["duration_seconds"] = round(_time.time() - t0, 2)
+                metadata["status"] = "success"
+                log_activity(db_path, action, metadata=metadata)
+            except Exception as e:
+                logger.error("%s failed: %s", name, e)
+                log_activity(
+                    db_path, action,
+                    metadata={
+                        "status": "failed",
+                        "error": type(e).__name__,
+                        "duration_seconds": round(_time.time() - t0, 2),
+                    },
+                )
+    return wrapper
+
+
 def init_scheduler(app) -> None:
     """Initialize and start the background scheduler.
 
@@ -57,6 +131,8 @@ def init_scheduler(app) -> None:
 
         scheduler = BackgroundScheduler(daemon=True)
 
+        # -- Ingestion pipeline (custom logging, kept inline) ---------------
+
         def run_pipeline():
             """Wrapped ingestion job executed by APScheduler."""
             import time as _time
@@ -67,7 +143,7 @@ def init_scheduler(app) -> None:
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 t0 = _time.time()
                 try:
-                    summary = run_ingestion(config, db_path)
+                    summary = run_ingestion(db_path, config)
                     logger.info(
                         "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d)",
                         summary["jobs_new"],
@@ -106,44 +182,27 @@ def init_scheduler(app) -> None:
             coalesce=True,     # skip missed runs if app was down
         )
 
-        def run_stale_job():
-            """Nightly stale detection job executed by APScheduler."""
-            import time as _time
-            with app.app_context():
-                from job_finder.web.activity_tracker import (
-                    log_activity, ACTION_SCHEDULED_STALE_DETECTION
-                )
-                from job_finder.web.stale_detector import run_stale_detection
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                t0 = _time.time()
-                try:
-                    result = run_stale_detection(db_path)
-                    logger.info("Stale detection: %s", result)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_STALE_DETECTION,
-                        metadata={
-                            "stale_marked": result.get("stale_marked", 0),
-                            "stale_cleared": result.get("stale_cleared", 0),
-                            "archived": result.get("archived", 0),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception as e:
-                    logger.error("Stale detection failed: %s", e)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_STALE_DETECTION,
-                        metadata={
-                            "status": "failed",
-                            "error": type(e).__name__,
-                            "duration_seconds": round(_time.time() - t0, 2),
-                        },
-                    )
+        # -- Stale detection (nightly) -------------------------------------
+
+        def _import_stale():
+            from job_finder.web.stale_detector import run_stale_detection
+            return lambda db_path, config: run_stale_detection(db_path)
+
+        def _import_stale_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_STALE_DETECTION
+            return ACTION_SCHEDULED_STALE_DETECTION
 
         scheduler.add_job(
-            run_stale_job,
+            _make_tracked_job(
+                app, "Stale detection",
+                import_func=_import_stale,
+                import_action=_import_stale_action,
+                extract_metadata=lambda r: {
+                    "stale_marked": r.get("stale_marked", 0),
+                    "stale_cleared": r.get("stale_cleared", 0),
+                    "archived": r.get("archived", 0),
+                },
+            ),
             trigger=CronTrigger(hour=2, minute=0),
             id="stale_detection",
             replace_existing=True,
@@ -151,50 +210,27 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_detection():
-            """Pipeline detection job executed by APScheduler."""
-            import time as _time
-            with app.app_context():
-                from job_finder.web.activity_tracker import (
-                    log_activity, ACTION_SCHEDULED_PIPELINE_DETECTION
-                )
-                from job_finder.web.pipeline_detector import run_pipeline_detection
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                t0 = _time.time()
-                try:
-                    result = run_pipeline_detection(config, db_path)
-                    logger.info(
-                        "Pipeline detection: %d scanned, %d auto-updated, %d queued",
-                        result.get("emails_scanned", 0),
-                        result.get("auto_updated", 0),
-                        result.get("queued", 0),
-                    )
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_PIPELINE_DETECTION,
-                        metadata={
-                            "emails_scanned": result.get("emails_scanned", 0),
-                            "auto_updated": result.get("auto_updated", 0),
-                            "queued": result.get("queued", 0),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception as e:
-                    logger.error("Pipeline detection failed: %s", e)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_PIPELINE_DETECTION,
-                        metadata={
-                            "status": "failed",
-                            "error": type(e).__name__,
-                            "duration_seconds": round(_time.time() - t0, 2),
-                        },
-                    )
+        # -- Pipeline detection (every 30 min) -----------------------------
+
+        def _import_detection():
+            from job_finder.web.pipeline_detector import run_pipeline_detection
+            return run_pipeline_detection
+
+        def _import_detection_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_PIPELINE_DETECTION
+            return ACTION_SCHEDULED_PIPELINE_DETECTION
 
         scheduler.add_job(
-            run_detection,
+            _make_tracked_job(
+                app, "Pipeline detection",
+                import_func=_import_detection,
+                import_action=_import_detection_action,
+                extract_metadata=lambda r: {
+                    "emails_scanned": r.get("emails_scanned", 0),
+                    "auto_updated": r.get("auto_updated", 0),
+                    "queued": r.get("queued", 0),
+                },
+            ),
             trigger=IntervalTrigger(minutes=30),
             id="pipeline_detection",
             replace_existing=True,
@@ -202,20 +238,14 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_feedback_poll():
-            """Drive resume feedback poll executed by APScheduler."""
-            with app.app_context():
-                from job_finder.web.resume_feedback import run_drive_feedback_poll
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                try:
-                    result = run_drive_feedback_poll(db_path, config)
-                    logger.info("Drive feedback poll: %s", result)
-                except Exception as e:
-                    logger.error("Drive feedback poll failed: %s", e)
+        # -- Drive feedback poll (every 30 min) ----------------------------
+
+        def _import_feedback():
+            from job_finder.web.resume_feedback import run_drive_feedback_poll
+            return run_drive_feedback_poll
 
         scheduler.add_job(
-            run_feedback_poll,
+            _make_simple_job(app, "Drive feedback poll", _import_feedback),
             trigger=IntervalTrigger(minutes=30),
             id="drive_feedback_poll",
             replace_existing=True,
@@ -223,20 +253,14 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_consolidation():
-            """Weekly preference consolidation job executed by APScheduler."""
-            with app.app_context():
-                from job_finder.web.resume_feedback import run_preference_consolidation
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                try:
-                    result = run_preference_consolidation(db_path, config)
-                    logger.info("Preference consolidation: %s", result)
-                except Exception as e:
-                    logger.error("Preference consolidation failed: %s", e)
+        # -- Preference consolidation (weekly, Sunday 3:00 AM) -------------
+
+        def _import_consolidation():
+            from job_finder.web.resume_feedback import run_preference_consolidation
+            return run_preference_consolidation
 
         scheduler.add_job(
-            run_consolidation,
+            _make_simple_job(app, "Preference consolidation", _import_consolidation),
             trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
             id="preference_consolidation",
             replace_existing=True,
@@ -244,44 +268,26 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_rejection_job():
-            """Weekly rejection analysis job executed by APScheduler."""
-            import time as _time
-            with app.app_context():
-                from job_finder.web.activity_tracker import (
-                    log_activity, ACTION_SCHEDULED_REJECTION_ANALYSIS
-                )
-                from job_finder.web.rejection_analyzer import run_rejection_analysis
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                t0 = _time.time()
-                try:
-                    result = run_rejection_analysis(db_path, config)
-                    logger.info("Rejection analysis: %s", result)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_REJECTION_ANALYSIS,
-                        metadata={
-                            "rejections_analyzed": result.get("rejections_analyzed", 0),
-                            "budget_exceeded": result.get("budget_exceeded", False),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception as e:
-                    logger.error("Rejection analysis failed: %s", e)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_REJECTION_ANALYSIS,
-                        metadata={
-                            "status": "failed",
-                            "error": type(e).__name__,
-                            "duration_seconds": round(_time.time() - t0, 2),
-                        },
-                    )
+        # -- Rejection analysis (weekly, Monday 3:00 AM) -------------------
+
+        def _import_rejection():
+            from job_finder.web.rejection_analyzer import run_rejection_analysis
+            return run_rejection_analysis
+
+        def _import_rejection_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_REJECTION_ANALYSIS
+            return ACTION_SCHEDULED_REJECTION_ANALYSIS
 
         scheduler.add_job(
-            run_rejection_job,
+            _make_tracked_job(
+                app, "Rejection analysis",
+                import_func=_import_rejection,
+                import_action=_import_rejection_action,
+                extract_metadata=lambda r: {
+                    "rejections_analyzed": r.get("rejections_analyzed", 0),
+                    "budget_exceeded": r.get("budget_exceeded", False),
+                },
+            ),
             trigger=CronTrigger(day_of_week="mon", hour=3, minute=0),
             id="rejection_analysis",
             replace_existing=True,
@@ -289,46 +295,27 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_ats_scan_job():
-            """ATS scan job executed by APScheduler (Mon/Wed at 7:00 AM)."""
-            import time as _time
-            with app.app_context():
-                from job_finder.web.activity_tracker import (
-                    log_activity, ACTION_SCHEDULED_ATS_SCAN
-                )
-                from job_finder.web.ats_scanner import run_ats_scan
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                if not config.get("ats", {}).get("scan_enabled", True):
-                    return
-                t0 = _time.time()
-                try:
-                    result = run_ats_scan(db_path, config)
-                    logger.info("ATS scan: %s", result)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_ATS_SCAN,
-                        metadata={
-                            "companies_scanned": result.get("companies_scanned", 0),
-                            "jobs_found": result.get("jobs_found", 0),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception as e:
-                    logger.error("ATS scan failed: %s", e)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_ATS_SCAN,
-                        metadata={
-                            "status": "failed",
-                            "error": type(e).__name__,
-                            "duration_seconds": round(_time.time() - t0, 2),
-                        },
-                    )
+        # -- ATS scan (Mon/Wed 7:00 AM) ------------------------------------
+
+        def _import_ats_scan():
+            from job_finder.web.ats_scanner import run_ats_scan
+            return run_ats_scan
+
+        def _import_ats_scan_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_ATS_SCAN
+            return ACTION_SCHEDULED_ATS_SCAN
 
         scheduler.add_job(
-            run_ats_scan_job,
+            _make_tracked_job(
+                app, "ATS scan",
+                import_func=_import_ats_scan,
+                import_action=_import_ats_scan_action,
+                extract_metadata=lambda r: {
+                    "companies_scanned": r.get("companies_scanned", 0),
+                    "jobs_found": r.get("jobs_found", 0),
+                },
+                guard=lambda config: config.get("ats", {}).get("scan_enabled", True),
+            ),
             trigger=CronTrigger(day_of_week="mon,wed", hour=7, minute=0),
             id="ats_scan",
             replace_existing=True,
@@ -336,24 +323,14 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_slug_probe_job():
-            """ATS slug probe job executed by APScheduler (Mon/Wed at 7:30 AM).
+        # -- ATS slug probe (Mon/Wed 7:30 AM) ------------------------------
 
-            Runs 30 minutes after ATS scan to pick up newly-added companies
-            from the day's ingestion run.
-            """
-            with app.app_context():
-                from job_finder.web.ats_scanner import probe_ats_slugs
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
-                try:
-                    result = probe_ats_slugs(db_path, config)
-                    logger.info("ATS slug probe: %s", result)
-                except Exception as e:
-                    logger.error("ATS slug probe failed: %s", e)
+        def _import_slug_probe():
+            from job_finder.web.ats_scanner import probe_ats_slugs
+            return probe_ats_slugs
 
         scheduler.add_job(
-            run_slug_probe_job,
+            _make_simple_job(app, "ATS slug probe", _import_slug_probe),
             trigger=CronTrigger(day_of_week="mon,wed", hour=7, minute=30),
             id="ats_slug_probe",
             replace_existing=True,
@@ -361,50 +338,29 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        def run_expiry_check_job():
-            """Nightly expiry check job executed by APScheduler."""
-            import time as _time
-            with app.app_context():
-                from job_finder.web.activity_tracker import (
-                    log_activity, ACTION_SCHEDULED_EXPIRY_CHECK
-                )
-                from job_finder.web.expiry_checker import run_expiry_check
-                config = app.config.get("JF_CONFIG", {})
-                db_path = app.config.get("DB_PATH", "jobs.db")
+        # -- Expiry check (nightly 2:30 AM) --------------------------------
 
-                if not config.get("expiry", {}).get("enabled", True):
-                    return
+        def _import_expiry():
+            from job_finder.web.expiry_checker import run_expiry_check
+            return run_expiry_check
 
-                t0 = _time.time()
-                try:
-                    result = run_expiry_check(db_path, config)
-                    logger.info("Expiry check: %s", result)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_EXPIRY_CHECK,
-                        metadata={
-                            "checked": result.get("checked", 0),
-                            "archived": result.get("archived", 0),
-                            "live": result.get("live", 0),
-                            "inconclusive": result.get("inconclusive", 0),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception as e:
-                    logger.error("Expiry check failed: %s", e)
-                    log_activity(
-                        db_path,
-                        ACTION_SCHEDULED_EXPIRY_CHECK,
-                        metadata={
-                            "status": "failed",
-                            "error": type(e).__name__,
-                            "duration_seconds": round(_time.time() - t0, 2),
-                        },
-                    )
+        def _import_expiry_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_EXPIRY_CHECK
+            return ACTION_SCHEDULED_EXPIRY_CHECK
 
         scheduler.add_job(
-            run_expiry_check_job,
+            _make_tracked_job(
+                app, "Expiry check",
+                import_func=_import_expiry,
+                import_action=_import_expiry_action,
+                extract_metadata=lambda r: {
+                    "checked": r.get("checked", 0),
+                    "archived": r.get("archived", 0),
+                    "live": r.get("live", 0),
+                    "inconclusive": r.get("inconclusive", 0),
+                },
+                guard=lambda config: config.get("expiry", {}).get("enabled", True),
+            ),
             trigger=CronTrigger(hour=2, minute=30),
             id="expiry_check",
             replace_existing=True,
@@ -434,7 +390,7 @@ def trigger_sync(app) -> dict:
     db_path = app.config.get("DB_PATH", "jobs.db")
 
     try:
-        summary = run_ingestion(config, db_path)
+        summary = run_ingestion(db_path, config)
         logger.info("Manual sync triggered: %d new jobs", summary.get("jobs_new", 0))
     except Exception as e:
         logger.error("Manual sync failed: %s", e)
@@ -454,7 +410,7 @@ def trigger_sync(app) -> dict:
     # Run pipeline detection after ingestion (non-blocking on failure)
     try:
         from job_finder.web.pipeline_detector import run_pipeline_detection
-        detection_result = run_pipeline_detection(config, db_path)
+        detection_result = run_pipeline_detection(db_path, config)
         summary["detection_auto_updated"] = detection_result.get("auto_updated", 0)
         summary["detection_queued"] = detection_result.get("queued", 0)
         logger.info(

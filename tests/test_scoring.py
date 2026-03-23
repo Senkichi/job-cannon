@@ -347,13 +347,11 @@ class TestHaikuScorer:
     @pytest.fixture
     def sample_profile(self):
         return {
-            "profile": {
-                "target_titles": ["Senior Data Scientist", "Staff Data Scientist"],
-                "target_locations": ["Remote", "San Francisco"],
-                "min_salary": 150000,
-                "industries": ["SaaS", "tech"],
-                "skills": ["Python", "SQL", "causal inference"],
-            }
+            "target_titles": ["Senior Data Scientist", "Staff Data Scientist"],
+            "target_locations": ["Remote", "San Francisco"],
+            "min_salary": 150000,
+            "industries": ["SaaS", "tech"],
+            "skills": ["Python", "SQL", "causal inference"],
         }
 
     @pytest.fixture
@@ -397,11 +395,13 @@ class TestHaikuScorer:
     def test_score_job_haiku_returns_structured_result(
         self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
-        """score_job_haiku must return a dict with score, summary, title_fit, etc."""
+        """score_job_haiku must return a ScoringResult with success status and data dict."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        result = score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        assert result is not None
+        scoring_result = score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
+        assert scoring_result is not None
+        assert scoring_result.status == "success"
+        result = scoring_result.data
         assert "score" in result
         assert "summary" in result
         assert "title_fit" in result
@@ -501,15 +501,16 @@ class TestHaikuScorer:
             "description": "Some job description",
         }
         path, conn = migrated_db
-        result = score_job_haiku(haiku_mock_client, job_row, sample_profile, conn, scoring_config)
+        scoring_result = score_job_haiku(haiku_mock_client, job_row, sample_profile, conn, scoring_config)
         # Must return a result (not raise, not None)
-        assert result is not None
-        assert "score" in result
+        assert scoring_result is not None
+        assert scoring_result.status == "success"
+        assert "score" in scoring_result.data
 
     def test_score_job_haiku_handles_budget_exceeded_gracefully(
         self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
-        """score_job_haiku must return None (not raise) on BudgetExceededError.
+        """score_job_haiku must return ScoringResult with budget_exceeded status.
 
         Note: Haiku never actually hits budget cap, but the function must be
         defensive against unexpected budget errors.
@@ -522,7 +523,8 @@ class TestHaikuScorer:
         mock_client.messages.create.side_effect = BudgetExceededError("Budget exceeded")
         path, conn = migrated_db
         result = score_job_haiku(mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        assert result is None
+        assert result.status == "budget_exceeded"
+        assert result.data is None
 
 
 # ---------------------------------------------------------------------------
@@ -1005,11 +1007,13 @@ class TestSonnetEvaluator:
     def test_returns_dict_with_score_summary_fit_analysis(
         self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
-        """evaluate_job_sonnet must return dict with score, summary, fit_analysis."""
+        """evaluate_job_sonnet must return ScoringResult with score, summary, fit_analysis."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        assert result is not None
+        scoring_result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        assert scoring_result is not None
+        assert scoring_result.status == "success"
+        result = scoring_result.data
         assert "score" in result
         assert "summary" in result
         assert "fit_analysis" in result
@@ -1020,9 +1024,9 @@ class TestSonnetEvaluator:
         """fit_analysis must include strengths, gaps, talking_points, resume_priority_skills."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        assert result is not None
-        fa = result["fit_analysis"]
+        scoring_result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        assert scoring_result is not None
+        fa = scoring_result.data["fit_analysis"]
         assert "strengths" in fa
         assert "gaps" in fa
         assert "talking_points" in fa
@@ -1084,14 +1088,15 @@ class TestSonnetEvaluator:
             "jd_full": None,
         }
         result = evaluate_job_sonnet(sonnet_mock_client, job_no_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        assert result is None
+        assert result.status == "skipped"
+        assert result.data is None
         # Must NOT have called the API
         assert sonnet_mock_client.messages.create.call_count == 0
 
     def test_returns_none_on_budget_exceeded_error(
         self, sample_profile, sonnet_config, migrated_db, job_with_jd
     ):
-        """evaluate_job_sonnet must return None (not raise) on BudgetExceededError."""
+        """evaluate_job_sonnet must return ScoringResult with budget_exceeded status."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         from job_finder.web.claude_client import BudgetExceededError
         path, conn = migrated_db
@@ -1100,7 +1105,8 @@ class TestSonnetEvaluator:
         mock_client.messages.create.side_effect = BudgetExceededError("Budget exceeded")
 
         result = evaluate_job_sonnet(mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        assert result is None
+        assert result.status == "budget_exceeded"
+        assert result.data is None
 
     def test_records_cost_with_purpose_sonnet_eval(
         self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
@@ -2266,7 +2272,8 @@ class TestHaikuCompensationContext:
 
         # Should succeed without error
         assert result is not None
-        assert "score" in result
+        assert result.status == "success"
+        assert "score" in result.data
 
         # Prompt should NOT have "Additional Compensation" line
         call_kwargs = mock_client.messages.create.call_args[1]

@@ -156,8 +156,14 @@ class GmailSource:
 
         return all_jobs
 
-    def _search_messages(self, query: str) -> list[dict]:
-        """Search Gmail and return all matching message metadata."""
+    def _search_messages(self, query: str, max_messages: int = 500) -> list[dict]:
+        """Search Gmail and return matching message metadata.
+
+        Args:
+            query: Gmail search query string.
+            max_messages: Upper bound on messages to return. Prevents
+                runaway pagination on broad queries.
+        """
         messages = []
         page_token = None
 
@@ -169,6 +175,13 @@ class GmailSource:
                 .execute()
             )
             messages.extend(result.get("messages", []))
+            if len(messages) >= max_messages:
+                logger.info(
+                    "Gmail pagination cap reached (%d messages), stopping",
+                    max_messages,
+                )
+                messages = messages[:max_messages]
+                break
             page_token = result.get("nextPageToken")
             if not page_token:
                 break
