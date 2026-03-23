@@ -2,7 +2,7 @@
 
 import threading
 
-PIPELINE_STATUSES = [
+PIPELINE_STATUSES = (
     "discovered",
     "reviewing",
     "applied",
@@ -14,7 +14,9 @@ PIPELINE_STATUSES = [
     "archived",
     "rejected",
     "withdrawn",
-]
+)
+
+VALID_PIPELINE_STATUSES = frozenset(PIPELINE_STATUSES)
 
 
 def trigger_interview_prep_if_applied(
