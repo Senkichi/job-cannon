@@ -358,71 +358,75 @@ class TestAutoReopen:
 
     def test_archived_job_reopened_on_upsert(self, tmp_db_path):
         """upsert_job for an existing archived job sets pipeline_status to discovered."""
+        import sqlite3
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.db import JobDB
+        from job_finder.db import upsert_job
         from job_finder.models import Job
 
         run_migrations(tmp_db_path)
-        db = JobDB(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
 
         # Insert a job and set it to archived
         job = Job(
             title="Data Scientist", company="Acme Corp", location="Remote",
             source="linkedin", source_url="https://linkedin.com/jobs/1",
         )
-        db.upsert_job(job)
-        db.conn.execute(
+        upsert_job(conn, job)
+        conn.execute(
             "UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key = ?",
             (job.dedup_key,),
         )
-        db.conn.commit()
+        conn.commit()
 
         # Re-ingest the same job (simulates re-appearance in Gmail/SerpAPI)
-        is_new = db.upsert_job(job)
+        is_new = upsert_job(conn, job)
         assert is_new is False  # existing job, not new
 
-        row = db.conn.execute(
+        row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
             (job.dedup_key,),
         ).fetchone()
         assert row["pipeline_status"] == "discovered"
 
         # Verify evidence was recorded in pipeline_events
-        event = db.conn.execute(
+        event = conn.execute(
             "SELECT evidence, source FROM pipeline_events WHERE job_id = ? ORDER BY timestamp DESC LIMIT 1",
             (job.dedup_key,),
         ).fetchone()
         assert event["evidence"] == "re_appeared"
         assert event["source"] == "ingestion"
 
-        db.conn.close()
+        conn.close()
 
     def test_non_archived_job_not_reopened(self, tmp_db_path):
         """upsert_job for an existing reviewing job does NOT change pipeline_status."""
+        import sqlite3
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.db import JobDB
+        from job_finder.db import upsert_job
         from job_finder.models import Job
 
         run_migrations(tmp_db_path)
-        db = JobDB(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
 
         job = Job(
             title="Data Scientist", company="Acme Corp", location="Remote",
             source="linkedin", source_url="https://linkedin.com/jobs/1",
         )
-        db.upsert_job(job)
-        db.conn.execute(
+        upsert_job(conn, job)
+        conn.execute(
             "UPDATE jobs SET pipeline_status = 'reviewing' WHERE dedup_key = ?",
             (job.dedup_key,),
         )
-        db.conn.commit()
+        conn.commit()
 
-        db.upsert_job(job)
+        upsert_job(conn, job)
 
-        row = db.conn.execute(
+        row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
             (job.dedup_key,),
         ).fetchone()
         assert row["pipeline_status"] == "reviewing"  # unchanged
 
-        db.conn.close()
+        conn.close()
