@@ -3335,7 +3335,10 @@ class TestValidationBadge:
         from unittest.mock import patch
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value={"ok": True}):
             with app.test_client() as client:
-                resp = client.get(f"/jobs/{quote(dedup_key, safe='')}/expand")
+                resp = client.get(
+                    f"/jobs/{quote(dedup_key, safe='')}/expand",
+                    headers={"HX-Request": "true"},
+                )
         return resp
 
     def test_badge_passed(self, badge_app):
