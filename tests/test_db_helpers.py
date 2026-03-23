@@ -63,7 +63,7 @@ class TestSafeJsonLoad:
         """safe_json_load logs at DEBUG level when JSONDecodeError occurs."""
         import logging
 
-        with caplog.at_level(logging.DEBUG, logger="job_finder.utils"):
+        with caplog.at_level(logging.DEBUG, logger="job_finder.json_utils"):
             safe_json_load("[broken", default=[])
 
         assert len(caplog.records) >= 1
