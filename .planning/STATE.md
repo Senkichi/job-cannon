@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Port job-finder Improvements
-status: Ready to plan
-last_updated: "2026-03-23T20:31:32.086Z"
+status: Complete
+last_updated: "2026-03-23T22:00:00.000Z"
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 5
   total_plans: 5
-  completed_plans: 0
+  completed_plans: 5
 ---
 
 # State
@@ -16,14 +16,14 @@ progress:
 ## Current Position
 
 Phase: 9
-Plan: Not started
+Plan: Complete (all 5 plans executed)
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 08 — Consumers
+**Current focus:** Phase 09 complete — all blueprints + multi-select filter ported
 
 ## Accumulated Context
 
@@ -52,14 +52,23 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 - db.py rewrite is the riskiest change (~1450 diff lines) — Phase 7
 - FILT-03 (multi-select IN clause) folded into db.py rewrite per design spec Wave 2.1
 
-### Pending Todos (from v1.0)
+### Decisions Made in Phase 9
 
-- Replace status filter dropdown with multi-select checkboxes (addressed in v1.1 Phase 9)
-- Fix job board not refreshing when date filter is cleared (addressed in v1.1 Phase 9)
+- HX-Request guards redirect to /jobs/ (full page) for direct browser access on all fragment routes
+- status list passed as-is when multiple values, single string when one value, None when none — matching db.py interface
+- _safe_float/_safe_int call abort(400) rather than returning None for invalid input
+- guidelines_path requires 4 parent levels: blueprints -> web -> job_finder -> repo_root
+- scoring_orchestrator replaces direct haiku_scorer/sonnet_evaluator calls in jobs.py and dashboard.py
+- Status filter replaced: dropdown removed, checkbox pill row added with "All" toggle
+
+### Completed Todos (from v1.0)
+
+- [x] Replace status filter dropdown with multi-select checkboxes — DONE Phase 9
+- [x] Fix job board not refreshing when date filter is cleared — DONE Phase 9 (change from:input trigger)
 
 ### Blockers/Concerns
 
-None yet.
+None.
 
 ---
-*Last updated: 2026-03-23*
+*Last session: 2026-03-23 — Completed phase9-plan1-SUMMARY.md*
