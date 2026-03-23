@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime
 
-from flask import Blueprint, current_app, make_response, render_template, request
+from flask import Blueprint, current_app, make_response, redirect, render_template, request, url_for
 
 from job_finder.db import (
     get_distinct_locations,
@@ -140,6 +140,8 @@ def index():
 @jobs_bp.route("/table", strict_slashes=False)
 def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -156,6 +158,8 @@ def table():
 @jobs_bp.route("/archived-table", strict_slashes=False)
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     jobs = get_filtered_jobs(conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200)
@@ -169,6 +173,8 @@ def archived_table():
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
 def expand(dedup_key: str):
     """HTMX partial -- returns accordion expansion row for a job."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -206,6 +212,8 @@ def expand(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
@@ -286,6 +294,8 @@ def update_status(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
@@ -530,6 +540,8 @@ def rescore(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
@@ -549,6 +561,8 @@ def interview_prep_status(dedup_key: str):
     - error fragment when status='error'
     - empty string (200) if no prep row exists yet
     """
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -648,6 +662,8 @@ def save_jd(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)

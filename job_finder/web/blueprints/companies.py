@@ -97,6 +97,8 @@ def index():
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
 def expand(company_id):
     """HTMX: expand company row with jobs and scan history."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("companies.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
@@ -137,6 +139,8 @@ def expand(company_id):
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("companies.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
