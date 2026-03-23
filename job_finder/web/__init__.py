@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import secrets
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -92,7 +93,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
 
     app.config["JF_CONFIG"] = cfg
     app.config["DB_PATH"] = cfg["db"]["path"]
-    app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-change-in-production")
+    app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # Set ANTHROPIC_API_KEY inside create_app(), not at module level.
     # Module-level os.environ pollution leaks the key to Claude Code and
