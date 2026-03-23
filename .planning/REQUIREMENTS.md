@@ -9,21 +9,21 @@ Requirements for milestone v1.1: Port job-finder improvements. Each maps to road
 
 ### Refactoring
 
-- [ ] **REFAC-01**: db.py uses module-level functions taking `conn` as first arg instead of JobDB class
-- [ ] **REFAC-02**: Explicit column constants replace `SELECT *` in db queries
-- [ ] **REFAC-03**: Smart description merging on upsert (substring dedup, keep longer, eager jd_full promotion)
-- [ ] **REFAC-04**: Scoring orchestrator centralizes haiku/sonnet scoring flow with persist helpers
-- [ ] **REFAC-05**: Description formatter extracted from app factory into dedicated module
+- [x] **REFAC-01**: db.py uses module-level functions taking `conn` as first arg instead of JobDB class
+- [x] **REFAC-02**: Explicit column constants replace `SELECT *` in db queries
+- [x] **REFAC-03**: Smart description merging on upsert (substring dedup, keep longer, eager jd_full promotion)
+- [x] **REFAC-04**: Scoring orchestrator centralizes haiku/sonnet scoring flow with persist helpers
+- [x] **REFAC-05**: Description formatter extracted from app factory into dedicated module
 - [ ] **REFAC-06**: Scheduler uses closure factories (_make_simple_job, _make_tracked_job) instead of boilerplate
 
 ### Safety
 
-- [ ] **SAFE-01**: Claude API calls have configurable timeout (default 120s)
-- [ ] **SAFE-02**: Unknown model pricing falls back conservatively with warning log instead of KeyError
+- [x] **SAFE-01**: Claude API calls have configurable timeout (default 120s)
+- [x] **SAFE-02**: Unknown model pricing falls back conservatively with warning log instead of KeyError
 - [ ] **SAFE-03**: Gmail message fetch has 500-message pagination cap
 - [ ] **SAFE-04**: Pipeline status changes validated against VALID_PIPELINE_STATUSES frozenset
 - [ ] **SAFE-05**: Query string params use _safe_float/_safe_int validators (HTTP 400 on malformed)
-- [ ] **SAFE-06**: Flask secret key generated via secrets.token_hex(32)
+- [x] **SAFE-06**: Flask secret key generated via secrets.token_hex(32)
 
 ### Blueprints
 
@@ -37,7 +37,7 @@ Requirements for milestone v1.1: Port job-finder improvements. Each maps to road
 
 - [ ] **FILT-01**: User can select multiple pipeline statuses simultaneously via checkbox pills
 - [ ] **FILT-02**: "All" toggle button checks/unchecks all status filters
-- [ ] **FILT-03**: Multi-status selection builds IN clause in db query
+- [x] **FILT-03**: Multi-status selection builds IN clause in db query
 - [ ] **FILT-04**: Date filter clearing triggers table refresh (hx-trigger change from:input)
 
 ### Cleanup
@@ -75,39 +75,40 @@ Requirements for milestone v1.1: Port job-finder improvements. Each maps to road
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REFAC-01 | Phase 7 | Pending |
-| REFAC-02 | Phase 7 | Pending |
-| REFAC-03 | Phase 7 | Pending |
-| REFAC-04 | Phase 7 | Pending |
-| REFAC-05 | Phase 7 | Pending |
-| REFAC-06 | Phase 8 | Pending |
-| SAFE-01 | Phase 7 | Pending |
-| SAFE-02 | Phase 7 | Pending |
-| SAFE-03 | Phase 8 | Pending |
-| SAFE-04 | Phase 10 | Pending |
-| SAFE-05 | Phase 9 | Pending |
-| SAFE-06 | Phase 6 | Pending |
-| BP-01 | Phase 9 | Pending |
-| BP-02 | Phase 9 | Pending |
-| BP-03 | Phase 9 | Pending |
-| BP-04 | Phase 9 | Pending |
-| BP-05 | Phase 9 | Pending |
-| FILT-01 | Phase 9 | Pending |
-| FILT-02 | Phase 9 | Pending |
-| FILT-03 | Phase 7 | Pending |
-| FILT-04 | Phase 9 | Pending |
-| CLN-01 | Phase 6 | Pending |
-| CLN-02 | Phase 8 | Pending |
-| CLN-03 | Phase 8 | Pending |
-| CLN-04 | Phase 10 | Pending |
-| CLN-05 | Phase 10 | Pending |
-| CLN-06 | Phase 10 | Pending |
+| REFAC-01 | Phase 7 | Satisfied |
+| REFAC-02 | Phase 7 | Satisfied |
+| REFAC-03 | Phase 7 | Satisfied |
+| REFAC-04 | Phase 7 | Satisfied |
+| REFAC-05 | Phase 7 | Satisfied |
+| REFAC-06 | Phase 11 | Pending |
+| SAFE-01 | Phase 7 | Satisfied |
+| SAFE-02 | Phase 7 | Satisfied |
+| SAFE-03 | Phase 11 | Pending |
+| SAFE-04 | Phase 12 | Pending |
+| SAFE-05 | Phase 12 | Pending |
+| SAFE-06 | Phase 6 | Satisfied |
+| BP-01 | Phase 12 | Pending |
+| BP-02 | Phase 12 | Pending |
+| BP-03 | Phase 12 | Pending |
+| BP-04 | Phase 12 | Pending |
+| BP-05 | Phase 12 | Pending |
+| FILT-01 | Phase 12 | Pending |
+| FILT-02 | Phase 12 | Pending |
+| FILT-03 | Phase 7 | Satisfied |
+| FILT-04 | Phase 12 | Pending |
+| CLN-01 | Phase 12 | Pending |
+| CLN-02 | Phase 11 | Pending |
+| CLN-03 | Phase 12 | Pending |
+| CLN-04 | Phase 12 | Pending |
+| CLN-05 | Phase 12 | Pending |
+| CLN-06 | Phase 11 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 27 total
-- Mapped to phases: 27
+- Satisfied: 9 (REFAC-01→05, SAFE-01, SAFE-02, SAFE-06, FILT-03)
+- Pending (gap closure): 18 (Phase 11: 4, Phase 12: 14)
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after roadmap creation*
+*Last updated: 2026-03-23 after gap closure phase creation*
