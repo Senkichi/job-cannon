@@ -135,17 +135,15 @@ def _get_all_skills(profile: dict) -> list:
     return all_skills
 
 
-@profile_bp.route("/", strict_slashes=False)
-def index():
-    """Profile Editor — display experience_profile.json in editable form."""
-    profile = load_profile(_PROFILE_PATH)
-    warnings = validate_profile(profile)
-    all_skills = _get_all_skills(profile)
+def _load_profile_page_extras() -> dict:
+    """Load supplementary variables required by profile/index.html.
 
+    Returns a dict with keys: resume_preferences, uploads, style_guide, profile_mtime.
+    All DB queries degrade gracefully if tables are absent (pre-migration or error).
+    """
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     conn = get_db(db_path)
 
-    # Query accepted resume preferences for display (graceful degradation if table absent)
     resume_preferences = []
     try:
         rows = conn.execute(
@@ -155,10 +153,8 @@ def index():
         ).fetchall()
         resume_preferences = [dict(row) for row in rows]
     except Exception:
-        # Table may not exist on fresh installs before Migration 5
         pass
 
-    # Query resume upload history (graceful degradation if table absent)
     upload_rows = []
     try:
         rows = conn.execute(
@@ -167,28 +163,39 @@ def index():
         ).fetchall()
         upload_rows = [dict(row) for row in rows]
     except Exception:
-        pass  # Degrade gracefully if table absent
+        pass
 
-    # Load style guide for display section
     from job_finder.web.resume_style_guide import load_style_guide
     style_guide = load_style_guide()
 
-    # File mtime for stale-form detection
     profile_mtime = 0
     try:
         profile_mtime = os.path.getmtime(_PROFILE_PATH)
     except OSError:
         pass
 
+    return {
+        "resume_preferences": resume_preferences,
+        "uploads": upload_rows,
+        "style_guide": style_guide,
+        "profile_mtime": profile_mtime,
+    }
+
+
+@profile_bp.route("/", strict_slashes=False)
+def index():
+    """Profile Editor — display experience_profile.json in editable form."""
+    profile = load_profile(_PROFILE_PATH)
+    warnings = validate_profile(profile)
+    all_skills = _get_all_skills(profile)
+    extras = _load_profile_page_extras()
+
     return render_template(
         "profile/index.html",
         profile=profile,
         warnings=warnings,
         all_skills=all_skills,
-        resume_preferences=resume_preferences,
-        uploads=upload_rows,
-        style_guide=style_guide,
-        profile_mtime=profile_mtime,
+        **extras,
     )
 
 
@@ -263,22 +270,7 @@ def import_markdown():
 
     warnings = validate_profile(extracted)
     all_skills = _get_all_skills(extracted)
-
-    db_path = current_app.config.get("DB_PATH", "jobs.db")
-    conn = get_db(db_path)
-
-    upload_rows = []
-    try:
-        rows = conn.execute(
-            "SELECT id, filename, uploaded_at, review_status "
-            "FROM resume_upload_reviews ORDER BY uploaded_at DESC"
-        ).fetchall()
-        upload_rows = [dict(row) for row in rows]
-    except Exception:
-        pass
-
-    from job_finder.web.resume_style_guide import load_style_guide
-    style_guide = load_style_guide()
+    extras = _load_profile_page_extras()
 
     return render_template(
         "profile/index.html",
@@ -286,8 +278,7 @@ def import_markdown():
         warnings=warnings,
         all_skills=all_skills,
         import_success=True,
-        uploads=upload_rows,
-        style_guide=style_guide,
+        **extras,
     )
 
 
@@ -635,11 +626,13 @@ def reorder_positions():
 
         warnings = validate_profile(profile)
         all_skills = _get_all_skills(profile)
+        extras = _load_profile_page_extras()
         return render_template(
             "profile/index.html",
             profile=profile,
             warnings=warnings,
             all_skills=all_skills,
+            **extras,
         )
     except (ValueError, KeyError, IndexError) as exc:
         return str(exc), 400
@@ -658,11 +651,13 @@ def reorder_skills():
 
         warnings = validate_profile(profile)
         all_skills = _get_all_skills(profile)
+        extras = _load_profile_page_extras()
         return render_template(
             "profile/index.html",
             profile=profile,
             warnings=warnings,
             all_skills=all_skills,
+            **extras,
         )
     except (ValueError, KeyError) as exc:
         return str(exc), 400
