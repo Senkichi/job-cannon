@@ -17,10 +17,6 @@ from dotenv import load_dotenv
 from flask import Flask, redirect, url_for
 
 load_dotenv()
-# Re-export under the standard name so anthropic.Anthropic() finds it.
-# The .env file uses JF_ANTHROPIC_API_KEY to prevent Claude Code and other
-# tools from detecting and consuming the key (which was costing ~$40/day).
-os.environ["ANTHROPIC_API_KEY"] = os.environ.get("JF_ANTHROPIC_API_KEY", "")
 from markupsafe import Markup, escape
 
 from job_finder.config import (
@@ -97,6 +93,14 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.config["JF_CONFIG"] = cfg
     app.config["DB_PATH"] = cfg["db"]["path"]
     app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-change-in-production")
+
+    # Set ANTHROPIC_API_KEY inside create_app(), not at module level.
+    # Module-level os.environ pollution leaks the key to Claude Code and
+    # other tools via environment inheritance.
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        jf_key = os.environ.get("JF_ANTHROPIC_API_KEY", "")
+        if jf_key:
+            os.environ["ANTHROPIC_API_KEY"] = jf_key
 
     # --- File logging ---
     _setup_file_logging()
