@@ -26,7 +26,7 @@ except ImportError:
     anthropic = None  # type: ignore[assignment]
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
-from job_finder.db import JobDB
+from job_finder.db import upsert_job, log_run
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.exclusion_filter import should_exclude
@@ -103,12 +103,14 @@ def run_ingestion(config: dict, db_path: str) -> dict:
     new_job_keys: list[str] = []
 
     # New connection per call -- thread-safe
-    db = JobDB(db_path)
+    import sqlite3
+    runner_conn = sqlite3.connect(db_path)
+    runner_conn.row_factory = sqlite3.Row
     scorer = JobScorer(config)
 
     try:
         # --- Gmail ingestion ---
-        gmail_jobs = _fetch_gmail(config, db.conn, summary)
+        gmail_jobs = _fetch_gmail(config, runner_conn, summary)
 
         # --- SerpAPI ingestion ---
         serpapi_jobs = _fetch_serpapi(config, summary)
@@ -118,7 +120,7 @@ def run_ingestion(config: dict, db_path: str) -> dict:
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
-            _score_and_persist(job, scorer, db, summary, new_job_keys)
+            _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
 
         # --- Log run totals to runs table ---
         jobs_new = summary["jobs_new"]
@@ -126,20 +128,20 @@ def run_ingestion(config: dict, db_path: str) -> dict:
 
         if summary["gmail_fetched"] > 0 or summary["gmail_errors"]:
             try:
-                db.log_run("gmail", summary["gmail_fetched"], jobs_new, jobs_scored)
+                log_run(runner_conn, "gmail", summary["gmail_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log Gmail run: %s", e)
 
         if summary["serpapi_fetched"] > 0 or summary["serpapi_errors"]:
             try:
-                db.log_run("serpapi", summary["serpapi_fetched"], jobs_new, jobs_scored)
+                log_run(runner_conn, "serpapi", summary["serpapi_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log SerpAPI run: %s", e)
 
     finally:
         # Always close the connection to release the file lock (important on Windows)
         try:
-            db.conn.close()
+            runner_conn.close()
         except Exception:
             logger.debug("db close failed during ingestion", exc_info=True)
 
@@ -288,7 +290,7 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
 
 
 def _score_and_persist(
-    job: Job, scorer: JobScorer, db: JobDB, summary: dict, new_job_keys: list[str]
+    job: Job, scorer: JobScorer, conn, summary: dict, new_job_keys: list[str]
 ) -> None:
     """Score a single job and persist it. Errors are logged but not re-raised.
 
@@ -298,7 +300,7 @@ def _score_and_persist(
     Args:
         job: Job object to score and persist.
         scorer: Initialized JobScorer instance.
-        db: Initialized JobDB instance.
+        conn: Open sqlite3 connection.
         summary: Mutable summary dict to update.
         new_job_keys: Mutable list; new job dedup_keys are appended here.
     """
@@ -310,7 +312,7 @@ def _score_and_persist(
             summary["jobs_scored"] += 1
 
         # Persist (upsert handles dedup by dedup_key)
-        is_new = db.upsert_job(job)
+        is_new = upsert_job(conn, job)
         if is_new:
             summary["jobs_new"] += 1
             new_job_keys.append(job.dedup_key)
@@ -333,18 +335,18 @@ def _score_and_persist(
                 ats_platform, ats_slug = extract_ats_from_urls(source_urls)
                 probe_status = "hit" if ats_slug else "pending"
                 company_id = upsert_company(
-                    db.conn,
+                    conn,
                     name=job.company,
                     ats_platform=ats_platform,
                     ats_slug=ats_slug,
                     ats_probe_status=probe_status,
                 )
                 if company_id:
-                    db.conn.execute(
+                    conn.execute(
                         "UPDATE jobs SET company_id = ? WHERE dedup_key = ?",
                         (company_id, job.dedup_key),
                     )
-                    db.conn.commit()
+                    conn.commit()
             except Exception as company_err:
                 logger.debug(
                     "Company upsert failed for '%s' (non-fatal): %s",

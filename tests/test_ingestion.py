@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from job_finder.db import upsert_job
 from job_finder.models import Job
 from job_finder.web.db_migrate import run_migrations
 
@@ -212,7 +213,7 @@ class TestJobErrorIsolation:
 
         call_count = 0
 
-        def mock_upsert(job):
+        def mock_upsert(conn, job):
             nonlocal call_count
             call_count += 1
             if call_count == 2:  # second job fails
@@ -221,7 +222,7 @@ class TestJobErrorIsolation:
 
         with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
-             patch("job_finder.db.JobDB.upsert_job", side_effect=mock_upsert), \
+             patch("job_finder.web.pipeline_runner.upsert_job", side_effect=mock_upsert), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
             mock_gmail_instance = MockGmail.return_value
@@ -385,7 +386,7 @@ class TestFirstSeenEmailDate:
 
     def test_upsert_job_uses_posted_date_as_first_seen(self, migrated_db_path):
         """When a Job has posted_date set, upsert_job stores it as first_seen."""
-        from job_finder.db import JobDB
+        from job_finder.db import upsert_job
 
         # conftest migrated_db fixture yields (path, conn)
         # test_ingestion has its own migrated_db_path fixture that yields just path
@@ -405,18 +406,19 @@ class TestFirstSeenEmailDate:
                 posted_date=email_date,
             )
 
-            db = JobDB(path)
-            is_new = db.upsert_job(job)
-            db.conn.close()
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            is_new = upsert_job(conn, job)
+            conn.close()
 
             assert is_new is True
 
-            conn = sqlite3.connect(path)
-            row = conn.execute(
+            conn2 = sqlite3.connect(path)
+            row = conn2.execute(
                 "SELECT first_seen FROM jobs WHERE dedup_key = ?",
                 (job.dedup_key,),
             ).fetchone()
-            conn.close()
+            conn2.close()
 
             assert row is not None
             # first_seen should be the email date, not ingestion time
@@ -430,7 +432,7 @@ class TestFirstSeenEmailDate:
 
     def test_upsert_job_uses_now_when_posted_date_none(self, migrated_db_path):
         """When a Job has posted_date=None, upsert_job stores current time as first_seen."""
-        from job_finder.db import JobDB
+        from job_finder.db import upsert_job
 
         fd, path = __import__("tempfile").mkstemp(suffix=".db")
         __import__("os").close(fd)
@@ -448,10 +450,11 @@ class TestFirstSeenEmailDate:
                 posted_date=None,  # SerpAPI jobs have no email date
             )
 
-            db = JobDB(path)
-            db.upsert_job(job)
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            upsert_job(conn, job)
             after = datetime.now()
-            db.conn.close()
+            conn.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -483,12 +486,13 @@ class TestSmartUpsertJobMerge:
     """Tests for the smart upsert_job merge behavior added in Plan 06-02."""
 
     def _make_db(self):
-        """Create a fresh migrated temp DB, return (path, db_instance)."""
+        """Create a fresh migrated temp DB, return (path, conn)."""
         fd, path = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         run_migrations(path)
-        from job_finder.db import JobDB
-        return path, JobDB(path)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        return path, conn
 
     def test_insert_initializes_locations_raw(self):
         """INSERT branch stores initial location in locations_raw JSON array."""
@@ -501,8 +505,8 @@ class TestSmartUpsertJobMerge:
                 source="linkedin",
                 source_url="https://linkedin.com/jobs/1",
             )
-            db.upsert_job(job)
-            db.conn.close()
+            upsert_job(db, job)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -517,7 +521,7 @@ class TestSmartUpsertJobMerge:
             assert "San Francisco, CA" in locations_raw
         finally:
             try:
-                db.conn.close()
+                db.close()
             except Exception:
                 pass
             if os.path.exists(path):
@@ -542,9 +546,9 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            db.upsert_job(job1)
-            db.upsert_job(job2)
-            db.conn.close()
+            upsert_job(db, job1)
+            upsert_job(db, job2)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -580,9 +584,9 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            db.upsert_job(job1)
-            db.upsert_job(job2)
-            db.conn.close()
+            upsert_job(db, job1)
+            upsert_job(db, job2)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -616,9 +620,9 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            db.upsert_job(job1)
-            db.upsert_job(job2)
-            db.conn.close()
+            upsert_job(db, job1)
+            upsert_job(db, job2)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -656,9 +660,9 @@ class TestSmartUpsertJobMerge:
                 source_url="https://glassdoor.com/jobs/2",
                 description=short_desc,  # Substring of first
             )
-            db.upsert_job(job1)
-            db.upsert_job(job2)
-            db.conn.close()
+            upsert_job(db, job1)
+            upsert_job(db, job2)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(
@@ -698,9 +702,9 @@ class TestSmartUpsertJobMerge:
                 source_url="https://glassdoor.com/jobs/2",
                 description=desc2,
             )
-            db.upsert_job(job1)
-            db.upsert_job(job2)
-            db.conn.close()
+            upsert_job(db, job1)
+            upsert_job(db, job2)
+            db.close()
 
             conn = sqlite3.connect(path)
             row = conn.execute(

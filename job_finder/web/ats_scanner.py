@@ -1072,10 +1072,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 summary["jobs_discovered"] += company_jobs_found
 
                 # Upsert each matched job
-                from job_finder.db import JobDB
+                from job_finder.db import upsert_job
                 from job_finder.models import Job
 
-                db = JobDB(db_path)
+                scan_conn = sqlite3.connect(db_path)
+                scan_conn.row_factory = sqlite3.Row
                 try:
                     for job_dict in job_dicts:
                         try:
@@ -1105,7 +1106,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 salary_max=salary_max,
                                 description=job_dict.get("description") or "",
                             )
-                            is_new = db.upsert_job(job)
+                            is_new = upsert_job(scan_conn, job)
 
                             # Promote ATS description to jd_full (DQ-03)
                             raw_desc = job_dict.get("description") or ""
@@ -1141,7 +1142,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             logger.warning("ATS scan job error: %s", error_msg)
                 finally:
                     try:
-                        db.conn.close()
+                        scan_conn.close()
                     except Exception:
                         logger.debug("ats scan step failed", exc_info=True)
 
@@ -1255,10 +1256,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     company_html_found = len(scraped_jobs)
 
                     # Step 3: Create Job objects and upsert
-                    from job_finder.db import JobDB
+                    from job_finder.db import upsert_job
                     from job_finder.models import Job
 
-                    db = JobDB(db_path)
+                    html_conn = sqlite3.connect(db_path)
+                    html_conn.row_factory = sqlite3.Row
                     try:
                         for scraped_job in scraped_jobs:
                             try:
@@ -1272,7 +1274,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                     salary_max=None,
                                     description=scraped_job.get("description", ""),
                                 )
-                                is_new = db.upsert_job(job)
+                                is_new = upsert_job(html_conn, job)
                                 if is_new:
                                     summary["jobs_new"] += 1
                                     all_new_job_keys.append(job.dedup_key)
@@ -1283,7 +1285,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 logger.warning("ATS HTML fallback job error: %s", error_msg)
                     finally:
                         try:
-                            db.conn.close()
+                            html_conn.close()
                         except Exception:
                             logger.debug("html scan step failed", exc_info=True)
 

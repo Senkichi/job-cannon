@@ -26,7 +26,7 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
 )
-from job_finder.db import JobDB
+from job_finder.db import upsert_job, log_run
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.json_utils import safe_json_load
