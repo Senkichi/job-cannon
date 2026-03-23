@@ -5,7 +5,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, url_for
 
 from job_finder.db import (
     get_dashboard_stats,
@@ -135,8 +135,6 @@ def index():
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
 def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("dashboard.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     cost_stats = get_cost_stats(conn)
