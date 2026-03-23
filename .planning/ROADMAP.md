@@ -84,7 +84,12 @@ Plans:
   3. Job upsert deduplicates descriptions, keeps the longer, and eagerly promotes jd_full for descriptions >200 chars
   4. A scoring_orchestrator module exists and centralizes haiku/sonnet scoring with persist helpers
   5. Claude API calls accept a configurable timeout (default 120s) and unknown model pricing falls back with a warning instead of raising KeyError
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Rewrite db.py: remove JobDB class, add column constants, smart merging, persist helpers, multi-select
+- [ ] 07-02-PLAN.md — Harden claude_client (timeout, pricing fallback), create description_formatter, update app factory
+- [ ] 07-03-PLAN.md — Create scoring_orchestrator, update ats_scanner to remove JobDB usage
 
 ### Phase 8: Consumers
 **Goal**: All modules that call db.py, scorers, or scheduler are updated to use the new APIs
@@ -133,7 +138,7 @@ Plans:
 | 4. Resume Generation | v1.0 | 0/? | Deferred | - |
 | 5. Intelligence | v1.0 | 0/? | Deferred | - |
 | 6. Foundation Types & Constants | v1.1 | 0/2 | Planning complete | - |
-| 7. Core Module Refactors | v1.1 | 0/? | Not started | - |
+| 7. Core Module Refactors | v1.1 | 0/3 | Planning complete | - |
 | 8. Consumers | v1.1 | 0/? | Not started | - |
 | 9. Blueprints + Multi-Select Filter | v1.1 | 0/? | Not started | - |
 | 10. Safety, Tests & Cleanup | v1.1 | 0/? | Not started | - |
