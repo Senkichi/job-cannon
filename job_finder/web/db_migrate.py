@@ -390,6 +390,14 @@ MIGRATIONS = [
         # Fix C: Promote long descriptions to jd_full
         "UPDATE jobs SET jd_full = SUBSTR(description, 1, 8000) WHERE jd_full IS NULL AND description IS NOT NULL AND LENGTH(description) > 200",
     ],
+
+    # Migration 16: Add company enrichment columns to companies table.
+    # enrich_company_info() returns company_size and industry from DuckDuckGo —
+    # previously discarded; now persisted for scoring context and UI display.
+    [
+        "ALTER TABLE companies ADD COLUMN company_size TEXT DEFAULT NULL",
+        "ALTER TABLE companies ADD COLUMN industry TEXT DEFAULT NULL",
+    ],
 ]
 
 
