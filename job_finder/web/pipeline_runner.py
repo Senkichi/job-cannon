@@ -507,16 +507,17 @@ def _run_haiku_scoring(
 
                 # --- Haiku scoring (now uses enriched data) ---
                 result = score_job_haiku(client, job_row, profile, conn, config)
-                if result is None:
+                if result.status != "success" or result.data is None:
                     logger.debug(
-                        "Haiku: no result for '%s' @ '%s' -- skipping",
+                        "Haiku: no result for '%s' @ '%s' (status=%s) -- skipping",
                         job_row.get("title"),
                         job_row.get("company"),
+                        result.status,
                     )
                     continue
 
-                score = result.get("score", 0)
-                summary_text = result.get("summary", "")
+                score = result.data.get("score", 0)
+                summary_text = result.data.get("summary", "")
 
                 conn.execute(
                     "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
@@ -540,9 +541,9 @@ def _run_haiku_scoring(
                         client, job_row, profile, conn, config,
                         max_chars=4000, purpose="haiku_reeval",
                     )
-                    if reeval_result is not None:
-                        score = reeval_result.get("score", 0)
-                        summary_text = reeval_result.get("summary", "")
+                    if reeval_result.status == "success" and reeval_result.data is not None:
+                        score = reeval_result.data.get("score", 0)
+                        summary_text = reeval_result.data.get("summary", "")
                         # Update DB with re-eval score (replaces initial borderline score)
                         conn.execute(
                             "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
@@ -649,16 +650,17 @@ def _run_sonnet_evaluation(
 
                 # Run Sonnet evaluation
                 result = evaluate_job_sonnet(client, job_row, experience_profile=profile, conn=conn, config=config)
-                if result is None:
+                if result.status != "success" or result.data is None:
                     logger.info(
-                        "Sonnet eval returned None for '%s' @ '%s' (budget or JD missing)",
+                        "Sonnet eval returned non-success for '%s' @ '%s' (status=%s)",
                         job_row.get("title"),
                         job_row.get("company"),
+                        result.status,
                     )
                     continue
 
-                sonnet_score = result.get("score")
-                fit_analysis = json.dumps(result.get("fit_analysis", {}))
+                sonnet_score = result.data.get("score")
+                fit_analysis = json.dumps(result.data.get("fit_analysis", {}))
 
                 conn.execute(
                     "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",

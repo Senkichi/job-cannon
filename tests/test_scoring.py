@@ -628,15 +628,20 @@ class TestHaikuPipelineIntegration:
         }
 
     def _make_mock_score_job_haiku(self, score: int = 72):
-        """Return a mock score_job_haiku function that returns a fixed score."""
-        def _mock(client, job_row, profile, conn, config):
-            return {
-                "score": score,
-                "summary": f"Mock score {score}",
-                "title_fit": "strong" if score >= 70 else "partial",
-                "location_fit": "remote",
-                "salary_meets_floor": True,
-            }
+        """Return a mock score_job_haiku function that returns a ScoringResult."""
+        from job_finder.web.scoring_types import ScoringResult
+
+        def _mock(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            return ScoringResult(
+                data={
+                    "score": score,
+                    "summary": f"Mock score {score}",
+                    "title_fit": "strong" if score >= 70 else "partial",
+                    "location_fit": "remote",
+                    "salary_meets_floor": True,
+                },
+                status="success",
+            )
         return _mock
 
     def test_haiku_scoring_runs_after_ingestion(self, migrated_db, pipeline_config):
@@ -763,17 +768,21 @@ class TestHaikuPipelineIntegration:
 
         call_count = {"n": 0}
 
-        def flaky_score(client, job_row, profile, conn, config):
+        def flaky_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
-                return None  # First job fails (returns None)
-            return {
-                "score": 65,
-                "summary": "Good match",
-                "title_fit": "partial",
-                "location_fit": "remote",
-                "salary_meets_floor": True,
-            }
+                return ScoringResult(data=None, status="error")  # First job fails
+            return ScoringResult(
+                data={
+                    "score": 65,
+                    "summary": "Good match",
+                    "title_fit": "partial",
+                    "location_fit": "remote",
+                    "salary_meets_floor": True,
+                },
+                status="success",
+            )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku",
                    side_effect=flaky_score), \
@@ -842,10 +851,14 @@ class TestExclusionFilterIntegration:
 
         score_call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config):
+        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             score_call_count["n"] += 1
-            return {"score": 72, "summary": "Good", "title_fit": "strong",
-                    "location_fit": "remote", "salary_meets_floor": True}
+            return ScoringResult(
+                data={"score": 72, "summary": "Good", "title_fit": "strong",
+                      "location_fit": "remote", "salary_meets_floor": True},
+                status="success",
+            )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku",
                    side_effect=mock_score), \
@@ -887,10 +900,14 @@ class TestExclusionFilterIntegration:
 
         score_call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config):
+        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             score_call_count["n"] += 1
-            return {"score": 75, "summary": "Good match", "title_fit": "strong",
-                    "location_fit": "remote", "salary_meets_floor": True}
+            return ScoringResult(
+                data={"score": 75, "summary": "Good match", "title_fit": "strong",
+                      "location_fit": "remote", "salary_meets_floor": True},
+                status="success",
+            )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku",
                    side_effect=mock_score), \
@@ -1180,17 +1197,21 @@ class TestSonnetPipelineIntegration:
 
     @pytest.fixture
     def mock_sonnet_result(self):
-        """Standard Sonnet evaluation result for mocking."""
-        return {
-            "score": 85,
-            "summary": "Excellent match -- strong A/B testing background aligns well.",
-            "fit_analysis": {
-                "strengths": ["A/B testing expertise", "Python proficiency"],
-                "gaps": ["No healthcare background"],
-                "talking_points": ["Led experimentation platform"],
-                "resume_priority_skills": ["causal inference", "Python"],
+        """Standard Sonnet evaluation result for mocking (ScoringResult NamedTuple)."""
+        from job_finder.web.scoring_types import ScoringResult
+        return ScoringResult(
+            data={
+                "score": 85,
+                "summary": "Excellent match -- strong A/B testing background aligns well.",
+                "fit_analysis": {
+                    "strengths": ["A/B testing expertise", "Python proficiency"],
+                    "gaps": ["No healthcare background"],
+                    "talking_points": ["Led experimentation platform"],
+                    "resume_priority_skills": ["causal inference", "Python"],
+                },
             },
-        }
+            status="success",
+        )
 
     def test_uses_existing_jd_full_for_sonnet(self, job_with_jd, pipeline_config, mock_sonnet_result):
         """_run_sonnet_evaluation uses pre-populated jd_full (set by enrich_job before Haiku).
@@ -1677,15 +1698,22 @@ class TestBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
                 # Initial call: borderline score
-                return {"score": 48, "summary": "Initial borderline", "title_fit": "partial",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 48, "summary": "Initial borderline", "title_fit": "partial",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
             else:
                 # Re-eval call: higher score
-                return {"score": 60, "summary": "Re-eval improved", "title_fit": "strong",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 60, "summary": "Re-eval improved", "title_fit": "strong",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
@@ -1714,14 +1742,21 @@ class TestBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
-                return {"score": 48, "summary": "Initial borderline", "title_fit": "partial",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 48, "summary": "Initial borderline", "title_fit": "partial",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
             else:
                 # Re-eval: drops below threshold
-                return {"score": 38, "summary": "Re-eval confirms weak fit", "title_fit": "weak",
-                        "location_fit": "other", "salary_meets_floor": False}
+                return ScoringResult(
+                    data={"score": 38, "summary": "Re-eval confirms weak fit", "title_fit": "weak",
+                          "location_fit": "other", "salary_meets_floor": False},
+                    status="success",
+                )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
@@ -1750,9 +1785,13 @@ class TestBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
-            return {"score": 65, "summary": "Good match above band", "title_fit": "strong",
-                    "location_fit": "remote", "salary_meets_floor": True}
+            return ScoringResult(
+                data={"score": 65, "summary": "Good match above band", "title_fit": "strong",
+                      "location_fit": "remote", "salary_meets_floor": True},
+                status="success",
+            )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
@@ -1775,9 +1814,13 @@ class TestBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
-            return {"score": 30, "summary": "Poor fit", "title_fit": "reject",
-                    "location_fit": "other", "salary_meets_floor": False}
+            return ScoringResult(
+                data={"score": 30, "summary": "Poor fit", "title_fit": "reject",
+                      "location_fit": "other", "salary_meets_floor": False},
+                status="success",
+            )
 
         with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
