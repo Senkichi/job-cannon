@@ -410,7 +410,7 @@ def test_migration_count_is_thirteen():
     updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 15
+    assert len(MIGRATIONS) == 16
 
 
 class TestMigration13:

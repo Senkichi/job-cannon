@@ -38,18 +38,3 @@ class Job:
         from job_finder.web.dedup_normalizer import normalized_dedup_key
         return normalized_dedup_key(self.company, self.title)
 
-    def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "company": self.company,
-            "location": self.location,
-            "source": self.source,
-            "source_url": self.source_url,
-            "source_id": self.source_id,
-            "salary_min": self.salary_min,
-            "salary_max": self.salary_max,
-            "description": self.description,
-            "posted_date": self.posted_date.isoformat() if self.posted_date else None,
-            "fetched_date": self.fetched_date.isoformat(),
-            "score": self.score,
-        }
