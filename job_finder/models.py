@@ -26,6 +26,12 @@ class Job:
     score: float = 0.0
     score_breakdown: dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        if not self.title.strip():
+            raise ValueError("Job title cannot be empty")
+        if not self.company.strip():
+            raise ValueError("Job company cannot be empty")
+
     # Dedup key
     @property
     def dedup_key(self) -> str:
