@@ -14,40 +14,40 @@ Requirements for milestone v1.1: Port job-finder improvements. Each maps to road
 - [x] **REFAC-03**: Smart description merging on upsert (substring dedup, keep longer, eager jd_full promotion)
 - [x] **REFAC-04**: Scoring orchestrator centralizes haiku/sonnet scoring flow with persist helpers
 - [x] **REFAC-05**: Description formatter extracted from app factory into dedicated module
-- [ ] **REFAC-06**: Scheduler uses closure factories (_make_simple_job, _make_tracked_job) instead of boilerplate
+- [x] **REFAC-06**: Scheduler uses closure factories (_make_simple_job, _make_tracked_job) instead of boilerplate
 
 ### Safety
 
 - [x] **SAFE-01**: Claude API calls have configurable timeout (default 120s)
 - [x] **SAFE-02**: Unknown model pricing falls back conservatively with warning log instead of KeyError
-- [ ] **SAFE-03**: Gmail message fetch has 500-message pagination cap
-- [ ] **SAFE-04**: Pipeline status changes validated against VALID_PIPELINE_STATUSES frozenset
-- [ ] **SAFE-05**: Query string params use _safe_float/_safe_int validators (HTTP 400 on malformed)
+- [x] **SAFE-03**: Gmail message fetch has 500-message pagination cap
+- [x] **SAFE-04**: Pipeline status changes validated against VALID_PIPELINE_STATUSES frozenset
+- [x] **SAFE-05**: Query string params use _safe_float/_safe_int validators (HTTP 400 on malformed)
 - [x] **SAFE-06**: Flask secret key generated via secrets.token_hex(32)
 
 ### Blueprints
 
-- [ ] **BP-01**: Fragment routes have HX-Request header guards (dismiss, return, expand, collapse, save_jd)
-- [ ] **BP-02**: Batch scoring has 30-minute timeout safety net for stuck sessions
-- [ ] **BP-03**: Settings guidelines_path uses correct parent depth (parent.parent.parent.parent)
-- [ ] **BP-04**: Sonnet empty-field protection preserves existing values
-- [ ] **BP-05**: cost_stats budget_cap is configurable via caller
+- [x] **BP-01**: Fragment routes have HX-Request header guards (dismiss, return, expand, collapse, save_jd)
+- [x] **BP-02**: Batch scoring has 30-minute timeout safety net for stuck sessions
+- [x] **BP-03**: Settings guidelines_path uses correct parent depth (parent.parent.parent.parent)
+- [x] **BP-04**: Sonnet empty-field protection preserves existing values
+- [x] **BP-05**: cost_stats budget_cap is configurable via caller
 
 ### Filter
 
-- [ ] **FILT-01**: User can select multiple pipeline statuses simultaneously via checkbox pills
-- [ ] **FILT-02**: "All" toggle button checks/unchecks all status filters
+- [x] **FILT-01**: User can select multiple pipeline statuses simultaneously via checkbox pills
+- [x] **FILT-02**: "All" toggle button checks/unchecks all status filters
 - [x] **FILT-03**: Multi-status selection builds IN clause in db query
-- [ ] **FILT-04**: Date filter clearing triggers table refresh (hx-trigger change from:input)
+- [x] **FILT-04**: Date filter clearing triggers table refresh (hx-trigger change from:input)
 
 ### Cleanup
 
-- [ ] **CLN-01**: Dead modules removed: main.py, scoring/ package, utils.py, output/
-- [ ] **CLN-02**: Scorers return ScoringResult instead of raw dict
-- [ ] **CLN-03**: Scorer profile param renamed to experience_profile
-- [ ] **CLN-04**: Dead to_dict() method removed from Job model
-- [ ] **CLN-05**: New db migration adds company_size and industry columns to companies table
-- [ ] **CLN-06**: Tests updated for new API (module-level db functions, ScoringResult, experience_profile)
+- [x] **CLN-01**: Dead modules removed: main.py, ~~scoring/ package,~~ utils.py, output/ (scoring/ retained — actively used by pipeline_runner.py)
+- [x] **CLN-02**: Scorers return ScoringResult instead of raw dict
+- [x] **CLN-03**: Scorer profile param renamed to experience_profile
+- [x] **CLN-04**: Dead to_dict() method removed from Job model
+- [x] **CLN-05**: New db migration adds company_size and industry columns to companies table
+- [x] **CLN-06**: Tests updated for new API (module-level db functions, ScoringResult, experience_profile)
 
 ## Future Requirements
 
@@ -80,35 +80,35 @@ Requirements for milestone v1.1: Port job-finder improvements. Each maps to road
 | REFAC-03 | Phase 7 | Satisfied |
 | REFAC-04 | Phase 7 | Satisfied |
 | REFAC-05 | Phase 7 | Satisfied |
-| REFAC-06 | Phase 11 | Pending |
+| REFAC-06 | Phase 11 | Complete |
 | SAFE-01 | Phase 7 | Satisfied |
 | SAFE-02 | Phase 7 | Satisfied |
-| SAFE-03 | Phase 11 | Pending |
-| SAFE-04 | Phase 12 | Pending |
-| SAFE-05 | Phase 12 | Pending |
+| SAFE-03 | Phase 11 | Complete |
+| SAFE-04 | Phase 10 | Satisfied |
+| SAFE-05 | Phase 9 | Satisfied |
 | SAFE-06 | Phase 6 | Satisfied |
-| BP-01 | Phase 12 | Pending |
-| BP-02 | Phase 12 | Pending |
-| BP-03 | Phase 12 | Pending |
-| BP-04 | Phase 12 | Pending |
-| BP-05 | Phase 12 | Pending |
-| FILT-01 | Phase 12 | Pending |
-| FILT-02 | Phase 12 | Pending |
+| BP-01 | Phase 9 | Satisfied |
+| BP-02 | Phase 9 | Satisfied |
+| BP-03 | Phase 9 | Satisfied |
+| BP-04 | Phase 9 | Satisfied |
+| BP-05 | Phase 9 | Satisfied |
+| FILT-01 | Phase 9 | Satisfied |
+| FILT-02 | Phase 9 | Satisfied |
 | FILT-03 | Phase 7 | Satisfied |
-| FILT-04 | Phase 12 | Pending |
-| CLN-01 | Phase 12 | Pending |
-| CLN-02 | Phase 11 | Pending |
-| CLN-03 | Phase 12 | Pending |
-| CLN-04 | Phase 12 | Pending |
-| CLN-05 | Phase 12 | Pending |
-| CLN-06 | Phase 11 | Pending |
+| FILT-04 | Phase 9 | Satisfied |
+| CLN-01 | Phase 10 | Satisfied |
+| CLN-02 | Phase 11 | Satisfied |
+| CLN-03 | Phase 8 | Satisfied |
+| CLN-04 | Phase 10 | Satisfied |
+| CLN-05 | Phase 10 | Satisfied |
+| CLN-06 | Phase 11 | Satisfied |
 
 **Coverage:**
 - v1.1 requirements: 27 total
-- Satisfied: 9 (REFAC-01→05, SAFE-01, SAFE-02, SAFE-06, FILT-03)
-- Pending (gap closure): 18 (Phase 11: 4, Phase 12: 14)
+- Satisfied: 27 (all v1.1 requirements)
+- Pending: 0
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after gap closure phase creation*
+*Last updated: 2026-03-23 after Phase 12 verification backfill*
