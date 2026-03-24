@@ -121,12 +121,12 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
                 "ANTHROPIC_API_KEY is not set. AI scoring and resume generation will not work. "
                 "Add it to your .env file: ANTHROPIC_API_KEY=sk-ant-..."
             )
-        from job_finder.web.db_migrate import (
-            _run_description_reformat_once,
-            _run_data_backfills_once,
+        from job_finder.web.startup_backfills import (
+            run_description_reformat_once,
+            run_data_backfills_once,
         )
-        _run_description_reformat_once(app.config["DB_PATH"], cfg)
-        _run_data_backfills_once(app.config["DB_PATH"], cfg)
+        run_description_reformat_once(app.config["DB_PATH"], cfg)
+        run_data_backfills_once(app.config["DB_PATH"], cfg)
 
     # --- Jinja2 globals: centralized config defaults ---
     app.jinja_env.globals["DEFAULT_HAIKU_THRESHOLD"] = DEFAULT_HAIKU_THRESHOLD
