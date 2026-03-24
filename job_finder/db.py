@@ -1,10 +1,11 @@
 """SQLite persistence layer for job deduplication and run history."""
 
+from __future__ import annotations
+
 import json
 import re
 import sqlite3
 from datetime import datetime, date
-from typing import Optional
 
 from job_finder.models import Job
 from job_finder.json_utils import safe_json_load, utc_now_iso
@@ -30,7 +31,7 @@ _UPSERT_MERGE_COLUMNS = (
 )
 
 
-def _merge_description(existing: Optional[str], new: Optional[str]) -> Optional[str]:
+def _merge_description(existing: str | None, new: str | None) -> str | None:
     """Merge two description strings — single source of truth for description merge logic.
 
     Also used iteratively by dedup_normalizer._merge_descriptions for N-way merges.
@@ -275,7 +276,7 @@ def persist_sonnet_score(
     conn.commit()
 
 
-def get_job(conn: sqlite3.Connection, dedup_key: str) -> Optional[dict]:
+def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
     """Return a single job by dedup_key, or None if not found.
 
     Args:
@@ -292,7 +293,7 @@ def get_job(conn: sqlite3.Connection, dedup_key: str) -> Optional[dict]:
     return dict(row) if row is not None else None
 
 
-def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> Optional[dict]:
+def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
     """Load the standard job context bundle: job + resume_history + prep_row.
 
     Shared helper for expand, rescore, paste_jd, and quick_apply routes.
@@ -516,14 +517,14 @@ def update_pipeline_status(
 
 def get_filtered_jobs(
     conn: sqlite3.Connection,
-    status: Optional[str | list[str]] = None,
-    location: Optional[str] = None,
-    min_score: Optional[float] = None,
-    max_score: Optional[float] = None,
-    salary_min: Optional[int] = None,
-    source: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    status: str | list[str] | None = None,
+    location: str | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    salary_min: int | None = None,
+    source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     sort_by: str = "score",
     sort_dir: str = "DESC",
     limit: int = 100,

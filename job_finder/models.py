@@ -1,8 +1,9 @@
 """Data models for Job Finder."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -16,10 +17,10 @@ class Job:
     source_url: str
     source_id: str = ""  # platform-specific job ID
 
-    salary_min: Optional[int] = None
-    salary_max: Optional[int] = None
-    description: Optional[str] = None
-    posted_date: Optional[datetime] = None
+    salary_min: int | None = None
+    salary_max: int | None = None
+    description: str | None = None
+    posted_date: datetime | None = None
     fetched_date: datetime = field(default_factory=datetime.now)
 
     # Scoring (populated by scorer)
