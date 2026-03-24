@@ -6,6 +6,7 @@ Provides:
 - cost_gate: Check whether a model tier is allowed given the monthly budget.
 - get_cost_stats: Aggregate cost data by time period and feature/purpose.
 - call_claude: Convenience wrapper for API calls with automatic cost recording.
+- ClaudeContext: Dataclass bundling the (client, conn, config) triple for call_claude.
 - BudgetExceededError: Raised by call_claude when the budget cap is exceeded.
 
 Model pricing (per million tokens):
@@ -16,6 +17,7 @@ Model pricing (per million tokens):
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -38,6 +40,21 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 
 class BudgetExceededError(Exception):
     """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeContext:
+    """Invariant triple threaded through every call_claude invocation.
+
+    Bundles the Anthropic client, database connection, and app config that
+    every caller assembles identically.  Passing a single ClaudeContext
+    instead of three separate parameters reduces call_claude's argument
+    count and eliminates repeated parameter threading.
+    """
+
+    client: Any
+    conn: sqlite3.Connection
+    config: dict
 
 
 # ---------------------------------------------------------------------------
@@ -290,32 +307,44 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def call_claude(
-    client: Any,
-    model: str,
-    system: str,
-    messages: list[dict],
-    output_schema: dict | None,
-    conn: sqlite3.Connection,
-    job_id: str | None,
-    purpose: str,
-    config: dict,
+    client: Any | None = None,
+    model: str = "",
+    system: str = "",
+    messages: list[dict] | None = None,
+    output_schema: dict | None = None,
+    conn: sqlite3.Connection | None = None,
+    job_id: str | None = None,
+    purpose: str = "",
+    config: dict | None = None,
     max_tokens: int = 1024,
     timeout: float | None = None,
+    *,
+    ctx: ClaudeContext | None = None,
 ) -> tuple[dict, float]:
     """Call Claude API with cost gating and automatic cost recording.
 
+    Accepts the Anthropic client, database connection, and config either as
+    individual parameters (legacy) or bundled in a ``ClaudeContext`` via the
+    keyword-only ``ctx`` argument.  When ``ctx`` is provided its fields take
+    precedence over the corresponding positional parameters.
+
     Args:
         client: Anthropic client instance (injected for testability).
+            Ignored when *ctx* is provided.
         model: Full model identifier, e.g. "claude-haiku-4-5".
         system: System prompt string.
         messages: List of message dicts [{role, content}].
         output_schema: JSON schema dict for structured output (or None).
         conn: Open SQLite connection for cost recording.
+            Ignored when *ctx* is provided.
         job_id: Job dedup_key for cost attribution (nullable).
         purpose: Feature label for cost attribution.
         config: Application config dict.
+            Ignored when *ctx* is provided.
         max_tokens: Maximum output tokens. Defaults to 1024.
         timeout: Request timeout in seconds.  Defaults to DEFAULT_API_TIMEOUT_SECONDS (120).
+        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
+            the individual client/conn/config parameters are ignored.
 
     Returns:
         Tuple of (parsed_json_result: dict, cost_usd: float).
@@ -323,6 +352,12 @@ def call_claude(
     Raises:
         BudgetExceededError: If cost_gate blocks the call.
     """
+    # Resolve context: prefer ctx fields over individual params
+    if ctx is not None:
+        client = ctx.client
+        conn = ctx.conn
+        config = ctx.config
+
     # Determine model tier for gating
     if "haiku" in model.lower():
         tier = "haiku"
