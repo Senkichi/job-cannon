@@ -99,7 +99,7 @@ class TestPipelineRunnerLogLevels:
                     with patch.object(runner_module, "_fetch_serpapi", return_value=[]):
                         with patch.object(runner_module, "_check_budget_alert"):
                             with caplog.at_level(logging.DEBUG, logger="job_finder.web.pipeline_runner"):
-                                runner_module.run_ingestion(config, db_path)
+                                runner_module.run_ingestion(db_path, config)
             finally:
                 if os.path.exists(db_path):
                     os.remove(db_path)

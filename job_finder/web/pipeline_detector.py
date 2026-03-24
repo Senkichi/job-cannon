@@ -128,14 +128,14 @@ TITLE_STOP_WORDS = {
 # ---------------------------------------------------------------------------
 
 
-def run_pipeline_detection(config: dict, db_path: str) -> dict:
+def run_pipeline_detection(db_path: str, config: dict) -> dict:
     """Scan Gmail for pipeline emails and process matches.
 
     Creates its own SQLite connection (thread-safe for APScheduler).
 
     Args:
-        config: Full JF_CONFIG dict.
         db_path: Path to the SQLite database file.
+        config: Full JF_CONFIG dict.
 
     Returns:
         Summary dict with keys:

@@ -670,7 +670,7 @@ class TestHaikuPipelineIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         # Verify the job was scored
         assert summary["haiku_scored"] == 1
@@ -707,7 +707,7 @@ class TestHaikuPipelineIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         assert summary["sonnet_queued"] == 1
         assert len(summary["sonnet_queue"]) == 1
@@ -737,7 +737,7 @@ class TestHaikuPipelineIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         assert summary["sonnet_queued"] == 0
         assert summary["sonnet_queue"] == []
@@ -790,7 +790,7 @@ class TestHaikuPipelineIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[job1, job2]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         # Both jobs were attempted; 1 was successfully scored
         assert summary["haiku_scored"] == 1
@@ -866,7 +866,7 @@ class TestExclusionFilterIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[excluded_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         # score_job_haiku must NOT have been called for the excluded job
         assert score_call_count["n"] == 0
@@ -915,7 +915,7 @@ class TestExclusionFilterIntegration:
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[good_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
-            summary = run_ingestion(pipeline_config, path)
+            summary = run_ingestion(path, pipeline_config)
 
         # score_job_haiku must have been called for the non-excluded job
         assert score_call_count["n"] == 1

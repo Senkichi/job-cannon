@@ -63,15 +63,15 @@ logger = logging.getLogger(__name__)
 _last_budget_pct_notified: float = 0.0
 
 
-def run_ingestion(config: dict, db_path: str) -> dict:
+def run_ingestion(db_path: str, config: dict) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
 
     Creates its own SQLite connection (thread-safe: called from APScheduler
     background thread, not the Flask request thread).
 
     Args:
-        config: Full JF_CONFIG dict (profile + scoring + sources sections).
         db_path: Absolute path to the SQLite database file.
+        config: Full JF_CONFIG dict (profile + scoring + sources sections).
 
     Returns:
         Summary dict with keys:

@@ -105,7 +105,7 @@ class TestEmailParseLog:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Verify email_parse_log has an entry
         conn = sqlite3.connect(migrated_db_path)
@@ -127,7 +127,7 @@ class TestEmailParseLog:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Verify error is in summary
         assert len(summary["gmail_errors"]) >= 1
@@ -161,7 +161,7 @@ class TestSourceErrorIsolation:
             mock_serp_instance.fetch_jobs.return_value = serpapi_jobs
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Gmail should have errored
         assert len(summary["gmail_errors"]) >= 1
@@ -186,7 +186,7 @@ class TestSourceErrorIsolation:
             MockSerpAPI.side_effect = Exception("SerpAPI quota exceeded")
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # SerpAPI should have errored
         assert len(summary["serpapi_errors"]) >= 1
@@ -230,7 +230,7 @@ class TestJobErrorIsolation:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Should have 1 error for the failing job
         assert len(summary["job_errors"]) == 1
@@ -253,7 +253,7 @@ class TestSummaryDict:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         expected_keys = {
             "gmail_fetched",
@@ -282,7 +282,7 @@ class TestSummaryDict:
             MockSerpAPI.return_value.fetch_jobs.return_value = serp_jobs
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         assert summary["gmail_fetched"] == 1
         assert summary["serpapi_fetched"] == 1
@@ -299,7 +299,7 @@ class TestSummaryDict:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         assert summary["gmail_fetched"] == 0
         assert summary["serpapi_fetched"] == 0
@@ -775,7 +775,7 @@ class TestCompanyAutoPopulation:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            run_ingestion(minimal_config, migrated_db_path)
+            run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
@@ -811,7 +811,7 @@ class TestCompanyAutoPopulation:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            run_ingestion(minimal_config, migrated_db_path)
+            run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
@@ -850,7 +850,7 @@ class TestCompanyAutoPopulation:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            summary = run_ingestion(minimal_config, migrated_db_path)
+            summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Ingestion should complete successfully despite company upsert failure
         assert summary["jobs_new"] >= 1
@@ -876,7 +876,7 @@ class TestCompanyAutoPopulation:
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
-            run_ingestion(minimal_config, migrated_db_path)
+            run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
