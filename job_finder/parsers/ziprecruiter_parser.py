@@ -23,7 +23,11 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import is_meta_email as _is_meta_email
+from job_finder.parsers._common import (
+    is_meta_email as _is_meta_email,
+    looks_like_salary_text as _looks_like_salary_text,
+    parse_salary_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +44,6 @@ ZIPRECRUITER_JOB_URL_RE = re.compile(
     r"ziprecruiter\.com/(jobs|apply|job|c/[^/]+/Job)/",
     re.IGNORECASE,
 )
-
-# Salary pattern: "$120K - $150K" or "$120,000 - $150,000"
-SALARY_RE = re.compile(r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\s*[Kk]?")
-
 
 def parse_ziprecruiter_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
     """Parse a ZipRecruiter job alert email body (HTML) into Job objects.
@@ -303,29 +303,8 @@ def _extract_job_id(url: str) -> str:
 
 
 def _extract_salary(text: str) -> tuple[Optional[int], Optional[int]]:
-    """Parse salary from text. Handles '$120K - $150K' and '$120,000 - $150,000'."""
-    match = SALARY_RE.search(text)
-    if not match:
-        return None, None
+    """Parse salary from text.
 
-    low_str = match.group(1).replace(",", "")
-    high_str = match.group(2).replace(",", "")
-
-    try:
-        low = int(low_str)
-        high = int(high_str)
-    except ValueError:
-        return None, None
-
-    # Convert K-notation to full values
-    if low < 1000:
-        low *= 1000
-    if high < 1000:
-        high *= 1000
-
-    return low, high
-
-
-def _looks_like_salary_text(text: str) -> bool:
-    """Check if text looks like a salary value."""
-    return bool(re.search(r"\$\d+", text))
+    Delegates to the shared ``parse_salary_range`` in ``_common.py``.
+    """
+    return parse_salary_range(text)
