@@ -478,7 +478,7 @@ def update_pipeline_status(
     Raises:
         ValueError: If new_status is not a recognized pipeline status.
     """
-    from job_finder.web.blueprints import VALID_PIPELINE_STATUSES
+    from job_finder.constants import VALID_PIPELINE_STATUSES
 
     if new_status not in VALID_PIPELINE_STATUSES:
         raise ValueError(

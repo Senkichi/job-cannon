@@ -2,21 +2,7 @@
 
 import threading
 
-PIPELINE_STATUSES = (
-    "discovered",
-    "reviewing",
-    "applied",
-    "phone_screen",
-    "technical",
-    "onsite",
-    "offer",
-    "accepted",
-    "archived",
-    "rejected",
-    "withdrawn",
-)
-
-VALID_PIPELINE_STATUSES = frozenset(PIPELINE_STATUSES)
+from job_finder.constants import PIPELINE_STATUSES, VALID_PIPELINE_STATUSES  # noqa: F401 — re-exported
 
 
 def trigger_interview_prep_if_applied(
