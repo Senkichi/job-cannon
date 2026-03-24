@@ -19,6 +19,7 @@ import requests
 
 from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
+from job_finder.web.scoring_orchestrator import load_scoring_profile
 
 logger = logging.getLogger(__name__)
 
@@ -124,16 +125,6 @@ def _fetch_company_info(company_name: str, config: dict) -> str:
 # Background interview prep generation
 # ---------------------------------------------------------------------------
 
-def _load_profile() -> dict:
-    """Load experience profile from disk. Returns empty dict if unavailable."""
-    try:
-        with open("experience_profile.json", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.debug("Could not load experience_profile.json: %s", e)
-        return {}
-
-
 def generate_interview_prep_background(
     dedup_key: str,
     db_path: str,
@@ -218,7 +209,7 @@ def _run_prep_generation(
             fit_analysis = {}
 
         # --- Load experience profile ---
-        profile = _load_profile()
+        profile = load_scoring_profile(config)
 
         # --- Fetch company info via SerpAPI (best-effort) ---
         company_info = _fetch_company_info(company, config)

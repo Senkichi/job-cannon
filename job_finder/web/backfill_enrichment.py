@@ -33,6 +33,7 @@ from typing import Any, Optional
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
+from job_finder.web.scoring_orchestrator import load_scoring_profile
 from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
 from job_finder.web.haiku_scorer import score_job_haiku
 
@@ -281,7 +282,7 @@ def run_sonnet_backfill(
     evaluated_count = 0
 
     # Load profile for Sonnet evaluation
-    profile = _load_profile(config)
+    profile = load_scoring_profile(config)
 
     for i, row in enumerate(rows, start=1):
         job_row = dict(row)
@@ -356,7 +357,7 @@ def run_borderline_rescore(
     rescored_count = 0
 
     # Load profile for Haiku scoring
-    profile = _load_profile(config)
+    profile = load_scoring_profile(config)
 
     haiku_threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
 
@@ -451,34 +452,6 @@ def main() -> None:
 
     finally:
         conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-
-def _load_profile(config: dict) -> dict:
-    """Load the experience profile from disk, or return empty dict on failure.
-
-    Args:
-        config: Application config dict.
-
-    Returns:
-        Profile dict or empty dict if not found.
-    """
-    import os
-
-    profile_path = config.get("profile_path", "experience_profile.json")
-    if not os.path.exists(profile_path):
-        return {}
-
-    try:
-        with open(profile_path, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("Failed to load profile from '%s': %s", profile_path, e)
-        return {}
 
 
 if __name__ == "__main__":

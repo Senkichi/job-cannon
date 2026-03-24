@@ -397,28 +397,6 @@ def _log_to_email_parse_log(
         logger.warning("Failed to write to email_parse_log: %s", e)
 
 
-def _load_profile(config: dict) -> dict:
-    """Load experience profile from disk.
-
-    Args:
-        config: Application config dict. Reads scoring.profile_path or defaults
-                to "experience_profile.json" in the working directory.
-
-    Returns:
-        Profile dict, or empty dict if file not found.
-    """
-    profile_path = (
-        config.get("scoring", {}).get("profile_path")
-        or "experience_profile.json"
-    )
-    try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.warning("Could not load experience profile from '%s': %s", profile_path, e)
-        return {}
-
-
 def _run_haiku_scoring(
     new_job_keys: list[str],
     config: dict,

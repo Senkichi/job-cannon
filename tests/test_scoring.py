@@ -1912,7 +1912,7 @@ class TestBatchHaikuBorderlineReeval:
                         "location_fit": "remote", "salary_meets_floor": True}
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner._load_profile", return_value={}), \
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
              patch("anthropic.Anthropic") as mock_anthropic_cls:
             mock_anthropic_cls.return_value = MagicMock()
             _run_batch_haiku_bg(path, session_id, batch_config)
@@ -1944,7 +1944,7 @@ class TestBatchHaikuBorderlineReeval:
                     "location_fit": "remote", "salary_meets_floor": True}
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner._load_profile", return_value={}), \
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
              patch("anthropic.Anthropic") as mock_anthropic_cls:
             mock_anthropic_cls.return_value = MagicMock()
             _run_batch_haiku_bg(path, session_id, batch_config)
@@ -1972,7 +1972,7 @@ class TestBatchHaikuBorderlineReeval:
                         "location_fit": "remote", "salary_meets_floor": True}
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner._load_profile", return_value={}), \
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
              patch("anthropic.Anthropic") as mock_anthropic_cls:
             mock_anthropic_cls.return_value = MagicMock()
             _run_batch_haiku_bg(path, session_id, batch_config)
