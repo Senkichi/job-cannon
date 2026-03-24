@@ -5,7 +5,7 @@ Orchestrates Gmail + SerpAPI ingestion with:
 - Per-source error isolation (Gmail failure does not stop SerpAPI)
 - Per-job error isolation (one bad job does not halt persistence)
 - Scoring via JobScorer before persistence
-- Deduplication via JobDB.upsert_job (dedup_key: company|title|location)
+- Deduplication via db.upsert_job (dedup_key: company|title|location)
 - Two-tier AI scoring: Haiku fast-filter for all new jobs, Sonnet deep-eval
   for jobs above haiku_threshold.
 
