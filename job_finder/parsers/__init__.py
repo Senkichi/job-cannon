@@ -2,12 +2,17 @@
 
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
-from job_finder.parsers.indeed_parser import parse_indeed_alert
+from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
+from job_finder.parsers.trueup_parser import parse_trueup_alert
 
 __all__ = [
     "parse_linkedin_alert",
     "parse_glassdoor_alert",
     "parse_indeed_alert",
+    "parse_indeed_match_alert",
     "parse_ziprecruiter_alert",
+    "parse_greenhouse_alert",
+    "parse_trueup_alert",
 ]

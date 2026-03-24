@@ -17,8 +17,10 @@ from googleapiclient.discovery import build
 from job_finder.models import Job
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
-from job_finder.parsers.indeed_parser import parse_indeed_alert
+from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
+from job_finder.parsers.trueup_parser import parse_trueup_alert
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,10 @@ SENDER_PARSERS = {
     "jobs-noreply@linkedin.com": parse_linkedin_alert,
     "noreply@glassdoor.com": parse_glassdoor_alert,
     "alert@indeed.com": parse_indeed_alert,
+    "donotreply@match.indeed.com": parse_indeed_match_alert,
     "no-reply@ziprecruiter.com": parse_ziprecruiter_alert,
+    "no-reply@us.greenhouse-jobs.com": parse_greenhouse_alert,
+    "hello@trueup.io": parse_trueup_alert,
 }
 
 TOKEN_PATH = "token.json"
