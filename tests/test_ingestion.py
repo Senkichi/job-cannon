@@ -12,7 +12,7 @@ Tests:
 import sqlite3
 import tempfile
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -439,7 +439,7 @@ class TestFirstSeenEmailDate:
         run_migrations(path)
 
         try:
-            before = datetime.now()
+            before = datetime.now(timezone.utc).replace(tzinfo=None)
             job = Job(
                 title="Staff Engineer",
                 company="SerpCo",
@@ -453,7 +453,7 @@ class TestFirstSeenEmailDate:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             upsert_job(conn, job)
-            after = datetime.now()
+            after = datetime.now(timezone.utc).replace(tzinfo=None)
             conn.close()
 
             conn = sqlite3.connect(path)
