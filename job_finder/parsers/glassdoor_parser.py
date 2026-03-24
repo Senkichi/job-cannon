@@ -22,34 +22,9 @@ from urllib.parse import parse_qs, urlparse
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
+from job_finder.parsers._common import is_meta_email as _is_meta_email
 
 logger = logging.getLogger(__name__)
-
-# Meta-email patterns checked against the first 200 characters of the body.
-# Checking only the preamble avoids false positives where job titles contain
-# phrases like "30+ new" (per Research Pitfall 4).
-_META_PATTERNS = [
-    re.compile(r"^\d+\+?\s+new\s+jobs?\s+match", re.IGNORECASE | re.MULTILINE),
-    re.compile(r"job alert digest|weekly digest", re.IGNORECASE),
-    re.compile(r"you have \d+ new jobs?", re.IGNORECASE),
-    re.compile(r"^\d+ jobs? found", re.IGNORECASE | re.MULTILINE),
-]
-
-
-def _is_meta_email(body: str) -> bool:
-    """Return True if the email preamble matches known meta-email patterns.
-
-    Only inspects the first 200 characters of the body to avoid false positives
-    from job titles or descriptions that contain pattern-matching words.
-
-    Args:
-        body: Email body text.
-
-    Returns:
-        True if the body looks like a digest/count summary, not a job alert.
-    """
-    preamble = body[:200]
-    return any(pattern.search(preamble) for pattern in _META_PATTERNS)
 
 # CSS class names from Glassdoor email templates (as of March 2026)
 # Update these if Glassdoor changes their email template
