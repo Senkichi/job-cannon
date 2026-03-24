@@ -54,8 +54,8 @@ Plans:
 - [x] **Phase 8: Consumers** - Scorers, pipeline runner, scheduler updated to new APIs (completed 2026-03-23)
 - [x] **Phase 9: Blueprints + Multi-Select Filter** - Fragment guards, safe params, batch timeout, filter UI (completed 2026-03-23)
 - [x] **Phase 10: Safety, Tests & Cleanup** - Status validation, test updates, dead code removal, db migration (completed 2026-03-23)
-- [ ] **Phase 11: Fix Critical Runtime Bugs** - Scheduler arg swap, ScoringResult unwrap, regression tests (gap closure)
-- [ ] **Phase 12: Milestone Verification Backfill** - Missing artifacts, requirements checkboxes, state updates (gap closure)
+- [x] **Phase 11: Fix Critical Runtime Bugs** - Scheduler arg swap, ScoringResult unwrap, regression tests (gap closure)
+- [x] **Phase 12: Milestone Verification Backfill** - Missing artifacts, requirements checkboxes, state updates (gap closure)
 
 ## Phase Details
 
@@ -150,7 +150,11 @@ Plans:
   2. All 27 REQUIREMENTS.md checkboxes reflect actual satisfaction status
   3. STATE.md completed_phases and ROADMAP.md progress table are current
   4. Stale docstrings in test_db_helpers.py and pipeline_runner.py are fixed
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 12-01-PLAN.md -- Create VERIFICATION.md for phases 8, 9, 10
+- [x] 12-02-PLAN.md -- Update requirements, state, fix stale docstrings
 
 ---
 
@@ -165,8 +169,8 @@ Plans:
 | 5. Intelligence | v1.0 | 0/? | Deferred | - |
 | 6. Foundation Types & Constants | v1.1 | 2/2 | Complete | 2026-03-23 |
 | 7. Core Module Refactors | v1.1 | 3/3 | Complete | 2026-03-23 |
-| 8. Consumers | v1.1 | —/— | Complete (bugs found) | 2026-03-23 |
-| 9. Blueprints + Multi-Select Filter | v1.1 | —/— | Complete | 2026-03-23 |
-| 10. Safety, Tests & Cleanup | v1.1 | —/— | Complete | 2026-03-23 |
-| 11. Fix Critical Runtime Bugs | v1.1 | 0/? | Not started | - |
-| 12. Milestone Verification Backfill | v1.1 | 0/? | Not started | - |
+| 8. Consumers | v1.1 | 1/1 | Complete | 2026-03-23 |
+| 9. Blueprints + Multi-Select Filter | v1.1 | 1/1 | Complete | 2026-03-23 |
+| 10. Safety, Tests & Cleanup | v1.1 | 1/1 | Complete | 2026-03-23 |
+| 11. Fix Critical Runtime Bugs | v1.1 | 1/1 | Complete | 2026-03-23 |
+| 12. Milestone Verification Backfill | v1.1 | 2/2 | Complete | 2026-03-23 |

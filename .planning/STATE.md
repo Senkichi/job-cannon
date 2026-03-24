@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Port job-finder Improvements
-status: Milestone complete
-last_updated: "2026-03-23T21:19:44.092Z"
+status: Executing Phase 12
+last_updated: "2026-03-23T23:59:00.000Z"
 progress:
-  total_phases: 5
-  completed_phases: 0
-  total_plans: 5
-  completed_plans: 1
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # State
 
 ## Current Position
 
-Phase: 10
-Plan: Not started
+Phase: 12 (verification-backfill) — Complete
+Plan: Complete
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 10 — Safety, Tests & Cleanup
+**Current focus:** Phase 12 — verification-backfill (final v1.1 phase)
 
 ## Accumulated Context
 
@@ -52,6 +52,13 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 - db.py rewrite is the riskiest change (~1450 diff lines) — Phase 7
 - FILT-03 (multi-select IN clause) folded into db.py rewrite per design spec Wave 2.1
 
+### Decisions Made in Phase 11
+
+- Scheduler arg swap fixed at all 3 call sites + _import_detection adapter lambda added
+- ScoringResult unwrap fixed via .status/.data attributes in all 3 pipeline_runner locations
+- test_scoring.py mocks updated to return ScoringResult (Rule 1 auto-fix)
+- Worktree rebased onto master before execution (required to get bugs that existed post-phase-8)
+
 ### Decisions Made in Phase 9
 
 - HX-Request guards redirect to /jobs/ (full page) for direct browser access on all fragment routes
@@ -71,4 +78,4 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 None.
 
 ---
-*Last session: 2026-03-23 — Completed phase9-plan1-SUMMARY.md*
+*Last session: 2026-03-23 — Completed Phase 12 (verification-backfill, milestone complete)*

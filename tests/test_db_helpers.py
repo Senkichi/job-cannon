@@ -1,4 +1,4 @@
-"""Unit tests for safe_json_load utility (now in job_finder/utils.py).
+"""Unit tests for safe_json_load utility (defined in job_finder/json_utils.py).
 
 The function is re-exported from job_finder.web.db_helpers for backward
 compatibility, so both import paths are valid.
