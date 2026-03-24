@@ -31,6 +31,7 @@ import sqlite3
 from typing import Any, Optional
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
+from job_finder.db import persist_haiku_score, persist_sonnet_score
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.scoring_orchestrator import load_scoring_profile
@@ -300,13 +301,7 @@ def run_sonnet_backfill(
 
         # Persist to DB
         fit_json = json.dumps(fit_analysis) if fit_analysis else None
-        conn.execute(
-            """UPDATE jobs
-               SET sonnet_score = ?, fit_analysis = ?
-               WHERE dedup_key = ?""",
-            (score, fit_json, dedup_key),
-        )
-        conn.commit()
+        persist_sonnet_score(conn, dedup_key, score, fit_json)
 
         evaluated_count += 1
         if i % 10 == 0 or i == len(rows):
@@ -375,11 +370,7 @@ def run_borderline_rescore(
         new_summary = result.get("summary")
 
         # Update haiku_score and haiku_summary
-        conn.execute(
-            "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-            (new_score, new_summary, dedup_key),
-        )
-        conn.commit()
+        persist_haiku_score(conn, dedup_key, new_score, new_summary)
 
         rescored_count += 1
 
