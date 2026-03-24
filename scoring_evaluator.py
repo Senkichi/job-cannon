@@ -30,6 +30,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 from job_finder.config import load_config
+from job_finder.db import persist_haiku_score, persist_sonnet_score
 from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
 from job_finder.web.drive_uploader import get_drive_service
 from job_finder.web.haiku_scorer import score_job_haiku
@@ -386,10 +387,7 @@ def rescore_sample(
         if haiku_result:
             new_haiku_score = haiku_result.get("score")
             new_haiku_summary = haiku_result.get("summary", "")
-            conn.execute(
-                "UPDATE jobs SET haiku_score=?, haiku_summary=? WHERE dedup_key=?",
-                (new_haiku_score, new_haiku_summary, dedup_key),
-            )
+            persist_haiku_score(conn, dedup_key, new_haiku_score, new_haiku_summary)
             job = dict(job)
             job["haiku_score"] = new_haiku_score
             job["haiku_summary"] = new_haiku_summary
@@ -407,10 +405,7 @@ def rescore_sample(
                 if sonnet_result:
                     new_sonnet_score = sonnet_result.get("score")
                     new_fit_analysis = json.dumps(sonnet_result.get("fit_analysis", {}))
-                    conn.execute(
-                        "UPDATE jobs SET sonnet_score=?, fit_analysis=? WHERE dedup_key=?",
-                        (new_sonnet_score, new_fit_analysis, dedup_key),
-                    )
+                    persist_sonnet_score(conn, dedup_key, new_sonnet_score, new_fit_analysis)
                     job["sonnet_score"] = new_sonnet_score
                     job["fit_analysis"] = new_fit_analysis
                     sonnet_count += 1
@@ -419,7 +414,6 @@ def rescore_sample(
         if i % 10 == 0 or i == len(sample):
             print(f"  Re-scored {i}/{len(sample)} jobs (Haiku: {haiku_count}, Sonnet: {sonnet_count})")
 
-    conn.commit()
     print(f"  Re-scoring complete: {haiku_count} Haiku, {sonnet_count} Sonnet calls.")
     return updated_sample
 
