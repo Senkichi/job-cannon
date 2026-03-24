@@ -4,7 +4,7 @@ from job_finder.config import load_config, DEFAULT_SERVER_HOST, DEFAULT_SERVER_P
 from job_finder.web import create_app
 
 cfg = load_config()
-app = create_app()
+app = create_app(config=cfg)
 
 if __name__ == "__main__":
     server = cfg.get("server", {})
