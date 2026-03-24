@@ -168,12 +168,20 @@ class GmailSource:
         page_token = None
 
         while True:
-            result = (
-                self.service.users()
-                .messages()
-                .list(userId="me", q=query, pageToken=page_token, maxResults=100)
-                .execute()
-            )
+            try:
+                result = (
+                    self.service.users()
+                    .messages()
+                    .list(userId="me", q=query, pageToken=page_token, maxResults=100)
+                    .execute()
+                )
+            except Exception as e:
+                logger.warning(
+                    "Gmail API error during pagination (collected %d so far): %s",
+                    len(messages),
+                    e,
+                )
+                break
             messages.extend(result.get("messages", []))
             if len(messages) >= max_messages:
                 logger.info(
