@@ -22,7 +22,11 @@ from urllib.parse import parse_qs, urlparse
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import is_meta_email as _is_meta_email
+from job_finder.parsers._common import (
+    is_meta_email as _is_meta_email,
+    looks_like_salary_range,
+    parse_salary_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,19 +152,16 @@ def _extract_listing_id(url: str) -> str:
 
 
 def _looks_like_salary(text: str) -> bool:
-    """Check if a text string looks like a salary range."""
-    return bool(re.search(r"\$\d+K?\s*-\s*\$\d+K?", text))
+    """Check if a text string looks like a salary range.
+
+    Delegates to the shared ``looks_like_salary_range`` in ``_common.py``.
+    """
+    return looks_like_salary_range(text)
 
 
 def _parse_salary(text: str) -> tuple[Optional[int], Optional[int]]:
-    """Parse salary from Glassdoor format: '$178K - $250K (Employer est.)'"""
-    match = re.search(r"\$(\d+)K?\s*-\s*\$(\d+)K?", text)
-    if match:
-        low = int(match.group(1))
-        high = int(match.group(2))
-        if low < 1000:
-            low *= 1000
-        if high < 1000:
-            high *= 1000
-        return low, high
-    return None, None
+    """Parse salary from Glassdoor format: '$178K - $250K (Employer est.)'
+
+    Delegates to the shared ``parse_salary_range`` in ``_common.py``.
+    """
+    return parse_salary_range(text)

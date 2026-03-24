@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
+from job_finder.parsers._common import parse_salary_range
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,7 @@ INDEED_ENGAGE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Salary range: "$120K - $150K" or "$120,000 - $150,000"
-SALARY_RE = re.compile(
-    r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\s*[Kk]?"
-)
-
-# Hourly rate: "$25/hr" or "$25.50 / hour"
+# Hourly rate: "$25/hr" or "$25.50 / hour" (Indeed-specific fallback)
 HOURLY_RE = re.compile(r"\$(\d[\d.]+)\s*(?:\/\s*(?:hr|hour))", re.IGNORECASE)
 
 # Meta-email patterns checked against the first 200 characters only.
@@ -495,24 +491,16 @@ def _looks_like_salary_text(text: str) -> bool:
 
 
 def _extract_salary_from_text(text: str) -> tuple[Optional[int], Optional[int]]:
-    """Parse salary range from text. Returns (salary_min, salary_max)."""
-    match = SALARY_RE.search(text)
-    if match:
-        low_str = match.group(1).replace(",", "")
-        high_str = match.group(2).replace(",", "")
-        try:
-            low = int(low_str)
-            high = int(high_str)
-            # Convert K notation to full values
-            if low < 1000:
-                low *= 1000
-            if high < 1000:
-                high *= 1000
-            return low, high
-        except ValueError:
-            pass
+    """Parse salary range from text. Returns (salary_min, salary_max).
 
-    # Try hourly rate
+    Delegates the range pattern to the shared ``parse_salary_range`` and
+    falls back to an Indeed-specific hourly rate conversion ($X/hr -> annual).
+    """
+    result = parse_salary_range(text)
+    if result != (None, None):
+        return result
+
+    # Indeed-specific fallback: hourly rate -> annualised salary
     match = HOURLY_RE.search(text)
     if match:
         try:

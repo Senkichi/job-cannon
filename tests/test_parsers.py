@@ -1145,13 +1145,10 @@ View job: https://www.linkedin.com/comm/jobs/view/3333333333/?trackingId=t3
         assert low3 is None
         assert high3 is None
 
-        # AUDIT LIMITATION: comma-formatted full dollars not supported.
-        # "$150,000 - $200,000" → (None, None). Documented behavior, not a bug.
+        # Comma-formatted full dollars now supported via shared parse_salary_range.
         low4, high4 = _extract_salary("$150,000 - $200,000 a year")
-        assert low4 is None, (
-            "LinkedIn parser does not support comma-formatted salaries; "
-            f"got {low4} (would need SALARY_RE from indeed_parser)"
-        )
+        assert low4 == 150000, f"Expected 150000, got {low4}"
+        assert high4 == 200000, f"Expected 200000, got {high4}"
 
     def test_audit_linkedin_explore_new_jobs_sender(self):
         """LinkedIn 'Explore new jobs' format (jobs-noreply sender) parses identically

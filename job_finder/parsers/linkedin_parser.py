@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Optional
 
 from job_finder.models import Job
-from job_finder.parsers._common import is_meta_email
+from job_finder.parsers._common import is_meta_email, parse_salary_range
 
 logger = logging.getLogger(__name__)
 
@@ -140,20 +140,8 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
 def _extract_salary(text: str) -> tuple[Optional[int], Optional[int]]:
     """Try to extract salary range from text.
 
-    Handles formats like:
-        $168K-$255K / year salary
-        $150,000 - $200,000
+    Delegates to the shared ``parse_salary_range`` in ``_common.py``.
+    Kept as a thin wrapper so internal callers and tests can continue
+    importing ``_extract_salary`` from this module.
     """
-    # Pattern: $XXXk-$XXXk
-    match = re.search(r"\$(\d+)K?\s*-\s*\$(\d+)K", text, re.IGNORECASE)
-    if match:
-        low = int(match.group(1))
-        high = int(match.group(2))
-        # If values are small, they're in thousands
-        if low < 1000:
-            low *= 1000
-        if high < 1000:
-            high *= 1000
-        return low, high
-
-    return None, None
+    return parse_salary_range(text)

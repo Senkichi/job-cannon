@@ -3,11 +3,73 @@
 Centralises the meta-email detection logic that was previously duplicated
 across linkedin_parser, glassdoor_parser, and ziprecruiter_parser.
 
-Note: indeed_parser intentionally uses its own pattern set (it must NOT
-filter on "N new jobs" lines, which are real alerts for Indeed).
+Also provides shared salary parsing (parse_salary_range) used by all four
+parsers, eliminating near-identical regex + K-notation conversion code.
+
+Note: indeed_parser intentionally uses its own meta-email pattern set (it
+must NOT filter on "N new jobs" lines, which are real alerts for Indeed).
 """
 
 import re
+from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Salary parsing
+# ---------------------------------------------------------------------------
+
+# Salary range: "$120K - $150K", "$120,000 - $150,000", "$168K-$255K"
+# Handles K-notation, comma-separated full-dollar amounts, and en-dash.
+SALARY_RANGE_RE = re.compile(
+    r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\s*[Kk]?"
+)
+
+
+def parse_salary_range(text: str) -> tuple[Optional[int], Optional[int]]:
+    """Extract a salary range from free-form text.
+
+    Handles formats like:
+        $168K-$255K / year salary
+        $150,000 - $200,000
+        $120K - $150K (Employer est.)
+
+    Returns:
+        (salary_min, salary_max) as full dollar ints, or (None, None).
+    """
+    match = SALARY_RANGE_RE.search(text)
+    if not match:
+        return None, None
+
+    low_str = match.group(1).replace(",", "")
+    high_str = match.group(2).replace(",", "")
+
+    try:
+        low = int(low_str)
+        high = int(high_str)
+    except ValueError:
+        return None, None
+
+    # Convert K-notation to full dollar values
+    if low < 1000:
+        low *= 1000
+    if high < 1000:
+        high *= 1000
+
+    return low, high
+
+
+def looks_like_salary_range(text: str) -> bool:
+    """Return True if *text* contains a salary range pattern ($X - $Y)."""
+    return bool(SALARY_RANGE_RE.search(text))
+
+
+def looks_like_salary_text(text: str) -> bool:
+    """Return True if *text* contains any dollar amount (e.g. '$120K')."""
+    return bool(re.search(r"\$\d+", text))
+
+
+# ---------------------------------------------------------------------------
+# Meta-email detection
+# ---------------------------------------------------------------------------
 
 # Base meta-email patterns checked against the first 200 characters of the
 # email body.  Checking only the preamble avoids false positives where job
