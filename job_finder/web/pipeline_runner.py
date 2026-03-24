@@ -110,7 +110,6 @@ def run_ingestion(db_path: str, config: dict) -> dict:
     new_job_keys: list[str] = []
 
     # New connection per call -- thread-safe
-    import sqlite3
     runner_conn = sqlite3.connect(db_path)
     runner_conn.row_factory = sqlite3.Row
     scorer = JobScorer(config)

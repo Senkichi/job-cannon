@@ -9,8 +9,10 @@ are run individually so that "duplicate column name" errors can be caught
 per-statement without aborting the whole migration.
 """
 
+import logging
 import sqlite3
 
+logger = logging.getLogger(__name__)
 
 # Each migration is a list of SQL statement strings.
 # Storing as discrete strings avoids semicolon-splitting hazards in comments.
@@ -455,9 +457,6 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
     Args:
         conn: Open SQLite connection (must have migration 6 applied).
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     try:
         sentinel = conn.execute(
             "SELECT id FROM merge_log WHERE merge_source = 'migration_complete' LIMIT 1"

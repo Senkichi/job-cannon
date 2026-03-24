@@ -8,7 +8,6 @@ import base64
 import logging
 import os
 from datetime import datetime, timedelta
-from datetime import datetime as _dt
 from typing import Optional
 
 from google.auth.transport.requests import Request
@@ -84,7 +83,7 @@ def _archive_parse_failure(sender: str, body: str) -> None:
     try:
         os.makedirs("data/parse_failures", exist_ok=True)
         domain = sender.split("@")[-1].replace(".", "_") if "@" in sender else sender
-        ts = _dt.now().strftime("%Y-%m-%dT%H-%M-%S")
+        ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         path = f"data/parse_failures/{domain}_{ts}.html"
         with open(path, "w", encoding="utf-8") as f:
             f.write(body)

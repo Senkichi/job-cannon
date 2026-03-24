@@ -13,6 +13,7 @@ Output schema:
   salary_meets_floor (bool): True if salary >= candidate's min_salary.
 """
 
+import json
 import logging
 import re
 from typing import Any
@@ -78,14 +79,12 @@ def _build_comp_context(job_row: JobRow) -> str | None:
     Returns:
         Short compensation summary string, or None if no data available.
     """
-    import json as _json
-
     comp_data_raw = job_row.get("comp_data_json")
     if not comp_data_raw:
         return None
 
     try:
-        comp = _json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
+        comp = json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
     except (ValueError, TypeError):
         return None
 
