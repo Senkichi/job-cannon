@@ -738,6 +738,12 @@ def resolve_detection(
         detection_id: The detection's primary key.
         resolution: Either 'confirmed' or 'dismissed'.
     """
+    _VALID_RESOLUTIONS = ("confirmed", "dismissed")
+    if resolution not in _VALID_RESOLUTIONS:
+        raise ValueError(
+            f"Invalid resolution: {resolution!r}. "
+            f"Must be one of: {', '.join(_VALID_RESOLUTIONS)}."
+        )
     now = datetime.now().isoformat()
     conn.execute(
         "UPDATE pipeline_detections SET status = ?, resolved_at = ? WHERE id = ?",
