@@ -113,5 +113,11 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
 
+    if cfg is None:
+        raise ValueError(
+            f"Config file is empty or contains only comments: {config_path}\n"
+            f"See config.example.yaml for the expected structure."
+        )
+
     validate_required_sections(cfg)
     return cfg
