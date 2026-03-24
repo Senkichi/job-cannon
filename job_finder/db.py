@@ -7,7 +7,7 @@ from datetime import datetime, date
 from typing import Optional
 
 from job_finder.models import Job
-from job_finder.json_utils import safe_json_load
+from job_finder.json_utils import safe_json_load, utc_now_iso
 
 
 # Explicit column lists for high-traffic queries. Avoids SELECT * so that
@@ -83,7 +83,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         (job.dedup_key,),
     ).fetchone()
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
 
     if existing:
         # Merge sources
@@ -215,7 +215,7 @@ def log_run(
     """
     conn.execute(
         "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
-        (datetime.now().isoformat(), source, fetched, new, scored),
+        (utc_now_iso(), source, fetched, new, scored),
     )
     conn.commit()
 
@@ -497,7 +497,7 @@ def update_pipeline_status(
     if from_status == new_status:
         return  # Already at this status — skip duplicate event insertion
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
 
     conn.execute(
         "UPDATE jobs SET pipeline_status = ? WHERE dedup_key = ?",
@@ -744,7 +744,7 @@ def resolve_detection(
             f"Invalid resolution: {resolution!r}. "
             f"Must be one of: {', '.join(_VALID_RESOLUTIONS)}."
         )
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     conn.execute(
         "UPDATE pipeline_detections SET status = ?, resolved_at = ? WHERE id = ?",
         (resolution, now, detection_id),
