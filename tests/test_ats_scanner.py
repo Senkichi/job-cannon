@@ -1121,11 +1121,15 @@ class TestRunAtsScan:
         self._insert_hit_company(conn, "Stripe", "lever", "stripe")
         conn.close()
 
+        # Description must be >200 chars so upsert_job populates jd_full
+        # (Sonnet loop skips jobs without jd_full)
+        long_desc = "ML and Data Science role at Stripe. " * 8
+
         lever_jobs = [
             {
                 "text": "Senior Data Scientist",
                 "hostedUrl": "https://jobs.lever.co/stripe/job-1",
-                "descriptionPlain": "ML at Stripe.",
+                "descriptionPlain": long_desc,
                 "categories": {"location": "Remote"},
                 "salaryRange": None,
             }
