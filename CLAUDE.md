@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Job Finder is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter) and SerpAPI, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), tracks application pipeline status, and will generate tailored resumes via Google Docs.
+Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter) and SerpAPI, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), tracks application pipeline status, and generates tailored resumes via Google Docs.
 
 **Single-user, local-only app. No deployment, no Docker, no CI/CD.**
 
@@ -13,7 +13,7 @@ Job Finder is a personal job search command center. Flask web app (localhost:500
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
 - **AI**: Anthropic API — Haiku for fast scoring, Sonnet for deep evaluation, Opus for profile extraction
-- **APIs**: Gmail API v1 (OAuth 2.0), Google Drive/Docs API (Phase 4), SerpAPI (optional)
+- **APIs**: Gmail API v1 (OAuth 2.0), Google Drive/Docs API, SerpAPI (optional)
 
 ## Key Commands
 
@@ -22,7 +22,7 @@ Job Finder is a personal job search command center. Flask web app (localhost:500
 uv run python run.py                              # Flask dev server on localhost:5000
 
 # Tests
-uv run pytest tests/                              # All tests (266 passing)
+uv run pytest tests/                              # All tests (1359 passing)
 uv run pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run pytest -x                                  # Stop on first failure
 
@@ -59,7 +59,7 @@ job_finder/
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
-└── test_*.py                    # 11 test files
+└── test_*.py                    # 41 test files
 ```
 
 ## Architecture Decisions That Matter
@@ -94,8 +94,8 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 ## Planning Documentation
 
 This project uses the GSD framework. Key docs:
-- `.planning/ROADMAP.md` — 5-phase milestone with success criteria
-- `.planning/STATE.md` — Current state, 100+ architectural decisions, pending todos
+- `.planning/ROADMAP.md` — All phases complete, milestone history
+- `.planning/STATE.md` — Current state, 100+ architectural decisions
 - `.planning/codebase/` — ARCHITECTURE.md, CONVENTIONS.md, CONCERNS.md, STACK.md, TESTING.md
 
 ## Current Status
@@ -103,8 +103,8 @@ This project uses the GSD framework. Key docs:
 - **Phase 1 (Foundation)**: Complete — 11/11 plans, 36/36 must-haves verified
 - **Phase 2 (AI Scoring)**: Complete — 5/5 plans
 - **Phase 3 (Pipeline Automation)**: Complete — 2/2 plans
-- **Phase 4 (Resume Generation)**: Not started (context gathered)
-- **Phase 5 (Intelligence)**: Not started
+- **Phase 4 (Resume Generation)**: Operational — inherited from job-finder (resume generator, Drive upload, DOCX formatter, feedback, validation)
+- **Phase 5 (Intelligence)**: Operational — inherited from job-finder (interview prep, rejection analysis, notifications). Semantic similarity/clustering dropped.
 
 ## Verification Standards
 
