@@ -1903,13 +1903,20 @@ class TestBatchHaikuBorderlineReeval:
         call_args_list = []
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_args_list.append({"max_chars": max_chars, "purpose": purpose})
             if len(call_args_list) == 1:
-                return {"score": 48, "summary": "Initial borderline", "title_fit": "partial",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 48, "summary": "Initial borderline", "title_fit": "partial",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
             else:
-                return {"score": 62, "summary": "Re-eval improved", "title_fit": "strong",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 62, "summary": "Re-eval improved", "title_fit": "strong",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
@@ -1939,9 +1946,13 @@ class TestBatchHaikuBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
-            return {"score": 70, "summary": "Strong match", "title_fit": "strong",
-                    "location_fit": "remote", "salary_meets_floor": True}
+            return ScoringResult(
+                data={"score": 70, "summary": "Strong match", "title_fit": "strong",
+                      "location_fit": "remote", "salary_meets_floor": True},
+                status="success",
+            )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
@@ -1963,13 +1974,20 @@ class TestBatchHaikuBorderlineReeval:
         call_count = {"n": 0}
 
         def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+            from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
-                return {"score": 45, "summary": "Initial", "title_fit": "partial",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 45, "summary": "Initial", "title_fit": "partial",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
             else:
-                return {"score": 58, "summary": "Re-eval score", "title_fit": "strong",
-                        "location_fit": "remote", "salary_meets_floor": True}
+                return ScoringResult(
+                    data={"score": 58, "summary": "Re-eval score", "title_fit": "strong",
+                          "location_fit": "remote", "salary_meets_floor": True},
+                    status="success",
+                )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
              patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
