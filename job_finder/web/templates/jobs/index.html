@@ -43,7 +43,8 @@
     </div>
 
     <!-- Location filter -->
-    <select name="location"
+    <label for="filter-location" class="sr-only">Location</label>
+    <select name="location" id="filter-location"
             class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
       <option value="">All Locations</option>
       {% for loc in locations %}
@@ -52,7 +53,8 @@
     </select>
 
     <!-- Source filter -->
-    <select name="source"
+    <label for="filter-source" class="sr-only">Source</label>
+    <select name="source" id="filter-source"
             class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
       <option value="">All Sources</option>
       {% for src in sources %}
@@ -61,35 +63,41 @@
     </select>
 
     <!-- Min score -->
-    <input type="number" name="min_score" min="0" max="10" step="0.5"
+    <label for="filter-min-score" class="sr-only">Minimum score</label>
+    <input type="number" name="min_score" id="filter-min-score" min="0" max="10" step="0.5"
            value="{{ filters.get('min_score', '') }}"
            placeholder="Min score"
            class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
 
     <!-- Max score -->
-    <input type="number" name="max_score" min="0" max="10" step="0.5"
+    <label for="filter-max-score" class="sr-only">Maximum score</label>
+    <input type="number" name="max_score" id="filter-max-score" min="0" max="10" step="0.5"
            value="{{ filters.get('max_score', '') }}"
            placeholder="Max score"
            class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
 
     <!-- Salary min -->
-    <input type="number" name="salary_min" step="10000"
+    <label for="filter-salary-min" class="sr-only">Minimum salary</label>
+    <input type="number" name="salary_min" id="filter-salary-min" step="10000"
            value="{{ filters.get('salary_min', '') }}"
            placeholder="Min salary $"
            class="w-28 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
 
     <!-- Date from -->
-    <input type="date" name="date_from"
+    <label for="filter-date-from" class="sr-only">Date from</label>
+    <input type="date" name="date_from" id="filter-date-from"
            value="{{ filters.get('date_from', '') }}"
            class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
 
     <!-- Date to -->
-    <input type="date" name="date_to"
+    <label for="filter-date-to" class="sr-only">Date to</label>
+    <input type="date" name="date_to" id="filter-date-to"
            value="{{ filters.get('date_to', '') }}"
            class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
 
     <!-- Sort -->
-    <select name="sort_by"
+    <label for="filter-sort-by" class="sr-only">Sort by</label>
+    <select name="sort_by" id="filter-sort-by"
             class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
       <option value="score" {% if filters.get('sort_by', 'score') == 'score' %}selected{% endif %}>Score</option>
       <option value="first_seen" {% if filters.get('sort_by') == 'first_seen' %}selected{% endif %}>Date</option>
@@ -97,7 +105,8 @@
       <option value="company" {% if filters.get('sort_by') == 'company' %}selected{% endif %}>Company</option>
     </select>
 
-    <select name="sort_dir"
+    <label for="filter-sort-dir" class="sr-only">Sort direction</label>
+    <select name="sort_dir" id="filter-sort-dir"
             class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
       <option value="DESC" {% if filters.get('sort_dir', 'DESC') == 'DESC' %}selected{% endif %}>Desc</option>
       <option value="ASC" {% if filters.get('sort_dir') == 'ASC' %}selected{% endif %}>Asc</option>
