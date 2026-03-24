@@ -31,6 +31,11 @@ from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
+from job_finder.web.scoring_orchestrator import (
+    load_scoring_profile,
+    score_and_persist_haiku,
+    score_and_persist_sonnet,
+)
 
 try:
     from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
@@ -443,7 +448,7 @@ def _run_haiku_scoring(
         return [], 0
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-    profile = _load_profile(config)
+    profile = load_scoring_profile(config)
     client = anthropic.Anthropic()
     sonnet_queue: list[str] = []
     haiku_scored = 0
@@ -505,55 +510,24 @@ def _run_haiku_scoring(
                     )
                     continue
 
-                # --- Haiku scoring (now uses enriched data) ---
-                result = score_job_haiku(client, job_row, profile, conn, config)
-                if result.status != "success" or result.data is None:
+                # --- Haiku scoring + borderline re-eval + DB persistence ---
+                # Delegated to scoring_orchestrator (single point of truth).
+                # Pass score_job_haiku as scorer_fn so test patches on
+                # pipeline_runner.score_job_haiku are captured.
+                result = score_and_persist_haiku(
+                    conn, job_row, config, client, profile,
+                    scorer_fn=score_job_haiku,
+                )
+                if result is None:
                     logger.debug(
-                        "Haiku: no result for '%s' @ '%s' (status=%s) -- skipping",
+                        "Haiku: no result for '%s' @ '%s' -- skipping",
                         job_row.get("title"),
                         job_row.get("company"),
-                        result.status,
                     )
                     continue
 
-                score = result.data.get("score", 0)
-                summary_text = result.data.get("summary", "")
-
-                conn.execute(
-                    "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-                    (score, summary_text, dedup_key),
-                )
-                conn.commit()
                 haiku_scored += 1
-
-                # --- Borderline re-evaluation band (C2) ---
-                # Jobs scoring 42-54 get a second Haiku call with expanded context
-                # (4000 chars vs 2000 default) before the Sonnet decision.
-                borderline_low = threshold  # 42
-                borderline_high = 54
-                if borderline_low <= score <= borderline_high:
-                    logger.info(
-                        "Borderline re-eval for '%s' @ '%s' (initial=%d, band=%d-%d)",
-                        job_row.get("title"), job_row.get("company"),
-                        score, borderline_low, borderline_high,
-                    )
-                    reeval_result = score_job_haiku(
-                        client, job_row, profile, conn, config,
-                        max_chars=4000, purpose="haiku_reeval",
-                    )
-                    if reeval_result.status == "success" and reeval_result.data is not None:
-                        score = reeval_result.data.get("score", 0)
-                        summary_text = reeval_result.data.get("summary", "")
-                        # Update DB with re-eval score (replaces initial borderline score)
-                        conn.execute(
-                            "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-                            (score, summary_text, dedup_key),
-                        )
-                        conn.commit()
-                        logger.info(
-                            "Borderline re-eval result for '%s': %d",
-                            job_row.get("title"), score,
-                        )
+                score = result.get("score", 0)
 
                 if score >= threshold:
                     sonnet_queue.append(dedup_key)
@@ -619,7 +593,7 @@ def _run_sonnet_evaluation(
         logger.warning("Sonnet evaluation module not available -- skipping")
         return 0
 
-    profile = _load_profile(config)
+    profile = load_scoring_profile(config)
     client = anthropic.Anthropic()
     sonnet_evaluated = 0
 
@@ -648,25 +622,22 @@ def _run_sonnet_evaluation(
                     )
                     continue
 
-                # Run Sonnet evaluation
-                result = evaluate_job_sonnet(client, job_row, experience_profile=profile, conn=conn, config=config)
-                if result.status != "success" or result.data is None:
+                # --- Sonnet scoring + DB persistence ---
+                # Delegated to scoring_orchestrator (single point of truth).
+                # Pass evaluate_job_sonnet as evaluator_fn so test patches on
+                # pipeline_runner.evaluate_job_sonnet are captured.
+                result = score_and_persist_sonnet(
+                    conn, job_row, config, client, profile,
+                    evaluator_fn=evaluate_job_sonnet,
+                )
+                if result is None:
                     logger.info(
-                        "Sonnet eval returned non-success for '%s' @ '%s' (status=%s)",
+                        "Sonnet eval returned no result for '%s' @ '%s'",
                         job_row.get("title"),
                         job_row.get("company"),
-                        result.status,
                     )
                     continue
 
-                sonnet_score = result.data.get("score")
-                fit_analysis = json.dumps(result.data.get("fit_analysis", {}))
-
-                conn.execute(
-                    "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
-                    (sonnet_score, fit_analysis, dedup_key),
-                )
-                conn.commit()
                 sonnet_evaluated += 1
 
                 # Company enrichment for Sonnet-scored jobs — best-effort
