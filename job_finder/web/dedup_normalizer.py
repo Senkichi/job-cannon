@@ -483,26 +483,18 @@ def _build_location_string(locations_raw: list[str]) -> str:
 def _merge_descriptions(rows: list[dict]) -> Optional[str]:
     """Merge descriptions from all rows.
 
-    - If descriptions are identical or one is a substring of another, keep the longer.
-    - If they are substantially different, append with separator.
+    Delegates to db._merge_description for pairwise merge logic (single source
+    of truth — see job_finder/db.py).
     """
+    from job_finder.db import _merge_description
+
     descriptions = [r.get("description") for r in rows if r.get("description")]
     if not descriptions:
         return None
 
-    # Start with the longest description
-    merged = max(descriptions, key=len)
-
-    for desc in descriptions:
-        if desc == merged:
-            continue
-        # Check if desc is already contained in merged (or vice versa)
-        if desc in merged or merged in desc:
-            # Keep the longer one
-            merged = max(merged, desc, key=len)
-        else:
-            # Substantially different — append
-            merged = f"{merged}\n\n---\n\n{desc}"
+    merged = descriptions[0]
+    for desc in descriptions[1:]:
+        merged = _merge_description(merged, desc)
 
     return merged
 

@@ -31,7 +31,9 @@ _UPSERT_MERGE_COLUMNS = (
 
 
 def _merge_description(existing: Optional[str], new: Optional[str]) -> Optional[str]:
-    """Merge two description strings for the smart upsert_job UPDATE branch.
+    """Merge two description strings — single source of truth for description merge logic.
+
+    Also used iteratively by dedup_normalizer._merge_descriptions for N-way merges.
 
     Rules:
     - If either is None/empty, return the other.
