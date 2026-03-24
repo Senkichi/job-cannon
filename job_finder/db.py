@@ -662,7 +662,8 @@ def get_recent_activity(conn: sqlite3.Connection, limit: int = 15) -> list[dict]
     """
     try:
         rows = conn.execute(
-            "SELECT * FROM user_activity ORDER BY occurred_at DESC LIMIT ?",
+            "SELECT id, action, entity_id, metadata, occurred_at "
+            "FROM user_activity ORDER BY occurred_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -715,7 +716,10 @@ def get_pending_detections(conn: sqlite3.Connection) -> list[dict]:
         job_title and job_company are None if job_id is NULL or job not found.
     """
     rows = conn.execute(
-        """SELECT pd.*,
+        """SELECT pd.id, pd.gmail_message_id, pd.detection_type, pd.job_id,
+                  pd.confidence_score, pd.matched_signals, pd.snippet,
+                  pd.email_subject, pd.email_from, pd.email_date,
+                  pd.status, pd.created_at, pd.resolved_at,
                   j.title AS job_title,
                   j.company AS job_company,
                   j.pipeline_status AS job_pipeline_status
