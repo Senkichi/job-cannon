@@ -366,7 +366,7 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
         pending_detections = conn.execute(
             "SELECT COUNT(*) FROM pipeline_detections WHERE status = 'pending'"
         ).fetchone()[0]
-    except Exception:
+    except sqlite3.OperationalError:
         pending_detections = 0
 
     return {
@@ -663,7 +663,7 @@ def get_recent_activity(conn: sqlite3.Connection, limit: int = 15) -> list[dict]
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         return []
 
 
@@ -694,7 +694,7 @@ def get_recent_pipeline_events(conn: sqlite3.Connection, limit: int = 10) -> lis
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         return []
 
 

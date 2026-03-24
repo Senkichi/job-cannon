@@ -549,6 +549,8 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
 
 def _update_session_counter(conn, session_id: int, counter: str) -> None:
     """Increment a batch session counter ('scored' or 'skipped') and commit."""
+    if counter not in ("scored", "skipped"):
+        raise ValueError(f"Invalid counter name: {counter!r}")
     conn.execute(
         f"UPDATE batch_score_sessions SET {counter} = {counter} + 1 WHERE id = ?",
         (session_id,),
@@ -620,12 +622,14 @@ def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
     """Mark a batch session as errored. Used for background thread import failures."""
     try:
         conn = sqlite3.connect(db_path)
-        conn.execute(
-            "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-            (error_msg, datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
+                (error_msg, datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception:
         logger.warning("Failed to mark session %s as error: %s", session_id, error_msg, exc_info=True)
 
