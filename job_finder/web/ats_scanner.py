@@ -30,13 +30,19 @@ import requests
 
 from job_finder.web.dedup_normalizer import normalize_company
 
-# Lazy import of pipeline_runner scoring functions (ImportError guard)
-# Matches the pattern used by other modules (stale_detector, rejection_analyzer)
+# Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
+# Uses the centralized orchestrator instead of pipeline_runner's private functions,
+# breaking the bidirectional dependency (ats_scanner <-> pipeline_runner).
 try:
-    from job_finder.web.pipeline_runner import _run_haiku_scoring, _run_sonnet_evaluation
+    from job_finder.web.scoring_orchestrator import (
+        load_scoring_profile,
+        score_and_persist_haiku,
+        score_and_persist_sonnet,
+    )
 except ImportError:
-    _run_haiku_scoring = None  # type: ignore[assignment]
-    _run_sonnet_evaluation = None  # type: ignore[assignment]
+    load_scoring_profile = None  # type: ignore[assignment]
+    score_and_persist_haiku = None  # type: ignore[assignment]
+    score_and_persist_sonnet = None  # type: ignore[assignment]
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)
 try:
@@ -976,8 +982,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     3. Apply keyword filter using config profile.target_titles and exclusions
     4. For each matched job, create Job object and call upsert_job
     5. Collect dedup_keys of newly-discovered jobs
-    6. Call _run_haiku_scoring for auto-scoring (same pipeline_runner flow)
-    7. Call _run_sonnet_evaluation for jobs above haiku_threshold
+    6. Score new jobs via scoring_orchestrator (Haiku fast-filter)
+    7. Evaluate jobs above haiku_threshold via scoring_orchestrator (Sonnet deep-eval)
     8. Insert company_scan_log row and update company.last_scanned_at
     9. Insert activity feed entry into runs table
     10. Return summary dict
@@ -1321,18 +1327,69 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # --- Haiku auto-scoring for newly discovered jobs ---
         # Runs AFTER both the ATS API loop and the HTML fallback loop so that
         # all_new_job_keys contains jobs from both sources before scoring begins.
-        # Same pipeline_runner._run_haiku_scoring flow as Gmail/SerpAPI ingestion.
-        if all_new_job_keys and _run_haiku_scoring is not None:
+        # Uses scoring_orchestrator directly (no pipeline_runner dependency).
+        if all_new_job_keys and score_and_persist_haiku is not None:
             try:
                 import anthropic as _anthropic  # noqa: F401 — import check only
-                sonnet_queue, haiku_scored_count = _run_haiku_scoring(
-                    all_new_job_keys, config, db_path
+                from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+
+                client = _anthropic.Anthropic()
+                profile = load_scoring_profile(config)
+                threshold = config.get("scoring", {}).get(
+                    "haiku_threshold", DEFAULT_HAIKU_THRESHOLD
                 )
+                sonnet_queue: list[str] = []
+                haiku_scored_count = 0
+
+                for dedup_key in all_new_job_keys:
+                    try:
+                        row = conn.execute(
+                            "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                        ).fetchone()
+                        if row is None:
+                            continue
+                        job_row = dict(row)
+
+                        result = score_and_persist_haiku(
+                            conn, job_row, config, client, profile,
+                        )
+                        if result is None:
+                            continue
+                        haiku_scored_count += 1
+                        score = result.get("score", 0)
+                        if score >= threshold:
+                            sonnet_queue.append(dedup_key)
+                    except Exception as job_err:
+                        logger.warning(
+                            "ATS Haiku scoring error for '%s': %s -- continuing",
+                            dedup_key, job_err,
+                        )
+
                 summary["haiku_scored"] = haiku_scored_count
 
                 # Sonnet evaluation for jobs above threshold
-                if sonnet_queue and _run_sonnet_evaluation is not None:
-                    sonnet_evaluated = _run_sonnet_evaluation(sonnet_queue, config, db_path)
+                if sonnet_queue and score_and_persist_sonnet is not None:
+                    sonnet_evaluated = 0
+                    for dedup_key in sonnet_queue:
+                        try:
+                            row = conn.execute(
+                                "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                            ).fetchone()
+                            if row is None:
+                                continue
+                            job_row = dict(row)
+                            if not job_row.get("jd_full"):
+                                continue
+                            s_result = score_and_persist_sonnet(
+                                conn, job_row, config, client, profile,
+                            )
+                            if s_result is not None:
+                                sonnet_evaluated += 1
+                        except Exception as sonnet_err:
+                            logger.warning(
+                                "ATS Sonnet scoring error for '%s': %s -- continuing",
+                                dedup_key, sonnet_err,
+                            )
                     summary["sonnet_evaluated"] = sonnet_evaluated
 
             except ImportError:
