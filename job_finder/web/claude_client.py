@@ -358,9 +358,15 @@ def call_claude(
 
     response = client.messages.create(**call_kwargs)
 
-    # Extract result
+    # Extract token counts and record cost before parsing content,
+    # so cost data is always tracked even if content parsing fails.
     input_tokens: int = response.usage.input_tokens
     output_tokens: int = response.usage.output_tokens
+    cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens)
+
+    # Guard against empty response content
+    if not response.content:
+        raise RuntimeError("Claude returned empty response content")
 
     # Parse response content
     content = response.content[0]
@@ -371,9 +377,10 @@ def call_claude(
         try:
             result = json.loads(text)
         except (json.JSONDecodeError, AttributeError):
+            if output_schema is not None:
+                raise ValueError(
+                    "Structured output expected but got unparseable text"
+                )
             result = {"text": str(text)}
-
-    # Record cost
-    cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens)
 
     return result, cost_usd
