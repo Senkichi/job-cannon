@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Migration & Stabilization
-status: Defining requirements
-last_updated: "2026-03-24"
+status: all features operational, migration and stabilization in progress
+last_updated: "2026-03-24T16:22:37.348Z"
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
-  total_plans: 0
+  total_plans: 2
   completed_plans: 0
 ---
 
@@ -15,17 +15,25 @@ progress:
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-24 — Milestone v1.2 started
+Phase: 13 (Planning Doc Corrections) — EXECUTING
+Plan: 2 of 2
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-23)
+See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Migration & Stabilization (v1.2)
+**Current focus:** Migration from job-finder + planning doc updates
+
+## Performance Metrics
+
+**Velocity:**
+
+- Total plans completed: 1 (this milestone)
+- Average duration: —
+- Total execution time: —
+
+*Updated after each plan completion*
 
 ## Accumulated Context
 
@@ -36,48 +44,21 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 - Accordion: compact row + hidden `<tr data-expand-slot>` placeholder pairs
 - Use hx-on:click not onclick for event.stopPropagation() in HTMX 2.x
 - Dismiss/return responses: ('', 200) not 204 — HTMX requires 200 for outerHTML swap
-- Detail-inline route registered BEFORE catch-all to avoid Flask route shadowing
 - Migrations stored as list of discrete SQL strings (not semicolon-delimited)
 - CREATE TABLE IF NOT EXISTS for idempotent migration
-- Stale detector creates own sqlite3 connection (thread-safe for APScheduler)
 - sort_by validated against Python allowlist before SQL interpolation
-- cost_gate returns bool — callers decide whether to raise BudgetExceededError
-- Sonnet skips if jd_full absent (no cost without full JD)
-- Batch score skips already-scored jobs (haiku_score IS NOT NULL)
 
-### Port-Specific Context
+### Migration Context
 
-- Design spec: `docs/superpowers/specs/2026-03-23-port-job-finder-improvements-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-03-23-port-job-finder-improvements.md`
-- Source repo (job-finder): `<other-repo>`
-- 3 cannon-only test files to preserve: test_docx_formatter.py, test_drive_status.py, test_drive_uploader.py
-- db.py rewrite is the riskiest change (~1450 diff lines) — Phase 7
-- FILT-03 (multi-select IN clause) folded into db.py rewrite per design spec Wave 2.1
-
-### Decisions Made in Phase 11
-
-- Scheduler arg swap fixed at all 3 call sites + _import_detection adapter lambda added
-- ScoringResult unwrap fixed via .status/.data attributes in all 3 pipeline_runner locations
-- test_scoring.py mocks updated to return ScoringResult (Rule 1 auto-fix)
-- Worktree rebased onto master before execution (required to get bugs that existed post-phase-8)
-
-### Decisions Made in Phase 9
-
-- HX-Request guards redirect to /jobs/ (full page) for direct browser access on all fragment routes
-- status list passed as-is when multiple values, single string when one value, None when none — matching db.py interface
-- _safe_float/_safe_int call abort(400) rather than returning None for invalid input
-- guidelines_path requires 4 parent levels: blueprints -> web -> job_finder -> repo_root
-- scoring_orchestrator replaces direct haiku_scorer/sonnet_evaluator calls in jobs.py and dashboard.py
-- Status filter replaced: dropdown removed, checkbox pill row added with "All" toggle
-
-### Completed Todos (from v1.0)
-
-- [x] Replace status filter dropdown with multi-select checkboxes — DONE Phase 9
-- [x] Fix job board not refreshing when date filter is cleared — DONE Phase 9 (change from:input trigger)
+- Implementation plan: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md`
+- Source repo (job-finder): `<other-repo>` (retired, read-only reference)
+- Phase 13 = Chunk 1 (Tasks 1-6): Planning doc updates — 6 files, surgical edits
+- Phase 14 = Chunk 2 (Tasks 7-11): Data migration — 8 files, config merge, schema check, validation
+- config.yaml MUST be edited with Edit tool only (never Write — wiped 3 times previously)
 
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-24 — Milestone v1.2 started (Migration & Stabilization)*
+*Last session: 2026-03-24 — Completed 13-01-PLAN.md (Planning Doc Corrections)*
