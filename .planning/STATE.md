@@ -1,29 +1,31 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Port job-finder Improvements
-status: v1.1 milestone complete
-last_updated: "2026-03-24T00:40:45.342Z"
+milestone: v1.2
+milestone_name: Migration & Stabilization
+status: Defining requirements
+last_updated: "2026-03-24"
 progress:
-  total_phases: 7
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 4
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # State
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-24 — Milestone v1.2 started
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 12 — verification-backfill (final v1.1 phase)
+**Current focus:** Migration & Stabilization (v1.2)
 
 ## Accumulated Context
 
@@ -78,4 +80,4 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 None.
 
 ---
-*Last session: 2026-03-23 — Completed Phase 12 (verification-backfill, milestone complete)*
+*Last session: 2026-03-24 — Milestone v1.2 started (Migration & Stabilization)*
