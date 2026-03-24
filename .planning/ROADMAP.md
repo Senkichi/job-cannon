@@ -36,7 +36,7 @@
 
 **Milestone Goal:** Make job-cannon fully operational with real data and accurate planning docs — complete the transition from job-finder.
 
-- [ ] **Phase 13: Planning Doc Corrections** - Correct all planning docs to reflect Phase 4/5 as operational, fix stats, remove stale references
+- [x] **Phase 13: Planning Doc Corrections** - Correct all planning docs to reflect Phase 4/5 as operational, fix stats, remove stale references
 - [ ] **Phase 14: Data Migration & Validation** - Migrate all data files from job-finder, merge config, verify schema, validate app with real data
 
 ## Phase Details
@@ -53,8 +53,8 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 13-01-PLAN.md -- Correct PROJECT.md, CLAUDE.md, STATE.md (project name, test counts, phase status, stale references)
-- [ ] 13-02-PLAN.md -- Remove phase annotations from STACK.md/INTEGRATIONS.md + verification sweep
+- [x] 13-01-PLAN.md -- Correct PROJECT.md, CLAUDE.md, STATE.md (project name, test counts, phase status, stale references)
+- [x] 13-02-PLAN.md -- Remove phase annotations from STACK.md/INTEGRATIONS.md + verification sweep
 
 Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Chunk 1 (Tasks 1-6)
 
@@ -68,7 +68,11 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
   3. config.yaml contains cannon-specific sections (server, filters) and key values match job-finder's (haiku_threshold: 42, drive folder ID populated)
   4. Full test suite passes after migration (1359 tests, zero failures)
   5. App starts on localhost:5000 and renders real job listings from the migrated database
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 14-01-PLAN.md -- Migrate 8 data files from job-finder, surgical config.yaml merge with server+filters sections
+- [ ] 14-02-PLAN.md -- Schema verification, test suite validation, app rendering check with real data
 
 Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Chunk 2 (Tasks 7-11)
 
@@ -88,5 +92,5 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
 | 10. Safety, Tests & Cleanup | v1.1 | 1/1 | Complete | 2026-03-23 |
 | 11. Fix Critical Runtime Bugs | v1.1 | 1/1 | Complete | 2026-03-23 |
 | 12. Milestone Verification Backfill | v1.1 | 2/2 | Complete | 2026-03-24 |
-| 13. Planning Doc Corrections | v1.2 | 0/2 | In progress | - |
-| 14. Data Migration & Validation | v1.2 | 0/? | Not started | - |
+| 13. Planning Doc Corrections | v1.2 | 2/2 | Complete | 2026-03-24 |
+| 14. Data Migration & Validation | v1.2 | 1/2 | In progress | - |
