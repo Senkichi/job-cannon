@@ -1,16 +1,19 @@
 """Parse Indeed job alert emails into Job objects.
 
-Indeed alert emails come from alert@indeed.com. Real emails arrive as plain
-text via gmail_source._extract_body() which prefers text/plain over text/html.
-The plain-text format uses engage.indeed.com tracking redirect URLs.
+Handles two distinct Indeed email types:
 
-This parser uses a two-strategy approach:
-  1. Plain-text strategy (primary): parse plain-text Indeed alert emails that
-     contain engage.indeed.com URLs. Job blocks are delimited by these URLs.
-  2. HTML strategy (fallback): legacy BeautifulSoup link/card strategies for
-     any HTML-format emails (e.g., fabricated test fixtures or future changes).
+1. **Alert emails** (alert@indeed.com): plain-text format with
+   engage.indeed.com tracking redirect URLs. Falls back to HTML strategies.
+   Entry point: ``parse_indeed_alert``
 
-If neither strategy finds jobs, a warning is logged.
+2. **Match emails** (donotreply@match.indeed.com): "smart match"
+   recommendations in plain-text. Two sub-formats:
+   - Single-job: intro sentence with cts.indeed.com URL
+   - Multi-job: job blocks delimited by indeed.com/pagead/clk/dl URLs
+   Entry point: ``parse_indeed_match_alert``
+
+Both share the same block-parsing logic (_parse_plaintext_job_block) and
+salary extraction (_extract_salary_from_text).
 """
 
 import logging
@@ -40,6 +43,54 @@ INDEED_ENGAGE_URL_RE = re.compile(
 
 # Hourly rate: "$25/hr" or "$25.50 / hour" (Indeed-specific fallback)
 HOURLY_RE = re.compile(r"\$(\d[\d.]+)\s*(?:\/\s*(?:hr|hour))", re.IGNORECASE)
+
+# Hourly range: "$70 - $80 an hour" or "$95 per hour" (match emails)
+# Must be checked BEFORE parse_salary_range to avoid K-notation misinterpretation.
+HOURLY_RANGE_RE = re.compile(
+    r"\$(\d[\d,.]+)\s*[-\u2013]+\s*\$(\d[\d,.]+)\s*(?:an?\s+hour|per\s+hour)",
+    re.IGNORECASE,
+)
+HOURLY_SINGLE_RE = re.compile(
+    r"\$(\d[\d,.]+)\s*(?:an?\s+hour|per\s+hour)",
+    re.IGNORECASE,
+)
+
+# Match email: indeed.com/pagead/clk/dl tracking URLs (multi-job format)
+INDEED_MATCH_URL_RE = re.compile(
+    r"https://www\.indeed\.com/pagead/clk/dl\?\S+",
+    re.IGNORECASE,
+)
+
+# Match email: cts.indeed.com tracking URLs (single-job format)
+INDEED_CTS_URL_RE = re.compile(
+    r"https://cts\.indeed\.com/v3/\S+",
+    re.IGNORECASE,
+)
+
+# Match email: single-job intro sentence extraction
+_SINGLE_MATCH_INTRO_RE = re.compile(
+    r"job for an?\s+(.+?)\s+at\s+(.+?)\s+in\s+(.+?)\s+paying\s+(.+?)\s+would",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Match email: single-job intro without salary
+_SINGLE_MATCH_INTRO_NO_PAY_RE = re.compile(
+    r"job for an?\s+(.+?)\s+at\s+(.+?)\s+in\s+(.+?)\s+would",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Match email: footer markers (superset of alert footer)
+_MATCH_FOOTER_RE = re.compile(
+    r"^(\u00a9|\(c\)|Indeed Tower|Salaries estimated)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Match email: preamble end marker — line containing the footnote superscript
+# "Jobs are based on your preferences, profile, and activity on Indeed ¹"
+_MATCH_PREAMBLE_END_RE = re.compile(
+    r"^Jobs are based on.*Indeed\b.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 # Meta-email patterns checked against the first 200 characters only.
 # IMPORTANT: Do NOT filter on "new jobs" or "N new jobs" — those ARE real alerts.
@@ -170,8 +221,12 @@ def _parse_plaintext_job_block(
     block_text: str,
     url: str,
     email_date: Optional[datetime],
+    extract_id_fn=None,
 ) -> Optional[Job]:
-    """Parse a single job block (text preceding an engage.indeed.com URL).
+    """Parse a single job block (text preceding a delimiter URL).
+
+    Shared by both alert (engage.indeed.com) and match (indeed.com/pagead)
+    email formats — the block structure is identical.
 
     Returns a Job if the block looks like a real job listing (has title +
     company-location), or None if it's a preamble/footer link block.
@@ -185,8 +240,8 @@ def _parse_plaintext_job_block(
         # Skip age lines ("Just posted", "1 day ago", etc.)
         if _AGE_LINE_RE.match(line):
             continue
-        # Skip "Easily apply" noise
-        if line.lower() == "easily apply":
+        # Skip noise labels
+        if line.lower() in ("easily apply", "responsive employer"):
             continue
         # Check for salary before adding to content lines
         if "$" in line and _extract_salary_from_text(line) != (None, None):
@@ -222,8 +277,9 @@ def _parse_plaintext_job_block(
     # Extract salary from salary line if present
     salary_min, salary_max = _extract_salary_from_text(salary_line) if salary_line else (None, None)
 
-    # Extract source_id from the engage URL path
-    source_id = _extract_job_id_from_engage_url(url)
+    # Extract source_id using the appropriate extractor
+    id_fn = extract_id_fn or _extract_job_id_from_engage_url
+    source_id = id_fn(url)
 
     return Job(
         title=title,
@@ -493,14 +549,38 @@ def _looks_like_salary_text(text: str) -> bool:
 def _extract_salary_from_text(text: str) -> tuple[Optional[int], Optional[int]]:
     """Parse salary range from text. Returns (salary_min, salary_max).
 
-    Delegates the range pattern to the shared ``parse_salary_range`` and
-    falls back to an Indeed-specific hourly rate conversion ($X/hr -> annual).
+    Checks for hourly indicators first to avoid K-notation misinterpretation
+    (e.g. "$70 - $80 an hour" would otherwise become $70K-$80K via
+    parse_salary_range). Then delegates to the shared parse_salary_range for
+    annual salary patterns, with a final fallback for $X/hr single amounts.
     """
+    # Hourly range: "$70 - $80 an hour" → annualised
+    # Must check BEFORE parse_salary_range to prevent K-notation conversion.
+    range_match = HOURLY_RANGE_RE.search(text)
+    if range_match:
+        try:
+            low = float(range_match.group(1).replace(",", ""))
+            high = float(range_match.group(2).replace(",", ""))
+            return int(low * 2080), int(high * 2080)
+        except ValueError:
+            pass
+
+    # Hourly single: "$95 an hour" → annualised
+    single_match = HOURLY_SINGLE_RE.search(text)
+    if single_match:
+        try:
+            hourly = float(single_match.group(1).replace(",", ""))
+            annual = int(hourly * 2080)
+            return annual, annual
+        except ValueError:
+            pass
+
+    # Annual salary range: "$120K - $150K", "$140,000 - $170,000"
     result = parse_salary_range(text)
     if result != (None, None):
         return result
 
-    # Indeed-specific fallback: hourly rate -> annualised salary
+    # Legacy fallback: "$25/hr" or "$25.50 / hour"
     match = HOURLY_RE.search(text)
     if match:
         try:
@@ -532,3 +612,177 @@ def _extract_job_id(url: str) -> str:
         logger.debug("indeed field extraction failed", exc_info=True)
 
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Indeed Match emails (donotreply@match.indeed.com)
+# ---------------------------------------------------------------------------
+
+
+def _extract_match_source_id(url: str) -> str:
+    """Extract a source_id from an indeed.com/pagead/clk/dl URL.
+
+    Uses the jrtk query param (unique per job tracking token).
+    Falls back to jsa param, then last path segment.
+    """
+    try:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        if "jrtk" in qs:
+            return qs["jrtk"][0]
+        if "jsa" in qs:
+            return qs["jsa"][0]
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if path_parts:
+            return path_parts[-1]
+    except Exception:
+        logger.debug("match source_id extraction failed", exc_info=True)
+    return ""
+
+
+def _extract_cts_source_id(url: str) -> str:
+    """Extract a source_id from a cts.indeed.com/v3/... URL.
+
+    Returns the first path segment after /v3/ (the encoded job payload).
+    """
+    try:
+        parsed = urlparse(url)
+        parts = [p for p in parsed.path.split("/") if p]
+        # Path: /v3/ENCODED_SEGMENT/OPTIONAL_EXTRA
+        if len(parts) >= 2 and parts[0] == "v3":
+            return parts[1][:64]  # cap length for sanity
+        if parts:
+            return parts[-1][:64]
+    except Exception:
+        logger.debug("cts source_id extraction failed", exc_info=True)
+    return ""
+
+
+def _parse_match_multi_job(body: str, email_date: Optional[datetime]) -> list[Job]:
+    """Parse a multi-job Indeed match email.
+
+    Same algorithm as _parse_plaintext but uses indeed.com/pagead/clk/dl URLs
+    as delimiters. Skips the personalized intro paragraph by finding the
+    "Jobs are based on..." preamble end marker.
+    """
+    # Skip preamble ("Hi SAMUEL... Jobs are based on your preferences...")
+    preamble_match = _MATCH_PREAMBLE_END_RE.search(body)
+    start = preamble_match.end() if preamble_match else 0
+
+    # Truncate at footer
+    footer_match = _MATCH_FOOTER_RE.search(body, start)
+    job_section = body[start:footer_match.start()] if footer_match else body[start:]
+
+    url_matches = list(INDEED_MATCH_URL_RE.finditer(job_section))
+    if not url_matches:
+        return []
+
+    jobs = []
+    prev_end = 0
+
+    for url_match in url_matches:
+        url = url_match.group(0)
+        block_text = job_section[prev_end:url_match.start()]
+        prev_end = url_match.end()
+
+        job = _parse_plaintext_job_block(
+            block_text, url, email_date,
+            extract_id_fn=_extract_match_source_id,
+        )
+        if job:
+            jobs.append(job)
+
+    return jobs
+
+
+def _parse_single_match(body: str, email_date: Optional[datetime]) -> list[Job]:
+    """Parse a single-job Indeed match email.
+
+    Format: "We thought this job for a {title} at {company} in {location}
+    paying {salary} would be a good fit. Check out the job at {url}"
+
+    Falls back to a simpler extraction if the intro regex doesn't match.
+    """
+    # Find the CTS URL first (we need it regardless)
+    url_match = INDEED_CTS_URL_RE.search(body)
+    if not url_match:
+        return []
+
+    # Filter out unsubscribe URLs — take the first non-unsubscribe CTS URL
+    url = url_match.group(0)
+    source_id = _extract_cts_source_id(url)
+
+    # Primary: extract from intro sentence with salary
+    intro_match = _SINGLE_MATCH_INTRO_RE.search(body)
+    if intro_match:
+        title = intro_match.group(1).strip()
+        company = intro_match.group(2).strip()
+        location = intro_match.group(3).strip()
+        salary_text = intro_match.group(4).strip()
+        salary_min, salary_max = _extract_salary_from_text(salary_text)
+
+        return [Job(
+            title=title,
+            company=company,
+            location=location,
+            source="indeed",
+            source_url=url,
+            source_id=source_id,
+            salary_min=salary_min,
+            salary_max=salary_max,
+            posted_date=email_date,
+        )]
+
+    # Fallback: intro sentence without salary
+    no_pay_match = _SINGLE_MATCH_INTRO_NO_PAY_RE.search(body)
+    if no_pay_match:
+        title = no_pay_match.group(1).strip()
+        company = no_pay_match.group(2).strip()
+        location = no_pay_match.group(3).strip()
+
+        return [Job(
+            title=title,
+            company=company,
+            location=location,
+            source="indeed",
+            source_url=url,
+            source_id=source_id,
+            posted_date=email_date,
+        )]
+
+    # Last resort: we have a URL but can't parse the intro
+    logger.warning(
+        "Indeed match parser: single-job format not recognized. "
+        "Archive the raw email and update indeed_parser.py."
+    )
+    return []
+
+
+def parse_indeed_match_alert(
+    body: str, email_date: Optional[datetime] = None
+) -> list[Job]:
+    """Parse an Indeed match/recommendation email into Job objects.
+
+    Handles two formats from donotreply@match.indeed.com:
+      - Single-job: intro sentence with cts.indeed.com URL
+      - Multi-job: job blocks delimited by indeed.com/pagead/clk/dl URLs
+
+    Args:
+        body: Email body from Gmail API (plain text).
+        email_date: When the email was sent.
+
+    Returns:
+        List of parsed Job objects (may be empty).
+    """
+    if not body or not body.strip():
+        return []
+
+    # Multi-job: has indeed.com/pagead/clk/dl URLs
+    if INDEED_MATCH_URL_RE.search(body):
+        return _parse_match_multi_job(body, email_date)
+
+    # Single-job: has cts.indeed.com URL
+    if INDEED_CTS_URL_RE.search(body):
+        return _parse_single_match(body, email_date)
+
+    return []
