@@ -118,33 +118,6 @@ _TITLE_STRIP_SUFFIX = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# Location canonical mapping (for normalize_location, NOT used in dedup_key)
-# ---------------------------------------------------------------------------
-
-_LOCATION_CANONICAL = {
-    "sf": "san francisco, ca",
-    "san francisco": "san francisco, ca",
-    "san francisco bay area": "san francisco, ca",
-    "bay area": "san francisco, ca",
-    "silicon valley": "san francisco, ca",
-    "nyc": "new york, ny",
-    "new york": "new york, ny",
-    "new york city": "new york, ny",
-    "ny": "new york, ny",
-    "la": "los angeles, ca",
-    "los angeles": "los angeles, ca",
-    "seattle": "seattle, wa",
-    "boston": "boston, ma",
-    "chicago": "chicago, il",
-    "austin": "austin, tx",
-    "denver": "denver, co",
-    "atlanta": "atlanta, ga",
-    "dc": "washington, dc",
-    "washington dc": "washington, dc",
-    "washington d.c.": "washington, dc",
-}
-
-# ---------------------------------------------------------------------------
 # Status precedence for merge conflict resolution (higher = more advanced stage)
 # ---------------------------------------------------------------------------
 
@@ -214,21 +187,6 @@ def normalize_title(title: str) -> str:
     # Normalize whitespace and lowercase
     normalized = " ".join(normalized.split()).lower()
     return normalized
-
-
-def normalize_location(location: str) -> str:
-    """Normalize a location string for display (NOT used in dedup_key).
-
-    Applies canonical mappings (nyc -> new york, ny) and lowercases.
-
-    Args:
-        location: Raw location string.
-
-    Returns:
-        Normalized location string for display.
-    """
-    normalized = location.strip().lower()
-    return _LOCATION_CANONICAL.get(normalized, normalized)
 
 
 def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
