@@ -27,7 +27,7 @@ except ImportError:
     anthropic = None  # type: ignore[assignment]
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
-from job_finder.db import upsert_job, log_run
+from job_finder.db import upsert_job, log_run, _JOBS_ALL_COLUMNS
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.exclusion_filter import should_exclude
@@ -439,7 +439,7 @@ def _run_haiku_scoring(
         for dedup_key in new_job_keys:
             try:
                 row = conn.execute(
-                    "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                    f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
                 ).fetchone()
                 if row is None:
                     logger.warning("Haiku: job '%s' not found in DB -- skipping", dedup_key)
@@ -583,7 +583,7 @@ def _run_sonnet_evaluation(
         for dedup_key in sonnet_queue:
             try:
                 row = conn.execute(
-                    "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                    f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
                 ).fetchone()
                 if row is None:
                     logger.warning("Sonnet: job '%s' not found in DB -- skipping", dedup_key)
