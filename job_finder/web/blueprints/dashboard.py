@@ -16,6 +16,7 @@ from job_finder.db import (
     get_recent_runs,
 )
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MONTHLY_BUDGET_USD
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.claude_client import get_cost_stats
@@ -180,7 +181,7 @@ def batch_score_haiku_start():
                 error_msg=None,
             )
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = utc_now_iso()
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('haiku', 'running', ?, 0, ?)",
@@ -241,7 +242,7 @@ def batch_score_sonnet_start():
                 error_msg=None,
             )
 
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now = utc_now_iso()
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('sonnet', 'running', ?, 0, ?)",
@@ -315,7 +316,7 @@ def batch_score_status(session_id):
                     timeout_conn.execute(
                         "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? "
                         "WHERE id = ? AND status IN ('running', 'cancelling')",
-                        ("Session timed out (>30 min)", datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+                        ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
                 finally:
@@ -443,7 +444,7 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
             if status_row and status_row["status"] == "cancelling":
                 conn.execute(
                     "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+                    (utc_now_iso(), session_id),
                 )
                 conn.commit()
                 return
@@ -521,7 +522,7 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
             if status_row and status_row["status"] == "cancelling":
                 conn.execute(
                     "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+                    (utc_now_iso(), session_id),
                 )
                 conn.commit()
                 return
@@ -562,7 +563,7 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
     """Mark a batch session as done and log the activity."""
     conn.execute(
         "UPDATE batch_score_sessions SET status = ?, finished_at = ? WHERE id = ?",
-        (status, datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+        (status, utc_now_iso(), session_id),
     )
     conn.commit()
 
@@ -597,7 +598,7 @@ def _fail_session(conn, db_path: str, session_id: int, error: Exception, session
     try:
         conn.execute(
             "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-            (str(error), datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+            (str(error), utc_now_iso(), session_id),
         )
         conn.commit()
     except Exception:
@@ -625,7 +626,7 @@ def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
         try:
             conn.execute(
                 "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-                (error_msg, datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), session_id),
+                (error_msg, utc_now_iso(), session_id),
             )
             conn.commit()
         finally:

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
+from job_finder.json_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def record_cost(
         Computed cost in USD.
     """
     cost_usd = compute_cost(model, input_tokens, output_tokens)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = utc_now_iso()
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",

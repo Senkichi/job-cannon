@@ -2,9 +2,20 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def utc_now_iso() -> str:
+    """Return the current UTC time as a naive ISO 8601 string.
+
+    Produces timestamps like '2026-03-23T14:30:00' (no timezone suffix).
+    All database timestamps should use this function so the codebase stores
+    a consistent UTC baseline rather than mixing local time and UTC.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def safe_json_load(value: str | None, default: Any = None) -> Any:
