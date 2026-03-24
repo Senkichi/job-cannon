@@ -441,3 +441,45 @@ Multiple input and select elements in the jobs filter bar lack associated `<labe
 6. **Standardize timestamp handling (F012).** Create `utc_now_iso()` utility and migrate all 33+ timestamp sites to a consistent convention. This prevents timezone-related comparison bugs.
 
 7. **Move pipeline status constants to foundation layer (F016).** Relocate `PIPELINE_STATUSES` and `VALID_PIPELINE_STATUSES` from `web/blueprints/__init__.py` to `constants.py`, eliminating the upward dependency from `db.py` to the web layer.
+
+---
+
+## Fix Summary
+
+**Applied: 24 | Reverted: 0 | Deferred: 2 | Errors: 0**
+
+### Applied
+- G001: "Migrate pipeline_runner scoring to scoring_orchestrator" -- 4 files (commit c3c4413)
+- G003: "Move VALID_PIPELINE_STATUSES to foundation layer constants" -- 2 files (commit 9c3a50a)
+- G004: "Extract shared backfill startup logic from db_migrate" -- 1 file (commit 5e4129b)
+- G002: "Consolidate profile loading into scoring_orchestrator" -- 4 files (commit 6994615)
+- G005: "Clean up ScoringResult dual-type handling in scoring orchestrator" -- 1 file (commit e29975d)
+- G006: "Standardize background job parameter ordering to (db_path, config)" -- 4 files (commit 30ca2fe)
+- G008: "Guard call_claude against empty response content and wrong-shape JSON fallback" -- 1 file (commit e4bb1d1)
+- G024: "Introduce ClaudeContext dataclass to reduce call_claude parameter count" -- 1 file (commit 6c3af3b)
+- G009: "Add validation to resolve_detection and empty config guard" -- 2 files (commit 9a21ac4)
+- G010: "Narrow exception handling in db.py and dashboard" -- 2 files (commit c0bda9d)
+- G011: "Extract shared meta-email detection into parser common module" -- 4 files (commit e7f1386)
+- G012: "Extract shared salary parsing into parser common module" -- 4 files (commit 5b39a33)
+- G013: "Standardize datetime timestamps to UTC across codebase" -- 3 files (commit 399410e)
+- G015: "Add Gmail pagination error resilience" -- 1 file (commit a7ba3ce)
+- G016: "Add __post_init__ validation to Job dataclass" -- 1 file (commit 11045b7)
+- G017: "Consolidate description merge logic" -- 2 files (commit a7e409d)
+- G007: "Replace inline score persistence SQL with db helper functions" -- 2 files (commit fe1238d)
+- G014: "Add thread safety to _last_budget_pct_notified" -- 1 file (commit 42b4ca1)
+- G018: "Eliminate double config load in run.py" -- 2 files (commit 6fcf6b1)
+- G019: "Remove dead code: normalize_location and purge_jobs.py" -- 2 files (commit 53acf6b)
+- G021: "Add accessibility labels to filter bar form elements" -- 1 file (commit 226e156)
+- G023: "Migrate Optional[T] to T | None syntax" -- 2 files (commit 9746a6d)
+- G020: "Clean up redundant imports across modules" -- 4 files (commit 4ee5a42)
+- G022: "Replace SELECT * with explicit column lists in high-traffic queries" -- 3 files (commit 3eb8a5b)
+
+### Reverted
+None
+
+### Deferred
+- F017: Requires decision on whether and how to decompose db.py into sub-modules (db_jobs.py, db_pipeline.py, db_dashboard.py)
+- F030: Requires decision on whether to remove, deprecate, or explicitly document the heuristic JobScorer
+
+### Remaining
+None
