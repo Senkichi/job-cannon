@@ -17,6 +17,7 @@ the Flask request thread.
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -60,6 +61,7 @@ logger = logging.getLogger(__name__)
 
 # Track last notified budget threshold to avoid repeated notifications.
 # Reset on app restart (acceptable for single-user app).
+_budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
 
 
@@ -679,12 +681,13 @@ def _check_budget_alert(config: dict, db_path: str) -> None:
 
         from job_finder.web.notifier import notify_budget_alert
 
-        if pct >= 100 and _last_budget_pct_notified < 100:
-            notify_budget_alert(pct, config)
-            _last_budget_pct_notified = 100
-        elif pct >= 80 and _last_budget_pct_notified < 80:
-            notify_budget_alert(pct, config)
-            _last_budget_pct_notified = 80
+        with _budget_alert_lock:
+            if pct >= 100 and _last_budget_pct_notified < 100:
+                notify_budget_alert(pct, config)
+                _last_budget_pct_notified = 100
+            elif pct >= 80 and _last_budget_pct_notified < 80:
+                notify_budget_alert(pct, config)
+                _last_budget_pct_notified = 80
 
     except Exception as e:
         logger.debug("Budget alert check failed (non-fatal): %s", e)
