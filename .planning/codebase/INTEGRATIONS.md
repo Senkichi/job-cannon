@@ -73,13 +73,13 @@ SENDER_PARSERS = {
 - Flow: 3-legged OAuth (InstalledAppFlow) via `job_finder/gmail_auth.py`
 - Scopes:
   - `https://www.googleapis.com/auth/gmail.readonly` - Read Gmail labels, messages
-  - `https://www.googleapis.com/auth/drive.file` - Upload/manage Drive files (Phase 4+)
+  - `https://www.googleapis.com/auth/drive.file` - Upload/manage Drive files
 - Token storage: `token.json` (persistent, auto-refreshed)
 - Credentials: `credentials.json` from Google Cloud Console (OAuth client secret)
 - Implementation:
   - Auth flow: `job_finder/gmail_auth.py`
   - Gmail client: `job_finder/sources/gmail_source.py`
-  - Drive client: `job_finder/web/drive_uploader.py` (Phase 4)
+  - Drive client: `job_finder/web/drive_uploader.py`
   - Status checker: `job_finder/web/drive_status.py`
 
 **Flask Session:**
@@ -160,7 +160,7 @@ SENDER_PARSERS = {
 - `sources.jsearch.rapidapi_key` - RapidAPI key for JSearch
 - `scoring.monthly_budget_usd` - Monthly Claude budget cap (default: $25.00)
 - `scoring.haiku_threshold` - Score threshold for high_score notifications (default: 55)
-- `drive.folder_id` - Google Drive folder for resume uploads (Phase 4)
+- `drive.folder_id` - Google Drive folder for resume uploads
 - `drive.convert_to_gdoc` - Convert uploaded DOCX to Google Docs (default: True)
 - `notifications.{high_score,pipeline_change,budget_alert}` - Per-type toggles (default: True)
 
@@ -178,7 +178,7 @@ SENDER_PARSERS = {
 - None - Polling-based architecture (Gmail and SerpAPI)
 
 **Outgoing:**
-- Google Drive API: Resume file uploads (Phase 4, future)
+- Google Drive API: Resume file uploads
 - Anthropic Streaming: Not used (all Claude calls are request-response)
 
 ---
