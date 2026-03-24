@@ -15,15 +15,15 @@ progress:
 
 ## Current Position
 
-Phase: 12 (verification-backfill) — Complete
-Plan: Complete
+Phase: 13 (planning-doc-corrections) — Plan 02 Complete
+Plan: 02 of 02
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 12 — verification-backfill (final v1.1 phase)
+**Current focus:** Phase 13 — planning-doc-corrections (v1.2 milestone)
 
 ## Accumulated Context
 
@@ -78,4 +78,9 @@ See: .planning/PROJECT.md (updated 2026-03-23)
 None.
 
 ---
-*Last session: 2026-03-23 — Completed Phase 12 (verification-backfill, milestone complete)*
+### Decisions Made in Phase 13
+
+- STACK.md and INTEGRATIONS.md cleaned of all "(Phase N)" annotations — features are operational, not future
+- Verification sweep confirmed zero stale phase references in codebase docs
+
+*Last session: 2026-03-24 — Completed 13-02-PLAN.md (remove phase annotations from STACK.md/INTEGRATIONS.md)*
