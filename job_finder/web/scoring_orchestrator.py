@@ -32,6 +32,7 @@ from typing import Callable, Optional
 
 from job_finder.config import DEFAULT_BORDERLINE_HIGH, DEFAULT_HAIKU_THRESHOLD
 from job_finder.db import persist_haiku_score, persist_sonnet_score
+from job_finder.web.scoring_types import unwrap_scoring_result
 
 logger = logging.getLogger(__name__)
 
@@ -99,15 +100,9 @@ def score_and_persist_haiku(
 
     scoring_result = scorer_fn(client, job_row, profile, conn, config)
 
-    # Handle ScoringResult (new discriminated type) and plain dict (legacy/mocked callers)
-    if hasattr(scoring_result, "status"):
-        if scoring_result.status != "success":
-            return None
-        result = scoring_result.data
-    elif scoring_result is None:
+    result = unwrap_scoring_result(scoring_result)
+    if result is None:
         return None
-    else:
-        result = scoring_result
 
     score = result.get("score", 0)
     summary_text = result.get("summary", "")
@@ -126,12 +121,7 @@ def score_and_persist_haiku(
             client, job_row, profile, conn, config,
             max_chars=4000, purpose="haiku_reeval",
         )
-        # Handle ScoringResult or plain dict
-        if hasattr(reeval_scoring, "status"):
-            reeval_ok = reeval_scoring.status == "success"
-            reeval_result = reeval_scoring.data if reeval_ok else None
-        else:
-            reeval_result = reeval_scoring
+        reeval_result = unwrap_scoring_result(reeval_scoring)
 
         if reeval_result is not None:
             score = reeval_result.get("score", 0)
@@ -182,15 +172,9 @@ def score_and_persist_sonnet(
 
     scoring_result = evaluator_fn(client, job_row, experience_profile=profile, conn=conn, config=config)
 
-    # Handle ScoringResult (new discriminated type) and plain dict (legacy/mocked callers)
-    if hasattr(scoring_result, "status"):
-        if scoring_result.status != "success":
-            return None
-        result = scoring_result.data
-    elif scoring_result is None:
+    result = unwrap_scoring_result(scoring_result)
+    if result is None:
         return None
-    else:
-        result = scoring_result
 
     sonnet_score = result.get("score")
     fit_analysis = json.dumps(result.get("fit_analysis", {}))

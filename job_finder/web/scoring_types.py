@@ -5,14 +5,16 @@ Provides:
               for job records. Used as a type hint in scoring function signatures.
     ScoringResult -- Discriminated return type that lets callers distinguish
               success from budget_exceeded, error, and skipped outcomes.
+    unwrap_scoring_result -- Helper to extract the data dict from a ScoringResult,
+              returning None for any non-success status.
 
 Usage:
-    from job_finder.web.scoring_types import JobRow, ScoringResult
+    from job_finder.web.scoring_types import JobRow, ScoringResult, unwrap_scoring_result
 
     def score(job_row: JobRow) -> ScoringResult: ...
 """
 
-from typing import Literal, NamedTuple, TypedDict
+from typing import Literal, NamedTuple, Optional, TypedDict
 
 
 class JobRow(TypedDict, total=False):
@@ -68,3 +70,22 @@ class ScoringResult(NamedTuple):
 
     data: dict | None
     status: Literal["success", "budget_exceeded", "error", "skipped"]
+
+
+def unwrap_scoring_result(scoring_result: ScoringResult) -> Optional[dict]:
+    """Unwrap a ScoringResult, returning the data dict on success or None.
+
+    Centralizes the success/failure dispatch so callers don't repeat the
+    status-check pattern.  Returns scoring_result.data when status is
+    'success', None otherwise.
+
+    Args:
+        scoring_result: A ScoringResult from score_job_haiku or
+                        evaluate_job_sonnet.
+
+    Returns:
+        The result data dict on success, or None for any non-success status.
+    """
+    if scoring_result.status != "success":
+        return None
+    return scoring_result.data
