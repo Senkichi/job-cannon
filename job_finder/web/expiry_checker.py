@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -258,6 +259,9 @@ def _check_serpapi(job_title: str, company_name: str, config: dict) -> str:
 # ---------------------------------------------------------------------------
 
 # Maps company_id -> consecutive failure count. Resets on app restart.
+# Thread-safety: protected by _careers_lock; APScheduler runs in a background
+# thread while Flask request handlers may trigger manual checks concurrently.
+_careers_lock = threading.Lock()
 _careers_failure_counts: dict[int, int] = {}
 _careers_skip_until: dict[int, datetime] = {}
 
@@ -277,18 +281,19 @@ def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
     """
     if company_id is None:
         return
-    if success:
-        _careers_failure_counts.pop(company_id, None)
-        _careers_skip_until.pop(company_id, None)
-    else:
-        count = _careers_failure_counts.get(company_id, 0) + 1
-        _careers_failure_counts[company_id] = count
-        if count >= _MAX_CAREERS_FAILURES:
-            _careers_skip_until[company_id] = datetime.now(timezone.utc) + timedelta(days=_CAREERS_SKIP_DAYS)
-            logger.info(
-                "_record_careers_outcome: company %d hit %d failures, skipping for %d days",
-                company_id, count, _CAREERS_SKIP_DAYS,
-            )
+    with _careers_lock:
+        if success:
+            _careers_failure_counts.pop(company_id, None)
+            _careers_skip_until.pop(company_id, None)
+        else:
+            count = _careers_failure_counts.get(company_id, 0) + 1
+            _careers_failure_counts[company_id] = count
+            if count >= _MAX_CAREERS_FAILURES:
+                _careers_skip_until[company_id] = datetime.now(timezone.utc) + timedelta(days=_CAREERS_SKIP_DAYS)
+                logger.info(
+                    "_record_careers_outcome: company %d hit %d failures, skipping for %d days",
+                    company_id, count, _CAREERS_SKIP_DAYS,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -434,13 +439,14 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
             # Check careers page failure backoff (Signal 2 only)
             company_id = job.get("company_row_id")
             skip_careers = False
-            if company_id and company_id in _careers_skip_until:
-                if datetime.now(timezone.utc) < _careers_skip_until[company_id]:
-                    skip_careers = True
-                    logger.debug(
-                        "run_expiry_check: skipping careers check for company %s (backoff)",
-                        company_id,
-                    )
+            with _careers_lock:
+                skip_until = _careers_skip_until.get(company_id) if company_id else None
+            if skip_until and datetime.now(timezone.utc) < skip_until:
+                skip_careers = True
+                logger.debug(
+                    "run_expiry_check: skipping careers check for company %s (backoff)",
+                    company_id,
+                )
 
             try:
                 result, evidence = _check_job_expiry(job, company, config, skip_careers=skip_careers)
