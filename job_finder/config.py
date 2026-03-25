@@ -111,7 +111,13 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
         )
 
     with open(path, "r") as f:
-        cfg = yaml.safe_load(f)
+        try:
+            cfg = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            raise ValueError(
+                f"Config file contains invalid YAML: {config_path}\n{exc}\n"
+                f"See config.example.yaml for the expected structure."
+            ) from exc
 
     if cfg is None:
         raise ValueError(
