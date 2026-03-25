@@ -91,7 +91,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
         cfg = config
 
     app.config["JF_CONFIG"] = cfg
-    app.config["DB_PATH"] = cfg["db"]["path"]
+    app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # Set ANTHROPIC_API_KEY inside create_app(), not at module level.
