@@ -41,8 +41,8 @@ uv pip install -r requirements.txt
 job_finder/
 ├── web/
 │   ├── __init__.py              # Flask app factory (create_app)
-│   ├── blueprints/              # 6 blueprints: jobs, dashboard, pipeline, profile, settings, detections
-│   ├── templates/               # 19 Jinja2 templates (base.html + partials)
+│   ├── blueprints/              # 10 blueprints: jobs, dashboard, pipeline, profile, settings, detections, companies, costs, feedback, resume
+│   ├── templates/               # 42 Jinja2 templates (base.html + partials)
 │   ├── claude_client.py         # Anthropic wrapper with cost tracking + budget gating
 │   ├── haiku_scorer.py          # Fast-filter scoring
 │   ├── sonnet_evaluator.py      # Deep evaluation with fit analysis
@@ -59,7 +59,7 @@ job_finder/
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
-└── test_*.py                    # 41 test files
+└── test_*.py                    # 45 test files
 ```
 
 ## Architecture Decisions That Matter
