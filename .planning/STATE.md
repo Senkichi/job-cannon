@@ -57,6 +57,19 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 - Phase 14 = Chunk 2 (Tasks 7-11): Data migration — 8 files, config merge, schema check, validation
 - config.yaml MUST be edited with Edit tool only (never Write — wiped 3 times previously)
 
+### Pending Todos
+
+8 total (2 pre-existing, 6 new from log investigation):
+
+- Fix job board not refreshing when date filter is cleared (ui)
+- Replace status filter dropdown with multi-select checkboxes (ui)
+- **Replace DDG with reliable search API for homepage discovery** (general) — critical
+- **Add domain-guessing heuristic for company homepage discovery** (general)
+- **Fix compound slug homepage resolution** (general)
+- **Separate homepage discovery into standalone scheduler job** (general)
+- **Isolate test logging from production log file** (testing)
+- **Separate template rendering from scan exception handler** (ui)
+
 ### Blockers/Concerns
 
 None.
