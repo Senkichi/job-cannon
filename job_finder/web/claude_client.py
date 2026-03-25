@@ -365,6 +365,11 @@ def call_claude(
     else:
         tier = "sonnet"
 
+    if conn is None:
+        raise ValueError("call_claude requires a database connection (conn is None)")
+    if client is None:
+        raise ValueError("call_claude requires an Anthropic client (client is None)")
+
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
             f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
@@ -409,6 +414,10 @@ def call_claude(
     if output_schema is not None and hasattr(content, "input"):
         result = content.input
     else:
+        if not hasattr(content, "text"):
+            raise RuntimeError(
+                f"Unexpected content block type '{type(content).__name__}': no .text attribute"
+            )
         text = content.text
         try:
             result = json.loads(text)
