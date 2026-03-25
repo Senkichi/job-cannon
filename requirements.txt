@@ -34,4 +34,5 @@ python-docx~=1.2
 
 # Dev
 pytest~=8.0
+pytest-playwright~=0.7
 python-dotenv~=1.0
