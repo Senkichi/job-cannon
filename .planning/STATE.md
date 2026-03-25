@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Migration & Stabilization
-status: Executing Phase 14
-last_updated: "2026-03-24T16:48:38Z"
+status: v1.2 milestone complete
+last_updated: "2026-03-24T17:11:15.187Z"
 progress:
   total_phases: 2
   completed_phases: 1
@@ -15,8 +15,8 @@ progress:
 
 ## Current Position
 
-Phase: 14 (Data Migration & Validation) — EXECUTING
-Plan: 2 of 2 (Plan 01 complete)
+Phase: 14
+Plan: Not started
 
 ## Project Reference
 
@@ -59,16 +59,15 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 
 ### Pending Todos
 
-8 total (2 pre-existing, 6 new from log investigation):
+7 total (2 pre-existing, 5 new from homepage discovery investigation):
 
 - Fix job board not refreshing when date filter is cleared (ui)
 - Replace status filter dropdown with multi-select checkboxes (ui)
-- **Replace DDG with reliable search API for homepage discovery** (general) — critical
+- **Replace DDG with reliable search API for homepage discovery** (general) — critical blocker
 - **Add domain-guessing heuristic for company homepage discovery** (general)
 - **Fix compound slug homepage resolution** (general)
 - **Separate homepage discovery into standalone scheduler job** (general)
 - **Isolate test logging from production log file** (testing)
-- **Separate template rendering from scan exception handler** (ui)
 
 ### Blockers/Concerns
 

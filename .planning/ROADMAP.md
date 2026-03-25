@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 Foundation + AI Scoring + Pipeline Automation** — Phases 1-5 (shipped 2026-03-23)
 - ✅ **v1.1 Port job-finder Improvements** — Phases 6-12 (shipped 2026-03-24)
-- 🚧 **v1.2 Migration & Stabilization** — Phases 13-14 (in progress)
+- ✅ **v1.2 Migration & Stabilization** — Phases 13-14 (shipped 2026-03-24)
 
 ## Phases
 
@@ -32,49 +32,13 @@
 
 </details>
 
-### v1.2 Migration & Stabilization (In Progress)
+<details>
+<summary>✅ v1.2 Migration & Stabilization (Phases 13-14) — SHIPPED 2026-03-24</summary>
 
-**Milestone Goal:** Make job-cannon fully operational with real data and accurate planning docs — complete the transition from job-finder.
+- [x] Phase 13: Planning Doc Corrections (2/2 plans) — completed 2026-03-24
+- [x] Phase 14: Data Migration & Validation (2/2 plans) — completed 2026-03-24
 
-- [x] **Phase 13: Planning Doc Corrections** - Correct all planning docs to reflect Phase 4/5 as operational, fix stats, remove stale references
-- [ ] **Phase 14: Data Migration & Validation** - Migrate all data files from job-finder, merge config, verify schema, validate app with real data
-
-## Phase Details
-
-### Phase 13: Planning Doc Corrections
-**Goal**: Planning documentation accurately reflects the project's actual state — Phase 4/5 features operational, test counts correct, no stale "deferred" references
-**Depends on**: Phase 12
-**Requirements**: DOCS-01, DOCS-02, DOCS-03, DOCS-04
-**Success Criteria** (what must be TRUE):
-  1. ROADMAP.md shows Phase 4 and Phase 5 as operational (not deferred)
-  2. CLAUDE.md project overview reads "Job Cannon" (not "Job Finder") and test count matches actual pytest output
-  3. Grep for "deferred" across all planning docs returns zero matches on Phase 4/5
-  4. Codebase docs (STACK.md, INTEGRATIONS.md) have no "Phase 4+" or "Phase 4)" annotations
-**Plans:** 2 plans
-
-Plans:
-- [x] 13-01-PLAN.md -- Correct PROJECT.md, CLAUDE.md, STATE.md (project name, test counts, phase status, stale references)
-- [x] 13-02-PLAN.md -- Remove phase annotations from STACK.md/INTEGRATIONS.md + verification sweep
-
-Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Chunk 1 (Tasks 1-6)
-
-### Phase 14: Data Migration & Validation
-**Goal**: job-cannon is fully operational with real data — all personal data files migrated from job-finder, config merged, schema verified, tests and app rendering confirmed
-**Depends on**: Phase 13
-**Requirements**: MIGR-01, MIGR-02, MIGR-03, MIGR-04, VALID-01, VALID-02, VALID-03
-**Success Criteria** (what must be TRUE):
-  1. All 8 data files (jobs.db, config.yaml, experience_profile.json, token.json, credentials.json, .env, resume_style_guide.json, experience_reference.md) exist in job-cannon root
-  2. `git status` shows zero untracked data files — all are gitignored
-  3. config.yaml contains cannon-specific sections (server, filters) and key values match job-finder's (haiku_threshold: 42, drive folder ID populated)
-  4. Full test suite passes after migration (1359 tests, zero failures)
-  5. App starts on localhost:5000 and renders real job listings from the migrated database
-**Plans**: 2 plans
-
-Plans:
-- [x] 14-01-PLAN.md -- Migrate 8 data files from job-finder, surgical config.yaml merge with server+filters sections
-- [ ] 14-02-PLAN.md -- Schema verification, test suite validation, app rendering check with real data
-
-Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Chunk 2 (Tasks 7-11)
+</details>
 
 ## Progress
 
@@ -93,4 +57,4 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
 | 11. Fix Critical Runtime Bugs | v1.1 | 1/1 | Complete | 2026-03-23 |
 | 12. Milestone Verification Backfill | v1.1 | 2/2 | Complete | 2026-03-24 |
 | 13. Planning Doc Corrections | v1.2 | 2/2 | Complete | 2026-03-24 |
-| 14. Data Migration & Validation | v1.2 | 1/2 | In progress | - |
+| 14. Data Migration & Validation | v1.2 | 2/2 | Complete | 2026-03-24 |
