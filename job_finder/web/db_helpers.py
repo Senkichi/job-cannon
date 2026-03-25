@@ -29,6 +29,13 @@ def get_db(db_path: str) -> sqlite3.Connection:
 
     Returns:
         An open sqlite3.Connection scoped to the current Flask request context.
+
+    Thread-safety contract:
+        check_same_thread=False is intentional — Flask's g object ensures this
+        connection is used only within a single request thread. Background jobs
+        (APScheduler, stale_detector) MUST create their own sqlite3.connect()
+        calls and MUST NOT share or reference g.db across thread boundaries.
+        Violating this contract causes silent data corruption under concurrent load.
     """
     if "db" not in g:
         g.db = sqlite3.connect(db_path, check_same_thread=False)
