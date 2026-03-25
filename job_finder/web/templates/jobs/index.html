@@ -24,6 +24,8 @@
       <!-- All toggle button -->
       <button type="button" id="status-all-btn"
               onclick="toggleAllStatus(this)"
+              title="Select or deselect all statuses"
+              aria-label="Select or deselect all statuses"
               class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer">
         All
       </button>
@@ -131,8 +133,8 @@
   <div class="overflow-x-auto">
     <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
       <colgroup>
-        <col style="width: 5%;">
-        <col style="width: 28%;">
+        <col style="width: 8%;">
+        <col style="width: 25%;">
         <col style="width: 16%;">
         <col style="width: 14%;">
         <col style="width: 10%;">
@@ -163,6 +165,9 @@
   {% if archived_count > 0 %}
   <div id="archived-section" class="mt-6">
     <button type="button" onclick="toggleArchived()"
+            aria-label="Toggle archived jobs section"
+            aria-expanded="false"
+            id="archived-toggle-btn"
             class="w-full flex items-center gap-3 px-4 py-3 bg-slate-800/70 hover:bg-slate-800 border border-slate-700 rounded-lg transition-colors cursor-pointer">
       <span id="archived-arrow" class="text-slate-400 text-sm" style="display: inline-block; transition: transform 0.2s;">&#9654;</span>
       <span class="text-sm font-medium text-slate-300">Archived Jobs</span>
@@ -172,8 +177,8 @@
       <div class="overflow-x-auto">
         <table class="text-xs text-left border-collapse w-full" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 5%;">
-            <col style="width: 28%;">
+            <col style="width: 8%;">
+            <col style="width: 25%;">
             <col style="width: 16%;">
             <col style="width: 14%;">
             <col style="width: 10%;">
@@ -270,12 +275,14 @@ function archiveRow(el) {
 function toggleArchived() {
   var body = document.getElementById('archived-body');
   var arrow = document.getElementById('archived-arrow');
+  var btn = document.getElementById('archived-toggle-btn');
   if (!body || !arrow) return;
 
   var isHidden = body.classList.contains('hidden');
   if (isHidden) {
     body.classList.remove('hidden');
     arrow.style.transform = 'rotate(90deg)';
+    if (btn) btn.setAttribute('aria-expanded', 'true');
     // Lazy-load: only fetch on first expand
     if (!body.dataset.loaded) {
       htmx.ajax('GET', '/jobs/archived-table', {target: '#archived-table-body', swap: 'innerHTML'});
@@ -284,6 +291,7 @@ function toggleArchived() {
   } else {
     body.classList.add('hidden');
     arrow.style.transform = 'rotate(0deg)';
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 }
 
