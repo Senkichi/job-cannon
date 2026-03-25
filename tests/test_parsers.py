@@ -133,6 +133,105 @@ class TestGlassdoorParser:
         assert parse_glassdoor_alert("<html></html>") == []
 
 
+# Sample Glassdoor positional HTML (new classless format as of 2026)
+SAMPLE_GLASSDOOR_POSITIONAL_HTML = """
+<html><body>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&amp;jobListingId=1010075022007&amp;other=params">
+  <table><tbody><tr><td>
+    <table><tbody><tr>
+      <td style="vertical-align:top;width:32px"><span></span></td>
+      <td style="vertical-align:middle;padding-left:8px">
+        <span style="display:inline-block">
+          <span style="font-size:12px">Comfy (Ukraine)</span>
+          <span style="font-size:12px"> 4.1 \u2605</span>
+        </span>
+      </td>
+    </tr></tbody></table>
+  </td></tr></tbody></table>
+  <table><tbody><tr><td>
+    <p>Business &amp; Operations Strategist</p>
+    <p>San Rafael, CA</p>
+    <p>$101K - $174K(Glassdoor est.)</p>
+    <p>Just posted</p>
+  </td></tr></tbody></table>
+</a>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=102&amp;jobListingId=1010058270842">
+  <table><tbody><tr><td>
+    <table><tbody><tr>
+      <td style="vertical-align:top;width:32px"><span></span></td>
+      <td style="vertical-align:middle;padding-left:8px">
+        <span style="display:inline-block">
+          <span style="font-size:12px">U.S. Bank</span>
+          <span style="font-size:12px"> 3.3 \u2605</span>
+        </span>
+      </td>
+    </tr></tbody></table>
+  </td></tr></tbody></table>
+  <table><tbody><tr><td>
+    <p>Business Development Officer</p>
+    <p>$139K - $164K(Employer est.)</p>
+    <p>1d</p>
+  </td></tr></tbody></table>
+</a>
+</body></html>
+"""
+
+
+class TestGlassdoorPositionalParser:
+    """Tests for Glassdoor positional extraction (no CSS classes)."""
+
+    def test_positional_basic_count(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert len(jobs) == 2
+
+    def test_positional_company_no_rating(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[0].company == "Comfy (Ukraine)"
+
+    def test_positional_title(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[0].title == "Business & Operations Strategist"
+
+    def test_positional_location(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[0].location == "San Rafael, CA"
+
+    def test_positional_salary(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[0].salary_min == 101000
+        assert jobs[0].salary_max == 174000
+
+    def test_positional_no_location(self):
+        """Card 2 has no location p -- salary directly after title."""
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[1].company == "U.S. Bank"
+        assert jobs[1].title == "Business Development Officer"
+        assert jobs[1].location == "Unknown"
+        assert jobs[1].salary_min == 139000
+
+    def test_positional_source_id(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
+        assert jobs[0].source_id == "1010075022007"
+
+    def test_old_css_format_still_works(self):
+        """Backward compat: CSS-class format still produces jobs."""
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_HTML)
+        assert len(jobs) == 2
+        assert jobs[0].company == "QLogic LLC"
+
+    def test_real_archived_email(self):
+        """Parse a real archived Glassdoor email from data/parse_failures/."""
+        import os
+        email_path = os.path.join("data", "parse_failures", "glassdoor_com_2026-03-25T12-38-48.html")
+        if os.path.exists(email_path):
+            with open(email_path, encoding="utf-8") as f:
+                body = f.read()
+            jobs = parse_glassdoor_alert(body)
+            assert len(jobs) > 0, f"Real Glassdoor email produced 0 jobs"
+            assert all(j.company and j.company != "Unknown" for j in jobs)
+            assert all(j.title for j in jobs)
+
+
 class TestDeduplication:
     def test_dedup_key_consistency(self):
         from job_finder.models import Job
@@ -950,6 +1049,84 @@ class TestIndeedPlaintextParser:
         assert all(j.source == "indeed" for j in jobs), (
             f"All jobs should have source='indeed', got {[j.source for j in jobs]}"
         )
+
+
+# Sample Indeed rc/clk/dl plain-text email (new 2026+ format)
+SAMPLE_INDEED_RC_CLK_PLAINTEXT = """Indeed Job Alert
+2 new lead data analyst jobs in San Francisco Bay Area, CA
+
+Jobs 1-2 of 2 new jobs
+See matching results on Indeed: https://www.indeed.com/jobs?q=lead+data+analyst&hl=en&from=ja&l=San+Francisco+Bay+Area%2C+CA
+
+Analytics Lead, GenAI Marketplace
+Scale AI - San Francisco, CA
+$149,600 - $225,500 a year
+Degree in a quantitative field (e.g., Math, Stats, Engineering). Partner with Data Engineers...
+Just posted
+https://www.indeed.com/rc/clk/dl?jk=cdd005f8a0d63582&from=ja&qd=RnZh_TRUNCATED&bb=TRUNCATED
+
+Analytics Lead, Safety & Customer Care
+Lyft - San Francisco, CA
+$118,000 - $147,500 a year
+Degree in a quantitative field like statistics, economics, applied math...
+Just posted
+https://www.indeed.com/rc/clk/dl?jk=6ca3afffde0194ba&from=ja&qd=RnZh_TRUNCATED&bb=TRUNCATED
+
+
+Do not share this email
+
+\u00a9 2026 Indeed, Inc.
+Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
+"""
+
+
+class TestIndeedRcClkParser:
+    """Tests for Indeed rc/clk/dl URL format parsing."""
+
+    def test_rc_clk_job_count(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert len(jobs) == 2, f"Expected 2 jobs, got {len(jobs)}"
+
+    def test_rc_clk_title(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert jobs[0].title == "Analytics Lead, GenAI Marketplace"
+
+    def test_rc_clk_company(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert jobs[0].company == "Scale AI"
+
+    def test_rc_clk_location(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert jobs[0].location == "San Francisco, CA"
+
+    def test_rc_clk_salary(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert jobs[0].salary_min == 149600
+        assert jobs[0].salary_max == 225500
+
+    def test_rc_clk_source_id(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert jobs[0].source_id == "cdd005f8a0d63582"
+
+    def test_rc_clk_source_url(self):
+        jobs = parse_indeed_alert(SAMPLE_INDEED_RC_CLK_PLAINTEXT)
+        assert "indeed.com/rc/clk/dl" in jobs[0].source_url
+
+    def test_old_engage_format_still_works(self):
+        """Backward compat: engage.indeed.com format still produces jobs."""
+        jobs = parse_indeed_alert(SAMPLE_INDEED_PLAINTEXT_MULTI)
+        assert len(jobs) == 3
+
+    def test_real_archived_email(self):
+        """Parse a real archived Indeed email from data/parse_failures/."""
+        import os
+        email_path = os.path.join("data", "parse_failures", "indeed_com_2026-03-25T12-39-03.html")
+        if os.path.exists(email_path):
+            with open(email_path, encoding="utf-8") as f:
+                body = f.read()
+            jobs = parse_indeed_alert(body)
+            assert len(jobs) > 0, f"Real Indeed email produced 0 jobs"
+            assert all(j.source == "indeed" for j in jobs)
 
 
 # ---------------------------------------------------------------------------
