@@ -15,8 +15,7 @@
       {% endif %}
     </span>
     {% if not cancelling %}
-    <form method="POST" action="/dashboard/batch-score/cancel/{{ session_id }}"
-          hx-post="/dashboard/batch-score/cancel/{{ session_id }}"
+    <form hx-post="/dashboard/batch-score/cancel/{{ session_id }}"
           hx-target="#batch-score-{{ label | lower }}-status"
           hx-swap="outerHTML">
       <button type="submit" class="text-xs text-red-400 hover:text-red-300">Cancel</button>
