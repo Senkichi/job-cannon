@@ -19,6 +19,7 @@ import io
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
 
 # Combined OAuth scopes -- must match SCOPES in job_finder/gmail_auth.py.
@@ -105,6 +106,10 @@ def upload_to_drive(
     Returns:
         webViewLink URL for the created file. Falls back to a constructed URL
         using the file ID if the API does not return webViewLink.
+
+    Raises:
+        HttpError: If the Drive API returns an error (e.g. 403 quota exceeded,
+                   404 folder not found, 401 unauthorized).
     """
     buffer.seek(0)
 
@@ -120,11 +125,14 @@ def upload_to_drive(
 
     media = MediaIoBaseUpload(buffer, mimetype=_DOCX_MIME, resumable=False)
 
-    created = (
-        service.files()
-        .create(body=file_metadata, media_body=media, fields="id,webViewLink")
-        .execute()
-    )
+    try:
+        created = (
+            service.files()
+            .create(body=file_metadata, media_body=media, fields="id,webViewLink")
+            .execute()
+        )
+    except HttpError:
+        raise
 
     web_view_link = created.get("webViewLink")
     if web_view_link:
