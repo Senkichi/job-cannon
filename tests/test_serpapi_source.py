@@ -63,7 +63,7 @@ SAMPLE_SERPAPI_RESULT = {
 # ---------------------------------------------------------------------------
 
 def _make_source() -> SerpAPISource:
-    return SerpAPISource(api_key="test-key-does-not-matter")
+    return SerpAPISource(api_key="test-key-does-not-matter")  # nosec B106 -- dummy placeholder, not a real credential
 
 
 def _result_with(**overrides) -> dict:
