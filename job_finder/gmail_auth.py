@@ -22,6 +22,7 @@ Upgrading from Gmail-only token:
     re-auth with the Drive scope included. The old token is deleted first.
 """
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -40,6 +41,8 @@ TOKEN_PATH = "token.json"
 _GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 _DRIVE_CONSOLE_URL = "https://console.cloud.google.com/apis/library/drive.googleapis.com"
+
+logger = logging.getLogger(__name__)
 
 
 def _check_token_scopes(token_path: str) -> set:
@@ -60,7 +63,8 @@ def _check_token_scopes(token_path: str) -> set:
             return set()
         creds = Credentials.from_authorized_user_file(token_path, scopes=None)
         return set(creds.scopes or [])
-    except Exception:
+    except Exception as e:
+        logger.debug("get_granted_scopes failed: %s", e)
         return set()
 
 
