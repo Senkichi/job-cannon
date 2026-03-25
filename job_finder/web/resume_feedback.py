@@ -22,6 +22,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 import anthropic
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 from job_finder.config import DEFAULT_MODEL_SONNET
@@ -115,9 +116,17 @@ def poll_resume_for_changes(
         Tuple of (text, modifiedTime). text is None if no change or skipped.
         modifiedTime is always returned for updating last_drive_polled_at.
     """
-    meta = service.files().get(
-        fileId=file_id, fields="id,modifiedTime,mimeType"
-    ).execute()
+    try:
+        meta = service.files().get(
+            fileId=file_id, fields="id,modifiedTime,mimeType"
+        ).execute()
+    except HttpError as e:
+        logger.error("Drive API error fetching metadata for file %s: %s", file_id, e)
+        raise
+    except Exception as e:
+        logger.error("Unexpected error fetching Drive metadata for file %s: %s", file_id, e)
+        raise
+
     modified_time = meta.get("modifiedTime", "")
 
     # Skip if not modified since last poll
@@ -131,12 +140,19 @@ def poll_resume_for_changes(
         return None, modified_time
 
     # Google Doc — export as plain text
-    request = service.files().export_media(fileId=file_id, mimeType="text/plain")
-    buf = io.BytesIO()
-    downloader = MediaIoBaseDownload(buf, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
+    try:
+        request = service.files().export_media(fileId=file_id, mimeType="text/plain")
+        buf = io.BytesIO()
+        downloader = MediaIoBaseDownload(buf, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+    except HttpError as e:
+        logger.error("Drive API error exporting file %s: %s", file_id, e)
+        raise
+    except Exception as e:
+        logger.error("Unexpected error exporting Drive file %s: %s", file_id, e)
+        raise
 
     return buf.getvalue().decode("utf-8"), modified_time
 
