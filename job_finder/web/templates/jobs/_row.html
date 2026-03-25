@@ -34,7 +34,7 @@
           }, 100);
         } else {
           setTimeout(function() {
-            compactRow.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            compactRow.scrollIntoView({behavior: 'smooth', block: 'start'});
             compactRow.classList.remove('highlight-flash'); void compactRow.offsetWidth; compactRow.classList.add('highlight-flash');
           }, 100);
         }
