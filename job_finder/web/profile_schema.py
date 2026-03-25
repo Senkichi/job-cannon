@@ -143,7 +143,10 @@ def load_profile(profile_path: str = "experience_profile.json") -> dict:
         }
 
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in profile file {path}: {exc}") from exc
 
 
 def save_profile(profile: dict, profile_path: str = "experience_profile.json", *, force: bool = False) -> None:
@@ -170,7 +173,7 @@ def save_profile(profile: dict, profile_path: str = "experience_profile.json", *
                 existing = json.load(f)
             existing_positions = existing.get("positions", [])
             existing_skills = existing.get("skills", [])
-        except Exception:
+        except (json.JSONDecodeError, ValueError):
             existing_positions = []
             existing_skills = []
 
