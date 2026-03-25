@@ -12,6 +12,8 @@ onsite, offer, accepted) are NEVER auto-archived — they require explicit actio
 import sqlite3
 import logging
 
+from job_finder.db import update_pipeline_status
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +39,7 @@ def run_stale_detection(db_path: str) -> dict:
             archived (int): Jobs auto-archived.
     """
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
         # Mark jobs as stale: not seen for 14+ days
         cursor = conn.execute(
@@ -52,16 +55,24 @@ def run_stale_detection(db_path: str) -> dict:
         )
         stale_cleared = cursor.rowcount
 
+        conn.commit()
+
         # Auto-archive discovered/reviewing jobs not seen for 30+ days
-        # CRITICAL: only archive passive stages, never active pipeline stages
-        cursor = conn.execute(
-            "UPDATE jobs SET pipeline_status = 'archived' "
+        # CRITICAL: only archive passive stages, never active pipeline stages.
+        # Use update_pipeline_status() so each archive transition is recorded
+        # in pipeline_events (audit trail).
+        rows_to_archive = conn.execute(
+            "SELECT dedup_key FROM jobs "
             "WHERE last_seen < datetime('now', '-30 days') "
             "AND pipeline_status IN ('discovered', 'reviewing')"
-        )
-        archived = cursor.rowcount
-
-        conn.commit()
+        ).fetchall()
+        archived = 0
+        for row in rows_to_archive:
+            update_pipeline_status(
+                conn, row["dedup_key"], "archived",
+                source="stale_detector", evidence="not_seen_30_days",
+            )
+            archived += 1
 
         result = {
             "stale_marked": stale_marked,
