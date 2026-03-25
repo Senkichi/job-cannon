@@ -30,6 +30,9 @@
         <!-- Rejected column: collapsed by default, expand toggle -->
         <div id="rejected-toggle-bar"
              class="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-slate-700/50 transition-colors"
+             role="button"
+             aria-expanded="false"
+             aria-controls="rejected-body"
              onclick="toggleRejected()">
           <span class="text-xs text-slate-400">
             <span id="rejected-toggle-label">Show {{ col.jobs | length }} rejected</span>
@@ -76,17 +79,20 @@
     const body = document.getElementById('rejected-body');
     const chevron = document.getElementById('rejected-chevron');
     const label = document.getElementById('rejected-toggle-label');
+    const toggleBar = document.getElementById('rejected-toggle-bar');
 
     const isHidden = body.classList.contains('hidden');
     if (isHidden) {
       body.classList.remove('hidden');
       chevron.style.transform = 'rotate(180deg)';
       label.textContent = 'Hide rejected';
+      toggleBar.setAttribute('aria-expanded', 'true');
     } else {
       body.classList.add('hidden');
       chevron.style.transform = 'rotate(0deg)';
       const count = body.querySelectorAll('[data-job-id]').length;
       label.textContent = 'Show ' + count + ' rejected';
+      toggleBar.setAttribute('aria-expanded', 'false');
     }
   }
 
