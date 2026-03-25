@@ -54,12 +54,14 @@ def confirm(detection_id: int):
             update_pipeline_status(conn, job_id, new_status, source="email")
         except Exception as e:
             logger.error("Failed to update pipeline status for %s: %s", job_id, e)
+            return f"Error: could not update pipeline status — {e}", 500
 
     # Resolve the detection as confirmed
     try:
         resolve_detection(conn, detection_id, "confirmed")
     except Exception as e:
         logger.error("Failed to resolve detection %d: %s", detection_id, e)
+        return f"Error: could not resolve detection — {e}", 500
 
     logger.info(
         "Detection %d confirmed: %s -> %s (job: %s)",
