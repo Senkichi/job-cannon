@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Migration & Stabilization
 status: Phase complete — ready for verification
-last_updated: "2026-03-26T03:07:26.461Z"
+last_updated: "2026-03-26T03:34:20.757Z"
 progress:
   total_phases: 2
   completed_phases: 0
@@ -15,24 +15,25 @@ progress:
 
 ## Current Position
 
-Phase: 16 (Homepage Discovery) — COMPLETE
-Plan: 2 of 2 (Plans 01 and 02 complete)
+Phase: 17 (Code Quality) — COMPLETE (1/1 plans, ready for verification)
+Plan: 1 of 1 (Plan 01 complete)
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 16 complete — homepage discovery scheduler job wired up
+**Current focus:** Phase 17 — Code Quality (complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3 (this milestone)
+- Total plans completed: 4 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
-- Average duration: ~2min
-- Total execution time: ~6min
+- Phase 17-01: 8min (3 tasks, 6 files)
+- Average duration: ~5min
+- Total execution time: ~10min
 
 *Updated after each plan completion*
 
@@ -71,11 +72,11 @@ None.
 - All 8 data files gitignored -- no per-task commits for data migration (Plan 01)
 - Config merge via copy + Edit append -- preserves job-finder values while adding cannon sections (Plan 01)
 
-### Decisions Made in Phase 16
+### Decisions Made in Phase 17
 
-- Used _make_simple_job (not _make_tracked_job) for homepage_discovery — no activity_tracker ACTION constant for this job; simple logging sufficient (Plan 02)
-- No day_of_week restriction on homepage discovery — daily cadence preferred over Mon/Wed-only ATS jobs (Plan 02)
-- No guard function for homepage discovery — should always run without config flag to disable (Plan 02)
+- Gate _setup_file_logging() inside existing if not _is_testing block — keeps all production-only side effects together (Plan 01)
+- scan() route uses two-layer exception handling — inner try for scan logic, render_template outside so TemplateErrors propagate as 500 (Plan 01)
+- Date filter uses form-level hx-trigger with input event for #filter-date-from and #filter-date-to — element-level triggers would own their own HTMX request (Plan 01)
 
 ---
-*Last session: 2026-03-26 — Completed Phase 16 Plan 02 (Scheduler Registration)*
+*Last session: 2026-03-26 — Completed Phase 17 Plan 01 (Code Quality Fixes)*

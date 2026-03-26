@@ -2699,3 +2699,84 @@ class TestGapClosureFixes:
             "paste-jd must NOT emit HX-Trigger (would cause full table reload, "
             "conflicting with OOB score cell approach)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for ATS scan exception handler separation (QUAL-01)
+# ---------------------------------------------------------------------------
+
+
+class TestScanExceptionSeparation:
+    """Verify that template rendering errors are distinct from scan logic errors."""
+
+    def test_scan_logic_error_returns_scan_failure_message(self, app_with_companies):
+        """POST /companies/scan where run_ats_scan raises RuntimeError returns 200 with error."""
+        from unittest.mock import patch
+
+        client = app_with_companies.test_client()
+        with patch(
+            "job_finder.web.blueprints.companies.run_ats_scan",
+            side_effect=RuntimeError("connection timeout"),
+        ), patch(
+            "job_finder.web.blueprints.companies.probe_ats_slugs",
+            return_value={"probed": 0},
+        ):
+            response = client.post("/companies/scan")
+
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "connection timeout" in data
+
+    def test_scan_template_error_not_reported_as_scan_failure(self, app_with_companies):
+        """POST /companies/scan where run_ats_scan succeeds but render_template raises propagates.
+
+        In Flask TESTING mode, unhandled exceptions propagate to the test instead of
+        returning 500. We verify the exception is a TemplateSyntaxError (not swallowed
+        as a generic scan failure), which confirms render_template is outside the try block.
+        """
+        import jinja2
+        from unittest.mock import patch
+
+        client = app_with_companies.test_client()
+        with patch(
+            "job_finder.web.blueprints.companies.run_ats_scan",
+            return_value={"jobs_found": 5, "companies_scanned": 2, "html_scraped": 0, "errors": []},
+        ), patch(
+            "job_finder.web.blueprints.companies.probe_ats_slugs",
+            return_value={"probed": 2},
+        ), patch(
+            "job_finder.web.blueprints.companies.render_template",
+            side_effect=jinja2.TemplateSyntaxError("unexpected char", 1, filename="test.html"),
+        ):
+            # Template error must propagate (not be swallowed as "ATS scan failed")
+            with pytest.raises(jinja2.TemplateSyntaxError):
+                client.post("/companies/scan")
+
+
+# ---------------------------------------------------------------------------
+# Tests for date filter HTMX trigger (UI-01)
+# ---------------------------------------------------------------------------
+
+
+class TestDateFilterHtmxTrigger:
+    """Verify date filter inputs have input event triggers for clearing."""
+
+    def test_date_filter_has_input_trigger_for_date_from(self, client):
+        """GET /jobs renders filter form with input trigger on date-from input."""
+        response = client.get("/jobs")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "input from:#filter-date-from" in data, (
+            "filter form hx-trigger must include 'input from:#filter-date-from' "
+            "so clearing the date input fires an HTMX request"
+        )
+
+    def test_date_filter_has_input_trigger_for_date_to(self, client):
+        """GET /jobs renders filter form with input trigger on date-to input."""
+        response = client.get("/jobs")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "input from:#filter-date-to" in data, (
+            "filter form hx-trigger must include 'input from:#filter-date-to' "
+            "so clearing the date input fires an HTMX request"
+        )

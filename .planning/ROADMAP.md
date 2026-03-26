@@ -37,8 +37,7 @@
 **Milestone Goal:** Make job-cannon fully operational with real data and accurate planning docs — complete the transition from job-finder.
 
 - [x] **Phase 13: Planning Doc Corrections** - Correct all planning docs to reflect Phase 4/5 as operational, fix stats, remove stale references
-- [x] **Phase 14: Data Migration & Validation** - Migrate all data files from job-finder, merge config, verify schema, validate app with real data (completed 2026-03-24)
-- [x] **Phase 16: Homepage Discovery** - Three-tier discovery + daily APScheduler cron job at 06:30 (completed 2026-03-26)
+- [ ] **Phase 14: Data Migration & Validation** - Migrate all data files from job-finder, merge config, verify schema, validate app with real data
 
 ## Phase Details
 
@@ -73,7 +72,7 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
 
 Plans:
 - [x] 14-01-PLAN.md -- Migrate 8 data files from job-finder, surgical config.yaml merge with server+filters sections
-- [x] 14-02-PLAN.md -- Schema verification, test suite validation, app rendering check with real data
+- [ ] 14-02-PLAN.md -- Schema verification, test suite validation, app rendering check with real data
 
 Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Chunk 2 (Tasks 7-11)
 
@@ -94,5 +93,5 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
 | 11. Fix Critical Runtime Bugs | v1.1 | 1/1 | Complete | 2026-03-23 |
 | 12. Milestone Verification Backfill | v1.1 | 2/2 | Complete | 2026-03-24 |
 | 13. Planning Doc Corrections | v1.2 | 2/2 | Complete | 2026-03-24 |
-| 14. Data Migration & Validation | v1.2 | 2/2 | Complete | 2026-03-24 |
-| 16. Homepage Discovery | v1.3 | 2/2 | Complete | 2026-03-26 |
+| 14. Data Migration & Validation | v1.2 | 1/2 | In progress | - |
+| 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
