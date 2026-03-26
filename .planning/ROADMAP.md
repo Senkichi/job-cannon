@@ -94,3 +94,4 @@ Reference: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md` Ch
 | 12. Milestone Verification Backfill | v1.1 | 2/2 | Complete | 2026-03-24 |
 | 13. Planning Doc Corrections | v1.2 | 2/2 | Complete | 2026-03-24 |
 | 14. Data Migration & Validation | v1.2 | 1/2 | In progress | - |
+| 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
