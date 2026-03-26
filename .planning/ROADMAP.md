@@ -73,9 +73,9 @@ Plans:
   3. Companies that fail the heuristic get homepage URLs discovered via SerpAPI `engine=google` web search — results exclude third-party directory URLs (Glassdoor, Crunchbase, LinkedIn, Bloomberg, ZoomInfo)
   4. A daily APScheduler job at 6:30 AM runs homepage discovery against companies with no `homepage_url`, using its own sqlite3 connection (not Flask `g.db`), skipping companies already attempted via `homepage_probe_attempted_at` tracking
   5. SerpAPI quota errors (JSON `error` key) short-circuit the batch immediately with a logged error rather than silently continuing
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
-- [ ] 16-01-PLAN.md — Three-tier discovery refactor (domain guess + slug + SerpAPI) + Migration 17 + test rewrite
+- [x] 16-01-PLAN.md — Three-tier discovery refactor (domain guess + slug + SerpAPI) + Migration 17 + test rewrite
 - [ ] 16-02-PLAN.md — Register homepage_discovery_job in scheduler (daily 06:30 cron)
 **UI hint**: no
 
@@ -122,6 +122,6 @@ Plans:
 | 13. Planning Doc Corrections | v1.2 | 2/2 | Complete | 2026-03-24 |
 | 14. Data Migration & Validation | v1.2 | 2/2 | Complete | 2026-03-24 |
 | 15. Parser Fixes | v1.3 | 1/1 | Complete    | 2026-03-26 |
-| 16. Homepage Discovery | v1.3 | 0/2 | Not started | — |
+| 16. Homepage Discovery | v1.3 | 1/2 | In Progress|  |
 | 17. Code Quality | v1.3 | 0/? | Not started | — |
 | 18. Async Sync | v1.3 | 0/? | Not started | — |
