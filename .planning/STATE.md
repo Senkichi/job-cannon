@@ -2,21 +2,21 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Fixes & Improvements
-status: Phase complete — ready for verification
-last_updated: "2026-03-26T00:40:00Z"
+status: Ready to execute
+last_updated: "2026-03-26T03:02:08.973Z"
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  total_plans: 3
+  completed_plans: 2
 ---
 
 # State
 
 ## Current Position
 
-Phase: 15 (Parser Fixes) — EXECUTING
-Plan: 1 of 1
+Phase: 16 (Homepage Discovery) — EXECUTING
+Plan: 2 of 2
 
 ## Progress Bar
 
@@ -32,16 +32,17 @@ Phase 18 [ ] Async Sync
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 15 — Parser Fixes
+**Current focus:** Phase 16 — Homepage Discovery
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3 (this milestone)
+- Total plans completed: 4 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
-- Average duration: ~2min
-- Total execution time: ~6min
+- Phase 16-01: 9min (2 tasks, 4 files)
+- Average duration: ~5min
+- Total execution time: ~15min
 
 *Updated after each plan completion*
 
@@ -108,5 +109,15 @@ None.
 - Pre-existing tests encoding "wrong CSS = 0 jobs" assumption updated to reflect correct new behavior (positional fallback succeeds)
 - Phase 15-01: 15min (3 tasks, 3 files, 18 new tests, +28 assertions)
 
+### Decisions Made in Phase 16 Plan 01
+
+- _strip_company_suffixes strips trailing Inc/LLC/Corp/Co/Ltd/Group tokens (with and without dot) before domain/slug check
+- Tier 1 (_try_domain_guess) returns None immediately for multi-word names — Tier 2 name-slug handles them
+- Tier 2b name-derived slug only tried when name_slug != ats_slug to avoid redundant HEAD request
+- _search_serpapi raises SerpAPIQuotaError on JSON error key; discover_homepages_batch catches and short-circuits
+- _BATCH_CAP=10 (conservative until SerpAPI quota confirmed — 250/month vs 100/month discrepancy still open)
+- Migration 17: homepage_probe_attempted_at column + index on companies table (retry-avoidance)
+- Phase 16-01: 9min (2 tasks, 4 files, 27 new tests)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 15 Plan 01 (Parser Fixes: Glassdoor positional + Indeed rc/clk)*
+*Last session: 2026-03-26 — Completed Phase 16 Plan 01 (Homepage Discoverer: three-tier + Migration 17)*
