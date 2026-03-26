@@ -89,7 +89,7 @@ Job Cannon uses Claude AI models for scoring. The costs are low, but here is wha
 | What | Cost | When |
 |------|------|------|
 | Haiku fast filter | ~$0.01-0.02 per job | Every new job found |
-| Sonnet deep evaluation | ~$0.05-0.15 per job | Jobs above the Haiku threshold (55 by default) |
+| Sonnet deep evaluation | ~$0.05-0.15 per job | Jobs above the Haiku threshold (42 by default) |
 | Opus profile extraction | ~$0.10-0.20 one-time | When you update your experience profile |
 
 **Typical monthly cost:** $2-10 for moderate job searching (50-200 new jobs/month)
