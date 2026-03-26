@@ -133,14 +133,7 @@ def load_profile(profile_path: str = "experience_profile.json") -> dict:
     """
     path = Path(profile_path)
     if not path.exists():
-        return {
-            "positions": [],
-            "skills": [],
-            "resume_preferences": {
-                "summary_style": "",
-                "emphasis": [],
-            },
-        }
+        return dict(EMPTY_PROFILE)
 
     with open(path, "r", encoding="utf-8") as f:
         try:
@@ -290,4 +283,5 @@ def extract_profile_from_markdown(markdown_text: str) -> dict:
         return extracted
 
     except Exception as exc:  # noqa: BLE001
+        logger.warning("extract_profile_from_markdown failed: %s", exc)
         return {"error": str(exc), "positions": [], "skills": [], "resume_preferences": {"summary_style": "", "emphasis": []}}
