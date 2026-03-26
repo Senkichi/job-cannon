@@ -406,11 +406,12 @@ def test_migration_count_is_thirteen():
     """v1.1 adds 4 migrations (9-12), Phase 19 cleanup adds Migration 13.
 
     NOTE: Migration 14 (Phase 30 infrastructure) and Migration 15 (Phase 40 data
-    quality) were added after this test was written. Kept for historical reference;
-    updated to reflect current count.
+    quality) were added after this test was written. Migration 16 adds company
+    enrichment columns. Migration 17 adds homepage_probe_attempted_at column.
+    Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 16
+    assert len(MIGRATIONS) == 17
 
 
 class TestMigration13:
