@@ -16,6 +16,10 @@ from job_finder.db import update_pipeline_status
 
 logger = logging.getLogger(__name__)
 
+# Configurable thresholds — days since last_seen before triggering each action
+_STALE_THRESHOLD_DAYS = 14   # Mark job as stale after this many days without re-sighting
+_ARCHIVE_THRESHOLD_DAYS = 30  # Auto-archive passive-stage jobs after this many days
+
 
 def run_stale_detection(db_path: str) -> dict:
     """Run stale detection and auto-archive on the job database.
@@ -41,17 +45,17 @@ def run_stale_detection(db_path: str) -> dict:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        # Mark jobs as stale: not seen for 14+ days
+        # Mark jobs as stale: not seen for _STALE_THRESHOLD_DAYS+ days
         cursor = conn.execute(
             "UPDATE jobs SET is_stale = 1 "
-            "WHERE last_seen < datetime('now', '-14 days') AND is_stale = 0"
+            f"WHERE last_seen < datetime('now', '-{_STALE_THRESHOLD_DAYS} days') AND is_stale = 0"
         )
         stale_marked = cursor.rowcount
 
         # Clear stale flag for jobs seen recently again
         cursor = conn.execute(
             "UPDATE jobs SET is_stale = 0 "
-            "WHERE last_seen >= datetime('now', '-14 days') AND is_stale = 1"
+            f"WHERE last_seen >= datetime('now', '-{_STALE_THRESHOLD_DAYS} days') AND is_stale = 1"
         )
         stale_cleared = cursor.rowcount
 
@@ -63,7 +67,7 @@ def run_stale_detection(db_path: str) -> dict:
         # in pipeline_events (audit trail).
         rows_to_archive = conn.execute(
             "SELECT dedup_key FROM jobs "
-            "WHERE last_seen < datetime('now', '-30 days') "
+            f"WHERE last_seen < datetime('now', '-{_ARCHIVE_THRESHOLD_DAYS} days') "
             "AND pipeline_status IN ('discovered', 'reviewing')"
         ).fetchall()
         archived = 0
