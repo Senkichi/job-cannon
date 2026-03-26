@@ -441,10 +441,10 @@ def _build_location_string(locations_raw: list[str]) -> str:
 def _merge_descriptions(rows: list[dict]) -> Optional[str]:
     """Merge descriptions from all rows.
 
-    Delegates to db._merge_description for pairwise merge logic (single source
+    Delegates to db.merge_description for pairwise merge logic (single source
     of truth — see job_finder/db.py).
     """
-    from job_finder.db import _merge_description
+    from job_finder.db import merge_description
 
     descriptions = [r.get("description") for r in rows if r.get("description")]
     if not descriptions:
@@ -452,7 +452,7 @@ def _merge_descriptions(rows: list[dict]) -> Optional[str]:
 
     merged = descriptions[0]
     for desc in descriptions[1:]:
-        merged = _merge_description(merged, desc)
+        merged = merge_description(merged, desc)
 
     return merged
 

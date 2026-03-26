@@ -170,7 +170,7 @@ def score_and_persist_sonnet(
 
     dedup_key = job_row.get("dedup_key", "unknown")
 
-    scoring_result = evaluator_fn(client, job_row, experience_profile=profile, conn=conn, config=config)
+    scoring_result = evaluator_fn(client, job_row, profile, conn, config)
 
     result = unwrap_scoring_result(scoring_result)
     if result is None:
