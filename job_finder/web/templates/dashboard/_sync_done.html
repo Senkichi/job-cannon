@@ -1,0 +1,19 @@
+{# Sync done/error terminal fragment. Auto-dismisses after 10s via hx-trigger load delay:10s.
+   NO polling trigger -- omitting hx-trigger="every" stops HTMX polling. #}
+<div id="sync-status"
+     hx-get="/dashboard/sync/dismiss"
+     hx-trigger="load delay:10s"
+     hx-target="this"
+     hx-swap="outerHTML"
+     class="text-xs py-1">
+  {% if error_msg %}
+    <span class="text-red-400">Sync error: {{ error_msg }}</span>
+  {% elif status == 'already_running' %}
+    <span class="text-amber-400">A sync is already running</span>
+  {% else %}
+    <span class="text-emerald-400">
+      Sync complete: {{ total }} fetched, {{ scored }} new
+      {% if skipped > 0 %}, {{ skipped }} errors{% endif %}
+    </span>
+  {% endif %}
+</div>

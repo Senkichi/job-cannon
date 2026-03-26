@@ -127,13 +127,17 @@
   <section aria-label="Quick actions">
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
     <div class="flex flex-wrap gap-3 items-start">
-      <!-- Sync Now -->
-      <form method="POST" action="/dashboard/sync">
-        <button type="submit"
-                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
-          Sync Now
-        </button>
-      </form>
+      <!-- Sync Now — async with HTMX progress polling -->
+      <div id="sync-status">
+        <form hx-post="/dashboard/sync/start"
+              hx-target="#sync-status"
+              hx-swap="outerHTML">
+          <button type="submit"
+                  class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
+            Sync Now
+          </button>
+        </form>
+      </div>
 
       <!-- Batch Haiku Score — async with HTMX polling progress bar -->
       <div id="batch-score-haiku-status">
