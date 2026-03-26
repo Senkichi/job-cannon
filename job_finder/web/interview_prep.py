@@ -175,17 +175,16 @@ def _run_prep_generation(
 
     # --- Insert initial 'generating' row ---
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    conn.execute(
+    cursor = conn.execute(
         "INSERT INTO interview_preps (job_id, status, generated_at) VALUES (?, ?, ?)",
         (dedup_key, "generating", now),
     )
+    prep_id = cursor.lastrowid
+    if prep_id is None:
+        raise RuntimeError(
+            f"Failed to insert interview_prep row for dedup_key: {dedup_key}"
+        )
     conn.commit()
-
-    # Retrieve the newly inserted row id for updates
-    prep_id = conn.execute(
-        "SELECT id FROM interview_preps WHERE job_id = ? AND status = 'generating' ORDER BY id DESC LIMIT 1",
-        (dedup_key,),
-    ).fetchone()["id"]
 
     try:
         # --- Load job row ---
