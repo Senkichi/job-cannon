@@ -41,6 +41,12 @@ INDEED_ENGAGE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches indeed.com/rc/clk/dl tracking redirect URLs (new plain-text format, 2026+)
+INDEED_RC_CLK_URL_RE = re.compile(
+    r"https://www\.indeed\.com/rc/clk/dl\?\S+",
+    re.IGNORECASE,
+)
+
 # Hourly rate: "$25/hr" or "$25.50 / hour" (Indeed-specific fallback)
 HOURLY_RE = re.compile(r"\$(\d[\d.]+)\s*(?:\/\s*(?:hr|hour))", re.IGNORECASE)
 
@@ -121,6 +127,19 @@ _AGE_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Plain-text: summary count lines (e.g. "Jobs 1-2 of 2 new jobs") that appear
+# in some email formats between the header and the actual job listings.
+_SUMMARY_COUNT_RE = re.compile(
+    r"^Jobs\s+\d",
+    re.IGNORECASE,
+)
+
+# Plain-text: preamble navigation lines (e.g. "See matching results on Indeed: URL")
+_SEE_MATCHING_RE = re.compile(
+    r"^See matching results",
+    re.IGNORECASE,
+)
+
 # Plain-text: footer start marker — stop processing job blocks here
 _FOOTER_RE = re.compile(
     r"^(\u00a9|\(c\)|Indeed Tower)",
@@ -197,8 +216,15 @@ def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
     else:
         job_section = body[job_section_start:]
 
-    # Find all engage.indeed.com URLs in the job section
+    # Try engage.indeed.com URLs first (legacy format)
     url_matches = list(INDEED_ENGAGE_URL_RE.finditer(job_section))
+    id_fn = None  # default: _extract_job_id_from_engage_url
+
+    # Fall back to rc/clk/dl URLs (2026+ format)
+    if not url_matches:
+        url_matches = list(INDEED_RC_CLK_URL_RE.finditer(job_section))
+        id_fn = _extract_job_id  # uses jk= param extraction
+
     if not url_matches:
         return []
 
@@ -210,7 +236,7 @@ def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
         block_text = job_section[prev_end:url_match.start()]
         prev_end = url_match.end()
 
-        job = _parse_plaintext_job_block(block_text, url, email_date)
+        job = _parse_plaintext_job_block(block_text, url, email_date, extract_id_fn=id_fn)
         if job:
             jobs.append(job)
 
@@ -242,6 +268,12 @@ def _parse_plaintext_job_block(
             continue
         # Skip noise labels
         if line.lower() in ("easily apply", "responsive employer"):
+            continue
+        # Skip summary count lines ("Jobs 1-2 of 2 new jobs")
+        if _SUMMARY_COUNT_RE.match(line):
+            continue
+        # Skip "See matching results on Indeed: ..." navigation lines
+        if _SEE_MATCHING_RE.match(line):
             continue
         # Check for salary before adding to content lines
         if "$" in line and _extract_salary_from_text(line) != (None, None):
