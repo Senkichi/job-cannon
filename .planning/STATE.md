@@ -1,39 +1,40 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Migration & Stabilization
+milestone: v1.3
+milestone_name: Fixes & Improvements
 status: Phase complete — ready for verification
-last_updated: "2026-03-26T03:34:20.757Z"
+last_updated: "2026-03-26T04:06:05.597Z"
 progress:
-  total_phases: 2
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 1
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # State
 
 ## Current Position
 
-Phase: 17 (Code Quality) — COMPLETE (1/1 plans, ready for verification)
-Plan: 1 of 1 (Plan 01 complete)
+Phase: 18 (Async Sync) — COMPLETE
+Plan: 1 of 1 — DONE
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 17 — Code Quality (complete)
+**Current focus:** Phase 18 — Async Sync
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4 (this milestone)
+- Total plans completed: 5 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
-- Average duration: ~5min
-- Total execution time: ~10min
+- Phase 18-01: 15min (1 task TDD, 5 files)
+- Average duration: ~8min
+- Total execution time: ~25min
 
 *Updated after each plan completion*
 
@@ -78,5 +79,12 @@ None.
 - scan() route uses two-layer exception handling — inner try for scan logic, render_template outside so TemplateErrors propagate as 500 (Plan 01)
 - Date filter uses form-level hx-trigger with input event for #filter-date-from and #filter-date-to — element-level triggers would own their own HTMX request (Plan 01)
 
+### Decisions Made in Phase 18
+
+- Reuse batch_score_sessions table with session_type='sync' for async sync — no new table needed, consistent pattern (Plan 01)
+- Store sync results in existing columns: scored=jobs_new, total=total_fetched, skipped=error_count — avoids JSON in error_msg (Plan 01)
+- Simplified phase labels (running->gmail->done) since trigger_sync is synchronous and opaque — no sub-phase callbacks available (Plan 01)
+- Flask's native app.config["TESTING"] must be set explicitly in test fixtures, separate from JF_CONFIG["TESTING"] (Plan 01)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 17 Plan 01 (Code Quality Fixes)*
+*Last session: 2026-03-26 — Completed Phase 18 Plan 01 (Async Sync)*
