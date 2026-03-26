@@ -1697,6 +1697,8 @@ class TestScanRouteProbeBeforeScan:
                 "jobs_discovered": 2,
                 "jobs_new": 2,
                 "haiku_scored": 2,
+                "html_scraped": 0,
+                "errors": [],
                 "probe": {},
             }
 
@@ -1718,6 +1720,8 @@ class TestScanRouteProbeBeforeScan:
             "jobs_discovered": 0,
             "jobs_new": 0,
             "haiku_scored": 0,
+            "html_scraped": 0,
+            "errors": [],
             "probe": probe_result,
         }
 

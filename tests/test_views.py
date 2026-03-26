@@ -2740,7 +2740,7 @@ class TestScanExceptionSeparation:
         client = app_with_companies.test_client()
         with patch(
             "job_finder.web.blueprints.companies.run_ats_scan",
-            return_value={"jobs_found": 5, "companies_scanned": 2},
+            return_value={"jobs_found": 5, "companies_scanned": 2, "html_scraped": 0, "errors": []},
         ), patch(
             "job_finder.web.blueprints.companies.probe_ats_slugs",
             return_value={"probed": 2},
