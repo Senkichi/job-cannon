@@ -1441,11 +1441,14 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
         assert j2.salary_min == 95000
         assert j2.salary_max == 130000
 
-    def test_audit_glassdoor_css_drift_logs_warning(self, caplog):
-        """Glassdoor parser logs WARNING when job card links exist but zero jobs extracted
-        (i.e., CSS class names have changed)."""
-        import logging
-        # Build HTML with real jobListing hrefs but WRONG CSS class names
+    def test_audit_glassdoor_css_drift_positional_fallback(self):
+        """Glassdoor parser uses positional fallback when CSS classes have changed.
+
+        With the 2026 format update, the parser now falls back to positional
+        extraction when CSS classes are missing or wrong — so changed classes
+        should produce jobs, not 0 jobs.
+        """
+        # HTML with wrong CSS class names but valid positional content
         html = """
 <html><body>
 <a href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&jobListingId=8001">
@@ -1460,10 +1463,33 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
 </a>
 </body></html>
 """
+        jobs = parse_glassdoor_alert(html)
+        # Positional fallback extracts jobs even when CSS classes changed
+        assert len(jobs) == 2, f"Expected 2 jobs via positional fallback, got {len(jobs)}"
+        assert jobs[0].company == "NewCo"
+        assert jobs[0].title == "Senior Analyst"
+        assert jobs[1].company == "OtherCo"
+
+    def test_audit_glassdoor_css_drift_logs_warning(self, caplog):
+        """Glassdoor parser logs WARNING when job card links exist but zero jobs extracted
+        (i.e., card structure is completely unextractable by either CSS-class or positional method)."""
+        import logging
+        # Build HTML with real jobListing hrefs but NO extractable content at all
+        # (empty card with no spans, no p tags — nothing to extract)
+        html = """
+<html><body>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&jobListingId=8001">
+  <img src="unknown-format.png" alt="job card"/>
+</a>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=102&jobListingId=8002">
+  <img src="unknown-format.png" alt="job card"/>
+</a>
+</body></html>
+"""
         with caplog.at_level(logging.WARNING, logger="job_finder.parsers.glassdoor_parser"):
             jobs = parse_glassdoor_alert(html)
 
-        assert jobs == [], f"Expected [] when CSS classes changed, got {len(jobs)} jobs"
+        assert jobs == [], f"Expected [] when cards have no extractable content, got {len(jobs)} jobs"
         assert any("CSS classes may have changed" in r.message for r in caplog.records), (
             f"Expected CSS drift warning. Got log records: {[r.message for r in caplog.records]}"
         )
@@ -1692,14 +1718,14 @@ This email does not have the expected format.
 # Uses wrong CSS classes so no parser extracts jobs from it
 _UNPARSEABLE_LONG_HTML = (
     "<html><body>"
+    # Glassdoor job link with no extractable content: no span text, no p tags.
+    # This is unextractable by both the CSS-class path AND the positional fallback.
     "<a href='https://www.glassdoor.com/partner/jobListing.htm?pos=1&jobListingId=99999'>"
-    "<span class='WRONG-CLASS-A'>Acme Corp</span>"
-    "<p class='WRONG-CLASS-B'>Senior Engineer</p>"
-    "<p class='WRONG-CLASS-C'>San Francisco, CA</p>"
+    "<img src='job-card-image.png' alt=''/>"
     "</a>"
-    + ("<p>This email contains what looks like a job listing but uses wrong CSS classes "
-       "so the parser will return zero jobs. This block pads the email body length past "
-       "the 500-character archival threshold so we can verify the archival path fires.</p>") * 4
+    + ("<p>This email contains what looks like a job listing but uses an image-only card "
+       "format so the parser will return zero jobs. This block pads the email body length "
+       "past the 500-character archival threshold so we can verify the archival path fires.</p>") * 4
     + "</body></html>"
 )
 
