@@ -112,10 +112,10 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     # This prevents Windows sqlite3 file lock issues during pytest teardown.
     _is_testing = cfg.get("TESTING") or "pytest" in sys.modules
 
-    # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
     if not _is_testing:
+        # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
         _setup_file_logging()
-    if not _is_testing:
+
         # --- Startup validation ---
         if not os.environ.get("ANTHROPIC_API_KEY"):
             logger.warning(
