@@ -39,7 +39,7 @@ def index():
         .get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
     )
 
-    cost_stats = get_cost_stats(conn)
+    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
     daily_breakdown = get_daily_cost_breakdown(conn)
     monthly_breakdown = get_monthly_feature_breakdown(conn)
 

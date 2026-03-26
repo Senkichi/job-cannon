@@ -16,7 +16,7 @@ from job_finder.json_utils import safe_json_load, utc_now_iso
 
 # Full jobs table columns — used by get_job() and get_filtered_jobs() which
 # return complete row dicts to templates and callers.
-_JOBS_ALL_COLUMNS = (
+JOBS_ALL_COLUMNS = (
     "dedup_key, title, company, location, sources, source_urls, source_id, "
     "salary_min, salary_max, description, first_seen, last_seen, score, "
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
@@ -31,10 +31,10 @@ _UPSERT_MERGE_COLUMNS = (
 )
 
 
-def _merge_description(existing: str | None, new: str | None) -> str | None:
+def merge_description(existing: str | None, new: str | None) -> str | None:
     """Merge two description strings — single source of truth for description merge logic.
 
-    Also used iteratively by dedup_normalizer._merge_descriptions for N-way merges.
+    Also used iteratively by dedup_normalizer.merge_descriptions for N-way merges.
 
     Rules:
     - If either is None/empty, return the other.
@@ -117,7 +117,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         merged_location = ", ".join(dict.fromkeys(locs_list))
 
         # Smart description merge: keep longer; append different content
-        merged_description = _merge_description(
+        merged_description = merge_description(
             existing["description"], job.description
         )
 
@@ -287,7 +287,7 @@ def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
         Job as dict with all columns, or None if not found.
     """
     row = conn.execute(
-        f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?",
+        f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?",
         (dedup_key,),
     ).fetchone()
     return dict(row) if row is not None else None
@@ -339,6 +339,8 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
             new_today (int): jobs where first_seen date == today
             reviewing_count (int): jobs where pipeline_status == 'reviewing'
             by_status (dict[str, int]): count per pipeline_status, active only
+            stale_count (int): jobs where is_stale == 1
+            pending_detections (int): pipeline_detections where status == 'pending' (0 if table missing)
     """
     today_prefix = date.today().isoformat()  # e.g. "2026-03-10"
 
@@ -390,7 +392,7 @@ def get_recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list:
         limit: Max number of runs to return.
 
     Returns:
-        List of dicts with keys: id, source, jobs_fetched, jobs_new, timestamp.
+        List of dicts with keys: id, source, jobs_fetched, jobs_new, jobs_scored, timestamp.
     """
     rows = conn.execute(
         "SELECT id, timestamp, source, jobs_fetched, jobs_new, jobs_scored "
@@ -608,7 +610,7 @@ def get_filtered_jobs(
         conditions.append("is_stale = 0")
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    query = f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"
+    query = f"SELECT {JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"
     params.append(limit)
 
     rows = conn.execute(query, params).fetchall()
@@ -667,8 +669,11 @@ def get_recent_activity(conn: sqlite3.Connection, limit: int = 15) -> list[dict]
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
-    except sqlite3.OperationalError:
-        return []
+    except sqlite3.OperationalError as exc:
+        # Gracefully handle missing table (pre-migration); re-raise other errors.
+        if "no such table" in str(exc).lower():
+            return []
+        raise
 
 
 def get_recent_pipeline_events(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
