@@ -33,13 +33,13 @@
     }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex">
+<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden">
 
   <!-- Sidebar -->
   {% include "components/_sidebar.html" %}
 
   <!-- Main content area -->
-  <div id="main-content" class="flex-1 flex flex-col min-h-screen transition-all duration-300" style="min-width: 0;">
+  <div id="main-content" class="flex-1 flex flex-col h-screen overflow-y-auto transition-all duration-300" style="min-width: 0;">
 
     <!-- Flash messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
