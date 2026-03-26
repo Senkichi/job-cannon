@@ -76,6 +76,11 @@ PREFERENCE_EXTRACTION_SCHEMA = {
 # ---------------------------------------------------------------------------
 # Module-level cache for original exported text (cleared on restart)
 # Keyed by resume_generation id. Acceptable since polling is periodic.
+#
+# Thread-safety: both run_drive_feedback_poll and run_preference_consolidation
+# are scheduled with max_instances=1 (see scheduler.py), so only one APScheduler
+# thread accesses this dict at a time. The check-then-act at lines 369-372 and
+# 403 is not atomic, but concurrent execution is prevented by max_instances=1.
 # ---------------------------------------------------------------------------
 _original_text_cache: dict[int, str] = {}
 
