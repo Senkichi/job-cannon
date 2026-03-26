@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Migration & Stabilization
-status: Executing Phase 14
-last_updated: "2026-03-24T16:48:38Z"
+status: Phase complete — ready for verification
+last_updated: "2026-03-26T03:07:26.461Z"
 progress:
   total_phases: 2
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 3
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # State
 
 ## Current Position
 
-Phase: 14 (Data Migration & Validation) — EXECUTING
-Plan: 2 of 2 (Plan 01 complete)
+Phase: 16 (Homepage Discovery) — COMPLETE
+Plan: 2 of 2 (Plans 01 and 02 complete)
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-24)
+See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 14 — Data Migration & Validation
+**Current focus:** Phase 16 complete — homepage discovery scheduler job wired up
 
 ## Performance Metrics
 
@@ -71,5 +71,11 @@ None.
 - All 8 data files gitignored -- no per-task commits for data migration (Plan 01)
 - Config merge via copy + Edit append -- preserves job-finder values while adding cannon sections (Plan 01)
 
+### Decisions Made in Phase 16
+
+- Used _make_simple_job (not _make_tracked_job) for homepage_discovery — no activity_tracker ACTION constant for this job; simple logging sufficient (Plan 02)
+- No day_of_week restriction on homepage discovery — daily cadence preferred over Mon/Wed-only ATS jobs (Plan 02)
+- No guard function for homepage discovery — should always run without config flag to disable (Plan 02)
+
 ---
-*Last session: 2026-03-24 — Completed Phase 14 Plan 01 (Data File Migration)*
+*Last session: 2026-03-26 — Completed Phase 16 Plan 02 (Scheduler Registration)*
