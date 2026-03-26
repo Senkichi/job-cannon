@@ -1,29 +1,38 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Migration & Stabilization
-status: v1.2 milestone complete
-last_updated: "2026-03-24T17:11:15.187Z"
+milestone: v1.3
+milestone_name: Fixes & Improvements
+status: Phase complete — ready for verification
+last_updated: "2026-03-26T00:40:00Z"
 progress:
-  total_phases: 2
+  total_phases: 4
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 3
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # State
 
 ## Current Position
 
-Phase: 14
-Plan: Not started
+Phase: 15 (Parser Fixes) — EXECUTING
+Plan: 1 of 1
+
+## Progress Bar
+
+```
+Phase 15 [ ] Parser Fixes
+Phase 16 [ ] Homepage Discovery
+Phase 17 [ ] Code Quality
+Phase 18 [ ] Async Sync
+```
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-24)
+See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 14 — Data Migration & Validation
+**Current focus:** Phase 15 — Parser Fixes
 
 ## Performance Metrics
 
@@ -57,17 +66,24 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 - Phase 14 = Chunk 2 (Tasks 7-11): Data migration — 8 files, config merge, schema check, validation
 - config.yaml MUST be edited with Edit tool only (never Write — wiped 3 times previously)
 
-### Pending Todos
+### v1.3 Roadmap Decisions
 
-7 total (2 pre-existing, 5 new from homepage discovery investigation):
+- **Phase 15 first:** Two parsers (Glassdoor, Indeed) are completely dark — 29 emails/run yield 0 jobs. Correctness regression ships before all other work.
+- **Phase 16 independent:** Homepage discovery has no dependency on parser fixes; can run in parallel but sequenced after 15 for clarity.
+- **Phase 17 independent:** Code quality + date filter fix have zero cross-dependencies — slot any time.
+- **Phase 18 depends on Phase 15:** Async sync is meaningless if the parsers feeding the sync are dark.
+- **SerpAPI replaces DDG:** Google CSE deprecated for new integrations Jan 2026; DDG endpoint confirmed broken. SerpAPI `engine=google` is the only viable option — API key already in config.yaml.
+- **`homepage_probe_attempted_at` column required:** Needed for DISC-04 retry-avoidance. Must add via migration before scheduler job is useful.
+- **Glassdoor positional extraction:** Strip `\d+\.\d+ ★` suffix from outer span text — do not navigate nested children.
+- **SerpAPI `_SKIP_DOMAINS`:** Must include glassdoor.com, crunchbase.com, bloomberg.com, zoominfo.com, pitchbook.com, linkedin.com before shipping DISC-03.
+- **Async sync 30-min timeout:** Replicates batch-score safety net — not optional, must ship from day one (not retrofitted).
+- **Async sync double-click guard:** Check for existing `running` session before spawning new thread.
+- **Background thread app context:** Pass `current_app._get_current_object()` before thread start.
 
-- Fix job board not refreshing when date filter is cleared (ui)
-- Replace status filter dropdown with multi-select checkboxes (ui)
-- **Replace DDG with reliable search API for homepage discovery** (general) — critical blocker
-- **Add domain-guessing heuristic for company homepage discovery** (general)
-- **Fix compound slug homepage resolution** (general)
-- **Separate homepage discovery into standalone scheduler job** (general)
-- **Isolate test logging from production log file** (testing)
+### Research Flags (from SUMMARY.md)
+
+- SerpAPI quota: 250/month vs 100/month discrepancy — verify against active plan before setting `batch_cap`
+- All v1.3 patterns already exist in codebase — no architectural unknowns, no new dependencies
 
 ### Blockers/Concerns
 
@@ -83,5 +99,14 @@ None.
 - All 8 data files gitignored -- no per-task commits for data migration (Plan 01)
 - Config merge via copy + Edit append -- preserves job-finder values while adding cannon sections (Plan 01)
 
+### Decisions Made in Phase 15
+
+- Glassdoor positional fallback: CSS-class extraction first, fall back to span.string + p tags positionally when CSS-class title extraction yields None
+- Company name extracted from first span.string not matching rating pattern (r'^\s*\d+\.\d+\s*★?\s*$')
+- Indeed rc/clk/dl: dual URL pattern matching in _parse_plaintext; _extract_job_id (jk= param) passed as id_fn for new format
+- Added _SUMMARY_COUNT_RE and _SEE_MATCHING_RE noise filters for rc/clk preamble lines ("Jobs 1-2 of 2 new jobs", "See matching results on Indeed: URL")
+- Pre-existing tests encoding "wrong CSS = 0 jobs" assumption updated to reflect correct new behavior (positional fallback succeeds)
+- Phase 15-01: 15min (3 tasks, 3 files, 18 new tests, +28 assertions)
+
 ---
-*Last session: 2026-03-24 — Completed Phase 14 Plan 01 (Data File Migration)*
+*Last session: 2026-03-26 — Completed Phase 15 Plan 01 (Parser Fixes: Glassdoor positional + Indeed rc/clk)*
