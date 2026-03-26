@@ -75,10 +75,9 @@ Non-obvious fields:
 | source_urls | TEXT | JSON array of URLs. All sources preserved. |
 | description | TEXT | Full JD text. May be null if fetch failed (see F4 fallback). |
 | haiku_score | REAL | 0-100 fast filter. Null if not yet scored. |
-| haiku_rationale | TEXT | Brief JSON with sub-scores. |
+| haiku_summary | TEXT | Brief JSON with sub-scores. |
 | sonnet_score | REAL | 0-100 deep eval. Null if below Haiku threshold. |
-| sonnet_summary | TEXT | Role summary. |
-| sonnet_fit_analysis | TEXT | JSON: strengths, gaps, talking_points, resume_priority_skills. |
+| fit_analysis | TEXT | JSON: strengths, gaps, talking_points, resume_priority_skills. |
 | pipeline_status | TEXT | See Pipeline States. Default: "discovered". |
 | status_source | TEXT | "manual", "email_detected", "calendar" |
 | resume_doc_id | TEXT | Google Docs/Drive file ID. |
