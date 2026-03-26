@@ -62,8 +62,11 @@ SAMPLE_SERPAPI_RESULT = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+_TEST_API_KEY = "test-key-does-not-matter"  # noqa: S105 -- test placeholder, not a real credential
+
+
 def _make_source() -> SerpAPISource:
-    return SerpAPISource(api_key="test-key-does-not-matter")  # nosec B106 -- dummy placeholder, not a real credential
+    return SerpAPISource(api_key=_TEST_API_KEY)
 
 
 def _result_with(**overrides) -> dict:
