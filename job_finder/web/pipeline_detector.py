@@ -652,10 +652,15 @@ def _load_active_jobs(conn: sqlite3.Connection) -> list[dict]:
         List of job dicts for active jobs.
     """
     placeholders = ",".join("?" * len(INACTIVE_STATUSES))
-    rows = conn.execute(
-        f"SELECT * FROM jobs WHERE pipeline_status NOT IN ({placeholders})",
-        tuple(INACTIVE_STATUSES),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            f"SELECT dedup_key, title, company, location, first_seen, pipeline_status"
+            f" FROM jobs WHERE pipeline_status NOT IN ({placeholders})",
+            tuple(INACTIVE_STATUSES),
+        ).fetchall()
+    except sqlite3.OperationalError as e:
+        logger.warning("_load_active_jobs failed (DB not ready?): %s", e)
+        return []
     return [dict(row) for row in rows]
 
 
@@ -712,6 +717,7 @@ def _insert_detection(
     message_id: str,
     detection_type: str,
     job_id: Optional[str],
+    *,
     score: int,
     signals: list[str],
     snippet: str,
@@ -857,10 +863,12 @@ def _process_email(
 
         _insert_detection(
             conn, message_id, detection_type, job_id,
-            best_score, best_signals, snippet,
-            email.get("subject", ""),
-            email.get("from_address", ""),
-            email.get("date", ""),
+            score=best_score,
+            signals=best_signals,
+            snippet=snippet,
+            email_subject=email.get("subject", ""),
+            email_from=email.get("from_address", ""),
+            email_date=email.get("date", ""),
             status="auto-applied",
         )
 
@@ -871,10 +879,12 @@ def _process_email(
         # Low confidence: queue for review
         _insert_detection(
             conn, message_id, detection_type, job_id,
-            best_score, best_signals, snippet,
-            email.get("subject", ""),
-            email.get("from_address", ""),
-            email.get("date", ""),
+            score=best_score,
+            signals=best_signals,
+            snippet=snippet,
+            email_subject=email.get("subject", ""),
+            email_from=email.get("from_address", ""),
+            email_date=email.get("date", ""),
             status="pending",
         )
 
