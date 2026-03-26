@@ -110,7 +110,7 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
             f"  3. See docs/SETUP.md for full configuration reference\n"
         )
 
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         try:
             cfg = yaml.safe_load(f)
         except yaml.YAMLError as exc:
