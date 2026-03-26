@@ -25,6 +25,15 @@ class JobScorer:
         self.weights = config.get("scoring", {}).get("weights", {})
         self.threshold = config.get("scoring", {}).get("min_score_threshold", DEFAULT_MIN_SCORE_THRESHOLD)
 
+        # Pre-compute lowercased exclusion sets for O(1) lookup on every scored job
+        exclusions = self.profile.get("exclusions", {})
+        self._title_exclusions: frozenset[str] = frozenset(
+            kw.lower() for kw in exclusions.get("title_keywords", [])
+        )
+        self._excluded_companies: frozenset[str] = frozenset(
+            c.lower() for c in exclusions.get("companies", [])
+        )
+
     def score_jobs(self, jobs: list[Job]) -> list[Job]:
         """Score and sort a list of jobs. Returns jobs above threshold, sorted desc."""
         for job in jobs:
@@ -61,12 +70,10 @@ class JobScorer:
         if not target_titles:
             return 50  # neutral if no preference
 
-        # Check exclusions first
-        exclusion_keywords = self.profile.get("exclusions", {}).get("title_keywords", [])
+        # Check exclusions first (pre-computed in __init__)
         title_lower = title.lower()
-        for kw in exclusion_keywords:
-            if kw.lower() in title_lower:
-                return 0  # hard reject
+        if any(kw in title_lower for kw in self._title_exclusions):
+            return 0  # hard reject
 
         # Best fuzzy match across all target titles
         best = max(fuzz.token_sort_ratio(title.lower(), t.lower()) for t in target_titles)
@@ -169,8 +176,7 @@ class JobScorer:
 
     def _score_company(self, company: str) -> float:
         """Score based on company signals."""
-        excluded = self.profile.get("exclusions", {}).get("companies", [])
-        if company.lower() in [c.lower() for c in excluded]:
+        if company.lower() in self._excluded_companies:
             return 0
 
         # Could expand with a company database, Glassdoor ratings, etc.
