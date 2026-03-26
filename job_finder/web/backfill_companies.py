@@ -215,13 +215,16 @@ def find_fuzzy_false_positives(
     results: list[dict] = []
     n = len(companies)
 
+    # Pre-compute normalizations to reduce O(n^2) normalize_company calls to O(n)
+    normalized = [normalize_company(c[1]) for c in companies]
+
     for i in range(n):
         id_a, name_a, name_raw_a = companies[i]
-        norm_a = normalize_company(name_a)
+        norm_a = normalized[i]
 
         for j in range(i + 1, n):
             id_b, name_b, name_raw_b = companies[j]
-            norm_b = normalize_company(name_b)
+            norm_b = normalized[j]
 
             # Only flag pairs with DIFFERENT normalized names
             # (same normalized name = duplicate, handled by find_duplicate_companies)
