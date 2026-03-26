@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
+try:
+    import fitz  # PyMuPDF — optional; guarded so app starts without it
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 from flask import (
     Blueprint,
@@ -291,10 +295,8 @@ def upload_pdf():
 
     pdf_bytes = uploaded.read()
 
-    # Lazy import: PyMuPDF (fitz) is optional — app should start even if not installed.
-    try:
-        import fitz  # noqa: PLC0415
-    except ImportError:
+    # Guard against fitz not being installed (ImportError at module level falls back to None).
+    if fitz is None:
         flash("PyMuPDF is not installed. PDF upload is unavailable.", "error")
         return redirect(url_for("profile.index"))
 
