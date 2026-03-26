@@ -57,12 +57,19 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
                       *, guard=None):
     """Factory for scheduler jobs with timing and activity logging.
 
+    Returns a zero-arg ``wrapper`` closure suitable for ``scheduler.add_job``.
+    The double-indirection in ``import_func`` is intentional: it defers the
+    import of heavy job modules until the job actually runs in the background
+    thread, rather than at scheduler-setup time inside ``init_scheduler``.
+
     Args:
         app: Flask application instance.
         name: Human-readable job name for log messages.
         import_func: No-arg callable that returns the job function.
+            Called lazily inside the closure to defer imports.
             The returned function must accept (db_path, config).
         import_action: No-arg callable that returns the activity action constant.
+            Also called lazily to defer activity_tracker imports.
         extract_metadata: Callable(result) -> dict of metadata fields for
             the success activity log entry. duration_seconds and status are
             added automatically.
@@ -117,8 +124,10 @@ def init_scheduler(app) -> None:
         logger.debug("Scheduler: skipped (TESTING=True)")
         return
 
-    # Guard 2: Flask debug reloader -- skip in child process
-    # (run.py sets use_reloader=False, but this is a safety net)
+    # Guard 2: Flask debug reloader -- skip in child process.
+    # WERKZEUG_RUN_MAIN="true" is set by Flask's reloader in the child process.
+    # run.py sets use_reloader=False so this guard normally never triggers, but
+    # it is kept as a safety net in case the reloader is enabled by accident.
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         logger.debug("Scheduler: skipped (werkzeug reloader child process)")
         return
