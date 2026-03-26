@@ -400,6 +400,14 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN company_size TEXT DEFAULT NULL",
         "ALTER TABLE companies ADD COLUMN industry TEXT DEFAULT NULL",
     ],
+
+    # Migration 17: Add homepage_probe_attempted_at column to companies table.
+    # Enables retry-avoidance in discover_homepages_batch — companies already
+    # attempted (whether found or not) are skipped on subsequent runs.
+    [
+        "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_companies_homepage_probe_attempted_at ON companies(homepage_probe_attempted_at)",
+    ],
 ]
 
 
