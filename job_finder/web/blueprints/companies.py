@@ -278,19 +278,28 @@ def update_slug(company_id):
 
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)
 def scan():
-    """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment."""
+    """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment.
+
+    Two-layer exception handling:
+    - Inner try: scan logic errors (probe + run_ats_scan). Caught and shown as scan failure.
+    - render_template is OUTSIDE the try block: template errors propagate as 500 with traceback.
+    """
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
 
+    scan_error = None
+    result = None
     try:
         probe_result = probe_ats_slugs(db_path, config)
         logger.info("ATS probe before scan: %s", probe_result)
         result = run_ats_scan(db_path, config)
         result["probe"] = probe_result
-        return render_template("companies/_scan_result.html", result=result, error=None)
     except Exception as e:
         logger.error("ATS scan failed: %s", e)
-        return render_template("companies/_scan_result.html", result=None, error=str(e))
+        scan_error = str(e)
+
+    # render_template is OUTSIDE the try block — TemplateErrors propagate as 500
+    return render_template("companies/_scan_result.html", result=result, error=scan_error)
 
 
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)

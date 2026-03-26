@@ -15,7 +15,7 @@
   <form id="filter-form"
         hx-get="/jobs/table"
         hx-target="#job-table-body"
-        hx-trigger="change from:select, change from:input"
+        hx-trigger="change from:select, change from:input, input from:#filter-date-from, input from:#filter-date-to"
         hx-swap="innerHTML"
         class="flex flex-wrap gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
 
