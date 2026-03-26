@@ -53,7 +53,7 @@ def log_activity(
 ) -> None:
     """Insert a row into user_activity recording a user or system action.
 
-    Fault-tolerant: any exception is caught and logged at DEBUG level.
+    Fault-tolerant: any exception is caught and logged at WARNING level.
     Thread-safe: opens its own sqlite3 connection, independent of the caller.
     Context-free: does not require a Flask application context.
 
@@ -79,4 +79,4 @@ def log_activity(
             conn.close()
 
     except Exception:
-        logger.debug("log_activity failed silently for action=%s", action, exc_info=True)
+        logger.warning("log_activity failed for action=%s", action, exc_info=True)
