@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
 from job_finder.db import (
-    _JOBS_ALL_COLUMNS,
+    JOBS_ALL_COLUMNS,
     get_dashboard_stats,
     get_pending_detections,
     get_pipeline_summary,
@@ -435,7 +435,7 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
 
     try:
         rows = conn.execute(
-            f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
+            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
         ).fetchall()
 
         for row in rows:
@@ -456,7 +456,7 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
             # Pre-Haiku exclusion filter
             exclusions = config.get("profile", {}).get("exclusions", {})
             profile_min_salary = config.get("profile", {}).get("min_salary")
-            excluded, reason = should_exclude(job_row, exclusions, profile_min_salary)
+            excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
             if excluded:
                 logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
                 _update_session_counter(conn, session_id, "skipped")
@@ -511,7 +511,7 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
 
     try:
         rows = conn.execute(
-            f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
+            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
             "AND sonnet_score IS NULL AND jd_full IS NOT NULL ORDER BY haiku_score DESC",
             (threshold,),
         ).fetchall()

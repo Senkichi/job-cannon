@@ -20,7 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF — optional; guarded so app starts without it
+except ImportError:
+    fitz = None  # type: ignore[assignment]
 
 from flask import (
     Blueprint,
@@ -291,6 +294,11 @@ def upload_pdf():
         return redirect(url_for("profile.index"))
 
     pdf_bytes = uploaded.read()
+
+    # Guard against fitz not being installed (ImportError at module level falls back to None).
+    if fitz is None:
+        flash("PyMuPDF is not installed. PDF upload is unavailable.", "error")
+        return redirect(url_for("profile.index"))
 
     # Extract text with PyMuPDF
     try:
@@ -861,9 +869,11 @@ def apply_fix():
     try:
         profile = load_profile(_PROFILE_PATH)
 
-        # Backup profile before modification
-        if os.path.exists(_PROFILE_PATH):
+        # Backup profile before modification — EAFP pattern avoids TOCTOU race.
+        try:
             shutil.copy2(_PROFILE_PATH, _PROFILE_PATH + ".bak")
+        except FileNotFoundError:
+            pass  # Profile doesn't exist yet — backup not needed
 
         # Apply the fix
         if action_type == "add_skill":

@@ -239,6 +239,7 @@ def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
         return [row[0] if isinstance(row, tuple) else row["preference_text"] for row in rows]
     except Exception:
         # Table may not exist in test DBs or older schemas — degrade gracefully
+        logger.debug("Failed to load resume preferences (non-fatal)", exc_info=True)
         return []
 
 
@@ -834,7 +835,7 @@ def _generate_resume_background(
         multi_threshold = (
             config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
         )
-        sonnet_score = job_row.get("sonnet_score") or 0.0
+        sonnet_score = float(job_row.get("sonnet_score") or 0.0)
         use_multi = sonnet_score >= multi_threshold
 
         if use_multi:
