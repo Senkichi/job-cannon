@@ -196,18 +196,31 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
 
     # Single Opus call for ALL rejections
     client = anthropic.Anthropic()
-    result, cost_usd = call_claude(
-        client=client,
-        model=opus_model,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-        output_schema=REJECTION_ANALYSIS_SCHEMA,
-        conn=conn,
-        job_id=None,
-        purpose="opus_rejection_analysis",
-        config=config,
-        max_tokens=4096,
-    )
+    try:
+        result, cost_usd = call_claude(
+            client=client,
+            model=opus_model,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+            output_schema=REJECTION_ANALYSIS_SCHEMA,
+            conn=conn,
+            job_id=None,
+            purpose="opus_rejection_analysis",
+            config=config,
+            max_tokens=4096,
+        )
+    except Exception as exc:
+        logger.error(
+            "Rejection analysis Opus call failed (%d rejections): %s",
+            len(dedup_keys),
+            exc,
+        )
+        return {
+            "rejections_analyzed": 0,
+            "report_id": None,
+            "cost_usd": 0.0,
+            "error": str(exc),
+        }
 
     # Store report
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
