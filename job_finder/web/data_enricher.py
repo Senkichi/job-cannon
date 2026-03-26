@@ -54,6 +54,10 @@ logger = logging.getLogger(__name__)
 # Strict cost ordering: free (URL -> ATS -> careers) -> DDG -> Haiku -> SerpAPI -> Sonnet
 TIER_ORDER = ["free", "ddg", "haiku", "serpapi", "sonnet", "exhausted"]
 
+# Allowlist of jobs table columns that _persist() may write. Prevents AI-extracted
+# dict keys from injecting arbitrary column names into dynamic SQL SET clauses.
+_ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max", "location"})
+
 # Per-field cost ceilings: highest tier allowed to search for this field.
 # After this tier fails for a field, it is abandoned (not escalated further).
 FIELD_TIER_CEILINGS = {
@@ -1087,9 +1091,19 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
 
     try:
         if enriched:
-            set_clauses = ", ".join(f"{k} = ?" for k in enriched)
+            # Filter to allowlisted columns only — prevents AI-extracted keys from
+            # injecting arbitrary column names into the dynamic SQL SET clause.
+            safe_enriched = {k: v for k, v in enriched.items() if k in _ENRICHABLE_COLUMNS}
+            if safe_enriched != enriched:
+                unknown = set(enriched) - _ENRICHABLE_COLUMNS
+                logger.warning("_persist: dropping non-allowlisted columns: %s", unknown)
+        else:
+            safe_enriched = {}
+
+        if safe_enriched:
+            set_clauses = ", ".join(f"{k} = ?" for k in safe_enriched)
             set_clauses += ", enrichment_tier = ?"
-            values = list(enriched.values()) + [tier_name, dedup_key]
+            values = list(safe_enriched.values()) + [tier_name, dedup_key]
             conn.execute(
                 f"UPDATE jobs SET {set_clauses} WHERE dedup_key = ?",
                 values,
@@ -1101,4 +1115,4 @@ def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
             )
         conn.commit()
     except Exception as e:
-        logger.debug("Failed to persist enrichment for '%s': %s", dedup_key, e)
+        logger.warning("Failed to persist enrichment for '%s': %s", dedup_key, e)

@@ -24,9 +24,14 @@ from typing import Any
 from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
 
+try:
+    import anthropic as _anthropic
+except ImportError:
+    _anthropic = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_API_TIMEOUT_SECONDS: int = 120
+_DEFAULT_API_TIMEOUT_SECONDS: int = 120
 
 # ---------------------------------------------------------------------------
 # Pricing table — price per million tokens (USD)
@@ -343,7 +348,7 @@ def call_claude(
         config: Application config dict.
             Ignored when *ctx* is provided.
         max_tokens: Maximum output tokens. Defaults to 1024.
-        timeout: Request timeout in seconds.  Defaults to DEFAULT_API_TIMEOUT_SECONDS (120).
+        timeout: Request timeout in seconds.  Defaults to _DEFAULT_API_TIMEOUT_SECONDS (120).
         ctx: ClaudeContext bundling (client, conn, config).  When supplied,
             the individual client/conn/config parameters are ignored.
 
@@ -359,11 +364,17 @@ def call_claude(
         conn = ctx.conn
         config = ctx.config
 
-    # Determine model tier for gating
-    if "haiku" in model.lower():
-        tier = "haiku"
+    # Ensure config is a dict (callers may pass None for optional configs)
+    if config is None:
+        config = {}
+
+    # Determine model tier for gating — derived from MODEL_PRICING where possible,
+    # falls back to substring match for versioned aliases (e.g. claude-haiku-4-5-20260301).
+    matching_pricing_key = next((k for k in MODEL_PRICING if model.startswith(k)), None)
+    if matching_pricing_key:
+        tier = "haiku" if "haiku" in matching_pricing_key else "sonnet"
     else:
-        tier = "sonnet"
+        tier = "haiku" if "haiku" in model.lower() else "sonnet"
 
     if conn is None:
         raise ValueError("call_claude requires a database connection (conn is None)")
@@ -375,7 +386,7 @@ def call_claude(
             f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
         )
 
-    effective_timeout = timeout if timeout is not None else DEFAULT_API_TIMEOUT_SECONDS
+    effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT_SECONDS
 
     # Build API call kwargs
     call_kwargs: dict[str, Any] = {
@@ -397,7 +408,18 @@ def call_claude(
         ]
         call_kwargs["tool_choice"] = {"type": "tool", "name": "output"}
 
-    response = client.messages.create(**call_kwargs)
+    # Make the API call with timeout-specific error surfacing.
+    # anthropic.APITimeoutError is a transient failure (retryable); separate from
+    # permanent APIStatusError (4xx/5xx) so callers can react differently.
+    try:
+        response = client.messages.create(**call_kwargs)
+    except Exception as exc:
+        if _anthropic is not None and isinstance(exc, _anthropic.APITimeoutError):
+            raise TimeoutError(
+                f"Claude API request timed out after {effective_timeout}s "
+                f"(model={model}, purpose={purpose})"
+            ) from exc
+        raise
 
     # Extract token counts and record cost before parsing content,
     # so cost data is always tracked even if content parsing fails.

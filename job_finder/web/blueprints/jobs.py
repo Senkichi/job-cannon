@@ -217,7 +217,7 @@ def expand(dedup_key: str):
             metadata={"title": job.get("title"), "company": job.get("company"), "status": "success"},
         )
     except Exception:
-        pass
+        logger.debug("log_activity failed in expand", exc_info=True)
 
     return render_template(
         "jobs/_row_expanded.html",
@@ -288,7 +288,7 @@ def update_status(dedup_key: str):
             },
         )
     except Exception:
-        pass
+        logger.debug("log_activity failed in update_status", exc_info=True)
 
     status_html = render_template(
         "jobs/_status_cell.html",
@@ -358,6 +358,9 @@ def paste_jd(dedup_key: str):
             drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
+    # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
+    jd_text = jd_text[:8000]
+
     # Store the JD text
     conn.execute(
         "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
@@ -378,7 +381,7 @@ def paste_jd(dedup_key: str):
             },
         )
     except Exception:
-        pass
+        logger.debug("log_activity failed in paste_jd", exc_info=True)
 
     # Attempt Sonnet evaluation (budget-gated)
     error = None
@@ -609,6 +612,9 @@ def save_jd(dedup_key: str):
             drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
+    # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
+    jd_text = jd_text[:8000]
+
     conn.execute(
         "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
         (jd_text, dedup_key),
@@ -628,7 +634,7 @@ def save_jd(dedup_key: str):
             },
         )
     except Exception:
-        pass
+        logger.debug("log_activity failed in save_jd", exc_info=True)
 
     ctx = load_job_context(conn, dedup_key)
     return render_template(

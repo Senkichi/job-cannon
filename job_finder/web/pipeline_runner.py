@@ -27,7 +27,7 @@ except ImportError:
     anthropic = None  # type: ignore[assignment]
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
-from job_finder.db import upsert_job, log_run, _JOBS_ALL_COLUMNS
+from job_finder.db import upsert_job, log_run, JOBS_ALL_COLUMNS
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.exclusion_filter import should_exclude
@@ -61,6 +61,8 @@ logger = logging.getLogger(__name__)
 
 # Track last notified budget threshold to avoid repeated notifications.
 # Reset on app restart (acceptable for single-user app).
+# Thread-safety: ALL reads and writes of _last_budget_pct_notified MUST occur
+# inside a `with _budget_alert_lock:` block to prevent data races.
 _budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
 
@@ -149,7 +151,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         try:
             runner_conn.close()
         except Exception:
-            logger.debug("db close failed during ingestion", exc_info=True)
+            logger.warning("db close failed during ingestion", exc_info=True)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
@@ -439,7 +441,7 @@ def _run_haiku_scoring(
         for dedup_key in new_job_keys:
             try:
                 row = conn.execute(
-                    f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                    f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
                 ).fetchone()
                 if row is None:
                     logger.warning("Haiku: job '%s' not found in DB -- skipping", dedup_key)
@@ -479,7 +481,7 @@ def _run_haiku_scoring(
                 # --- Pre-Haiku exclusion filter (C3) ---
                 exclusions = config.get("profile", {}).get("exclusions", {})
                 profile_min_salary = config.get("profile", {}).get("min_salary")
-                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary)
+                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
                 if excluded:
                     logger.info(
                         "Pre-filter excluded '%s' @ '%s': %s",
@@ -583,7 +585,7 @@ def _run_sonnet_evaluation(
         for dedup_key in sonnet_queue:
             try:
                 row = conn.execute(
-                    f"SELECT {_JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                    f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
                 ).fetchone()
                 if row is None:
                     logger.warning("Sonnet: job '%s' not found in DB -- skipping", dedup_key)
