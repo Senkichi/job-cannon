@@ -150,7 +150,12 @@ def save():
 
         _write_config(config, _CONFIG_PATH)
 
-        # Update running app config so changes take effect without restart
+        # Update running app config so changes take effect without restart.
+        # Thread-safety: APScheduler and batch background threads MUST snapshot
+        # JF_CONFIG at job-start time (i.e. read once into a local variable before
+        # any await/sleep) rather than reading individual keys across multiple
+        # statements. This replacement is atomic at the Python dict level but
+        # readers may observe the old dict between the two assignments below.
         current_app.config["JF_CONFIG"] = config
         if "db" in config:
             current_app.config["DB_PATH"] = config["db"].get("path", current_app.config.get("DB_PATH"))
@@ -597,6 +602,20 @@ def _parse_serpapi_queries(form) -> list:
 
 
 def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
-    """Write config dict to YAML file."""
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    """Write config dict to YAML file atomically.
+
+    Writes to a sibling temp file first, then uses os.replace() for an atomic
+    rename so a crash or OS error mid-write cannot produce a partial/empty file.
+    """
+    config_path_obj = Path(config_path)
+    tmp_path = config_path_obj.with_suffix(".yaml.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        os.replace(tmp_path, config_path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
