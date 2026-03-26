@@ -1,13 +1,25 @@
 """Parse Glassdoor job alert emails into Job objects.
 
 Glassdoor sends HTML emails from noreply@glassdoor.com with job cards.
-Each card contains:
+
+Two formats are handled:
+1. CSS-class format (pre-2026): span.gd-* and p.gd-* elements
+2. Positional format (2026+): classless spans and p tags in fixed order
+
+Each card is wrapped in an <a> tag linking to glassdoor.com/partner/jobListing.htm
+with a jobListingId URL parameter.
+
+CSS-class format:
 - Company name in span.gd-628b46d9ce
 - Job title in p.gd-6c2846d4dc
 - Location in p.gd-28d35bae2f (first occurrence per card)
 - Salary in p.gd-28d35bae2f (second occurrence, format: "$XXK - $XXK (Employer est.)")
-- Link wrapping each card with glassdoor.com/partner/jobListing.htm URL
-- Job listing ID in URL param: jobListingId=XXXXX
+
+Positional format:
+- Company name in inner <span> (sibling of rating span "X.X ★")
+- Job title in first <p> tag
+- Location in second <p> tag (if not salary/age)
+- Salary in <p> tag containing "$"
 
 Note: Glassdoor CSS class names may change over time. If parsing breaks,
 inspect a recent email and update the class constants below.
@@ -30,15 +42,17 @@ from job_finder.parsers._common import (
 
 logger = logging.getLogger(__name__)
 
-# CSS class names from Glassdoor email templates (as of March 2026)
-# Update these if Glassdoor changes their email template
-#
-# AUDIT 2026-03-15: Classes verified against synthetic sample. Re-verify when
-# Glassdoor changes template. Fallback: if zero jobs found and body has
-# jobListing anchors, log warning for manual re-inspection.
+# CSS class names from Glassdoor email templates (pre-2026 format)
+# These classes are absent in the 2026+ positional format.
 COMPANY_CLASS = "gd-628b46d9ce"
 TITLE_CLASS = "gd-6c2846d4dc"
 DETAIL_CLASS = "gd-28d35bae2f"  # used for both location and salary
+
+# Positional format: rating pattern (e.g. "3.6 ★" or "4.1 ★")
+_RATING_RE = re.compile(r'^\s*\d+\.\d+\s*\u2605?\s*$')
+
+# Positional format: age/recency pattern (e.g. "Just posted", "17h", "1d", "5d")
+_AGE_RE = re.compile(r'^(Just posted|\d+[hd]?)$', re.IGNORECASE)
 
 
 def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
@@ -86,7 +100,11 @@ def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> l
 
 
 def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
-    """Parse a single job card from a Glassdoor alert."""
+    """Parse a single job card from a Glassdoor alert.
+
+    Tries CSS-class extraction first (pre-2026 format). Falls back to
+    positional extraction when CSS classes are absent (2026+ format).
+    """
     href = link_tag.get("href", "")
 
     # Extract job listing ID from URL
@@ -100,8 +118,10 @@ def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
     title_el = link_tag.find("p", class_=TITLE_CLASS)
     title = title_el.get_text(strip=True) if title_el else None
 
+    # If CSS-class extraction yielded no title, fall back to positional extraction.
+    # This handles the 2026+ Glassdoor email format where all CSS classes are absent.
     if not title:
-        return None
+        return _parse_job_card_positional(link_tag, email_date)
 
     # Find location and salary (both use DETAIL_CLASS)
     detail_els = link_tag.find_all("p", class_=DETAIL_CLASS)
@@ -117,6 +137,90 @@ def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
             # First non-salary detail is location
             if location == "Unknown":
                 location = text
+
+    # Build clean Glassdoor URL
+    clean_url = f"https://www.glassdoor.com/job-listing/j?jl={source_id}" if source_id else href
+
+    return Job(
+        title=title,
+        company=company,
+        location=location,
+        source="glassdoor",
+        source_url=clean_url,
+        source_id=source_id,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        posted_date=email_date,
+    )
+
+
+def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
+    """Parse a single job card using positional extraction (2026+ classless format).
+
+    In the new Glassdoor format, all CSS classes are absent. Company name and
+    rating are in nested <span> tags; job fields are in sequential <p> tags.
+
+    Company extraction: iterate all <span> tags in the card, collect those
+    whose .string (direct text, no children) is non-empty. Filter out spans
+    whose text matches the rating pattern (e.g. "3.6 ★"). Take first remaining.
+
+    Field extraction from <p> tags:
+    - First p that is neither salary nor age = title
+    - Among remaining: first non-salary non-age = location
+    - First p containing "$" with salary range = salary
+    """
+    href = link_tag.get("href", "")
+    source_id = _extract_listing_id(href)
+
+    # --- Company ---
+    company = "Unknown"
+    for span in link_tag.find_all("span"):
+        direct_text = span.string
+        if direct_text is None:
+            continue
+        direct_text = direct_text.strip()
+        if not direct_text:
+            continue
+        if _RATING_RE.match(direct_text):
+            continue
+        company = direct_text
+        break
+
+    # --- Title, location, salary from <p> tags ---
+    all_ps = link_tag.find_all("p")
+    title = None
+    location = "Unknown"
+    salary_min = None
+    salary_max = None
+
+    # Find title: first p that is not a salary and not an age marker
+    title_idx = None
+    for i, p in enumerate(all_ps):
+        text = p.get_text(strip=True)
+        if not text:
+            continue
+        if _looks_like_salary(text):
+            continue
+        if _AGE_RE.match(text):
+            continue
+        title = text
+        title_idx = i
+        break
+
+    if not title:
+        return None
+
+    # Among remaining p tags after title: classify location, salary, age
+    for p in all_ps[title_idx + 1:]:
+        text = p.get_text(strip=True)
+        if not text:
+            continue
+        if _AGE_RE.match(text):
+            continue
+        if _looks_like_salary(text):
+            salary_min, salary_max = _parse_salary(text)
+        elif location == "Unknown":
+            location = text
 
     # Build clean Glassdoor URL
     clean_url = f"https://www.glassdoor.com/job-listing/j?jl={source_id}" if source_id else href
