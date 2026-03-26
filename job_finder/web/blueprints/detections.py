@@ -44,6 +44,12 @@ def confirm(detection_id: int):
 
     detection = dict(row)
     detection_type = detection.get("detection_type", "")
+    if detection_type not in _DETECTION_TYPE_TO_STATUS:
+        logger.warning(
+            "Detection %d has unknown detection_type %r; defaulting to 'reviewing'",
+            detection_id,
+            detection_type,
+        )
     new_status = _DETECTION_TYPE_TO_STATUS.get(detection_type, "reviewing")
     job_id = detection.get("job_id")
     company = detection.get("job_company") or "Unknown Company"
