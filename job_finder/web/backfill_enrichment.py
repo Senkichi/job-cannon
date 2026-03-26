@@ -50,9 +50,6 @@ _HAIKU_OUTPUT_TOKENS = 200
 _SONNET_INPUT_TOKENS = 2000
 _SONNET_OUTPUT_TOKENS = 500
 
-# Tiers that require AI calls (used for cost estimation)
-_AI_TIERS = {"haiku", "serpapi", "sonnet"}
-
 # Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
 _ELIGIBLE_TIERS_QUERY = (
     "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')"
