@@ -2728,7 +2728,12 @@ class TestScanExceptionSeparation:
         assert "connection timeout" in data
 
     def test_scan_template_error_not_reported_as_scan_failure(self, app_with_companies):
-        """POST /companies/scan where run_ats_scan succeeds but render_template raises returns 500."""
+        """POST /companies/scan where run_ats_scan succeeds but render_template raises propagates.
+
+        In Flask TESTING mode, unhandled exceptions propagate to the test instead of
+        returning 500. We verify the exception is a TemplateSyntaxError (not swallowed
+        as a generic scan failure), which confirms render_template is outside the try block.
+        """
         import jinja2
         from unittest.mock import patch
 
@@ -2743,10 +2748,9 @@ class TestScanExceptionSeparation:
             "job_finder.web.blueprints.companies.render_template",
             side_effect=jinja2.TemplateSyntaxError("unexpected char", 1, filename="test.html"),
         ):
-            response = client.post("/companies/scan")
-
-        # Template error should propagate as 500, NOT be caught and shown as scan failure
-        assert response.status_code == 500
+            # Template error must propagate (not be swallowed as "ATS scan failed")
+            with pytest.raises(jinja2.TemplateSyntaxError):
+                client.post("/companies/scan")
 
 
 # ---------------------------------------------------------------------------
