@@ -258,16 +258,13 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.ClaudeClient") as MockClient:
-            mock_instance = MagicMock()
-            MockClient.return_value = mock_instance
-            with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-                mock_call.return_value = ({"text": reformatted_text}, 0.0002)
-                count = run_description_reformat_pass(
-                    db_with_unformatted_jobs,
-                    "fake-api-key",
-                    config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
-                )
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
+            count = run_description_reformat_pass(
+                db_with_unformatted_jobs,
+                "fake-api-key",
+                config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
+            )
 
         # Only 2 unformatted jobs should be processed (not the reformatted=1 one)
         assert count == 2

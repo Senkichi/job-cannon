@@ -30,9 +30,6 @@ from job_finder.web.claude_client import call_claude
 
 logger = logging.getLogger(__name__)
 
-# Model identifier for description reformatting
-_DEFAULT_MODEL = DEFAULT_MODEL_HAIKU
-
 # Regex pattern for common section headers (2+ indicates already formatted)
 _SECTION_HEADER_PATTERN = re.compile(
     r"(?:About|Overview|Summary|Responsibilities|Requirements|Qualifications|Benefits|What You|Minimum|Preferred|Nice to Have|The Role|Your Role|Who You Are|What We)",
@@ -51,18 +48,6 @@ _SYSTEM_PROMPT = (
     "pipe-separated items into proper paragraphs or clean bullet lists. Preserve all "
     "factual content — do not add or remove information. Return ONLY the reformatted text."
 )
-
-
-class ClaudeClient:
-    """Thin wrapper to initialize an Anthropic client for run_description_reformat_pass."""
-
-    def __init__(self, api_key: str):
-        import anthropic
-        self._client = anthropic.Anthropic(api_key=api_key)
-
-    @property
-    def client(self):
-        return self._client
 
 
 def reformat_description(
@@ -104,7 +89,7 @@ def reformat_description(
     model = (
         config.get("scoring", {})
         .get("models", {})
-        .get("haiku", _DEFAULT_MODEL)
+        .get("haiku", DEFAULT_MODEL_HAIKU)
     )
 
     try:
