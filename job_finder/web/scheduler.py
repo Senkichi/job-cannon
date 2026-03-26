@@ -368,6 +368,21 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Homepage discovery (daily 6:30 AM) ----------------------------
+
+        def _import_homepage_discovery():
+            from job_finder.web.homepage_discoverer import discover_homepages_batch
+            return discover_homepages_batch
+
+        scheduler.add_job(
+            _make_simple_job(app, "Homepage discovery", _import_homepage_discovery),
+            trigger=CronTrigger(hour=6, minute=30),
+            id="homepage_discovery",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         scheduler.start()
         _scheduler = scheduler
         logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
