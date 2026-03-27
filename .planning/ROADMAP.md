@@ -85,7 +85,10 @@
   2. config.yaml without a `providers` section defaults to Anthropic routing with no code change required
   3. The scoring_costs table has a `provider` column with 'anthropic' as the default for all existing rows
   4. ModelResult and BaseProvider types exist and are importable from the provider layer
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 24-01-PLAN.md — Types, config resolver, and providers package
+- [ ] 24-02-PLAN.md — DB migration 18 (provider column on scoring_costs)
 
 ### Phase 25: Provider Adapters
 **Goal**: Three provider adapters are implemented and independently testable — Anthropic wrapping existing internals, Gemini via google-genai, and Ollama via local REST
@@ -159,7 +162,7 @@
 | 21. Test Coverage | v1.4 | 1/1 | Complete | 2026-03-27 |
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
-| 24. Provider Foundation | v1.5 | 0/? | Not started | - |
+| 24. Provider Foundation | v1.5 | 0/2 | Not started | - |
 | 25. Provider Adapters | v1.5 | 0/? | Not started | - |
 | 26. Dispatcher & Cost Tracking | v1.5 | 0/? | Not started | - |
 | 27. Caller Migration | v1.5 | 0/? | Not started | - |
