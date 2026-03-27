@@ -94,13 +94,14 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
-    # Set ANTHROPIC_API_KEY inside create_app(), not at module level.
-    # Module-level os.environ pollution leaks the key to Claude Code and
-    # other tools via environment inheritance.
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        jf_key = os.environ.get("JF_ANTHROPIC_API_KEY", "")
-        if jf_key:
-            os.environ["ANTHROPIC_API_KEY"] = jf_key
+    # Activate cross-project API telemetry, budget enforcement, and key injection.
+    # Replaces the old JF_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY env var promotion.
+    # Key now sourced from ~/.anthropic-telemetry/config.toml (never in os.environ).
+    try:
+        import anthropic_telemetry
+        anthropic_telemetry.activate("job-cannon")
+    except Exception as _e:
+        logging.getLogger(__name__).warning("anthropic-telemetry not available: %s", _e)
 
     # --- Database setup ---
     run_migrations(app.config["DB_PATH"])
@@ -116,12 +117,6 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
         # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
         _setup_file_logging()
 
-        # --- Startup validation ---
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            logger.warning(
-                "ANTHROPIC_API_KEY is not set. AI scoring and resume generation will not work. "
-                "Add it to your .env file: ANTHROPIC_API_KEY=sk-ant-..."
-            )
         from job_finder.web.startup_backfills import (
             run_description_reformat_once,
             run_data_backfills_once,
@@ -169,6 +164,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
     from job_finder.web.blueprints.resume import resume_bp
+    from job_finder.web.blueprints.guidelines import guidelines_bp
     from job_finder.web.blueprints.settings import settings_bp
 
     # companies_bp, resume_bp, feedback_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
@@ -182,6 +178,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(guidelines_bp)
 
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---
     @app.route("/")
