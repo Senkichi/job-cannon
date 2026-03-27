@@ -11,7 +11,7 @@ onsite, offer, accepted) are NEVER auto-archived — they require explicit actio
 
 import logging
 
-from job_finder.db import update_pipeline_status
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -62,20 +62,33 @@ def run_stale_detection(db_path: str) -> dict:
 
             # Auto-archive discovered/reviewing jobs not seen for 30+ days
             # CRITICAL: only archive passive stages, never active pipeline stages.
-            # Use update_pipeline_status() so each archive transition is recorded
-            # in pipeline_events (audit trail).
+            # BATCH-03: batch UPDATE + executemany INSERT instead of per-row status calls
             rows_to_archive = conn.execute(
-                "SELECT dedup_key FROM jobs "
+                "SELECT dedup_key, pipeline_status FROM jobs "
                 f"WHERE last_seen < datetime('now', '-{_ARCHIVE_THRESHOLD_DAYS} days') "
                 "AND pipeline_status IN ('discovered', 'reviewing')"
             ).fetchall()
+
             archived = 0
-            for row in rows_to_archive:
-                update_pipeline_status(
-                    conn, row["dedup_key"], "archived",
-                    source="stale_detector", evidence="not_seen_30_days",
+            if rows_to_archive:
+                keys = [r["dedup_key"] for r in rows_to_archive]
+                placeholders = ",".join("?" * len(keys))
+
+                # Bulk UPDATE jobs to archived
+                conn.execute(
+                    f"UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key IN ({placeholders})",
+                    keys,
                 )
-                archived += 1
+
+                # Bulk INSERT pipeline_events (audit trail)
+                now = utc_now_iso()
+                conn.executemany(
+                    "INSERT INTO pipeline_events (job_id, from_status, to_status, timestamp, source, evidence) "
+                    "VALUES (?, ?, 'archived', ?, 'stale_detector', 'not_seen_30_days')",
+                    [(r["dedup_key"], r["pipeline_status"], now) for r in rows_to_archive],
+                )
+                conn.commit()
+                archived = len(keys)
 
             result = {
                 "stale_marked": stale_marked,
