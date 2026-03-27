@@ -1,32 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Tech Debt Sweep
-status: executing
-last_updated: "2026-03-27T05:11:42.297Z"
-last_activity: 2026-03-27
+milestone: v1.3
+milestone_name: Fixes & Improvements
+status: Phase complete — ready for verification
+last_updated: "2026-03-27T05:01:27.211Z"
 progress:
-  total_phases: 5
-  completed_phases: 3
-  total_plans: 12
-  completed_plans: 7
-  percent: 58
+  total_phases: 4
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 3
 ---
 
 # State
 
 ## Current Position
 
-Phase: 22 (Module Splits) — EXECUTING
-Plan: 4 of 7 (next to execute)
-Status: Ready to execute
-Last activity: 2026-03-27
-
-Progress: [██████░░░░] 58%
+Phase: 22 (Module Splits) — IN PROGRESS
+Plan: 1 of 7 — DONE
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-26)
+See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
 **Current focus:** Phase 22 — Module Splits
@@ -35,23 +29,19 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Velocity:**
 
-- Total plans completed: 9 (including this session)
+- Total plans completed: 6 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
-- Phase 20-01: 15min (2 tasks, 15 files)
-- Phase 20-02: 24min (2 tasks, 7 files)
-- Phase 20-03: 49min (1 task, 20 files)
-- Phase 21-01: 8min (2 tasks, 1 file)
-- Phase 22-02: 17min (2 tasks, 4 files)
-- Average duration: ~18min
-- Total execution time: ~138min
+- Phase 22-01: 12min (2 tasks, 7 files)
+- Average duration: ~9min
+- Total execution time: ~37min
 
 *Updated after each plan completion*
 
 ## Accumulated Context
 
-### Architectural Decisions
+### Architectural Decisions (from v1.0)
 
 - HTMX fragment routes MUST check HX-Request header and return full page for direct browser access
 - Status dropdown: hx-target=this hx-swap=outerHTML on the select element itself
@@ -61,55 +51,47 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Migrations stored as list of discrete SQL strings (not semicolon-delimited)
 - CREATE TABLE IF NOT EXISTS for idempotent migration
 - sort_by validated against Python allowlist before SQL interpolation
+
+### Migration Context
+
+- Implementation plan: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md`
+- Source repo (job-finder): `<other-repo>` (retired, read-only reference)
+- Phase 13 = Chunk 1 (Tasks 1-6): Planning doc updates — 6 files, surgical edits
+- Phase 14 = Chunk 2 (Tasks 7-11): Data migration — 8 files, config merge, schema check, validation
 - config.yaml MUST be edited with Edit tool only (never Write — wiped 3 times previously)
-
-### Decisions Made in Phase 18
-
-- Reuse batch_score_sessions table with session_type='sync' for async sync — no new table needed
-- Store sync results in existing columns: scored=jobs_new, total=total_fetched, skipped=error_count
-- Simplified phase labels (running->gmail->done) since run_sync_now is synchronous and opaque
-- Flask's native app.config["TESTING"] must be set explicitly in test fixtures
-
-### Decisions Made in Phase 20 Plan 01
-
-- Use is_meta_email with extra_patterns to extend base meta-email detection without duplication — parsers pass source-specific patterns as extra_patterns instead of maintaining private copies
-- Indeed's _INDEED_META_PATTERNS retains only 2 source-specific patterns; "job alert digest" dropped as duplicate of BASE_META_PATTERNS
-- Public functions/constants use no leading underscore (run_homepage_discovery, run_sync_now, merge_guidelines_into_guide, FIELD_LABELS) — private helpers keep _prefix
-
-### Decisions Made in Phase 20 Plan 02
-
-- Job.normalized_dedup_key uses lazy imports inside static method to break circular import between models.py (foundation layer) and dedup_normalizer.py (web layer)
-- run_retroactive_dedup calls normalize_company/normalize_title directly instead of the backward-compat wrapper to avoid a potential circular import chain within dedup_normalizer.py
-- get_config_snapshot lives in db_helpers.py (not a new module) since it pairs naturally with the per-request connection helper pattern
-- Background threads take config snapshot at job-start via get_config_snapshot(app) rather than reading individual keys from shared app.config dict
-
-### Decisions Made in Phase 20 Plan 03
-
-- standalone_connection() extracted to db_helpers.py (after close_db) — single context manager for all background/CLI sqlite3 connections; sets Row factory + WAL mode, guarantees close via contextlib
-- Files with sqlite3.Connection type hints or sqlite3.IntegrityError/OperationalError in except clauses retain `import sqlite3`; files that only used it for sqlite3.connect() have the import removed
-- dashboard.py _run_batch_*_bg outer exception handlers changed from _fail_session(conn) to _mark_session_error(db_path) — conn is not in scope in the outer except block
-- resume_generator.py mid-function close/reopen pattern eliminated — generate_resume_multi() uses standalone_connection internally so no connection conflict; single with standalone_connection covers entire function body
-
-### Decisions Made in Phase 21 Plan 01
-
-- Patch upsert_company at source module (job_finder.web.ats_scanner) not blueprint namespace — locally imported functions inside a route body never appear in the blueprint's module namespace, so patch must target the definition site
-- TESTING: True in top-level JF_CONFIG dict activates probe_ats_slugs/run_ats_scan guards; probe_single_company has no TESTING guard and requires explicit unittest.mock.patch
-- Blueprint test fixture chain: migrated_db -> companies_app (with TESTING=True) -> companies_client; same pattern as detections blueprint
-
-### Decisions Made in Phase 22 Plan 02
-
-- Deferred import of generate_resume_multi inside _generate_resume_background avoids circular import at module load time (resume_multi_version imports from resume_generator at top level)
-- resume_multi_version.py adds explicit `import sqlite3` to preserve patch surface for TestThreadSafety.test_each_variant_thread_opens_own_sqlite_connection
-- TestScoreThresholdDispatch patches at resume_multi_version.generate_resume_multi since deferred import binds name there during execution
-
-### Decisions Made in Phase 22 Plan 03
-
-- guidelines_bp shares url_prefix='/settings' with settings_bp — routes stay at same URLs, no template or link changes needed (Plan 03)
-- Monkeypatch targets follow module of definition: test patches must reference guidelines module, not settings module, after the split (Plan 03)
 
 ### Blockers/Concerns
 
 None.
 
+### Decisions Made in Phase 13
+
+- STACK.md and INTEGRATIONS.md cleaned of all "(Phase N)" annotations -- features are operational, not future
+- Verification sweep confirmed zero stale phase references in codebase docs
+
+### Decisions Made in Phase 14
+
+- All 8 data files gitignored -- no per-task commits for data migration (Plan 01)
+- Config merge via copy + Edit append -- preserves job-finder values while adding cannon sections (Plan 01)
+
+### Decisions Made in Phase 17
+
+- Gate _setup_file_logging() inside existing if not _is_testing block — keeps all production-only side effects together (Plan 01)
+- scan() route uses two-layer exception handling — inner try for scan logic, render_template outside so TemplateErrors propagate as 500 (Plan 01)
+- Date filter uses form-level hx-trigger with input event for #filter-date-from and #filter-date-to — element-level triggers would own their own HTMX request (Plan 01)
+
+### Decisions Made in Phase 18
+
+- Reuse batch_score_sessions table with session_type='sync' for async sync — no new table needed, consistent pattern (Plan 01)
+- Store sync results in existing columns: scored=jobs_new, total=total_fetched, skipped=error_count — avoids JSON in error_msg (Plan 01)
+- Simplified phase labels (running->gmail->done) since trigger_sync is synchronous and opaque — no sub-phase callbacks available (Plan 01)
+- Flask's native app.config["TESTING"] must be set explicitly in test fixtures, separate from JF_CONFIG["TESTING"] (Plan 01)
+
+### Decisions Made in Phase 22
+
+- Re-export all moved symbols from ats_scanner.py for backward compatibility — avoids updating 8+ callers that import from ats_scanner (Plan 01)
+- Python module singleton ensures patch("ats_scanner.requests.get") still works for probe_ats_slugs tests after probe functions moved to ats_prober.py (Plan 01)
+- caplog logger target updated to ats_prober in test_log_levels.py — _handle_scan_error logs via its own module's logger, not ats_scanner (Plan 01)
+
 ---
-*Last session: 2026-03-27 — Phase 22 Plan 03 complete: settings.py split into settings.py + guidelines.py blueprint. 29/29 target tests pass.*
+*Last session: 2026-03-26 — Completed Phase 22 Plan 01 (ATS Scanner Module Split)*
