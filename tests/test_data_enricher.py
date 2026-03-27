@@ -27,6 +27,21 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
+
+
+def _make_model_result(data: dict, cost_usd: float = 0.0001) -> ModelResult:
+    """Helper to create a ModelResult for test mocking."""
+    return ModelResult(
+        data=data,
+        cost_usd=cost_usd,
+        input_tokens=100,
+        output_tokens=50,
+        model="test-model",
+        provider="anthropic",
+        schema_valid=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -305,10 +320,9 @@ class TestExtractWithHaiku:
         search_text = "Data Scientist at Acme Corp builds ML models."
         config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
 
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"jd_full": "Build ML models.", "salary_min": 140000},
-                0.0001,
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
+            mock_call.return_value = _make_model_result(
+                {"jd_full": "Build ML models.", "salary_min": 140000}
             )
             result = extract_with_haiku(
                 search_text, job_row, mock_anthropic_client, temp_db, config
@@ -316,7 +330,7 @@ class TestExtractWithHaiku:
 
         mock_call.assert_called_once()
         call_kwargs = mock_call.call_args[1]
-        assert "haiku" in call_kwargs.get("model", "").lower()
+        assert call_kwargs.get("tier") == "haiku"
 
     def test_extract_with_haiku_returns_dict_with_job_fields(
         self, mock_anthropic_client, temp_db
@@ -328,10 +342,9 @@ class TestExtractWithHaiku:
         search_text = "Data Scientist at Acme Corp."
         config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
 
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"jd_full": "Build ML models at Acme.", "salary_min": 140000},
-                0.0001,
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
+            mock_call.return_value = _make_model_result(
+                {"jd_full": "Build ML models at Acme.", "salary_min": 140000}
             )
             result = extract_with_haiku(
                 search_text, job_row, mock_anthropic_client, temp_db, config
@@ -350,7 +363,7 @@ class TestExtractWithHaiku:
         search_text = "Some search text."
         config = {}
 
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
             mock_call.side_effect = Exception("API error")
             result = extract_with_haiku(
                 search_text, job_row, mock_anthropic_client, temp_db, config
