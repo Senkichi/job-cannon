@@ -2345,7 +2345,7 @@ class TestAtsJdFullStorage:
     def test_ats_scan_does_not_overwrite_existing_jd_full(self, migrated_db_path):
         """If a job already has jd_full in DB, COALESCE guard does not overwrite it."""
         from job_finder.web.ats_scanner import run_ats_scan
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
+        from job_finder.models import Job
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
@@ -2353,7 +2353,7 @@ class TestAtsJdFullStorage:
 
         # Pre-insert a job with existing jd_full
         existing_jd = "Existing high-quality job description already stored by a prior source."
-        dedup_key = normalized_dedup_key("Acme", "Staff Engineer")
+        dedup_key = Job.normalized_dedup_key("Acme", "Staff Engineer")
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
                first_seen, last_seen, score, score_breakdown, user_interest, jd_full)

@@ -34,6 +34,24 @@ class Job:
             raise ValueError("Job company cannot be empty")
 
     # Dedup key
+    @staticmethod
+    def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
+        """Compute the normalized dedup_key for a job.
+
+        Location is INTENTIONALLY EXCLUDED -- same company + same title = same job
+        regardless of location text differences.
+
+        Args:
+            company: Raw company name.
+            title: Raw job title.
+            location: Ignored. Kept for backward-compatible call signatures.
+
+        Returns:
+            String in format "{normalized_company}|{normalized_title}"
+        """
+        from job_finder.web.dedup_normalizer import normalize_company, normalize_title
+        return f"{normalize_company(company)}|{normalize_title(title)}"
+
     @property
     def dedup_key(self) -> str:
         """Normalized key for deduplication.
@@ -42,6 +60,5 @@ class Job:
         same company + same title = same job regardless of location differences).
         Normalizes company suffixes (Inc., LLC) and title abbreviations (Sr.->Senior).
         """
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
-        return normalized_dedup_key(self.company, self.title)
+        return Job.normalized_dedup_key(self.company, self.title)
 

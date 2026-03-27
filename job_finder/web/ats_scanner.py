@@ -1088,8 +1088,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         try:
                             # First-seen salary wins: only set salary if job is new
                             # (no existing salary data). Check existing record first.
-                            from job_finder.web.dedup_normalizer import normalized_dedup_key
-                            candidate_dedup_key = normalized_dedup_key(company_name, job_dict["title"])
+                            from job_finder.models import Job
+                            candidate_dedup_key = Job.normalized_dedup_key(company_name, job_dict["title"])
                             existing_row = conn.execute(
                                 "SELECT salary_min, salary_max FROM jobs WHERE dedup_key = ?",
                                 (candidate_dedup_key,),
