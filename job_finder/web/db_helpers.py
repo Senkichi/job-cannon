@@ -11,6 +11,7 @@ Usage in Flask app factory:
 import copy
 import logging
 import sqlite3
+from contextlib import contextmanager
 
 from flask import g
 
@@ -56,6 +57,27 @@ def close_db(e=None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+@contextmanager
+def standalone_connection(db_path: str):
+    """Context manager for background/CLI sqlite3 connections.
+
+    Sets row_factory=Row and WAL mode. NOT for Flask request handlers (use
+    get_db() via g.db instead).
+
+    Usage:
+        with standalone_connection(db_path) as conn:
+            rows = conn.execute("SELECT ...").fetchall()
+            conn.commit()
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_config_snapshot(app) -> dict:

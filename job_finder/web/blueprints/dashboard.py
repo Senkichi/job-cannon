@@ -1,7 +1,6 @@
 """Dashboard blueprint — overview stats, activity feed, pipeline summary."""
 
 import logging
-import sqlite3
 import threading
 from datetime import datetime, timezone
 
@@ -21,7 +20,7 @@ from job_finder.json_utils import utc_now_iso
 from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.claude_client import get_cost_stats
-from job_finder.web.db_helpers import get_db
+from job_finder.web.db_helpers import get_db, standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +164,7 @@ def batch_score_haiku_start():
     config = current_app.config.get("JF_CONFIG", {})
     testing = current_app.config.get("TESTING", False)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL"
         ).fetchone()[0]
@@ -191,8 +188,6 @@ def batch_score_haiku_start():
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    finally:
-        conn.close()
 
     if not testing:
         t = threading.Thread(
@@ -224,9 +219,7 @@ def batch_score_sonnet_start():
     testing = current_app.config.get("TESTING", False)
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
             "AND sonnet_score IS NULL AND jd_full IS NOT NULL",
@@ -252,8 +245,6 @@ def batch_score_sonnet_start():
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    finally:
-        conn.close()
 
     if not testing:
         t = threading.Thread(
@@ -283,14 +274,10 @@ def batch_score_status(session_id):
     """
     db_path = current_app.config["DB_PATH"]
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         session = conn.execute(
             "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
         ).fetchone()
-    finally:
-        conn.close()
 
     if session is None:
         return render_template(
@@ -313,16 +300,13 @@ def batch_score_status(session_id):
             elapsed_minutes = (datetime.now(timezone.utc).replace(tzinfo=None) - started).total_seconds() / 60
             if elapsed_minutes > 30:
                 logger.warning("Batch session %s timed out after %.1f minutes", session_id, elapsed_minutes)
-                timeout_conn = sqlite3.connect(db_path)
-                try:
+                with standalone_connection(db_path) as timeout_conn:
                     timeout_conn.execute(
                         "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? "
                         "WHERE id = ? AND status IN ('running', 'cancelling')",
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                finally:
-                    timeout_conn.close()
                 return render_template(
                     "dashboard/_batch_score_done.html",
                     label=label,
@@ -368,9 +352,7 @@ def batch_score_cancel(session_id):
     """
     db_path = current_app.config["DB_PATH"]
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         conn.execute(
             "UPDATE batch_score_sessions SET status = 'cancelling' WHERE id = ? AND status = 'running'",
             (session_id,),
@@ -379,8 +361,6 @@ def batch_score_cancel(session_id):
         session = conn.execute(
             "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
         ).fetchone()
-    finally:
-        conn.close()
 
     if session is None:
         return render_template(
@@ -430,56 +410,52 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     try:
-        rows = conn.execute(
-            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
-        ).fetchall()
+        with standalone_connection(db_path) as conn:
+            rows = conn.execute(
+                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
+            ).fetchall()
 
-        for row in rows:
-            # Check cancellation status before each job
-            status_row = conn.execute(
-                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if status_row and status_row["status"] == "cancelling":
-                conn.execute(
-                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (utc_now_iso(), session_id),
-                )
-                conn.commit()
-                return
+            for row in rows:
+                # Check cancellation status before each job
+                status_row = conn.execute(
+                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if status_row and status_row["status"] == "cancelling":
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                        (utc_now_iso(), session_id),
+                    )
+                    conn.commit()
+                    return
 
-            job_row = dict(row)
+                job_row = dict(row)
 
-            # Pre-Haiku exclusion filter
-            exclusions = config.get("profile", {}).get("exclusions", {})
-            profile_min_salary = config.get("profile", {}).get("min_salary")
-            excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
-            if excluded:
-                logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
-                _update_session_counter(conn, session_id, "skipped")
-                continue
+                # Pre-Haiku exclusion filter
+                exclusions = config.get("profile", {}).get("exclusions", {})
+                profile_min_salary = config.get("profile", {}).get("min_salary")
+                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
+                if excluded:
+                    logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
+                    _update_session_counter(conn, session_id, "skipped")
+                    continue
 
-            try:
-                result = score_and_persist_haiku(conn, job_row, config, client, profile)
-                _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
-            except Exception as e:
-                logger.warning(
-                    "Batch Haiku: error scoring job '%s': %s -- continuing",
-                    job_row.get("dedup_key"), e,
-                )
-                _update_session_counter(conn, session_id, "skipped")
+                try:
+                    result = score_and_persist_haiku(conn, job_row, config, client, profile)
+                    _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
+                except Exception as e:
+                    logger.warning(
+                        "Batch Haiku: error scoring job '%s': %s -- continuing",
+                        job_row.get("dedup_key"), e,
+                    )
+                    _update_session_counter(conn, session_id, "skipped")
 
-        # All jobs processed — mark done
-        _finish_session(conn, db_path, session_id, "done", "haiku")
+            # All jobs processed — mark done
+            _finish_session(conn, db_path, session_id, "done", "haiku")
 
     except Exception as e:
         logger.error("Batch Haiku background thread failed: %s", e)
-        _fail_session(conn, db_path, session_id, e, "haiku")
-    finally:
-        conn.close()
+        _mark_session_error(db_path, session_id, str(e)[:500])
 
 
 def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
@@ -506,48 +482,44 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     profile = load_scoring_profile(config)
     client = anthropic.Anthropic()
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     try:
-        rows = conn.execute(
-            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
-            "AND sonnet_score IS NULL AND jd_full IS NOT NULL ORDER BY haiku_score DESC",
-            (threshold,),
-        ).fetchall()
+        with standalone_connection(db_path) as conn:
+            rows = conn.execute(
+                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
+                "AND sonnet_score IS NULL AND jd_full IS NOT NULL ORDER BY haiku_score DESC",
+                (threshold,),
+            ).fetchall()
 
-        for row in rows:
-            # Check cancellation status before each job
-            status_row = conn.execute(
-                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if status_row and status_row["status"] == "cancelling":
-                conn.execute(
-                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (utc_now_iso(), session_id),
-                )
-                conn.commit()
-                return
+            for row in rows:
+                # Check cancellation status before each job
+                status_row = conn.execute(
+                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if status_row and status_row["status"] == "cancelling":
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                        (utc_now_iso(), session_id),
+                    )
+                    conn.commit()
+                    return
 
-            job_row = dict(row)
-            try:
-                result = score_and_persist_sonnet(conn, job_row, config, client, profile)
-                _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
-            except Exception as e:
-                logger.warning(
-                    "Batch Sonnet: error evaluating job '%s': %s -- continuing",
-                    job_row.get("dedup_key"), e,
-                )
-                _update_session_counter(conn, session_id, "skipped")
+                job_row = dict(row)
+                try:
+                    result = score_and_persist_sonnet(conn, job_row, config, client, profile)
+                    _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
+                except Exception as e:
+                    logger.warning(
+                        "Batch Sonnet: error evaluating job '%s': %s -- continuing",
+                        job_row.get("dedup_key"), e,
+                    )
+                    _update_session_counter(conn, session_id, "skipped")
 
-        # All jobs processed — mark done
-        _finish_session(conn, db_path, session_id, "done", "sonnet")
+            # All jobs processed — mark done
+            _finish_session(conn, db_path, session_id, "done", "sonnet")
 
     except Exception as e:
         logger.error("Batch Sonnet background thread failed: %s", e)
-        _fail_session(conn, db_path, session_id, e, "sonnet")
-    finally:
-        conn.close()
+        _mark_session_error(db_path, session_id, str(e)[:500])
 
 
 def _update_session_counter(conn, session_id: int, counter: str) -> None:
@@ -624,15 +596,12 @@ def _fail_session(conn, db_path: str, session_id: int, error: Exception, session
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
     """Mark a batch session as errored. Used for background thread import failures."""
     try:
-        conn = sqlite3.connect(db_path)
-        try:
+        with standalone_connection(db_path) as conn:
             conn.execute(
                 "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
                 (error_msg, utc_now_iso(), session_id),
             )
             conn.commit()
-        finally:
-            conn.close()
     except Exception:
         logger.warning("Failed to mark session %s as error: %s", session_id, error_msg, exc_info=True)
 
@@ -648,9 +617,7 @@ def sync_start():
     db_path = current_app.config["DB_PATH"]
     testing = current_app.config.get("TESTING", False)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         # Duplicate guard: reject if a non-terminal sync session already exists
         existing = conn.execute(
             "SELECT id FROM batch_score_sessions "
@@ -674,8 +641,6 @@ def sync_start():
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-    finally:
-        conn.close()
 
     if not testing:
         t = threading.Thread(
@@ -702,14 +667,10 @@ def sync_status(session_id):
     """
     db_path = current_app.config["DB_PATH"]
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         session = conn.execute(
             "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
         ).fetchone()
-    finally:
-        conn.close()
 
     if session is None:
         return render_template(
@@ -730,16 +691,13 @@ def sync_status(session_id):
             elapsed_minutes = (datetime.now(timezone.utc).replace(tzinfo=None) - started).total_seconds() / 60
             if elapsed_minutes > 30:
                 logger.warning("Sync session %s timed out after %.1f minutes", session_id, elapsed_minutes)
-                timeout_conn = sqlite3.connect(db_path)
-                try:
+                with standalone_connection(db_path) as timeout_conn:
                     timeout_conn.execute(
                         "UPDATE batch_score_sessions SET status='error', error_msg=?, finished_at=? "
                         "WHERE id=? AND status NOT IN ('done', 'error', 'cancelled')",
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                finally:
-                    timeout_conn.close()
                 return render_template(
                     "dashboard/_sync_done.html",
                     status="error",
@@ -802,15 +760,14 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
     """
     from job_finder.web.scheduler import run_sync_now
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
     try:
-        # Mark as fetching phase
-        conn.execute(
-            "UPDATE batch_score_sessions SET status='gmail' WHERE id=?",
-            (session_id,),
-        )
-        conn.commit()
+        with standalone_connection(db_path) as conn:
+            # Mark as fetching phase
+            conn.execute(
+                "UPDATE batch_score_sessions SET status='gmail' WHERE id=?",
+                (session_id,),
+            )
+            conn.commit()
 
         # Run the full sync pipeline synchronously in this background thread
         with app.app_context():
@@ -821,12 +778,13 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
         total_fetched = summary.get("gmail_fetched", 0) + summary.get("serpapi_fetched", 0)
         error_count = len(summary.get("gmail_errors", [])) + len(summary.get("serpapi_errors", []))
 
-        conn.execute(
-            "UPDATE batch_score_sessions SET status='done', scored=?, total=?, skipped=?, finished_at=? "
-            "WHERE id=?",
-            (jobs_new, total_fetched, error_count, utc_now_iso(), session_id),
-        )
-        conn.commit()
+        with standalone_connection(db_path) as conn:
+            conn.execute(
+                "UPDATE batch_score_sessions SET status='done', scored=?, total=?, skipped=?, finished_at=? "
+                "WHERE id=?",
+                (jobs_new, total_fetched, error_count, utc_now_iso(), session_id),
+            )
+            conn.commit()
 
         try:
             log_activity(
@@ -846,11 +804,12 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
     except Exception as e:
         logger.error("Async sync background thread failed: %s", e)
         try:
-            conn.execute(
-                "UPDATE batch_score_sessions SET status='error', error_msg=?, finished_at=? WHERE id=?",
-                (str(e), utc_now_iso(), session_id),
-            )
-            conn.commit()
+            with standalone_connection(db_path) as conn:
+                conn.execute(
+                    "UPDATE batch_score_sessions SET status='error', error_msg=?, finished_at=? WHERE id=?",
+                    (str(e), utc_now_iso(), session_id),
+                )
+                conn.commit()
         except Exception:
             pass
         try:
@@ -861,8 +820,6 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             )
         except Exception:
             pass
-    finally:
-        conn.close()
 
 
 @dashboard_bp.route("/sync", methods=["POST"], strict_slashes=False)

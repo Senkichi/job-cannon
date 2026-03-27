@@ -11,7 +11,7 @@ Both modules are called from the app factory (web/__init__.py) in sequence:
 first schema migrations, then startup backfills.
 """
 
-import sqlite3
+from job_finder.web.db_helpers import standalone_connection
 
 
 def run_description_reformat_once(db_path: str, config: dict) -> None:
@@ -33,24 +33,17 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
     if config.get("TESTING"):
         return
 
-    # Need an anthropic API key to do anything useful
+    # Key is injected by anthropic-telemetry from ~/.anthropic-telemetry/config.toml.
+    # No need to check os.environ for ANTHROPIC_API_KEY.
     try:
-        import os
         import anthropic
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            logger.debug(
-                "ANTHROPIC_API_KEY not set — skipping description reformat pass"
-            )
-            return
 
         import threading
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         def _run():
             try:
-                count = run_description_reformat_pass(db_path, api_key, config=config)
+                count = run_description_reformat_pass(db_path, config=config)
                 if count > 0:
                     logger.info("Description reformat pass complete: reformatted %d jobs", count)
             except Exception as e:
@@ -87,64 +80,62 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
     import threading
 
     def _run():
-        conn = sqlite3.connect(db_path)
         try:
-            # Check sentinel — skip if already ran
-            sentinel = conn.execute(
-                "SELECT id FROM merge_log WHERE merge_source = 'backfill_v1' LIMIT 1"
-            ).fetchone()
-            if sentinel is not None:
-                return
+            with standalone_connection(db_path) as conn:
+                # Check sentinel — skip if already ran
+                sentinel = conn.execute(
+                    "SELECT id FROM merge_log WHERE merge_source = 'backfill_v1' LIMIT 1"
+                ).fetchone()
+                if sentinel is not None:
+                    return
 
-            logger.info("Running one-time data backfills...")
+                logger.info("Running one-time data backfills...")
 
-            # 1. Backfill locations_raw from location column
-            updated = conn.execute(
-                "UPDATE jobs SET locations_raw = json_array(location) "
-                "WHERE locations_raw IS NULL AND location IS NOT NULL"
-            ).rowcount
-            conn.commit()
-            if updated:
-                logger.info("Backfill locations_raw: %d jobs updated", updated)
+                # 1. Backfill locations_raw from location column
+                updated = conn.execute(
+                    "UPDATE jobs SET locations_raw = json_array(location) "
+                    "WHERE locations_raw IS NULL AND location IS NOT NULL"
+                ).rowcount
+                conn.commit()
+                if updated:
+                    logger.info("Backfill locations_raw: %d jobs updated", updated)
 
-            # 2. Backfill posted_date from first_seen
-            updated = conn.execute(
-                "UPDATE jobs SET posted_date = first_seen "
-                "WHERE posted_date IS NULL AND first_seen IS NOT NULL"
-            ).rowcount
-            conn.commit()
-            if updated:
-                logger.info("Backfill posted_date: %d jobs updated", updated)
+                # 2. Backfill posted_date from first_seen
+                updated = conn.execute(
+                    "UPDATE jobs SET posted_date = first_seen "
+                    "WHERE posted_date IS NULL AND first_seen IS NOT NULL"
+                ).rowcount
+                conn.commit()
+                if updated:
+                    logger.info("Backfill posted_date: %d jobs updated", updated)
 
-            # 3. SerpAPI enrichment for jobs missing jd_full
-            serpapi_key = (
-                config.get("sources", {}).get("serpapi", {}).get("api_key")
-            )
-            if serpapi_key:
-                try:
-                    from job_finder.web.data_enricher import run_enrichment_backfill
-                    count = run_enrichment_backfill(db_path, serpapi_key, config=config, limit=100)
-                    if count:
-                        logger.info("Enrichment backfill: %d jobs enriched", count)
-                except Exception as e:
-                    logger.warning("Enrichment backfill failed (non-fatal): %s", e)
-            else:
-                logger.debug("No SerpAPI key — skipping enrichment backfill")
+                # 3. SerpAPI enrichment for jobs missing jd_full
+                serpapi_key = (
+                    config.get("sources", {}).get("serpapi", {}).get("api_key")
+                )
+                if serpapi_key:
+                    try:
+                        from job_finder.web.data_enricher import run_enrichment_backfill
+                        count = run_enrichment_backfill(db_path, serpapi_key, config=config, limit=100)
+                        if count:
+                            logger.info("Enrichment backfill: %d jobs enriched", count)
+                    except Exception as e:
+                        logger.warning("Enrichment backfill failed (non-fatal): %s", e)
+                else:
+                    logger.debug("No SerpAPI key — skipping enrichment backfill")
 
-            # Insert sentinel
-            from datetime import datetime, timezone
-            conn.execute(
-                "INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at) "
-                "VALUES ('__sentinel__', '__sentinel__', 'backfill_v1', ?)",
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),),
-            )
-            conn.commit()
-            logger.info("Data backfills complete.")
+                # Insert sentinel
+                from datetime import datetime, timezone
+                conn.execute(
+                    "INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at) "
+                    "VALUES ('__sentinel__', '__sentinel__', 'backfill_v1', ?)",
+                    (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),),
+                )
+                conn.commit()
+                logger.info("Data backfills complete.")
 
         except Exception as e:
             logger.warning("Data backfills failed (non-fatal): %s", e)
-        finally:
-            conn.close()
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()

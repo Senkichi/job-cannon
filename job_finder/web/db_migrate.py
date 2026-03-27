@@ -12,6 +12,8 @@ per-statement without aborting the whole migration.
 import logging
 import sqlite3
 
+from job_finder.web.db_helpers import standalone_connection
+
 logger = logging.getLogger(__name__)
 
 # Each migration is a list of SQL statement strings.
@@ -425,10 +427,7 @@ def run_migrations(db_path: str) -> None:
     Args:
         db_path: Path to the SQLite database file.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         current_version = conn.execute("PRAGMA user_version").fetchone()[0]
         pending = MIGRATIONS[current_version:]
 
@@ -450,9 +449,6 @@ def run_migrations(db_path: str) -> None:
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # Column already exists — expected on fresh DBs
-
-    finally:
-        conn.close()
 
 
 def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:

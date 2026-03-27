@@ -27,6 +27,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.drive_uploader import get_drive_service
 
 logger = logging.getLogger(__name__)
@@ -318,14 +319,11 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
     Returns:
         Summary dict: {resumes_polled, changes_detected, preferences_extracted}.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     resumes_polled = 0
     changes_detected = 0
     preferences_extracted = 0
 
-    try:
+    with standalone_connection(db_path) as conn:
         rows = conn.execute(
             "SELECT id, job_id, doc_url, last_drive_polled_at "
             "FROM resume_generations "
@@ -428,9 +426,6 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
         logger.info("Drive feedback poll: %s", result)
         return result
 
-    finally:
-        conn.close()
-
 
 # ---------------------------------------------------------------------------
 # Preference consolidation
@@ -449,10 +444,7 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
     Returns:
         Summary dict: {consolidated, count} or {consolidated, original_count, consolidated_count}.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         rows = conn.execute(
             "SELECT * FROM resume_preferences_detected "
             "WHERE accepted=1 AND applied_at IS NULL "
@@ -566,6 +558,3 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
         }
         logger.info("Preference consolidation: %s", result_summary)
         return result_summary
-
-    finally:
-        conn.close()
