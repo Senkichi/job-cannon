@@ -19,7 +19,7 @@ Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap ph
 
 - [x] **ADAPT-01**: Anthropic adapter wraps existing call_claude() internals with tool-choice structured output
 - [x] **ADAPT-02**: Gemini adapter uses google-genai SDK with response_schema structured output and 429 rate-limit retry
-- [ ] **ADAPT-03**: Ollama adapter uses REST API with JSON format + schema-in-prompt, health-check on init
+- [x] **ADAPT-03**: Ollama adapter uses REST API with JSON format + schema-in-prompt, health-check on init
 
 ### Caller Migration
 
@@ -101,7 +101,7 @@ None identified for this milestone.
 | INFRA-05 | Phase 24 | Pending |
 | ADAPT-01 | Phase 25 | Complete |
 | ADAPT-02 | Phase 25 | Complete |
-| ADAPT-03 | Phase 25 | Pending |
+| ADAPT-03 | Phase 25 | Complete |
 | MIGR-01 | Phase 27 | Pending |
 | MIGR-02 | Phase 27 | Pending |
 | MIGR-03 | Phase 27 | Pending |
