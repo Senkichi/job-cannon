@@ -166,6 +166,7 @@ def import_markdown():
     """Accept .md file upload, extract structured profile via Claude Opus."""
     try:
         import anthropic
+        # Key availability probe — not a model call (MIGR-02 exception: verifies API key, result discarded)
         anthropic.Anthropic()  # verify key is available (via telemetry injection)
     except Exception:
         flash(
@@ -186,7 +187,10 @@ def import_markdown():
         flash("Could not read file as UTF-8 text. Please upload a .md file.", "error")
         return redirect(url_for("profile.index"))
 
-    extracted = extract_profile_from_markdown(markdown_text)
+    db_path = current_app.config.get("DB_PATH", "jobs.db")
+    conn = get_db(db_path)
+    config = current_app.config.get("JF_CONFIG", {})
+    extracted = extract_profile_from_markdown(markdown_text, conn=conn, config=config)
 
     if "error" in extracted and not extracted.get("positions") and not extracted.get("skills"):
         flash(f"Extraction failed: {extracted['error']}", "error")

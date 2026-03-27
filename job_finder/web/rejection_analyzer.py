@@ -24,8 +24,8 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from job_finder.config import DEFAULT_MODEL_OPUS
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.claude_client import BudgetExceededError
+from job_finder.web.model_provider import call_model
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -148,16 +148,6 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
         logger.info("Rejection analysis: no unreviewed rejections found, skipping")
         return {"rejections_analyzed": 0, "report_id": None, "cost_usd": 0.0}
 
-    # Budget gate before making Opus call
-    if not cost_gate(conn, config, "opus"):
-        logger.info("Rejection analysis: monthly budget cap reached, skipping Opus call")
-        return {
-            "rejections_analyzed": 0,
-            "report_id": None,
-            "cost_usd": 0.0,
-            "budget_exceeded": True,
-        }
-
     # Build batch input for Opus
     job_summaries = []
     dedup_keys = []
@@ -184,19 +174,11 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
         indent=2,
     )
 
-    # Determine Opus model from config
-    opus_model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("opus", DEFAULT_MODEL_OPUS)
-    )
-
     # Single Opus call for ALL rejections
     client = anthropic.Anthropic()
     try:
-        result, cost_usd = call_claude(
-            client=client,
-            model=opus_model,
+        result_obj = call_model(
+            tier="opus",
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
             output_schema=REJECTION_ANALYSIS_SCHEMA,
@@ -205,7 +187,18 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
             purpose="opus_rejection_analysis",
             config=config,
             max_tokens=4096,
+            client=client,
         )
+        result = result_obj.data
+        cost_usd = result_obj.cost_usd
+    except BudgetExceededError:
+        logger.info("Rejection analysis: monthly budget cap reached, skipping Opus call")
+        return {
+            "rejections_analyzed": 0,
+            "report_id": None,
+            "cost_usd": 0.0,
+            "budget_exceeded": True,
+        }
     except Exception as exc:
         logger.error(
             "Rejection analysis Opus call failed (%d rejections): %s",

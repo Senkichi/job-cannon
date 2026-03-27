@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Multi-Provider Model Routing
-status: executing
-stopped_at: Completed 27-caller-migration 27-03-PLAN.md
-last_updated: "2026-03-27T21:16:20.634Z"
+status: verifying
+stopped_at: Completed 27-04-PLAN.md
+last_updated: "2026-03-27T21:14:50.091Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 4
@@ -18,9 +18,9 @@ progress:
 
 ## Current Position
 
-Phase: 26 (Dispatcher & Cost Tracking) — EXECUTING
-Plan: 3 of 3 COMPLETE
-Status: Ready to execute
+Phase: 27 (Caller Migration) — EXECUTING
+Plan: 4 of 4
+Status: 27-04 complete
 Last activity: 2026-03-27
 
 Progress: [██████████] 100%
@@ -30,7 +30,7 @@ Progress: [██████████] 100%
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 26 — Dispatcher & Cost Tracking
+**Current focus:** Phase 27 — Caller Migration
 
 ## Performance Metrics
 
@@ -64,6 +64,12 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 - _maybe_record_cost() guards on result.provider == 'anthropic' to prevent double-recording — call_claude() handles Anthropic cost internally (Plan 01)
 - Fallback model resolved with resolve_provider_config(tier, {}) (empty config) to get Anthropic default, not the Gemini/Ollama model string (Plan 01)
 
+### Decisions Made in Phase 27 Plan 04
+
+- profile_schema.extract_profile_from_markdown accepts optional conn+config — caller passes real conn for cost tracking, None is safe only in contexts without DB access (Plan 04)
+- guidelines.py model= argument removed from merge_guidelines_into_guide call — forward-compatible with Plan 03 migration that removes model from function signature (Plan 04)
+- rejection_analyzer BudgetExceededError now caught in try/except instead of pre-check — same INFO log level behavior preserved, test_log_levels.py updated accordingly (Plan 04)
+
 ### Blockers/Concerns
 
 None.
@@ -75,6 +81,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-27T21:16:20.631Z
-Stopped at: Completed 27-caller-migration 27-03-PLAN.md
+Last session: 2026-03-27T21:13:06.909Z
+Stopped at: Completed 27-04-PLAN.md
 Resume file: None

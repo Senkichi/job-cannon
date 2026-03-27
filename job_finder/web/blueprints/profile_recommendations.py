@@ -20,8 +20,7 @@ from flask import (
     url_for,
 )
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
-from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import call_model
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
 from job_finder.web.blueprints.profile import _get_all_skills
@@ -101,11 +100,6 @@ def recommendation():
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
 
         system = (
             "You are a profile improvement advisor. Given a profile validation warning "
@@ -127,9 +121,8 @@ def recommendation():
             f"Suggest how to fix this warning."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=RECOMMENDATION_SCHEMA,
@@ -138,7 +131,9 @@ def recommendation():
             purpose="profile_recommendation",
             config=config,
             max_tokens=512,
+            client=client,
         )
+        result = result_obj.data
 
         recs = result.get("recommendations", [])
         rec = recs[0] if recs else {}
@@ -184,11 +179,6 @@ def recommendations_all():
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
 
         system = (
             "You are a profile improvement advisor. Given a set of profile validation warnings "
@@ -213,9 +203,8 @@ def recommendations_all():
             f"Provide a recommendation for each warning above."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=RECOMMENDATION_SCHEMA,
@@ -224,7 +213,9 @@ def recommendations_all():
             purpose="profile_recommendations_batch",
             config=config,
             max_tokens=1024,
+            client=client,
         )
+        result = result_obj.data
 
         recommendations = result.get("recommendations", [])
 

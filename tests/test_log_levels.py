@@ -194,8 +194,9 @@ class TestRejectionAnalyzerLogLevels:
                 )
 
     def test_budget_cap_caplog_integration(self, caplog):
-        """When cost_gate returns False, rejection_analyzer emits an INFO record."""
+        """When call_model raises BudgetExceededError, rejection_analyzer emits an INFO record."""
         import job_finder.web.rejection_analyzer as ra_module
+        from job_finder.web.claude_client import BudgetExceededError
 
         db_path, conn = _make_migrated_db()
         # Insert a rejected + unreviewed job so the code reaches the budget gate
@@ -214,7 +215,10 @@ class TestRejectionAnalyzerLogLevels:
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         try:
-            with patch("job_finder.web.rejection_analyzer.cost_gate", return_value=False):
+            with patch(
+                "job_finder.web.rejection_analyzer.call_model",
+                side_effect=BudgetExceededError("Budget cap reached. Tier: opus"),
+            ):
                 with caplog.at_level(logging.INFO, logger="job_finder.web.rejection_analyzer"):
                     ra_module.run_rejection_analysis(db_path, config)
         finally:
@@ -290,8 +294,9 @@ class TestInterviewPrepLogLevels:
                 break
 
     def test_budget_cap_caplog_integration(self, caplog):
-        """cost_gate=False path in interview_prep emits INFO record."""
+        """BudgetExceededError from call_model in interview_prep emits INFO record."""
         import job_finder.web.interview_prep as ip_module
+        from job_finder.web.claude_client import BudgetExceededError
 
         db_path, conn = _make_migrated_db()
         conn.execute(
@@ -308,7 +313,10 @@ class TestInterviewPrepLogLevels:
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         try:
-            with patch("job_finder.web.interview_prep.cost_gate", return_value=False):
+            with patch(
+                "job_finder.web.interview_prep.call_model",
+                side_effect=BudgetExceededError("Budget cap reached. Tier: opus"),
+            ):
                 with caplog.at_level(logging.INFO, logger="job_finder.web.interview_prep"):
                     ip_module.generate_interview_prep_background("co|eng|nyc", db_path, config)
         finally:
