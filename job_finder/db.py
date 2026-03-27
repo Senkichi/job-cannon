@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime, date
 
 from job_finder.models import Job
 from job_finder.json_utils import safe_json_load, utc_now_iso
+
+_log = logging.getLogger(__name__)
 
 
 # Explicit column lists for high-traffic queries. Avoids SELECT * so that
@@ -559,9 +562,9 @@ def get_filtered_jobs(
 
     # When sorting by score, use best available AI score (sonnet > haiku > heuristic)
     if sort_by == "score":
-        score_expr = f"COALESCE(sonnet_score, haiku_score, score) {sort_dir}"
+        sort_expr = f"COALESCE(sonnet_score, haiku_score, score) {sort_dir}"
     else:
-        score_expr = f"{sort_by} {sort_dir}"
+        sort_expr = f"{sort_by} {sort_dir}"
 
     # Deprioritize archived/withdrawn jobs (push to bottom) when viewing all statuses.
     # When the user explicitly filters by a specific status, skip deprioritization
@@ -569,10 +572,10 @@ def get_filtered_jobs(
     if not status:
         order_expr = (
             "CASE WHEN pipeline_status IN ('archived', 'withdrawn') THEN 1 ELSE 0 END, "
-            + score_expr
+            + sort_expr
         )
     else:
-        order_expr = score_expr
+        order_expr = sort_expr
 
     conditions: list[str] = []
     params: list = []
@@ -646,7 +649,7 @@ def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
             for src in json.loads(row[0]):
                 seen.add(src)
         except (json.JSONDecodeError, TypeError):
-            pass
+            _log.warning("get_distinct_sources: corrupt sources JSON skipped: %r", row[0])
     return sorted(seen)
 
 
@@ -703,8 +706,11 @@ def get_recent_pipeline_events(conn: sqlite3.Connection, limit: int = 10) -> lis
             (limit,),
         ).fetchall()
         return [dict(row) for row in rows]
-    except sqlite3.OperationalError:
-        return []
+    except sqlite3.OperationalError as exc:
+        # Gracefully handle missing table (pre-migration); re-raise other errors.
+        if "no such table" in str(exc).lower():
+            return []
+        raise
 
 
 def get_pending_detections(conn: sqlite3.Connection) -> list[dict]:
