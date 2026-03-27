@@ -69,7 +69,7 @@
 **Milestone Goal:** Make all AI model calls configurable to route through Anthropic, Gemini, or Ollama via config.yaml, with an evaluation framework to benchmark alternatives before switching.
 
 - [x] **Phase 24: Provider Foundation** (2/2 plans) — completed 2026-03-27
-- [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
+- [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
 - [ ] **Phase 26: Dispatcher & Cost Tracking** — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
 - [ ] **Phase 27: Caller Migration** — Migrate all call sites from call_claude() to call_model()
 - [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
@@ -101,7 +101,10 @@ Plans:
   3. When retry also fails, call_model() re-dispatches to Anthropic as configured fallback
   4. Calls routed to Gemini free tier or Ollama skip budget gate checks entirely
   5. The Costs page shows a per-provider breakdown of API spend alongside the existing per-feature breakdown
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 26-01-PLAN.md — call_model() dispatcher with schema retry, fallback, budget bypass, and record_cost provider param
+- [ ] 26-02-PLAN.md — Per-provider cost breakdown query and Costs page UI
 
 ### Phase 27: Caller Migration
 **Goal**: Every call site in the codebase uses call_model() with a logical tier name — no direct call_claude() calls or raw anthropic.Anthropic() usage remain in blueprint or orchestrator code
@@ -153,7 +156,7 @@ Plans:
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 25. Provider Adapters | v1.5 | 3/3 | Complete   | 2026-03-27 |
-| 26. Dispatcher & Cost Tracking | v1.5 | 0/? | Not started | - |
+| 25. Provider Adapters | v1.5 | 3/3 | Complete    | 2026-03-27 |
+| 26. Dispatcher & Cost Tracking | v1.5 | 0/2 | Not started | - |
 | 27. Caller Migration | v1.5 | 0/? | Not started | - |
 | 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
