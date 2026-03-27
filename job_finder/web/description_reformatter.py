@@ -24,8 +24,7 @@ import logging
 import re
 from typing import Optional, Any
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
-from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import call_model
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -86,27 +85,22 @@ def reformat_description(
     if header_count >= _ALREADY_FORMATTED_THRESHOLD:
         return description
 
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("haiku", DEFAULT_MODEL_HAIKU)
-    )
-
     try:
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": description[:4000]}],
-            output_schema=None,
             conn=conn,
+            config=config,
+            output_schema=None,
             job_id=None,
             purpose="description_reformat",
-            config=config,
             max_tokens=2048,
+            client=client,
         )
+        result = result_obj.data
 
-        # call_claude returns dict — extract the text field
+        # call_model returns ModelResult — extract the text field from result_obj.data
         if isinstance(result, dict):
             reformatted = result.get("text", "")
         else:
@@ -155,6 +149,7 @@ def run_description_reformat_pass(
     try:
         with standalone_connection(db_path) as conn:
             import anthropic
+            # Utility function — standalone client instantiation (not blueprint/orchestrator scope)
             client = anthropic.Anthropic(api_key=anthropic_api_key) if anthropic_api_key else anthropic.Anthropic()
 
             rows = conn.execute(

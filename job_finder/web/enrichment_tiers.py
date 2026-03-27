@@ -15,8 +15,7 @@ from typing import Optional, Any
 import requests
 from bs4 import BeautifulSoup
 
-from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
 
@@ -290,26 +289,21 @@ def extract_with_sonnet(
             f"Extract job details as JSON. Include only fields that are explicitly mentioned."
         )
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
-
         job_id = job_row.get("dedup_key")
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
             conn=conn,
+            config=config,
+            output_schema=None,
             job_id=job_id,
             purpose="enrich_job_sonnet",
-            config=config,
             max_tokens=1024,
+            client=client,
         )
+        result = result_obj.data
 
         if isinstance(result, dict):
             enriched = {}
@@ -463,26 +457,21 @@ def extract_with_haiku(
             f"Extract job details as JSON. Include only fields that are explicitly mentioned."
         )
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
-
         job_id = job_row.get("dedup_key")
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
             conn=conn,
+            config=config,
+            output_schema=None,
             job_id=job_id,
             purpose="enrich_job",
-            config=config,
             max_tokens=512,
+            client=client,
         )
+        result = result_obj.data
 
         if isinstance(result, dict):
             # Remove None values and ensure salary fields are integers
