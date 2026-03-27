@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import parse_salary_range, is_meta_email
+from job_finder.parsers._common import parse_salary_range, is_meta_email, looks_like_salary_text
 
 logger = logging.getLogger(__name__)
 
@@ -531,7 +531,7 @@ def _extract_company_from_context(container, title_text: str) -> str:
             continue
         if text.lower() == title_lower:
             continue
-        if _looks_like_salary_text(text):
+        if looks_like_salary_text(text):
             continue
         if _looks_like_location(text):
             continue
@@ -562,11 +562,6 @@ def _extract_location_from_context(container) -> str:
 def _looks_like_location(text: str) -> bool:
     """Return True if text matches common location patterns."""
     return bool(_LOCATION_RE.search(text))
-
-
-def _looks_like_salary_text(text: str) -> bool:
-    """Return True if text contains a salary value."""
-    return bool(re.search(r"\$\d+", text))
 
 
 def _extract_salary_from_text(text: str) -> tuple[Optional[int], Optional[int]]:
