@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
-status: verifying
-last_updated: "2026-03-27T04:11:56.529Z"
+status: executing
+last_updated: "2026-03-27T05:03:36.414Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 12
+  completed_plans: 6
   percent: 100
 ---
 
@@ -17,25 +17,25 @@ progress:
 
 ## Current Position
 
-Phase: 21 (Test Coverage) — COMPLETE
-Plan: 1 of 1
-Status: Phase 21 complete — all plans done, ready for milestone verification
-Last activity: 2026-03-27 — Phase 21 Plan 01 complete: 29-test companies blueprint suite, 1562 tests pass
+Phase: 22 (Module Splits) — EXECUTING
+Plan: 2 of 7 complete
+Status: Executing Phase 22
+Last activity: 2026-03-27 -- Phase 22 Plan 02 complete
 
-Progress: [██████████] 100%
+Progress: [█████░░░░░] 50%
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 21 — Test Coverage
+**Current focus:** Phase 22 — Module Splits
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 8 (including this session)
+- Total plans completed: 9 (including this session)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
@@ -43,8 +43,9 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Phase 20-02: 24min (2 tasks, 7 files)
 - Phase 20-03: 49min (1 task, 20 files)
 - Phase 21-01: 8min (2 tasks, 1 file)
+- Phase 22-02: 17min (2 tasks, 4 files)
 - Average duration: ~18min
-- Total execution time: ~121min
+- Total execution time: ~138min
 
 *Updated after each plan completion*
 
@@ -95,9 +96,15 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - TESTING: True in top-level JF_CONFIG dict activates probe_ats_slugs/run_ats_scan guards; probe_single_company has no TESTING guard and requires explicit unittest.mock.patch
 - Blueprint test fixture chain: migrated_db -> companies_app (with TESTING=True) -> companies_client; same pattern as detections blueprint
 
+### Decisions Made in Phase 22 Plan 02
+
+- Deferred import of generate_resume_multi inside _generate_resume_background avoids circular import at module load time (resume_multi_version imports from resume_generator at top level)
+- resume_multi_version.py adds explicit `import sqlite3` to preserve patch surface for TestThreadSafety.test_each_variant_thread_opens_own_sqlite_connection
+- TestScoreThresholdDispatch patches at resume_multi_version.generate_resume_multi since deferred import binds name there during execution
+
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-27 — Phase 21 Plan 01 complete: 29-test companies blueprint suite. 1562 tests pass.*
+*Last session: 2026-03-27 — Phase 22 Plan 02 complete: resume_generator.py split into resume_multi_version.py. 1562 tests pass.*
