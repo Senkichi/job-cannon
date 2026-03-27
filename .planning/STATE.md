@@ -1,22 +1,22 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Tech Debt Sweep
-status: v1.4 milestone complete
-last_updated: "2026-03-27T07:22:40.283Z"
+milestone: v1.5
+milestone_name: Multi-Provider Model Routing
+status: executing
+last_updated: "2026-03-27T18:45:00.000Z"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 7
+  completed_phases: 1
+  total_plans: 13
+  completed_plans: 11
 ---
 
 # State
 
 ## Current Position
 
-Phase: 23 (N+1 Batching) — EXECUTING
-Plan: 2 of 3
+Phase: 24 (Provider Foundation) — EXECUTING
+Plan: 2 of 2 complete — Plan 02 done, phase complete
 
 ## Project Reference
 
@@ -106,5 +106,10 @@ None.
 - Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
 - Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
 
+### Decisions Made in Phase 24
+
+- DEFAULT 'anthropic' on scoring_costs.provider column — existing rows attributed correctly without data backfill (Plan 02)
+- record_cost() signature unchanged in Plan 02 — Phase 25 adds explicit provider parameter (Plan 02)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 23 Plan 01 (N+1 Batch Prefetch in Scoring Runner)*
+*Last session: 2026-03-27 — Completed Phase 24 Plan 02 (Migration 18: provider column on scoring_costs)*
