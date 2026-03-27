@@ -17,8 +17,6 @@ Per-field cost ceilings:
   salary_min: capped at haiku (not worth SerpAPI/Sonnet for salary alone)
   salary_max: capped at haiku
 
-Company info enrichment (for Sonnet-scored jobs only) uses DuckDuckGo.
-
 Design principles:
   - Never raises — all errors are caught and logged.
   - Returns empty dict when nothing can be enriched.
@@ -30,20 +28,19 @@ Design principles:
 Exports:
     TIER_ORDER: Ordered list of enrichment tier names.
     enrich_job: Enrich a sparse job record with cost-ordered tier fallback.
-    enrich_company_info: Enrich company metadata via DuckDuckGo.
     run_enrichment_backfill: Backfill unenriched jobs from the DB.
 """
 
 import json
 import logging
-import re
 from typing import Optional, Any
 
-import requests
-from bs4 import BeautifulSoup
-
-from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.claude_client import cost_gate
+from job_finder.web.enrichment_tiers import (
+    fetch_direct_jd, query_ats_api, scrape_careers,
+    extract_with_sonnet, search_serpapi, search_duckduckgo, extract_with_haiku,
+)
+from job_finder.web.company_enricher import enrich_company_info  # noqa: F401 (re-exported for callers)
 
 logger = logging.getLogger(__name__)
 
@@ -65,37 +62,6 @@ FIELD_TIER_CEILINGS = {
     "salary_min": "haiku",    # cap at Haiku — not worth SerpAPI/Sonnet for salary alone
     "salary_max": "haiku",
 }
-
-# DuckDuckGo Instant Answer API endpoint
-_DDG_API_URL = "https://api.duckduckgo.com/"
-
-# SerpAPI Google Jobs endpoint
-_SERPAPI_URL = "https://serpapi.com/search.json"
-
-# HTTP headers for external requests
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (compatible; JobFinder/1.0; +https://github.com/job-finder)"
-    )
-}
-
-# Tags to strip from HTML before extracting text
-_NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
-
-# Maximum characters to return from direct JD fetch
-_MAX_JD_CHARS = 8000
-
-# Auth-wall signatures: if page text contains any of these (case-insensitive),
-# the fetched page is a login/CAPTCHA wall, not a real JD. Return None.
-_AUTH_WALL_SIGNATURES = [
-    "we're signing you in",
-    "sign in or join",
-    "please verify you are a human",
-    "access denied",
-]
-
-# Timeout for external API calls (seconds)
-_TIMEOUT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -174,20 +140,20 @@ def enrich_job(
                 # Sub-tier A: Direct URL fetch
                 source_urls = _parse_source_urls(job_row.get("source_urls"))
                 for url in source_urls:
-                    jd_text = _fetch_direct_jd(url)
+                    jd_text = fetch_direct_jd(url)
                     if jd_text:
                         fragments["url_jd"] = jd_text
                         break
 
                 # Sub-tier B: ATS API query (if company has confirmed ATS slug)
                 if conn is not None and job_row.get("company_id"):
-                    ats_result = _query_ats_api(job_row, conn, config)
+                    ats_result = query_ats_api(job_row, conn, config)
                     if ats_result:
                         fragments.update(ats_result)
 
                 # Sub-tier C: HTML careers scrape (if company has homepage_url)
                 if conn is not None and job_row.get("company_id"):
-                    careers_result = _scrape_careers(job_row, conn, config)
+                    careers_result = scrape_careers(job_row, conn, config)
                     if careers_result:
                         # Don't overwrite ATS result
                         for k, v in careers_result.items():
@@ -216,7 +182,7 @@ def enrich_job(
         if start_idx <= TIER_ORDER.index("ddg"):
             try:
                 query = f"{title} {company} job description"
-                ddg_text = _search_duckduckgo(query)
+                ddg_text = search_duckduckgo(query)
                 if ddg_text:
                     fragments["ddg"] = ddg_text
 
@@ -234,7 +200,7 @@ def enrich_job(
             try:
                 # Compose search text from all fragments collected so far
                 search_input = _compose_fragment_text(fragments, title, company)
-                haiku_result = _extract_with_haiku(
+                haiku_result = extract_with_haiku(
                     search_input, job_row, anthropic_client, conn, config
                 )
                 if haiku_result:
@@ -280,7 +246,7 @@ def enrich_job(
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
             try:
                 query = f"{title} {company}"
-                serpapi_result = _search_serpapi(query, serpapi_key)
+                serpapi_result = search_serpapi(query, serpapi_key)
                 if serpapi_result:
                     for k, v in serpapi_result.items():
                         if k not in fragments:
@@ -315,7 +281,7 @@ def enrich_job(
                 # Check cost gate before calling Sonnet
                 gate_ok = cost_gate(conn, config, "sonnet")
                 if gate_ok:
-                    sonnet_result = _extract_with_sonnet(
+                    sonnet_result = extract_with_sonnet(
                         fragments, job_row, anthropic_client, conn, config
                     )
                     if sonnet_result:
@@ -333,68 +299,6 @@ def enrich_job(
 
     except Exception as e:
         logger.warning("enrich_job failed for '%s': %s", job_row.get("title"), e)
-        return {}
-
-
-def enrich_company_info(company_name: str) -> dict:
-    """Enrich company info via DuckDuckGo (for Sonnet-scored jobs only).
-
-    Returns dict with optional keys: company_size, industry, funding_stage.
-    Best-effort — returns empty dict on failure. DDG reliability is LOW per
-    research (sparse company data), so callers should not depend on results.
-
-    Args:
-        company_name: The company name to look up.
-
-    Returns:
-        Dict with any of: company_size (str), industry (str), funding_stage (str).
-        May be empty if no data found.
-    """
-    try:
-        query = f"{company_name} company size employees industry"
-        ddg_text = _search_duckduckgo(query)
-        if not ddg_text:
-            return {}
-
-        result = {}
-
-        # Extract employee count pattern: "X employees" or "X,000 employees"
-        employee_match = re.search(
-            r"(\d[\d,]*)\s*(?:to\s*\d[\d,]*)?\s+employees?", ddg_text, re.IGNORECASE
-        )
-        if employee_match:
-            count_str = employee_match.group(1).replace(",", "")
-            try:
-                count = int(count_str)
-                if count < 50:
-                    result["company_size"] = "startup"
-                elif count < 500:
-                    result["company_size"] = "small"
-                elif count < 5000:
-                    result["company_size"] = "mid-size"
-                else:
-                    result["company_size"] = "large"
-            except ValueError:
-                pass
-
-        # Extract industry keywords
-        industry_keywords = {
-            "software": ["software", "saas", "tech", "technology", "platform"],
-            "finance": ["finance", "fintech", "banking", "financial"],
-            "healthcare": ["healthcare", "health", "medical", "pharma"],
-            "e-commerce": ["e-commerce", "ecommerce", "retail", "marketplace"],
-            "media": ["media", "entertainment", "streaming", "content"],
-        }
-        text_lower = ddg_text.lower()
-        for industry, keywords in industry_keywords.items():
-            if any(kw in text_lower for kw in keywords):
-                result["industry"] = industry
-                break
-
-        return result
-
-    except Exception as e:
-        logger.debug("enrich_company_info failed for '%s': %s", company_name, e)
         return {}
 
 
@@ -449,452 +353,6 @@ def run_enrichment_backfill(
 
 
 # ---------------------------------------------------------------------------
-# Private helpers: tier execution
-# ---------------------------------------------------------------------------
-
-
-def _fetch_direct_jd(url: str) -> Optional[str]:
-    """Attempt a direct HTTP GET and return cleaned job description text.
-
-    Strips noisy HTML tags and returns cleaned text capped at 8000 chars.
-
-    Args:
-        url: The job URL to fetch.
-
-    Returns:
-        Cleaned text up to 8000 chars, or None on any error.
-    """
-    try:
-        response = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Strip noisy tags
-        for tag in soup.find_all(_NOISE_TAGS):
-            tag.decompose()
-
-        text = soup.get_text(separator="\n", strip=True)
-
-        # Reject auth-wall / CAPTCHA pages that return login HTML instead of JD
-        text_lower = text.lower()
-        if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
-            logger.debug("Auth-wall detected for '%s', rejecting", url)
-            return None
-
-        return text[:_MAX_JD_CHARS] if text.strip() else None
-
-    except Exception as e:
-        logger.debug("Direct fetch failed for '%s': %s", url, e)
-        return None
-
-
-def _query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
-    """Query ATS API (Lever/Greenhouse/Ashby) for job data if company has a slug.
-
-    Looks up the company record from the DB. If ats_probe_status='hit',
-    calls the appropriate ATS scan function with a loose title match derived
-    from significant words in the job title.
-
-    Args:
-        job_row: Job row dict with company_id field.
-        conn: Open SQLite connection.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full, salary_min, salary_max. Empty if not found.
-    """
-    try:
-        company_id = job_row.get("company_id")
-        if not company_id:
-            return {}
-
-        company_row = conn.execute(
-            "SELECT ats_platform, ats_slug, ats_probe_status FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-
-        if not company_row:
-            return {}
-
-        if dict(company_row).get("ats_probe_status") != "hit":
-            return {}
-
-        platform = dict(company_row).get("ats_platform")
-        slug = dict(company_row).get("ats_slug")
-        if not platform or not slug:
-            return {}
-
-        # Derive loose target titles from significant words in job title
-        title = job_row.get("title", "")
-        target_titles = [w for w in title.split() if len(w) > 3]
-
-        exclusions = config.get("scoring", {}).get("exclusions", [])
-
-        # Lazy import with ImportError guard
-        try:
-            from job_finder.web.ats_scanner import scan_lever, scan_greenhouse, scan_ashby
-        except ImportError:
-            return {}
-
-        postings = []
-        if platform == "lever":
-            postings = scan_lever(slug, target_titles, exclusions)
-        elif platform == "greenhouse":
-            postings = scan_greenhouse(slug, target_titles, exclusions)
-        elif platform == "ashby":
-            postings = scan_ashby(slug, target_titles, exclusions)
-
-        if not postings:
-            return {}
-
-        # Take the first matching posting
-        posting = postings[0]
-        result = {}
-        if posting.get("description"):
-            result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
-        if posting.get("salary_min"):
-            result["salary_min"] = posting["salary_min"]
-        if posting.get("salary_max"):
-            result["salary_max"] = posting["salary_max"]
-
-        return result
-
-    except Exception as e:
-        logger.debug("ATS API query failed: %s", e)
-        return {}
-
-
-def _scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
-    """Scrape company careers page for matching job listing.
-
-    Looks up company homepage_url from DB. If found, uses find_careers_url
-    and scrape_careers_page to extract JD from the HTML careers page.
-
-    Args:
-        job_row: Job row dict with company_id field.
-        conn: Open SQLite connection.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full. Empty if not found.
-    """
-    try:
-        company_id = job_row.get("company_id")
-        if not company_id:
-            return {}
-
-        company_row = conn.execute(
-            "SELECT homepage_url FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-
-        if not company_row:
-            return {}
-
-        homepage_url = dict(company_row).get("homepage_url")
-        if not homepage_url:
-            return {}
-
-        # Lazy import with ImportError guard
-        try:
-            from job_finder.web.careers_scraper import find_careers_url, scrape_careers_page
-        except ImportError:
-            return {}
-
-        careers_url = find_careers_url(homepage_url)
-        if not careers_url:
-            return {}
-
-        title = job_row.get("title", "")
-        target_titles = [w for w in title.split() if len(w) > 3]
-        exclusions = config.get("scoring", {}).get("exclusions", [])
-
-        postings = scrape_careers_page(careers_url, target_titles, exclusions)
-        if not postings:
-            return {}
-
-        posting = postings[0]
-        result = {}
-        if posting.get("description"):
-            result["jd_full"] = posting["description"][:_MAX_JD_CHARS]
-
-        return result
-
-    except Exception as e:
-        logger.debug("Careers scrape failed: %s", e)
-        return {}
-
-
-def _extract_with_sonnet(
-    fragments: dict,
-    job_row: dict,
-    client: Any,
-    conn: Any,
-    config: dict,
-) -> dict:
-    """Use Sonnet to deep-extract structured data from ALL accumulated fragments.
-
-    Assembles all text fragments from prior tiers into a single context string
-    (budget 4000-6000 chars). Prompts Sonnet to extract jd_full and salary
-    from sparse/fragmented signals.
-
-    Args:
-        fragments: Dict of all text fragments accumulated from prior tiers.
-        job_row: Job row dict for context (title, company).
-        client: Anthropic client instance.
-        conn: SQLite connection for cost recording.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full, salary_min, salary_max. Empty dict on failure.
-    """
-    try:
-        title = job_row.get("title", "")
-        company = job_row.get("company", "")
-
-        # Assemble all fragments into context string (cap at 5000 chars total)
-        context_parts = []
-        for key, text in fragments.items():
-            if text and isinstance(text, str):
-                label = key.replace("_", " ").upper()
-                context_parts.append(f"[{label}]\n{str(text)[:1500]}")
-        context_text = "\n\n".join(context_parts)[:5000]
-
-        if not context_text:
-            context_text = f"Job posting: {title} at {company}"
-
-        system_prompt = (
-            "You are an expert job data extractor. Given fragments of information "
-            "about a job posting (from web searches, ATS APIs, and careers pages), "
-            "extract structured information as a JSON object. "
-            "Extract only what is explicitly stated — do not invent data. "
-            "Return ONLY a JSON object with these optional fields: "
-            "jd_full (string, full job description), "
-            "salary_min (integer, USD annual), "
-            "salary_max (integer, USD annual). "
-            "Omit fields that cannot be determined from the provided text."
-        )
-
-        user_prompt = (
-            f"Job: {title} at {company}\n\n"
-            f"Information fragments from multiple sources:\n{context_text}\n\n"
-            f"Extract job details as JSON. Include only fields that are explicitly mentioned."
-        )
-
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
-
-        job_id = job_row.get("dedup_key")
-
-        result, _cost = call_claude(
-            client=client,
-            model=model,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
-            conn=conn,
-            job_id=job_id,
-            purpose="enrich_job_sonnet",
-            config=config,
-            max_tokens=1024,
-        )
-
-        if isinstance(result, dict):
-            enriched = {}
-            for key, value in result.items():
-                if value is not None and key in ("jd_full", "salary_min", "salary_max"):
-                    if key in ("salary_min", "salary_max") and isinstance(value, (int, float)):
-                        enriched[key] = int(value)
-                    elif key == "jd_full" and isinstance(value, str) and value.strip():
-                        enriched[key] = value
-            return enriched
-
-        return {}
-
-    except Exception as e:
-        logger.debug("Sonnet extraction failed: %s", e)
-        return {}
-
-
-def _search_serpapi(query: str, api_key: str) -> Optional[dict]:
-    """Search Google Jobs via SerpAPI for job details.
-
-    Args:
-        query: Search query string (e.g., "Data Scientist Acme Corp").
-        api_key: SerpAPI API key.
-
-    Returns:
-        Dict with job data (jd_full, salary_min, salary_max, location) or None
-        if no results or an error occurs.
-    """
-    try:
-        params = {
-            "engine": "google_jobs",
-            "q": query,
-            "api_key": api_key,
-            "num": 1,
-        }
-        response = requests.get(_SERPAPI_URL, params=params, timeout=_TIMEOUT)
-        response.raise_for_status()
-
-        data = response.json()
-        jobs = data.get("jobs_results", [])
-        if not jobs:
-            return None
-
-        job = jobs[0]
-        result = {}
-
-        # Extract job description
-        description = job.get("description")
-        if description:
-            result["jd_full"] = description[:_MAX_JD_CHARS]
-
-        # Extract location
-        location = job.get("location")
-        if location:
-            result["location"] = location
-
-        # Extract salary from detected_extensions
-        extensions = job.get("detected_extensions", {})
-        salary_str = extensions.get("salary", "")
-        if salary_str:
-            salary_range = _parse_salary_string(salary_str)
-            if salary_range:
-                result.update(salary_range)
-
-        return result if result else None
-
-    except Exception as e:
-        logger.debug("SerpAPI search failed for '%s': %s", query, e)
-        return None
-
-
-def _search_duckduckgo(query: str) -> Optional[str]:
-    """Query DuckDuckGo Instant Answer API for job/company info.
-
-    Args:
-        query: Search query string.
-
-    Returns:
-        AbstractText content string, or None if no useful content found.
-    """
-    try:
-        params = {
-            "q": query,
-            "format": "json",
-            "no_redirect": "1",
-            "no_html": "1",
-            "skip_disambig": "1",
-        }
-        response = requests.get(_DDG_API_URL, params=params, headers=_HEADERS, timeout=_TIMEOUT)
-        response.raise_for_status()
-
-        data = response.json()
-
-        # Try AbstractText first (most informative)
-        abstract = data.get("AbstractText", "")
-        if abstract:
-            return abstract
-
-        # Fall back to first RelatedTopic text
-        topics = data.get("RelatedTopics", [])
-        for topic in topics:
-            if isinstance(topic, dict) and topic.get("Text"):
-                return topic["Text"]
-
-        return None
-
-    except Exception as e:
-        logger.debug("DuckDuckGo search failed for '%s': %s", query, e)
-        return None
-
-
-def _extract_with_haiku(
-    search_text: str,
-    job_row: dict,
-    client: Any,
-    conn: Any,
-    config: dict,
-) -> dict:
-    """Use Haiku to extract structured job data from accumulated fragment text.
-
-    Sends search_text to Haiku with a structured extraction prompt to parse
-    out salary range, location, and job description summary.
-
-    Args:
-        search_text: Aggregated text from DDG and other free-tier sources.
-        job_row: Job row dict for context (title, company).
-        client: Anthropic client instance.
-        conn: SQLite connection for cost recording.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full, salary_min, salary_max, location.
-        Returns empty dict on failure.
-    """
-    try:
-        title = job_row.get("title", "")
-        company = job_row.get("company", "")
-
-        system_prompt = (
-            "You are a job data extractor. Given text about a job posting, extract "
-            "structured information as a JSON object. Extract only what is explicitly "
-            "stated — do not invent data. Return ONLY a JSON object with these optional "
-            "fields: jd_full (string, job description summary), salary_min (integer, USD), "
-            "salary_max (integer, USD), location (string). Omit fields that are not present."
-        )
-
-        user_prompt = (
-            f"Job: {title} at {company}\n\n"
-            f"Text to extract from:\n{search_text[:2000]}\n\n"
-            f"Extract job details as JSON. Include only fields that are explicitly mentioned."
-        )
-
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
-
-        job_id = job_row.get("dedup_key")
-
-        result, _cost = call_claude(
-            client=client,
-            model=model,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
-            conn=conn,
-            job_id=job_id,
-            purpose="enrich_job",
-            config=config,
-            max_tokens=512,
-        )
-
-        if isinstance(result, dict):
-            # Remove None values and ensure salary fields are integers
-            enriched = {}
-            for key, value in result.items():
-                if value is not None and key in ("jd_full", "salary_min", "salary_max", "location"):
-                    if key in ("salary_min", "salary_max") and isinstance(value, (int, float)):
-                        enriched[key] = int(value)
-                    elif isinstance(value, str) and value.strip():
-                        enriched[key] = value
-            return enriched
-
-        return {}
-
-    except Exception as e:
-        logger.debug("Haiku extraction failed: %s", e)
-        return {}
-
-
-# ---------------------------------------------------------------------------
 # Private helpers: tier logic utilities
 # ---------------------------------------------------------------------------
 
@@ -919,59 +377,6 @@ def _find_missing_fields(job_row: dict) -> list:
 def _filter_non_none(d: dict) -> dict:
     """Return a new dict with None values removed."""
     return {k: v for k, v in d.items() if v is not None}
-
-
-def _parse_salary_string(salary_str: str) -> Optional[dict]:
-    """Parse a salary string like '$140K-$180K/yr' into min/max integers.
-
-    Args:
-        salary_str: Salary string from SerpAPI detected_extensions.
-
-    Returns:
-        Dict with salary_min and/or salary_max as integers, or None if parsing fails.
-    """
-    try:
-        # Remove currency symbols and whitespace
-        cleaned = salary_str.upper().replace("$", "").replace(",", "").strip()
-
-        # Handle K (thousands) and M (millions)
-        def parse_amount(s: str) -> Optional[int]:
-            s = s.strip()
-            if s.endswith("K"):
-                return int(float(s[:-1]) * 1000)
-            elif s.endswith("M"):
-                return int(float(s[:-1]) * 1_000_000)
-            else:
-                try:
-                    return int(float(s))
-                except ValueError:
-                    return None
-
-        result = {}
-
-        # Range pattern: "140K-180K" or "140,000-180,000"
-        range_match = re.search(r"([\d.]+[KM]?)\s*[-–]\s*([\d.]+[KM]?)", cleaned)
-        if range_match:
-            low = parse_amount(range_match.group(1))
-            high = parse_amount(range_match.group(2))
-            if low:
-                result["salary_min"] = low
-            if high:
-                result["salary_max"] = high
-            return result if result else None
-
-        # Single value: "$140K"
-        single_match = re.search(r"([\d.]+[KM]?)", cleaned)
-        if single_match:
-            val = parse_amount(single_match.group(1))
-            if val:
-                return {"salary_min": val}
-
-        return None
-
-    except Exception:
-        logger.debug("_parse_salary_string failed", exc_info=True)
-        return None
 
 
 def _start_tier_index(current_tier: Optional[str]) -> int:
