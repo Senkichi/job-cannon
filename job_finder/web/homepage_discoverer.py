@@ -13,6 +13,7 @@ per run. Stamps homepage_probe_attempted_at on every company processed
 (success or failure) for retry-avoidance.
 """
 
+import json
 import logging
 import re
 from typing import Optional
@@ -180,13 +181,22 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
             company_id, name_raw, ats_platform, ats_slug = row
             companies_checked += 1
 
-            # Fetch source_urls for this company from jobs table
+            # Fetch source_urls for this company from jobs table.
+            # source_urls is a JSON array column (e.g. '["https://..."]') per job row.
+            # Collect and flatten all URL arrays across the company's jobs.
             try:
                 source_url_rows = conn.execute(
-                    "SELECT DISTINCT source_url FROM jobs WHERE company = ? AND source_url != ''",
+                    "SELECT source_urls FROM jobs WHERE company = ? AND source_urls IS NOT NULL AND source_urls != '[]'",
                     (name_raw,)
                 ).fetchall()
-                source_urls = [r[0] for r in source_url_rows]
+                source_urls = []
+                for (raw,) in source_url_rows:
+                    try:
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, list):
+                            source_urls.extend(u for u in parsed if u)
+                    except (ValueError, TypeError):
+                        pass
             except Exception as e:
                 logger.debug("Could not fetch source_urls for %s: %s", name_raw, e)
                 source_urls = []
