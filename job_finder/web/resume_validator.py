@@ -16,8 +16,7 @@ import sqlite3
 
 import anthropic
 
-from job_finder.config import DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import call_model
 from job_finder.web.resume_generator import RESUME_SCHEMA
 
 logger = logging.getLogger(__name__)
@@ -164,11 +163,6 @@ def validate_resume(
     """
     try:
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
 
         # Build a compact profile summary for Sonnet to cross-reference
         profile_skills = profile.get("skills", [])
@@ -194,19 +188,19 @@ def validate_resume(
             "Audit the generated resume and report any violations."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=_AUDIT_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=VALIDATION_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=VALIDATION_SCHEMA,
             job_id=None,
             purpose="resume_validation",
-            config=config,
             max_tokens=2048,
+            client=client,
         )
-        return result
+        return result_obj.data
 
     except Exception as e:
         logger.warning("validate_resume: audit failed, returning fail-open result: %s", e)
@@ -243,11 +237,6 @@ def fix_resume_violations(
 
     try:
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
 
         profile_skills = profile.get("skills", [])
 
@@ -272,19 +261,19 @@ def fix_resume_violations(
             "Return the complete fixed resume."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=_FIX_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=RESUME_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=RESUME_SCHEMA,
             job_id=None,
             purpose="resume_fix",
-            config=config,
             max_tokens=4096,
+            client=client,
         )
-        return result
+        return result_obj.data
 
     except Exception as e:
         logger.warning("fix_resume_violations: fix pass failed, returning original resume: %s", e)
