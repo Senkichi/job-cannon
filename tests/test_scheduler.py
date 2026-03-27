@@ -5,7 +5,7 @@ Tests:
 - init_scheduler is skipped when WERKZEUG_RUN_MAIN=true (reloader child process)
 - init_scheduler guards against double initialization
 - Scheduler job is registered with 30-minute interval
-- trigger_sync returns a summary dict
+- run_sync_now returns a summary dict
 - reset_scheduler clears the singleton
 """
 
@@ -215,13 +215,13 @@ class TestSchedulerJobConfig:
 
 
 # ---------------------------------------------------------------------------
-# Test: trigger_sync
+# Test: run_sync_now
 # ---------------------------------------------------------------------------
 
-class TestTriggerSync:
-    def test_trigger_sync_returns_summary_dict(self):
-        """trigger_sync returns the summary dict from run_ingestion."""
-        from job_finder.web.scheduler import trigger_sync
+class TestRunSyncNow:
+    def test_run_sync_now_returns_summary_dict(self):
+        """run_sync_now returns the summary dict from run_ingestion."""
+        from job_finder.web.scheduler import run_sync_now
 
         mock_summary = {
             "gmail_fetched": 5,
@@ -241,13 +241,13 @@ class TestTriggerSync:
         with patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run:
             mock_run.return_value = mock_summary
 
-            result = trigger_sync(app)
+            result = run_sync_now(app)
 
         assert result == mock_summary
 
-    def test_trigger_sync_returns_error_dict_on_exception(self):
-        """trigger_sync returns an error dict if run_ingestion raises."""
-        from job_finder.web.scheduler import trigger_sync
+    def test_run_sync_now_returns_error_dict_on_exception(self):
+        """run_sync_now returns an error dict if run_ingestion raises."""
+        from job_finder.web.scheduler import run_sync_now
 
         app = MagicMock()
         app.config = {"JF_CONFIG": {}, "DB_PATH": ":memory:"}
@@ -255,7 +255,7 @@ class TestTriggerSync:
         with patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run:
             mock_run.side_effect = Exception("Database locked")
 
-            result = trigger_sync(app)
+            result = run_sync_now(app)
 
         assert "error" in result
         assert "Database locked" in result["error"]
@@ -366,9 +366,9 @@ class TestSchedulerArgOrder:
     """Regression tests: scheduler calls run_ingestion/run_pipeline_detection
     with (config, db_path) — not (db_path, config)."""
 
-    def test_trigger_sync_calls_run_ingestion_with_db_path_first(self):
-        """trigger_sync passes (db_path, config) to run_ingestion — first arg must be a string."""
-        from job_finder.web.scheduler import trigger_sync
+    def test_run_sync_now_calls_run_ingestion_with_db_path_first(self):
+        """run_sync_now passes (db_path, config) to run_ingestion — first arg must be a string."""
+        from job_finder.web.scheduler import run_sync_now
 
         config_dict = {"key": "val", "sources": {}}
         db_path = "/tmp/test.db"
@@ -387,7 +387,7 @@ class TestSchedulerArgOrder:
             mock_run_ingestion.return_value = mock_summary
             mock_detection.return_value = {"auto_updated": 0, "queued": 0}
 
-            trigger_sync(app)
+            run_sync_now(app)
 
         assert mock_run_ingestion.called, "run_ingestion was not called"
         call_args = mock_run_ingestion.call_args[0]  # positional args
@@ -399,9 +399,9 @@ class TestSchedulerArgOrder:
             f"Second arg to run_ingestion must be config dict, got {type(call_args[1])}"
         )
 
-    def test_trigger_sync_calls_pipeline_detection_with_db_path_first(self):
-        """trigger_sync passes (db_path, config) to run_pipeline_detection — first arg must be a string."""
-        from job_finder.web.scheduler import trigger_sync
+    def test_run_sync_now_calls_pipeline_detection_with_db_path_first(self):
+        """run_sync_now passes (db_path, config) to run_pipeline_detection — first arg must be a string."""
+        from job_finder.web.scheduler import run_sync_now
 
         config_dict = {"key": "val", "sources": {}}
         db_path = "/tmp/test.db"
@@ -420,7 +420,7 @@ class TestSchedulerArgOrder:
             mock_run_ingestion.return_value = mock_summary
             mock_detection.return_value = {"auto_updated": 0, "queued": 0}
 
-            trigger_sync(app)
+            run_sync_now(app)
 
         assert mock_detection.called, "run_pipeline_detection was not called"
         call_args = mock_detection.call_args[0]  # positional args

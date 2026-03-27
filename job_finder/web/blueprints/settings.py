@@ -39,9 +39,9 @@ from job_finder.web.resume_style_guide import (
     load_style_guide,
     migrate_style_guide,
     save_style_guide,
-    _merge_guidelines_into_guide,
+    merge_guidelines_into_guide,
     STYLE_GUIDE_SCHEMA,
-    _FIELD_LABELS,
+    FIELD_LABELS,
 )
 from job_finder.web.db_helpers import get_db
 
@@ -235,7 +235,7 @@ def preview_guidelines_merge():
             .get("sonnet", DEFAULT_MODEL_SONNET)
         )
 
-        result = _merge_guidelines_into_guide(
+        result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
             client=client,
@@ -258,7 +258,7 @@ def preview_guidelines_merge():
         for field in STYLE_GUIDE_SCHEMA["properties"]:
             old_val = existing_guide.get(field, "")
             new_val = result.get(field, "")
-            label = _FIELD_LABELS.get(field, field)
+            label = FIELD_LABELS.get(field, field)
 
             # Stringify lists/dicts for comparison
             old_str = json.dumps(old_val, ensure_ascii=False) if isinstance(old_val, (list, dict)) else str(old_val) if old_val else ""

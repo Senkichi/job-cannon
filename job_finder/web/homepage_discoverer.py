@@ -8,7 +8,7 @@ Three-tier lookup:
 3. SerpAPI web search — query SerpAPI engine=google for company homepage.
    Replaces broken DDG HTML search.
 
-Used by discover_homepages_batch() which processes up to _BATCH_CAP companies
+Used by run_homepage_discovery() which processes up to _BATCH_CAP companies
 per run. Stamps homepage_probe_attempted_at on every company processed
 (success or failure) for retry-avoidance.
 """
@@ -142,7 +142,7 @@ def discover_homepage(
     return None
 
 
-def discover_homepages_batch(db_path: str, config: dict | None = None) -> dict:
+def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
     """Process up to _BATCH_CAP companies with no homepage_url and no prior probe attempt.
 
     Creates its own sqlite3 connection (thread-safe for APScheduler).

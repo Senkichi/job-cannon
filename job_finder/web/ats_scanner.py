@@ -53,9 +53,9 @@ except ImportError:
 
 # Lazy import of homepage discoverer (ImportError guard — Plan 01)
 try:
-    from job_finder.web.homepage_discoverer import discover_homepages_batch
+    from job_finder.web.homepage_discoverer import run_homepage_discovery
 except ImportError:
-    discover_homepages_batch = None  # type: ignore[assignment]
+    run_homepage_discovery = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -1199,9 +1199,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # --- Homepage discovery pre-step ---
         # Discover homepages for companies missing homepage_url BEFORE the HTML
         # fallback loop, so newly-discovered homepages are immediately available.
-        if discover_homepages_batch is not None:
+        if run_homepage_discovery is not None:
             try:
-                discovery_result = discover_homepages_batch(db_path, config)
+                discovery_result = run_homepage_discovery(db_path, config)
                 logger.info(
                     "Homepage discovery: %d checked, %d found",
                     discovery_result.get("companies_checked", 0),

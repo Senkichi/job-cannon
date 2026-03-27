@@ -1018,10 +1018,10 @@ class TestRunAtsScan:
 
         config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
 
-        # Patch both requests.get and discover_homepages_batch to prevent network calls.
-        # discover_homepages_batch now runs as a pre-step and would call requests.get internally.
+        # Patch both requests.get and run_homepage_discovery to prevent network calls.
+        # run_homepage_discovery now runs as a pre-step and would call requests.get internally.
         with patch("job_finder.web.ats_scanner.requests.get") as mock_get, \
-             patch("job_finder.web.ats_scanner.discover_homepages_batch") as mock_discover:
+             patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover:
             mock_discover.return_value = {"companies_checked": 0, "homepages_found": 0, "errors": []}
             result = run_ats_scan(migrated_db_path, config=config)
 
@@ -2461,12 +2461,12 @@ class TestHomepageDiscoveryIntegration:
     """Tests for homepage discovery pre-step in run_ats_scan."""
 
     def test_run_ats_scan_calls_homepage_discovery(self, migrated_db_path):
-        """run_ats_scan calls discover_homepages_batch before the HTML fallback loop."""
+        """run_ats_scan calls run_homepage_discovery before the HTML fallback loop."""
         from job_finder.web.ats_scanner import run_ats_scan
 
         config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {}}}
 
-        with patch("job_finder.web.ats_scanner.discover_homepages_batch") as mock_discover:
+        with patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover:
             mock_discover.return_value = {"companies_checked": 5, "homepages_found": 2, "errors": []}
             result = run_ats_scan(migrated_db_path, config)
 
@@ -2479,7 +2479,7 @@ class TestHomepageDiscoveryIntegration:
 
         config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {}}}
 
-        with patch("job_finder.web.ats_scanner.discover_homepages_batch") as mock_discover:
+        with patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover:
             mock_discover.side_effect = Exception("network error")
             result = run_ats_scan(migrated_db_path, config)
 
@@ -2527,7 +2527,7 @@ class TestHtmlFallbackDescriptionPassthrough:
 
         scraped_jobs = [{"title": "Software Engineer", "url": "https://acme.com/jobs/1", "description": "Full JD text here"}]
 
-        with patch("job_finder.web.ats_scanner.discover_homepages_batch", return_value={"companies_checked": 0, "homepages_found": 0, "errors": []}), \
+        with patch("job_finder.web.ats_scanner.run_homepage_discovery", return_value={"companies_checked": 0, "homepages_found": 0, "errors": []}), \
              patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://acme.com/careers"), \
              patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs):
             result = run_ats_scan(migrated_db_path, config)

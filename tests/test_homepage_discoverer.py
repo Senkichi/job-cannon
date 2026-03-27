@@ -6,7 +6,7 @@ Covers:
 - _try_domain_guess: single-token Tier 1 domain guess
 - discover_homepage: three-tier logic (domain guess, slug, SerpAPI)
 - _search_serpapi: SerpAPI Google search, skip domains, quota error
-- discover_homepages_batch: probe tracking, batch cap, quota short-circuit
+- run_homepage_discovery: probe tracking, batch cap, quota short-circuit
 """
 
 import os
@@ -260,7 +260,7 @@ class TestDiscoverHomepage:
 
 
 # ---------------------------------------------------------------------------
-# Tests: discover_homepages_batch
+# Tests: run_homepage_discovery
 # ---------------------------------------------------------------------------
 
 class TestDiscoverHomepagesBatch:
@@ -315,7 +315,7 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_updates_db(self):
         """Batch discovers homepages, updates DB, stamps all with probe timestamp."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(3)
 
@@ -326,7 +326,7 @@ class TestDiscoverHomepagesBatch:
                     "https://company1.com",
                     None,  # company2 not found
                 ]
-                result = discover_homepages_batch(path)
+                result = run_homepage_discovery(path)
 
             assert result["companies_checked"] == 3
             assert result["homepages_found"] == 2
@@ -350,14 +350,14 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_caps_at_10(self):
         """Batch processes at most 10 companies per run (cap changed from 50 to 10)."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(20)
 
         try:
             with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
                 mock_discover.return_value = None
-                result = discover_homepages_batch(path)
+                result = run_homepage_discovery(path)
 
             assert result["companies_checked"] == 10
             assert mock_discover.call_count == 10
@@ -367,7 +367,7 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_skips_already_probed(self):
         """Batch skips companies that already have homepage_probe_attempted_at set."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         # 5 companies, 2 already probed
         path = self._make_db_with_companies(5, with_probe_attempted=2)
@@ -375,7 +375,7 @@ class TestDiscoverHomepagesBatch:
         try:
             with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
                 mock_discover.return_value = None
-                result = discover_homepages_batch(path)
+                result = run_homepage_discovery(path)
 
             assert result["companies_checked"] == 3
             assert mock_discover.call_count == 3
@@ -385,14 +385,14 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_stamps_probe_timestamp(self):
         """All processed companies get homepage_probe_attempted_at stamped regardless of outcome."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(2)
 
         try:
             with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
                 mock_discover.return_value = None  # Both fail
-                discover_homepages_batch(path)
+                run_homepage_discovery(path)
 
             conn = sqlite3.connect(path)
             rows = conn.execute(
@@ -408,7 +408,7 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_quota_error_breaks(self):
         """SerpAPIQuotaError on second company stops batch; first stamped, third not processed."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch, SerpAPIQuotaError
+        from job_finder.web.homepage_discoverer import run_homepage_discovery, SerpAPIQuotaError
 
         path = self._make_db_with_companies(3)
 
@@ -418,7 +418,7 @@ class TestDiscoverHomepagesBatch:
                     "https://company0.com",  # First succeeds
                     SerpAPIQuotaError("quota exceeded"),  # Second raises quota error
                 ]
-                result = discover_homepages_batch(path)
+                result = run_homepage_discovery(path)
 
             assert result["companies_checked"] == 2
             assert result["homepages_found"] == 1
@@ -443,14 +443,14 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_passes_api_key_from_config(self):
         """Config serpapi.api_key is passed to discover_homepage as api_key kwarg."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(1)
 
         try:
             with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
                 mock_discover.return_value = None
-                discover_homepages_batch(path, config={"serpapi": {"api_key": "test123"}})
+                run_homepage_discovery(path, config={"serpapi": {"api_key": "test123"}})
 
             mock_discover.assert_called_once()
             call_kwargs = mock_discover.call_args[1]
@@ -461,14 +461,14 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_skips_companies_with_existing_homepage(self):
         """Batch only processes companies where homepage_url IS NULL."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(5, with_homepage=3)  # 3 have homepage, 2 don't
 
         try:
             with patch("job_finder.web.homepage_discoverer.discover_homepage") as mock_discover:
                 mock_discover.return_value = None
-                result = discover_homepages_batch(path)
+                result = run_homepage_discovery(path)
 
             assert result["companies_checked"] == 2
             assert mock_discover.call_count == 2
@@ -478,12 +478,12 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_returns_summary_dict(self):
         """Batch returns dict with companies_checked, homepages_found, errors keys."""
-        from job_finder.web.homepage_discoverer import discover_homepages_batch
+        from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(0)
 
         try:
-            result = discover_homepages_batch(path)
+            result = run_homepage_discovery(path)
 
             assert "companies_checked" in result
             assert "homepages_found" in result
