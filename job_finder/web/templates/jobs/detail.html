@@ -73,6 +73,7 @@
     <div class="mt-4 flex items-center gap-3">
       <span class="text-xs text-slate-500">Status:</span>
       <select name="pipeline_status"
+              aria-label="Pipeline status"
               hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
               hx-trigger="change"
               hx-target="this"
