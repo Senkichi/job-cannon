@@ -138,7 +138,11 @@ Plans:
   4. Dashboard cancellation check fires once per batch, not once per job
   5. Session counter increments once after a batch completes, not after each job
   6. Full test suite passes and no functional scoring or pipeline behavior changed
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 23-01-PLAN.md -- Batch prefetch in scoring_runner.py (Haiku + Sonnet)
+- [ ] 23-02-PLAN.md -- Batch archive in stale_detector.py
+- [ ] 23-03-PLAN.md -- Pre-loop cancellation + deferred counters in batch_scoring.py
 
 ## Progress
 
@@ -166,4 +170,4 @@ Plans:
 | 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
 | 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
-| 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
+| 23. N+1 Batching | v1.4 | 0/3 | Not started | - |
