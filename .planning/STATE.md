@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Fixes & Improvements
 status: Ready to execute
-last_updated: "2026-03-27T05:51:38.944Z"
+last_updated: "2026-03-27T06:26:36.364Z"
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 3
+  completed_phases: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # State
@@ -16,7 +16,7 @@ progress:
 ## Current Position
 
 Phase: 22 (Module Splits) — IN PROGRESS
-Plan: 5 of 7 — DONE
+Plan: 7 of 7 — DONE
 
 ## Project Reference
 
@@ -95,6 +95,10 @@ None.
 - batch_scoring_bp and sync_bp use url_prefix='/dashboard' — multiple blueprints can share url_prefix, no URL changes needed (Plan 05)
 - Background thread functions (_run_batch_haiku_bg, _run_batch_sonnet_bg, _run_sync_bg) colocated with their blueprint, not extracted to shared utilities (Plan 05)
 - test_async_sync.py needed no import changes — uses Flask test client URLs only, no direct function imports (Plan 05)
+- _PROFILE_PATH duplicated in all three profile modules for self-containment; no shared constant needed (Plan 06)
+- rec_app fixture patches both profile_mod and profile_recs_mod _PROFILE_PATH — index route reads from profile module, recommendation routes read from profile_recommendations module (Plan 06)
+- Multiple blueprints sharing url_prefix='/profile' — Flask supports this, all routes remain at same URLs (Plan 06)
+- scoring_runner.py extracts run_haiku_scoring/run_sonnet_evaluation from pipeline_runner.py; tests patching scoring functions target scoring_runner module; run_ingestion tests patch both pipeline_runner.anthropic (gates call) and scoring_runner.anthropic (gates Anthropic() creation) (Plan 07)
 
 ---
-*Last session: 2026-03-27 — Completed Phase 22 Plan 05 (Dashboard Module Split)*
+*Last session: 2026-03-26 — Completed Phase 22 Plan 07 (scoring_runner.py Extraction)*
