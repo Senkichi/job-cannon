@@ -36,6 +36,7 @@ from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_orchestrator import load_scoring_profile
+from job_finder.web.scoring_types import unwrap_scoring_result
 from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
 from job_finder.web.haiku_scorer import score_job_haiku
 
@@ -287,14 +288,14 @@ def run_sonnet_backfill(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = evaluate_job_sonnet(client, job_row, profile, conn, config)
+        scoring_result = evaluate_job_sonnet(client, job_row, profile, conn, config)
+        result = unwrap_scoring_result(scoring_result)
 
         if result is None:
             logger.debug("Sonnet eval returned None for '%s'", dedup_key)
             continue
 
         score = result.get("score")
-        summary = result.get("summary")
         fit_analysis = result.get("fit_analysis")
 
         # Persist to DB
@@ -358,7 +359,8 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = score_job_haiku(client, job_row, profile, conn, config)
+        scoring_result = score_job_haiku(client, job_row, profile, conn, config)
+        result = unwrap_scoring_result(scoring_result)
 
         if result is None:
             logger.debug("Haiku re-score returned None for '%s'", dedup_key)
