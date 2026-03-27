@@ -132,19 +132,23 @@ def record_cost(
 # Budget gating
 # ---------------------------------------------------------------------------
 
+DEFAULT_DAILY_BUDGET_USD: float = 10.0
+
+
 def cost_gate(
     conn: sqlite3.Connection,
     config: dict,
     model_tier: str = "sonnet",
 ) -> bool:
-    """Check whether a model tier call is allowed under the monthly budget.
+    """Check whether a model tier call is allowed under daily and monthly budgets.
 
     Haiku calls are always allowed regardless of spend.
-    Sonnet/Opus calls are blocked when monthly spend >= budget cap.
+    Sonnet/Opus calls are blocked when daily or monthly spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        config: Application config dict (reads scoring.monthly_budget_usd).
+        config: Application config dict (reads scoring.monthly_budget_usd,
+            scoring.daily_budget_usd).
         model_tier: "haiku" or "sonnet" (or "opus"). Defaults to "sonnet".
 
     Returns:
@@ -153,23 +157,33 @@ def cost_gate(
     if model_tier == "haiku":
         return True
 
-    budget_cap: float = (
-        config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
-    )
+    scoring_cfg = config.get("scoring", {})
+    monthly_cap: float = scoring_cfg.get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
-    # Sum cost_usd for the current calendar month
     now = datetime.now(timezone.utc)
-    month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
+    # Monthly check
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) AS monthly_spend "
-        "FROM scoring_costs "
-        "WHERE timestamp >= ?",
+        "SELECT COALESCE(SUM(cost_usd), 0.0) "
+        "FROM scoring_costs WHERE timestamp >= ?",
         (month_start,),
     ).fetchone()
+    if (row[0] if row else 0.0) >= monthly_cap:
+        return False
 
-    monthly_spend: float = row[0] if row else 0.0
-    return monthly_spend < budget_cap
+    # Daily check
+    day_start = now.strftime("%Y-%m-%dT00:00:00Z")
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0.0) "
+        "FROM scoring_costs WHERE timestamp >= ?",
+        (day_start,),
+    ).fetchone()
+    if (row[0] if row else 0.0) >= daily_cap:
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------

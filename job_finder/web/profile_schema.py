@@ -250,7 +250,7 @@ def extract_profile_from_markdown(markdown_text: str) -> dict:
     try:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        client = anthropic.Anthropic()
         message = client.messages.create(
             model=DEFAULT_MODEL_OPUS,
             max_tokens=4096,
