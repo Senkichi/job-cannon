@@ -73,6 +73,7 @@ def standalone_connection(db_path: str):
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    # WAL mode ensures concurrent read/write safety for background jobs
     conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
