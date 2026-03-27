@@ -70,7 +70,7 @@
 
 - [x] **Phase 24: Provider Foundation** (2/2 plans) — completed 2026-03-27
 - [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
-- [ ] **Phase 26: Dispatcher & Cost Tracking** — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
+- [ ] **Phase 26: Dispatcher & Cost Tracking** (1/3 plans complete) — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
 - [ ] **Phase 27: Caller Migration** — Migrate all call sites from call_claude() to call_model()
 - [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
 
