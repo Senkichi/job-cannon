@@ -20,6 +20,21 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
+
+
+def _make_model_result(data: dict, cost_usd: float = 0.0002) -> ModelResult:
+    """Helper to create a ModelResult for test mocking."""
+    return ModelResult(
+        data=data,
+        cost_usd=cost_usd,
+        input_tokens=200,
+        output_tokens=100,
+        model="test-model",
+        provider="anthropic",
+        schema_valid=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -148,10 +163,9 @@ class TestReformatDescription:
 
         pipe_description = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"},
-                0.0002,
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result(
+                {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"}
             )
             result = reformat_description(pipe_description, mock_anthropic_client)
 
@@ -168,7 +182,7 @@ class TestReformatDescription:
 
         original = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
             mock_call.side_effect = Exception("API error")
             result = reformat_description(original, mock_anthropic_client)
 
@@ -201,7 +215,7 @@ class TestReformatDescription:
         )
 
         mock_client = MagicMock()
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
             result = reformat_description(already_formatted, mock_client)
 
         # Should return original without calling Haiku
@@ -227,10 +241,9 @@ class TestReformatDescription:
 
         original = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"text": "About the Role\n\nBuild ML models."},
-                0.0002,
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result(
+                {"text": "About the Role\n\nBuild ML models."}
             )
             result = reformat_description(
                 original,
@@ -258,8 +271,8 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": reformatted_text})
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
                 "fake-api-key",
@@ -278,8 +291,8 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": reformatted_text})
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
                 "fake-api-key",
@@ -304,8 +317,8 @@ class TestRunDescriptionReformatPass:
         """run_description_reformat_pass skips jobs where description IS NULL."""
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": "Reformatted text"}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": "Reformatted text"})
             count = run_description_reformat_pass(
                 db_with_null_description,
                 "fake-api-key",
@@ -326,8 +339,8 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": reformatted_text})
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
                 "fake-api-key",
@@ -342,8 +355,8 @@ class TestRunDescriptionReformatPass:
 
         # Mock Haiku to return same text as input (already formatted)
         # This happens when description has 2+ section headers
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": "same as input"}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": "same as input"})
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
                 "fake-api-key",
@@ -366,14 +379,14 @@ class TestRunDescriptionReformatPass:
 
         reformatted_text = "About the Role\n\nReformatted.\n\nRequirements\n\n- Python"
 
-        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
+        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+            mock_call.return_value = _make_model_result({"text": reformatted_text})
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
                 "fake-api-key",
                 config={},
             )
 
-        # Check that call_claude was called for each reformatted job
+        # Check that call_model was called for each reformatted job
         # (2 jobs with description_reformatted=0 and non-NULL descriptions)
         assert mock_call.call_count == 2
