@@ -46,13 +46,13 @@ def batch_score_haiku_start():
             )
 
         now = utc_now_iso()
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('haiku', 'running', ?, 0, ?)",
             (total, now),
         )
         conn.commit()
-        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        session_id = cursor.lastrowid
 
     if not testing:
         t = threading.Thread(
@@ -103,13 +103,13 @@ def batch_score_sonnet_start():
             )
 
         now = utc_now_iso()
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('sonnet', 'running', ?, 0, ?)",
             (total, now),
         )
         conn.commit()
-        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        session_id = cursor.lastrowid
 
     if not testing:
         t = threading.Thread(
@@ -446,33 +446,7 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
             },
         )
     except Exception:
-        pass
-
-
-def _fail_session(conn, db_path: str, session_id: int, error: Exception, session_type: str) -> None:
-    """Mark a batch session as errored and log the failure."""
-    try:
-        conn.execute(
-            "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-            (str(error), utc_now_iso(), session_id),
-        )
-        conn.commit()
-    except Exception:
-        pass
-    try:
-        from job_finder.web.activity_tracker import (
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
-            log_activity,
-        )
-        action = ACTION_BATCH_SCORE_HAIKU if session_type == "haiku" else ACTION_BATCH_SCORE_SONNET
-        log_activity(
-            db_path,
-            action,
-            metadata={"session_type": session_type, "status": "failed", "error": type(error).__name__},
-        )
-    except Exception:
-        pass
+        logger.debug("activity logging failed in _finish_session", exc_info=True)
 
 
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:

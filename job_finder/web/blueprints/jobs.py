@@ -411,6 +411,8 @@ def paste_jd(dedup_key: str):
 
     # Return updated expanded row + OOB score cell (updates compact row in-place)
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -637,6 +639,8 @@ def save_jd(dedup_key: str):
         logger.debug("log_activity failed in save_jd", exc_info=True)
 
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     return render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -651,6 +655,8 @@ def save_jd(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
+    if not request.headers.get("HX-Request"):
+        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)

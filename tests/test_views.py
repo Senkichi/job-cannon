@@ -2487,18 +2487,25 @@ class TestSaveJD:
         assert b"JD saved" in response.data
 
     def test_jd_edit_form_returns_200(self, jd_full_client):
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
+        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form",
+                                       headers={"HX-Request": "true"})
         assert response.status_code == 200
 
     def test_jd_edit_form_contains_prefilled_textarea(self, jd_full_client):
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
+        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form",
+                                       headers={"HX-Request": "true"})
         data = response.data.decode()
         assert "<textarea" in data
         assert "full job description for testing" in data
 
     def test_jd_edit_form_nonexistent_key_returns_404(self, jd_full_client):
-        response = jd_full_client.get("/jobs/nonexistent-key/jd-edit-form")
+        response = jd_full_client.get("/jobs/nonexistent-key/jd-edit-form",
+                                       headers={"HX-Request": "true"})
         assert response.status_code == 404
+
+    def test_jd_edit_form_redirects_without_hx_request(self, jd_full_client):
+        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/jd-edit-form")
+        assert response.status_code == 302
 
     def test_save_jd_button_is_type_button(self, jobs_client):
         """Save JD button must be type=button to prevent native form submission."""

@@ -115,3 +115,11 @@ None — GeminiProvider is fully implemented. cost_usd=0.0 is intentional (free 
 ---
 *Phase: 25-provider-adapters*
 *Completed: 2026-03-27*
+
+## Self-Check: PASSED
+
+- FOUND: job_finder/web/providers/gemini_provider.py
+- FOUND: tests/test_gemini_provider.py
+- FOUND: .planning/phases/25-provider-adapters/25-02-SUMMARY.md
+- FOUND commit: 223448b (feat(25-02): implement GeminiProvider adapter with TDD)
+- All 1616 tests pass

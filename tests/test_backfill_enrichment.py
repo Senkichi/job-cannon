@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import job_finder.web.backfill_enrichment as be_module
+from job_finder.web.scoring_types import ScoringResult
 
 
 # ---------------------------------------------------------------------------
@@ -249,12 +250,12 @@ def test_sonnet_queue(migrated_db):
     insert_job(conn, "job2", jd_full="Full JD for job 2", sonnet_score=None)
     insert_job(conn, "job3", jd_full="Full JD for job 3", sonnet_score=None)
 
-    mock_result = {
+    mock_data = {
         "score": 82,
         "summary": "Strong match",
         "fit_analysis": {"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []},
     }
-    mock_evaluate = MagicMock(return_value=mock_result)
+    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
         count = be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())
@@ -283,12 +284,12 @@ def test_sonnet_queue_skips_scored(migrated_db):
     # One job that needs scoring
     insert_job(conn, "needs_scoring", jd_full="Full JD 2", sonnet_score=None)
 
-    mock_result = {
+    mock_data = {
         "score": 80,
         "summary": "Good match",
         "fit_analysis": {"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []},
     }
-    mock_evaluate = MagicMock(return_value=mock_result)
+    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
         count = be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())
@@ -316,14 +317,14 @@ def test_borderline_rescore(migrated_db):
 
     tier_advanced_keys = {"borderline1", "borderline2"}
 
-    mock_result = {
+    mock_data = {
         "score": 65,
         "summary": "Re-scored after enrichment",
         "title_fit": "partial",
         "location_fit": "remote",
         "salary_meets_floor": True,
     }
-    mock_score = MagicMock(return_value=mock_result)
+    mock_score = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
 
     with patch.object(be_module, "score_job_haiku", mock_score):
         count = be_module.run_borderline_rescore(
@@ -357,13 +358,13 @@ def test_borderline_skips_non_advanced(migrated_db):
     # Only the second job is in tier_advanced_keys
     tier_advanced_keys = {"borderline_advanced"}
 
-    mock_score = MagicMock(return_value={
+    mock_score = MagicMock(return_value=ScoringResult(data={
         "score": 70,
         "summary": "Better after enrichment",
         "title_fit": "strong",
         "location_fit": "remote",
         "salary_meets_floor": True,
-    })
+    }, status="success"))
 
     with patch.object(be_module, "score_job_haiku", mock_score):
         count = be_module.run_borderline_rescore(
@@ -468,8 +469,8 @@ def test_sonnet_backfill_writes_fit_analysis(migrated_db):
         "talking_points": ["Experience with large datasets"],
         "resume_priority_skills": ["Python", "SQL"],
     }
-    mock_result = {"score": 78, "summary": "Good fit", "fit_analysis": fit}
-    mock_evaluate = MagicMock(return_value=mock_result)
+    mock_data = {"score": 78, "summary": "Good fit", "fit_analysis": fit}
+    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
         be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())

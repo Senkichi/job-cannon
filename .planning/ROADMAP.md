@@ -70,8 +70,8 @@
 
 - [x] **Phase 24: Provider Foundation** (2/2 plans) — completed 2026-03-27
 - [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
-- [ ] **Phase 26: Dispatcher & Cost Tracking** (1/3 plans complete) — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
-- [ ] **Phase 27: Caller Migration** — Migrate all call sites from call_claude() to call_model()
+- [x] **Phase 26: Dispatcher & Cost Tracking** (1/3 plans complete) — call_model() dispatcher with retry, fallback, budget bypass, and cost UI (completed 2026-03-27)
+- [ ] **Phase 27: Caller Migration** (4 plans) — Migrate all call sites from call_claude() to call_model()
 - [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
 
 ## Phase Details
@@ -101,7 +101,7 @@ Plans:
   3. When retry also fails, call_model() re-dispatches to Anthropic as configured fallback
   4. Calls routed to Gemini free tier or Ollama skip budget gate checks entirely
   5. The Costs page shows a per-provider breakdown of API spend alongside the existing per-feature breakdown
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 26-01-PLAN.md — call_model() dispatcher with schema retry, fallback, budget bypass, and record_cost provider param
 - [x] 26-02-PLAN.md — Per-provider cost breakdown query and Costs page UI
@@ -115,7 +115,12 @@ Plans:
   2. No blueprint or orchestrator module directly instantiates anthropic.Anthropic() — all such usage goes through the provider layer
   3. config.example.yaml contains a fully-documented `providers` section that demonstrates routing Sonnet to Gemini or Ollama
   4. The app starts and scores jobs end-to-end with the existing Anthropic config after migration
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 27-01-PLAN.md — Core scoring path (haiku_scorer, sonnet_evaluator, scoring_runner, batch_scoring)
+- [ ] 27-02-PLAN.md — Enrichment, description reformatter, and careers scraper
+- [ ] 27-03-PLAN.md — Resume pipeline (generator, multi-version, feedback, style guide, validator)
+- [ ] 27-04-PLAN.md — Intelligence, blueprints, special cases, and config.example.yaml
 
 ### Phase 28: Evaluation Framework
 **Goal**: A CLI tool lets the developer run data-driven comparisons of alternative providers against stored Sonnet results, producing a JSON report with a clear SUITABLE/MARGINAL/NOT_RECOMMENDED verdict
@@ -157,6 +162,6 @@ Plans:
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 25. Provider Adapters | v1.5 | 3/3 | Complete    | 2026-03-27 |
-| 26. Dispatcher & Cost Tracking | v1.5 | 0/2 | Not started | - |
-| 27. Caller Migration | v1.5 | 0/? | Not started | - |
+| 26. Dispatcher & Cost Tracking | v1.5 | 0/2 | Complete    | 2026-03-27 |
+| 27. Caller Migration | v1.5 | 0/4 | Not started | - |
 | 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
