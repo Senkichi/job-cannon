@@ -1,76 +1,116 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Multi-Provider Model Routing
-status: executing
-stopped_at: Completed 27-04-PLAN.md
-last_updated: "2026-03-27T21:11:30.000Z"
-last_activity: 2026-03-27
+milestone: v1.0
+milestone_name: milestone
+status: Ready to execute
+last_updated: "2026-03-27T21:49:25.888Z"
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 8
-  percent: 100
+  total_phases: 7
+  completed_phases: 1
+  total_plans: 13
+  completed_plans: 10
 ---
 
 # State
 
 ## Current Position
 
-Phase: 27 (Caller Migration) — EXECUTING
-Plan: 4 of 4
-Status: 27-04 complete
-Last activity: 2026-03-27
-
-Progress: [██████████] 100%
+Phase: 28 (Evaluation Framework) — EXECUTING
+Plan: 2 of 2
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-27)
+See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 27 — Caller Migration
+**Current focus:** Phase 28 — Evaluation Framework
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3 (this milestone)
+- Total plans completed: 7 (this milestone)
+- Phase 14-01: 2min (2 tasks, 8 files)
+- Phase 17-01: 8min (3 tasks, 6 files)
+- Phase 18-01: 15min (1 task TDD, 5 files)
+- Phase 22-01: 12min (2 tasks, 7 files)
+- Phase 23-01: 4min (1 task TDD, 2 files)
+- Average duration: ~8min
+- Total execution time: ~41min
 
 *Updated after each plan completion*
 
 ## Accumulated Context
 
-### Key Design Decisions (v1.5)
+### Architectural Decisions (from v1.0)
 
-- call_model() is the single dispatch point — all callers use logical tier names ("sonnet", "haiku", "opus"), never provider-specific model IDs
-- call_claude() internals stay untouched; Anthropic adapter wraps them (no behavior change for existing paths)
-- Budget gate bypass: free providers (Gemini free tier, Ollama) skip budget checks entirely — cost_gate not called
-- Schema validation retry: dispatcher retries once with schema errors appended to prompt before falling back to Anthropic
-- Configurable fallback: if retry fails, re-dispatch to Anthropic (not hardcoded — config specifies fallback provider)
-- COST-01 DB migration adds `provider` column with 'anthropic' default — existing rows unaffected
-- eval_results/ directory for evaluation JSON reports (CLI tool, not web UI)
-- Phase 28 (Evaluation Framework) depends on Phase 26 (Dispatcher) but is independent of Phase 27 (Caller Migration)
-- OllamaProvider uses requests library (not ollama SDK) — stream=False is hardcoded correctness requirement, format=json guarantees parseable output
-- OllamaProvider health check on init with 5s timeout — prevents silent failures during Flask startup
-- Schema embedded in system prompt for Ollama (lacks native schema enforcement); format=json guarantees valid JSON
-- AnthropicProvider stores job_id and purpose at init, forwards to call_claude for correct cost attribution (plan 27-01)
-- ctx parameter removed from score_job_haiku and evaluate_job_sonnet — no external callers used it (plan 27-01)
-- profile_schema.extract_profile_from_markdown accepts optional conn+config — caller passes real conn for cost tracking (plan 27-04)
-- guidelines.py model= argument removed from merge_guidelines_into_guide call — forward-compatible with Plan 03 migration (plan 27-04)
+- HTMX fragment routes MUST check HX-Request header and return full page for direct browser access
+- Status dropdown: hx-target=this hx-swap=outerHTML on the select element itself
+- Accordion: compact row + hidden `<tr data-expand-slot>` placeholder pairs
+- Use hx-on:click not onclick for event.stopPropagation() in HTMX 2.x
+- Dismiss/return responses: ('', 200) not 204 — HTMX requires 200 for outerHTML swap
+- Migrations stored as list of discrete SQL strings (not semicolon-delimited)
+- CREATE TABLE IF NOT EXISTS for idempotent migration
+- sort_by validated against Python allowlist before SQL interpolation
+
+### Migration Context
+
+- Implementation plan: `docs/superpowers/plans/2026-03-24-migration-and-stabilization.md`
+- Source repo (job-finder): `<other-repo>` (retired, read-only reference)
+- Phase 13 = Chunk 1 (Tasks 1-6): Planning doc updates — 6 files, surgical edits
+- Phase 14 = Chunk 2 (Tasks 7-11): Data migration — 8 files, config merge, schema check, validation
+- config.yaml MUST be edited with Edit tool only (never Write — wiped 3 times previously)
 
 ### Blockers/Concerns
 
 None.
 
-### Implementation Reference
+### Decisions Made in Phase 13
 
-- Design spec: `docs/superpowers/specs/2026-03-27-multi-provider-model-routing-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-03-27-multi-provider-model-routing.md`
+- STACK.md and INTEGRATIONS.md cleaned of all "(Phase N)" annotations -- features are operational, not future
+- Verification sweep confirmed zero stale phase references in codebase docs
 
-## Session Continuity
+### Decisions Made in Phase 14
 
-Last session: 2026-03-27T21:11:30Z
-Stopped at: Completed 27-04-PLAN.md
-Resume file: None
+- All 8 data files gitignored -- no per-task commits for data migration (Plan 01)
+- Config merge via copy + Edit append -- preserves job-finder values while adding cannon sections (Plan 01)
+
+### Decisions Made in Phase 17
+
+- Gate _setup_file_logging() inside existing if not _is_testing block — keeps all production-only side effects together (Plan 01)
+- scan() route uses two-layer exception handling — inner try for scan logic, render_template outside so TemplateErrors propagate as 500 (Plan 01)
+- Date filter uses form-level hx-trigger with input event for #filter-date-from and #filter-date-to — element-level triggers would own their own HTMX request (Plan 01)
+
+### Decisions Made in Phase 18
+
+- Reuse batch_score_sessions table with session_type='sync' for async sync — no new table needed, consistent pattern (Plan 01)
+- Store sync results in existing columns: scored=jobs_new, total=total_fetched, skipped=error_count — avoids JSON in error_msg (Plan 01)
+- Simplified phase labels (running->gmail->done) since trigger_sync is synchronous and opaque — no sub-phase callbacks available (Plan 01)
+- Flask's native app.config["TESTING"] must be set explicitly in test fixtures, separate from JF_CONFIG["TESTING"] (Plan 01)
+
+### Decisions Made in Phase 22
+
+- Re-export all moved symbols from ats_scanner.py for backward compatibility — avoids updating 8+ callers that import from ats_scanner (Plan 01)
+- Python module singleton ensures patch("ats_scanner.requests.get") still works for probe_ats_slugs tests after probe functions moved to ats_prober.py (Plan 01)
+- caplog logger target updated to ats_prober in test_log_levels.py — _handle_scan_error logs via its own module's logger, not ats_scanner (Plan 01)
+- batch_scoring_bp and sync_bp use url_prefix='/dashboard' — multiple blueprints can share url_prefix, no URL changes needed (Plan 05)
+- Background thread functions (_run_batch_haiku_bg, _run_batch_sonnet_bg, _run_sync_bg) colocated with their blueprint, not extracted to shared utilities (Plan 05)
+- test_async_sync.py needed no import changes — uses Flask test client URLs only, no direct function imports (Plan 05)
+- _PROFILE_PATH duplicated in all three profile modules for self-containment; no shared constant needed (Plan 06)
+- rec_app fixture patches both profile_mod and profile_recs_mod _PROFILE_PATH — index route reads from profile module, recommendation routes read from profile_recommendations module (Plan 06)
+- Multiple blueprints sharing url_prefix='/profile' — Flask supports this, all routes remain at same URLs (Plan 06)
+
+### Decisions Made in Phase 23
+
+- Batch prefetch before scoring loop using WHERE dedup_key IN — O(1) DB round-trip per batch instead of O(N) (Plan 01)
+- Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
+- Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
+
+### Decisions Made in Phase 28
+
+- Import _SYSTEM_PROMPT from sonnet_evaluator rather than duplicating — guarantees prompt equivalence for correlation validity (Plan 01)
+- statistics.StatisticsError caught for zero-variance guard — returns None for pearson_r when all eval scores identical (Plan 01)
+- eval_results/ gitignored at Plan 01 implementation time — personal job data must never be committed (Plan 01)
+
+---
+*Last session: 2026-03-27 — Completed Phase 28 Plan 01 (Evaluation Framework Pure Functions TDD)*
