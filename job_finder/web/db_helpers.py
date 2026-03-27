@@ -8,6 +8,7 @@ Usage in Flask app factory:
     app.teardown_appcontext(close_db)
 """
 
+import copy
 import logging
 import sqlite3
 
@@ -55,3 +56,19 @@ def close_db(e=None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+def get_config_snapshot(app) -> dict:
+    """Return a frozen deep copy of JF_CONFIG for use in background threads.
+
+    Background threads (APScheduler jobs) call this at job-start to get an
+    immutable snapshot, rather than reading individual keys from the shared
+    dict across multiple statements.
+
+    Args:
+        app: Flask application instance.
+
+    Returns:
+        Deep copy of app.config["JF_CONFIG"], or empty dict if not set.
+    """
+    return copy.deepcopy(app.config.get("JF_CONFIG", {}))
