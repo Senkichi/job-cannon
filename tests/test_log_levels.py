@@ -377,7 +377,7 @@ class TestAtsScannerLogLevels:
         ).fetchone()[0]
 
         try:
-            with caplog.at_level(logging.INFO, logger="job_finder.web.ats_scanner"):
+            with caplog.at_level(logging.INFO, logger="job_finder.web.ats_prober"):
                 ats_module._handle_scan_error(
                     conn, company_id, "AcmeCorp", "connection refused", now
                 )
