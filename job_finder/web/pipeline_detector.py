@@ -13,7 +13,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from job_finder.db import update_pipeline_status
@@ -354,7 +354,7 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
                 logger.debug("email date parse failed, using internalDate", exc_info=True)
                 internal = msg.get("internalDate")
                 if internal:
-                    email_date = datetime.fromtimestamp(int(internal) / 1000).isoformat()
+                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=timezone.utc).isoformat()
                 else:
                     email_date = datetime.now().isoformat()
 
