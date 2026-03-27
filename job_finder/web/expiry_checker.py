@@ -414,9 +414,14 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
                 (recheck_cutoff, batch_size),
             ).fetchall()
 
+            from job_finder.db import update_pipeline_status
+
             archived = 0
             live = 0
             inconclusive = 0
+
+            # Collect (checked_at, dedup_key) pairs for batch expiry_checked_at update
+            expiry_checked_updates: list[tuple[str, str]] = []
 
             for row in rows:
                 job = dict(row)
@@ -465,25 +470,17 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
                         _record_careers_outcome(company_id, success=False)
 
                 if result == EXPIRED:
-                    from job_finder.db import update_pipeline_status
+                    # update_pipeline_status commits internally (pipeline_events audit trail)
                     update_pipeline_status(
                         conn, job["dedup_key"], "archived",
                         source="expiry_check", evidence=evidence,
                     )
-                    conn.execute(
-                        "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
-                        (now, job["dedup_key"]),
-                    )
-                    conn.commit()
+                    expiry_checked_updates.append((now, job["dedup_key"]))
                     archived += 1
                     logger.info("run_expiry_check: archived %s (%s)", job["dedup_key"], evidence)
 
                 elif result == LIVE:
-                    conn.execute(
-                        "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
-                        (now, job["dedup_key"]),
-                    )
-                    conn.commit()
+                    expiry_checked_updates.append((now, job["dedup_key"]))
                     live += 1
 
                 else:
@@ -492,6 +489,14 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
 
                 # Rate limit between jobs
                 time.sleep(_INTER_REQUEST_DELAY)
+
+            # Batch-update expiry_checked_at for all checked jobs in one round-trip
+            if expiry_checked_updates:
+                conn.executemany(
+                    "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
+                    expiry_checked_updates,
+                )
+                conn.commit()
 
             result_summary = {
                 "checked": len(rows),
