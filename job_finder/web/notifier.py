@@ -137,8 +137,11 @@ def notify_pipeline_change(
     """Notify when an auto-detected pipeline change occurs.
 
     Args:
-        detection_type: Classification result ('rejection', 'interview_invite',
-                        'application_confirmation', 'offer', etc.).
+        detection_type: Classification result from pipeline_detector.py.
+                        Primary values: 'rejection', 'interview', 'confirmation'.
+                        Legacy/extended values also accepted: 'interview_invite',
+                        'application_confirmation', 'offer'. Unknown values are
+                        title-cased and displayed as-is.
         job_title: Job title from the DB.
         company: Company name from the DB.
         dedup_key: Job dedup_key for building the URL.
