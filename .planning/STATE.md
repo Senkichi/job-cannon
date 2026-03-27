@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
-status: Ready to execute
-last_updated: "2026-03-27T07:10:35.250Z"
+status: Executing Phase 23
+last_updated: "2026-03-26T00:00:00.000Z"
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 15
-  completed_plans: 12
+  completed_phases: 1
+  total_plans: 11
+  completed_plans: 6
 ---
 
 # State
@@ -16,7 +16,7 @@ progress:
 ## Current Position
 
 Phase: 23 (N+1 Batching) — EXECUTING
-Plan: 3 of 3
+Plan: 2 of 3
 
 ## Project Reference
 
@@ -29,13 +29,14 @@ See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Velocity:**
 
-- Total plans completed: 6 (this milestone)
+- Total plans completed: 7 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 22-01: 12min (2 tasks, 7 files)
-- Average duration: ~9min
-- Total execution time: ~37min
+- Phase 23-01: 4min (1 task TDD, 2 files)
+- Average duration: ~8min
+- Total execution time: ~41min
 
 *Updated after each plan completion*
 
@@ -101,9 +102,9 @@ None.
 
 ### Decisions Made in Phase 23
 
-- Batch archive replaces N per-row update_pipeline_status() calls with 1 UPDATE + 1 executemany INSERT — reduces N*3 queries to 2 per batch (Plan 02)
-- SELECT includes pipeline_status column (was only dedup_key) — needed for from_status accuracy in pipeline_events without extra per-row lookup (Plan 02)
-- utc_now_iso() called once before executemany — all events in a batch share same timestamp (acceptable audit log, avoids N function calls) (Plan 02)
+- Batch prefetch before scoring loop using WHERE dedup_key IN — O(1) DB round-trip per batch instead of O(N) (Plan 01)
+- Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
+- Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
 
 ---
-*Last session: 2026-03-27 — Completed Phase 23 Plan 02 (Batch Archive in Stale Detector)*
+*Last session: 2026-03-26 — Completed Phase 23 Plan 01 (N+1 Batch Prefetch in Scoring Runner)*
