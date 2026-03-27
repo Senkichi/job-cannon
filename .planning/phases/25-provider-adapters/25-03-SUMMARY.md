@@ -123,6 +123,15 @@ None for the adapter itself. To use Ollama, install and run `ollama serve` local
 - All three provider adapters now complete: Anthropic (25-01), Gemini (25-02), Ollama (25-03)
 - No blockers
 
+## Self-Check: PASSED
+
+- FOUND: `job_finder/web/providers/ollama_provider.py`
+- FOUND: `tests/test_ollama_provider.py`
+- FOUND: `.planning/phases/25-provider-adapters/25-03-SUMMARY.md`
+- FOUND: commit `bf80658` (TDD RED — failing tests)
+- FOUND: commit `8944ab9` (TDD GREEN — implementation)
+- FOUND: commit `89f073a` (docs — SUMMARY, STATE, ROADMAP)
+
 ---
 *Phase: 25-provider-adapters*
 *Completed: 2026-03-27*
