@@ -67,7 +67,7 @@ def _setup_file_logging() -> None:
 logger = logging.getLogger(__name__)
 
 
-def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
+def create_app(config_path: str = "config.yaml", *, config: dict = None) -> Flask:
     """Create and configure the Flask application.
 
     Args:
@@ -92,6 +92,10 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
 
     app.config["JF_CONFIG"] = cfg
     app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
+    # NOTE: Ephemeral dev-only behavior — a random key is generated on each startup
+    # when FLASK_SECRET_KEY is not set in the environment. This intentionally breaks
+    # session persistence across restarts (acceptable for a single-user local app).
+    # Set FLASK_SECRET_KEY in .env for persistent sessions.
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # Activate cross-project API telemetry, budget enforcement, and key injection.
@@ -100,8 +104,13 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     try:
         import anthropic_telemetry
         anthropic_telemetry.activate("job-cannon")
+    except ImportError:
+        # Package not installed — silently skip; telemetry is optional.
+        pass
     except Exception as _e:
-        logging.getLogger(__name__).warning("anthropic-telemetry not available: %s", _e)
+        # Package installed but activate() failed (bad config, network error, etc.).
+        # Log as warning so the failure is visible without crashing app startup.
+        logging.getLogger(__name__).warning("anthropic-telemetry activate() failed: %s", _e)
 
     # --- Database setup ---
     run_migrations(app.config["DB_PATH"])
