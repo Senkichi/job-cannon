@@ -634,6 +634,7 @@ class TestFieldCeilings:
                 sparse_job_row,
                 serpapi_key="test-key",
                 anthropic_client=mock_anthropic_client,
+                conn=MagicMock(),
             )
 
         mock_sonnet.assert_called_once()
@@ -671,6 +672,7 @@ class TestSonnetEnrichment:
                 sparse_job_row,
                 serpapi_key="test-key",
                 anthropic_client=mock_anthropic_client,
+                conn=MagicMock(),
             )
 
         # Sonnet should have been called with fragments dict containing DDG text

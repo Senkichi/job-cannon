@@ -30,6 +30,8 @@ class AnthropicProvider(BaseProvider):
         client: Anthropic API client instance.
         conn: Open SQLite connection for cost recording.
         config: Application config dict.
+        job_id: Job dedup_key for cost attribution (nullable).
+        purpose: Feature attribution label for cost rows.
     """
 
     def __init__(
@@ -37,10 +39,14 @@ class AnthropicProvider(BaseProvider):
         client: Any,
         conn: sqlite3.Connection,
         config: dict,
+        job_id: str | None = None,
+        purpose: str = "",
     ) -> None:
         self._client = client
         self._conn = conn
         self._config = config
+        self._job_id = job_id
+        self._purpose = purpose
 
     def call(
         self,
@@ -81,6 +87,8 @@ class AnthropicProvider(BaseProvider):
             messages=messages,
             output_schema=output_schema,
             conn=self._conn,
+            job_id=self._job_id,
+            purpose=self._purpose,
             config=self._config,
             max_tokens=max_tokens,
             timeout=timeout,

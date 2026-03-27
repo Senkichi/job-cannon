@@ -68,7 +68,7 @@
       <div class="bg-slate-800 rounded-xl border {{ cost_border }} p-5 flex flex-col gap-1 cursor-pointer"
            hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML">
         <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Today's Cost</span>
-        <span class="text-4xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
+        <span class="text-2xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
         <span class="text-xs text-slate-500">${{ "%.2f" | format(cost_stats.month) }} / ${{ "%.0f" | format(budget_cap) }} this month</span>
         <a href="/costs"
            class="text-xs text-violet-400 hover:text-violet-300 transition-colors mt-1"

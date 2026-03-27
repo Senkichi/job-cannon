@@ -23,8 +23,8 @@ Exports:
 import logging
 from typing import Any, Optional
 
-from job_finder.config import DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import BudgetExceededError, ClaudeContext, call_claude
+from job_finder.web.claude_client import BudgetExceededError
+from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
@@ -95,8 +95,6 @@ def evaluate_job_sonnet(
     experience_profile: dict,
     conn: Any,
     config: dict,
-    *,
-    ctx: ClaudeContext | None = None,
 ) -> ScoringResult:
     """Evaluate a job against the candidate profile using Claude Sonnet.
 
@@ -105,29 +103,17 @@ def evaluate_job_sonnet(
 
     Args:
         client: Anthropic client instance (injected for testability).
-            Ignored when *ctx* is provided.
         job_row: Job record dict. Must include jd_full (str or None), plus
                  title, company, location, salary_min, salary_max.
         experience_profile: Experience profile dict (from experience_profile.json).
         conn: Open SQLite connection for cost recording.
-            Ignored when *ctx* is provided.
-        config: Application config dict (reads scoring.models.sonnet and
-                profile section for candidate preferences).
-            Ignored when *ctx* is provided.
-        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
-            the individual client/conn/config parameters are ignored.
+        config: Application config dict (reads profile section for candidate preferences).
 
     Returns:
         ScoringResult with status='success' and data dict containing score,
         summary, fit_analysis. On failure: status='skipped' (jd_full absent),
         status='budget_exceeded', or status='error', with data=None.
     """
-    # Resolve context: prefer ctx fields over individual params
-    if ctx is not None:
-        client = ctx.client
-        conn = ctx.conn
-        config = ctx.config
-
     jd_full = job_row.get("jd_full")
     if not jd_full:
         logger.debug(
@@ -136,12 +122,6 @@ def evaluate_job_sonnet(
             job_row.get("company"),
         )
         return ScoringResult(data=None, status="skipped")
-
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("sonnet", DEFAULT_MODEL_SONNET)
-    )
 
     # Build salary string
     salary_min = job_row.get("salary_min")
@@ -213,16 +193,19 @@ def evaluate_job_sonnet(
     )
 
     try:
-        result, _cost = call_claude(
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
+            conn=conn,
+            config=config,
             output_schema=SONNET_SCHEMA,
             job_id=job_row.get("dedup_key"),
             purpose="sonnet_eval",
             max_tokens=2048,
-            ctx=ctx or ClaudeContext(client=client, conn=conn, config=config),
+            client=client,
         )
+        result = result_obj.data
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",
             job_row.get("title"),

@@ -18,8 +18,8 @@ import logging
 import re
 from typing import Any
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
-from job_finder.web.claude_client import call_claude, BudgetExceededError, ClaudeContext
+from job_finder.web.claude_client import BudgetExceededError
+from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
@@ -180,40 +180,27 @@ def score_job_haiku(
     config: dict,
     max_chars: int = 2000,
     purpose: str = "haiku_score",
-    *,
-    ctx: ClaudeContext | None = None,
 ) -> ScoringResult:
     """Score a single job against the candidate profile using Claude Haiku.
 
     Args:
         client: Anthropic client instance (injected for testability).
-            Ignored when *ctx* is provided.
         job_row: Job record dict with keys: dedup_key, title, company, location,
                  salary_min (optional), salary_max (optional), description (optional).
         experience_profile: Profile dict with target_titles, target_locations,
                  min_salary, skills, industries keys.
         conn: Open SQLite connection for cost recording.
-            Ignored when *ctx* is provided.
-        config: Application config dict (reads scoring.models.haiku, scoring.monthly_budget_usd).
-            Ignored when *ctx* is provided.
+        config: Application config dict (reads scoring.monthly_budget_usd).
         max_chars: Maximum characters for description snippet (default 2000).
                    Pass 4000 for borderline re-evaluation to expand context.
         purpose: Cost tracking purpose label (default "haiku_score", use "haiku_reeval"
                  for the borderline second-pass call).
-        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
-            the individual client/conn/config parameters are ignored.
 
     Returns:
         ScoringResult with status='success' and data dict containing score,
         summary, title_fit, location_fit, salary_meets_floor.
         On failure: status='budget_exceeded' or status='error', data=None.
     """
-    # Resolve context: prefer ctx fields over individual params
-    if ctx is not None:
-        client = ctx.client
-        conn = ctx.conn
-        config = ctx.config
-
     profile_section: dict = experience_profile
 
     # Build job context snippet
@@ -270,25 +257,22 @@ def score_job_haiku(
         f"Use the structured output format."
     )
 
-    # Get Haiku model from config
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("haiku", DEFAULT_MODEL_HAIKU)
-    )
-
     job_id = job_row.get("dedup_key")
 
     try:
-        result, cost_usd = call_claude(
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
+            conn=conn,
+            config=config,
             output_schema=HAIKU_SCHEMA,
             job_id=job_id,
             purpose=purpose,
-            ctx=ctx or ClaudeContext(client=client, conn=conn, config=config),
+            client=client,
         )
+        result = result_obj.data
+        cost_usd = result_obj.cost_usd
         logger.debug(
             "Haiku scored '%s' @ '%s': score=%s (cost=$%.5f)",
             title,

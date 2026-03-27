@@ -43,13 +43,13 @@ def sync_start():
             )
 
         now = utc_now_iso()
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('sync', 'running', 0, 0, ?)",
             (now,),
         )
         conn.commit()
-        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        session_id = cursor.lastrowid
 
     if not testing:
         t = threading.Thread(
@@ -116,7 +116,7 @@ def sync_status(session_id):
                     skipped=session["skipped"],
                 )
         except (ValueError, TypeError):
-            pass
+            logger.debug("timestamp parse failed in sync_status", exc_info=True)
 
     # Terminal states: done, error, cancelled — return done fragment (NO polling hx-trigger)
     if status in ("done", "error", "cancelled"):

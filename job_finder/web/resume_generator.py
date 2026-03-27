@@ -24,7 +24,10 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None
 
 from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
 from job_finder.web.claude_client import call_claude, cost_gate
@@ -347,18 +350,23 @@ def generate_resume_single(
     if contact_hint:
         user_message += f"- Contact line: {contact_hint}\n"
 
-    result, _cost = call_claude(
-        client=client,
-        model=model,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-        output_schema=RESUME_SCHEMA,
-        conn=conn,
-        job_id=job_row.get("dedup_key"),
-        purpose="resume_generation",
-        config=config,
-        max_tokens=4096,
-    )
+    try:
+        result, _cost = call_claude(
+            client=client,
+            model=model,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+            output_schema=RESUME_SCHEMA,
+            conn=conn,
+            job_id=job_row.get("dedup_key"),
+            purpose="resume_generation",
+            config=config,
+            max_tokens=4096,
+        )
+    except Exception:
+        logger.error("call_claude failed in generate_resume_single for '%s'",
+                      job_row.get("dedup_key"), exc_info=True)
+        raise
 
     logger.debug(
         "generate_resume_single: generated resume for '%s' @ '%s'",
@@ -518,15 +526,19 @@ def generate_resume_background(
             # Upload to Drive
             drive_service = get_drive_service()
             folder_id = config.get("drive", {}).get("folder_id", "")
-            convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
+            if not folder_id:
+                logger.warning("Drive folder_id not configured — skipping upload for gen_id=%s", gen_id)
+                doc_url = None
+            else:
+                convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
 
-            doc_url = upload_to_drive(
-                drive_service,
-                doc_name,
-                docx_buffer,
-                folder_id=folder_id,
-                convert_to_gdoc=convert_to_gdoc,
-            )
+                doc_url = upload_to_drive(
+                    drive_service,
+                    doc_name,
+                    docx_buffer,
+                    folder_id=folder_id,
+                    convert_to_gdoc=convert_to_gdoc,
+                )
 
             # Transition: generating -> done (update generation_type alongside status)
             conn.execute(

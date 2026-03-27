@@ -136,6 +136,8 @@ def _make_adapter(
     client: Any | None,
     conn: sqlite3.Connection,
     config: dict,
+    job_id: str | None = None,
+    purpose: str = "",
 ) -> "BaseProvider":
     """Instantiate the correct provider adapter.
 
@@ -144,6 +146,8 @@ def _make_adapter(
         client: Anthropic client (required for anthropic, unused for others).
         conn: Open SQLite connection (required for anthropic).
         config: Application config dict.
+        job_id: Job dedup_key for cost attribution (nullable, Anthropic only).
+        purpose: Feature attribution label for cost rows (Anthropic only).
 
     Returns:
         Concrete BaseProvider instance.
@@ -157,7 +161,9 @@ def _make_adapter(
     from job_finder.web.providers.ollama_provider import OllamaProvider
 
     if provider_name == "anthropic":
-        return AnthropicProvider(client=client, conn=conn, config=config)
+        return AnthropicProvider(
+            client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
+        )
     if provider_name == "gemini":
         return GeminiProvider(config=config)
     if provider_name == "ollama":
@@ -248,7 +254,7 @@ def call_model(
             raise BudgetExceededError(f"Budget cap reached. Tier: {tier}")
 
     # Instantiate and make first attempt
-    adapter = _make_adapter(provider_name, client, conn, config)
+    adapter = _make_adapter(provider_name, client, conn, config, job_id=job_id, purpose=purpose)
     result = adapter.call(model, system, messages, output_schema, max_tokens, timeout)
 
     # Schema validation — attempt 1
@@ -269,7 +275,9 @@ def call_model(
     if fallback and client is not None:
         from job_finder.web.providers.anthropic_provider import AnthropicProvider
 
-        fallback_adapter = AnthropicProvider(client=client, conn=conn, config=config)
+        fallback_adapter = AnthropicProvider(
+            client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
+        )
         # Use empty config to get Anthropic default model (not the Gemini/Ollama model name)
         fallback_model = resolve_provider_config(tier, {})["model"]
         # AnthropicProvider handles cost_gate + record_cost internally via call_claude()
