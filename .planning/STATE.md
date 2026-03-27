@@ -1,29 +1,29 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Fixes & Improvements
+milestone: v1.4
+milestone_name: Tech Debt Sweep
 status: Ready to execute
-last_updated: "2026-03-27T05:51:38.944Z"
+last_updated: "2026-03-27T07:10:35.250Z"
 progress:
-  total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 3
+  total_phases: 5
+  completed_phases: 3
+  total_plans: 15
+  completed_plans: 12
 ---
 
 # State
 
 ## Current Position
 
-Phase: 22 (Module Splits) — IN PROGRESS
-Plan: 6 of 7 — DONE
+Phase: 23 (N+1 Batching) — EXECUTING
+Plan: 3 of 3
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 22 — Module Splits
+**Current focus:** Phase 23 — N+1 Batching
 
 ## Performance Metrics
 
@@ -99,5 +99,11 @@ None.
 - rec_app fixture patches both profile_mod and profile_recs_mod _PROFILE_PATH — index route reads from profile module, recommendation routes read from profile_recommendations module (Plan 06)
 - Multiple blueprints sharing url_prefix='/profile' — Flask supports this, all routes remain at same URLs (Plan 06)
 
+### Decisions Made in Phase 23
+
+- Batch archive replaces N per-row update_pipeline_status() calls with 1 UPDATE + 1 executemany INSERT — reduces N*3 queries to 2 per batch (Plan 02)
+- SELECT includes pipeline_status column (was only dedup_key) — needed for from_status accuracy in pipeline_events without extra per-row lookup (Plan 02)
+- utc_now_iso() called once before executemany — all events in a batch share same timestamp (acceptable audit log, avoids N function calls) (Plan 02)
+
 ---
-*Last session: 2026-03-27 — Completed Phase 22 Plan 06 (Profile Module Split)*
+*Last session: 2026-03-27 — Completed Phase 23 Plan 02 (Batch Archive in Stale Detector)*
