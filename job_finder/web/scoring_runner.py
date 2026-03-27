@@ -68,16 +68,20 @@ def run_haiku_scoring(
     haiku_scored = 0
 
     with standalone_connection(db_path) as conn:
+        # Batch prefetch all job rows (BATCH-01) — O(1) query instead of O(N)
+        placeholders = ",".join("?" * len(new_job_keys))
+        rows = conn.execute(
+            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key IN ({placeholders})",
+            new_job_keys,
+        ).fetchall()
+        job_rows_by_key = {r["dedup_key"]: dict(r) for r in rows}
+
         for dedup_key in new_job_keys:
             try:
-                row = conn.execute(
-                    f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                ).fetchone()
-                if row is None:
+                job_row = job_rows_by_key.get(dedup_key)
+                if job_row is None:
                     logger.warning("Haiku: job '%s' not found in DB -- skipping", dedup_key)
                     continue
-
-                job_row = dict(row)
 
                 # --- Enrichment FIRST (before scoring) ---
                 if enrich_job is not None and (
@@ -206,16 +210,20 @@ def run_sonnet_evaluation(
     sonnet_evaluated = 0
 
     with standalone_connection(db_path) as conn:
+        # Batch prefetch all job rows (BATCH-02) — O(1) query instead of O(N)
+        placeholders = ",".join("?" * len(sonnet_queue))
+        rows = conn.execute(
+            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key IN ({placeholders})",
+            sonnet_queue,
+        ).fetchall()
+        job_rows_by_key = {r["dedup_key"]: dict(r) for r in rows}
+
         for dedup_key in sonnet_queue:
             try:
-                row = conn.execute(
-                    f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                ).fetchone()
-                if row is None:
+                job_row = job_rows_by_key.get(dedup_key)
+                if job_row is None:
                     logger.warning("Sonnet: job '%s' not found in DB -- skipping", dedup_key)
                     continue
-
-                job_row = dict(row)
 
                 # Job should already have jd_full from enrich_job (ran before Haiku scoring).
                 # If still missing after full enrichment pipeline, skip Sonnet eval.
