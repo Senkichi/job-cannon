@@ -1,41 +1,42 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Fixes & Improvements
-status: Ready to execute
-last_updated: "2026-03-27T05:51:38.944Z"
+milestone: v1.4
+milestone_name: Tech Debt Sweep
+status: Executing Phase 23
+last_updated: "2026-03-26T00:00:00.000Z"
 progress:
-  total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 3
+  total_phases: 5
+  completed_phases: 1
+  total_plans: 11
+  completed_plans: 6
 ---
 
 # State
 
 ## Current Position
 
-Phase: 22 (Module Splits) — IN PROGRESS
-Plan: 6 of 7 — DONE
+Phase: 23 (N+1 Batching) — EXECUTING
+Plan: 2 of 3
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 22 — Module Splits
+**Current focus:** Phase 23 — N+1 Batching
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6 (this milestone)
+- Total plans completed: 7 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 22-01: 12min (2 tasks, 7 files)
-- Average duration: ~9min
-- Total execution time: ~37min
+- Phase 23-01: 4min (1 task TDD, 2 files)
+- Average duration: ~8min
+- Total execution time: ~41min
 
 *Updated after each plan completion*
 
@@ -99,5 +100,11 @@ None.
 - rec_app fixture patches both profile_mod and profile_recs_mod _PROFILE_PATH — index route reads from profile module, recommendation routes read from profile_recommendations module (Plan 06)
 - Multiple blueprints sharing url_prefix='/profile' — Flask supports this, all routes remain at same URLs (Plan 06)
 
+### Decisions Made in Phase 23
+
+- Batch prefetch before scoring loop using WHERE dedup_key IN — O(1) DB round-trip per batch instead of O(N) (Plan 01)
+- Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
+- Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
+
 ---
-*Last session: 2026-03-27 — Completed Phase 22 Plan 06 (Profile Module Split)*
+*Last session: 2026-03-26 — Completed Phase 23 Plan 01 (N+1 Batch Prefetch in Scoring Runner)*
