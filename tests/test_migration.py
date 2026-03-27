@@ -408,10 +408,11 @@ def test_migration_count_is_thirteen():
     NOTE: Migration 14 (Phase 30 infrastructure) and Migration 15 (Phase 40 data
     quality) were added after this test was written. Migration 16 adds company
     enrichment columns. Migration 17 adds homepage_probe_attempted_at column.
+    Migration 18 (Phase 24) adds provider column to scoring_costs.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 17
+    assert len(MIGRATIONS) == 18
 
 
 class TestMigration13:
@@ -1075,3 +1076,47 @@ class TestMigration5Reporting:
         ).fetchone()
         conn.close()
         assert row[0] == 0, f"Expected rejection_reviewed=0, got {row[0]}"
+
+
+class TestMigration18:
+    """Tests for migration 18: provider column on scoring_costs."""
+
+    def test_migration_18_adds_provider_column(self, tmp_db_path):
+        """Migration 18 adds provider column to scoring_costs table."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(scoring_costs)").fetchall()}
+        conn.close()
+        assert "provider" in columns
+
+    def test_migration_18_provider_default_is_anthropic(self, tmp_db_path):
+        """Provider column defaults to 'anthropic' for new rows."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
+            "VALUES ('test-job', 'haiku_score', 'claude-haiku-4-5', 100, 50, 0.01, '2026-01-01T00:00:00Z')"
+        )
+        conn.commit()
+        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'test-job'").fetchone()
+        conn.close()
+        assert row[0] == "anthropic"
+
+    def test_migration_18_existing_record_cost_insert_still_works(self, tmp_db_path):
+        """The exact INSERT from record_cost() (no provider column) succeeds post-migration."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        # This is the exact INSERT statement from claude_client.py record_cost()
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("test-job-2", "sonnet_eval", "claude-sonnet-4-6", 500, 200, 0.05, "2026-01-01T00:00:00Z"),
+        )
+        conn.commit()
+        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'test-job-2'").fetchone()
+        conn.close()
+        assert row[0] == "anthropic"
+
+    def test_migrations_count_is_18(self):
+        """MIGRATIONS list has exactly 18 entries."""
+        assert len(MIGRATIONS) == 18

@@ -410,6 +410,13 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_companies_homepage_probe_attempted_at ON companies(homepage_probe_attempted_at)",
     ],
+
+    # Migration 18: Add provider column to scoring_costs table.
+    # Tracks which provider (anthropic, gemini, ollama) handled each API call.
+    # Default 'anthropic' for all existing rows (pre-multi-provider).
+    [
+        "ALTER TABLE scoring_costs ADD COLUMN provider TEXT DEFAULT 'anthropic'",
+    ],
 ]
 
 
