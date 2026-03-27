@@ -10,9 +10,9 @@ Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap ph
 ### Provider Infrastructure
 
 - [ ] **INFRA-01**: Dispatcher resolves logical tier names ("sonnet", "haiku", "opus") to provider + model via config.yaml providers section
-- [ ] **INFRA-02**: Schema validation retries once on failure with augmented prompt including schema errors
-- [ ] **INFRA-03**: Configurable fallback re-dispatches to Anthropic when retry fails
-- [ ] **INFRA-04**: Budget gate bypassed for free providers (Gemini free tier, Ollama)
+- [x] **INFRA-02**: Schema validation retries once on failure with augmented prompt including schema errors
+- [x] **INFRA-03**: Configurable fallback re-dispatches to Anthropic when retry fails
+- [x] **INFRA-04**: Budget gate bypassed for free providers (Gemini free tier, Ollama)
 - [ ] **INFRA-05**: Missing providers section defaults to Anthropic routing (backwards compatible)
 
 ### Provider Adapters
@@ -95,9 +95,9 @@ None identified for this milestone.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | INFRA-01 | Phase 24 | Pending |
-| INFRA-02 | Phase 26 | Pending |
-| INFRA-03 | Phase 26 | Pending |
-| INFRA-04 | Phase 26 | Pending |
+| INFRA-02 | Phase 26 | Complete |
+| INFRA-03 | Phase 26 | Complete |
+| INFRA-04 | Phase 26 | Complete |
 | INFRA-05 | Phase 24 | Pending |
 | ADAPT-01 | Phase 25 | Complete |
 | ADAPT-02 | Phase 25 | Complete |
