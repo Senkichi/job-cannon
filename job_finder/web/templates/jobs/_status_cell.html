@@ -6,7 +6,7 @@
         hx-target="this"
         hx-swap="outerHTML"
         hx-on:click="event.stopPropagation()"
-        class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1 border border-slate-500 ring-1 ring-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer w-full">
+        class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1 border border-slate-500 ring-1 ring-slate-600 focus:outline-none focus:border-indigo-500 cursor-pointer w-full min-w-[7rem]">
   {% for s in pipeline_statuses %}
     <option value="{{ s }}" {% if job.pipeline_status == s %}selected{% endif %}>
       {{ s | replace('_', ' ') | title }}
