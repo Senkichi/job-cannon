@@ -100,7 +100,9 @@ Plans:
   1. `tests/test_companies.py` exists and passes with `uv run pytest tests/test_companies.py`
   2. All six routes (index, expand, collapse, toggle, update_slug, retry) have at least one test
   3. Overall test suite still passes (no regressions introduced)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 21-01-PLAN.md -- Companies blueprint test suite (all 8 routes)
 
 ### Phase 22: Module Splits
 **Goal**: Seven god-object modules are decomposed into focused files; no file exceeds its target LOC ceiling and all imports resolve without circular dependencies
@@ -153,7 +155,7 @@ Plans:
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 20. Surgical Fixes | v1.4 | 3/3 | Complete   | 2026-03-27 |
-| 21. Test Coverage | v1.4 | 0/TBD | Not started | - |
+| 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
+| 21. Test Coverage | v1.4 | 0/1 | Not started | - |
 | 22. Module Splits | v1.4 | 0/TBD | Not started | - |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
