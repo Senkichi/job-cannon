@@ -123,6 +123,13 @@ server:
   # Debug mode (set to false in production-like environments)
   debug: true
 
+# --- Stale detection thresholds ---
+stale_detection:
+  # Days since last_seen before a job is marked stale
+  stale_threshold_days: 14
+  # Days since last_seen before a passive-stage job is auto-archived
+  archive_threshold_days: 30
+
 # --- Filtering ---
 filters:
   # Additional companies to auto-exclude (merged with built-in denylist)
