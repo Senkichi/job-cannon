@@ -88,8 +88,7 @@ def _find_careers_url_with_haiku(
     Returns:
         Absolute URL to the careers page, or None if not found.
     """
-    from job_finder.config import DEFAULT_MODEL_HAIKU
-    from job_finder.web.claude_client import call_claude
+    from job_finder.web.model_provider import call_model
 
     truncated_html = homepage_html[:_HAIKU_HTML_CHARS]
 
@@ -102,21 +101,21 @@ def _find_careers_url_with_haiku(
     ]
 
     try:
-        result, cost = call_claude(
-            client=client,
-            model=DEFAULT_MODEL_HAIKU,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=messages,
-            output_schema=None,
             conn=conn,
+            config=config,
+            output_schema=None,
             job_id=None,
             purpose="careers_scrape",
-            config=config,
             max_tokens=256,
+            client=client,
         )
 
-        # call_claude returns (dict, float) — when no output_schema, result has "text" key
-        url_text = result.get("text", "").strip()
+        # call_model returns ModelResult — when no output_schema, result_obj.data has "text" key
+        url_text = result_obj.data.get("text", "").strip()
         if not url_text or url_text.lower() == "none":
             return None
 
@@ -191,8 +190,7 @@ def _extract_jobs_with_haiku(
         List of dicts with title, url, description keys. May be empty.
     """
     import json as _json
-    from job_finder.config import DEFAULT_MODEL_HAIKU
-    from job_finder.web.claude_client import call_claude
+    from job_finder.web.model_provider import call_model
 
     truncated_html = careers_html[:_HAIKU_HTML_CHARS]
 
@@ -205,21 +203,21 @@ def _extract_jobs_with_haiku(
     ]
 
     try:
-        result, cost = call_claude(
-            client=client,
-            model=DEFAULT_MODEL_HAIKU,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=messages,
-            output_schema=None,
             conn=conn,
+            config=config,
+            output_schema=None,
             job_id=None,
             purpose="careers_scrape",
-            config=config,
             max_tokens=1024,
+            client=client,
         )
 
         # Parse Haiku response — expect JSON array
-        text = result.get("text", "").strip()
+        text = result_obj.data.get("text", "").strip()
         # Handle markdown code blocks
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
