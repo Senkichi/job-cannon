@@ -115,10 +115,10 @@ Plans:
   2. No blueprint or orchestrator module directly instantiates anthropic.Anthropic() — all such usage goes through the provider layer
   3. config.example.yaml contains a fully-documented `providers` section that demonstrates routing Sonnet to Gemini or Ollama
   4. The app starts and scores jobs end-to-end with the existing Anthropic config after migration
-**Plans:** 4 plans
+**Plans:** 2/4 plans executed
 Plans:
-- [ ] 27-01-PLAN.md — Core scoring path (haiku_scorer, sonnet_evaluator, scoring_runner, batch_scoring)
-- [ ] 27-02-PLAN.md — Enrichment, description reformatter, and careers scraper
+- [x] 27-01-PLAN.md — Core scoring path (haiku_scorer, sonnet_evaluator, scoring_runner, batch_scoring)
+- [x] 27-02-PLAN.md — Enrichment, description reformatter, and careers scraper
 - [ ] 27-03-PLAN.md — Resume pipeline (generator, multi-version, feedback, style guide, validator)
 - [ ] 27-04-PLAN.md — Intelligence, blueprints, special cases, and config.example.yaml
 
@@ -163,5 +163,5 @@ Plans:
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 25. Provider Adapters | v1.5 | 3/3 | Complete    | 2026-03-27 |
 | 26. Dispatcher & Cost Tracking | v1.5 | 0/2 | Complete    | 2026-03-27 |
-| 27. Caller Migration | v1.5 | 0/4 | Not started | - |
+| 27. Caller Migration | v1.5 | 2/4 | In Progress|  |
 | 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
