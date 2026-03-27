@@ -326,6 +326,34 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
+def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-provider cost breakdown scoped to the current calendar month.
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+
+    Returns:
+        List of dicts with keys: provider (str), calls (int), spend (float).
+        Sorted descending by spend.
+    """
+    now = datetime.now(timezone.utc)
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+
+    rows = conn.execute(
+        "SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        "FROM scoring_costs "
+        "WHERE timestamp >= ? "
+        "GROUP BY provider "
+        "ORDER BY spend DESC",
+        (month_start,),
+    ).fetchall()
+
+    return [
+        {"provider": row[0], "calls": int(row[1]), "spend": float(row[2])}
+        for row in rows
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Main API call wrapper
 # ---------------------------------------------------------------------------
