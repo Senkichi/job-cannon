@@ -20,6 +20,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from job_finder.web.db_helpers import get_config_snapshot
+
 logger = logging.getLogger(__name__)
 
 # Module-level singleton -- prevents double initialization
@@ -43,7 +45,7 @@ def _make_simple_job(app, name, import_func):
     """
     def wrapper():
         with app.app_context():
-            config = app.config.get("JF_CONFIG", {})
+            config = get_config_snapshot(app)
             db_path = app.config.get("DB_PATH", "jobs.db")
             try:
                 result = import_func()(db_path, config)
@@ -80,7 +82,7 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
         import time as _time
         with app.app_context():
             from job_finder.web.activity_tracker import log_activity
-            config = app.config.get("JF_CONFIG", {})
+            config = get_config_snapshot(app)
             db_path = app.config.get("DB_PATH", "jobs.db")
             action = import_action()
 
@@ -148,7 +150,7 @@ def init_scheduler(app) -> None:
             with app.app_context():
                 from job_finder.web.activity_tracker import log_activity, ACTION_SCHEDULED_SYNC
                 from job_finder.web.pipeline_runner import run_ingestion
-                config = app.config.get("JF_CONFIG", {})
+                config = get_config_snapshot(app)
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 t0 = _time.time()
                 try:
@@ -410,7 +412,7 @@ def run_sync_now(app) -> dict:
         Summary dict from run_ingestion, or an error dict if ingestion failed.
     """
     from job_finder.web.pipeline_runner import run_ingestion
-    config = app.config.get("JF_CONFIG", {})
+    config = get_config_snapshot(app)
     db_path = app.config.get("DB_PATH", "jobs.db")
 
     try:
