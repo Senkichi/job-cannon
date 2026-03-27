@@ -319,21 +319,14 @@ def probe_single_company(
 
 
 def _probe_lever_with_result(slug: str) -> bool:
-    """Return True if Lever slug has at least one active posting. Let transient exceptions propagate."""
-    url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-    r = requests.get(url, timeout=_PROBE_TIMEOUT)
-    if r.status_code == 200:
-        data = r.json()
-        return isinstance(data, list) and len(data) > 0
-    return False
-
-
-def _probe_lever(slug: str) -> bool:
-    """Return True if slug has at least one active Lever posting.
+    """Return True if Lever slug has at least one active posting.
 
     IMPORTANT (Research Pitfall 2): Lever returns HTTP 200 with empty list
     for invalid slugs AND for valid slugs with no current postings. Only
     cache as 'hit' when response is 200 AND list has at least one posting.
+
+    Transient exceptions (Timeout, ConnectionError) propagate to the caller so
+    the surrounding probe loop can record error state appropriately.
 
     Args:
         slug: Lever company slug to probe.
@@ -342,13 +335,28 @@ def _probe_lever(slug: str) -> bool:
         True if the slug is confirmed active on Lever (non-empty postings list).
     """
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    if r.status_code == 200:
+        data = r.json()
+        # Per Research Pitfall 2: empty list is NOT a confirmed hit
+        return isinstance(data, list) and len(data) > 0
+    return False
+
+
+def _probe_lever(slug: str) -> bool:
+    """Return True if slug has at least one active Lever posting; False on any error.
+
+    Wraps :func:`_probe_lever_with_result` and swallows all exceptions so batch
+    scan loops can call this without extra try/except blocks.
+
+    Args:
+        slug: Lever company slug to probe.
+
+    Returns:
+        True if the slug is confirmed active on Lever, False on miss or error.
+    """
     try:
-        r = requests.get(url, timeout=_PROBE_TIMEOUT)
-        if r.status_code == 200:
-            data = r.json()
-            # Per Research Pitfall 2: empty list is NOT a confirmed hit
-            return isinstance(data, list) and len(data) > 0
-        return False
+        return _probe_lever_with_result(slug)
     except Exception as e:
         logger.debug("_probe_lever('%s') failed: %s", slug, e)
         return False
