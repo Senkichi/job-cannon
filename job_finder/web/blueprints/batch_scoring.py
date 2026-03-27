@@ -281,19 +281,23 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
             ).fetchall()
 
-            for row in rows:
-                # Check cancellation status before each job
-                status_row = conn.execute(
-                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-                ).fetchone()
-                if status_row and status_row["status"] == "cancelling":
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                        (utc_now_iso(), session_id),
-                    )
-                    conn.commit()
-                    return
+            # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
+            status_row = conn.execute(
+                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if status_row and status_row["status"] == "cancelling":
+                conn.execute(
+                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                    (utc_now_iso(), session_id),
+                )
+                conn.commit()
+                return
 
+            # BATCH-05: In-memory counters (was per-job _update_session_counter calls)
+            scored_count = 0
+            skipped_count = 0
+
+            for row in rows:
                 job_row = dict(row)
 
                 # Pre-Haiku exclusion filter
@@ -302,18 +306,28 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
                 if excluded:
                     logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
-                    _update_session_counter(conn, session_id, "skipped")
+                    skipped_count += 1
                     continue
 
                 try:
                     result = score_and_persist_haiku(conn, job_row, config, client, profile)
-                    _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
+                    if result is not None:
+                        scored_count += 1
+                    else:
+                        skipped_count += 1
                 except Exception as e:
                     logger.warning(
                         "Batch Haiku: error scoring job '%s': %s -- continuing",
                         job_row.get("dedup_key"), e,
                     )
-                    _update_session_counter(conn, session_id, "skipped")
+                    skipped_count += 1
+
+            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
+            conn.execute(
+                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                (scored_count, skipped_count, session_id),
+            )
+            conn.commit()
 
             # All jobs processed — mark done
             _finish_session(conn, db_path, session_id, "done", "haiku")
@@ -355,29 +369,43 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                 (threshold,),
             ).fetchall()
 
-            for row in rows:
-                # Check cancellation status before each job
-                status_row = conn.execute(
-                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-                ).fetchone()
-                if status_row and status_row["status"] == "cancelling":
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                        (utc_now_iso(), session_id),
-                    )
-                    conn.commit()
-                    return
+            # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
+            status_row = conn.execute(
+                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if status_row and status_row["status"] == "cancelling":
+                conn.execute(
+                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                    (utc_now_iso(), session_id),
+                )
+                conn.commit()
+                return
 
+            # BATCH-05: In-memory counters (was per-job _update_session_counter calls)
+            scored_count = 0
+            skipped_count = 0
+
+            for row in rows:
                 job_row = dict(row)
                 try:
                     result = score_and_persist_sonnet(conn, job_row, config, client, profile)
-                    _update_session_counter(conn, session_id, "scored" if result is not None else "skipped")
+                    if result is not None:
+                        scored_count += 1
+                    else:
+                        skipped_count += 1
                 except Exception as e:
                     logger.warning(
                         "Batch Sonnet: error evaluating job '%s': %s -- continuing",
                         job_row.get("dedup_key"), e,
                     )
-                    _update_session_counter(conn, session_id, "skipped")
+                    skipped_count += 1
+
+            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
+            conn.execute(
+                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                (scored_count, skipped_count, session_id),
+            )
+            conn.commit()
 
             # All jobs processed — mark done
             _finish_session(conn, db_path, session_id, "done", "sonnet")
@@ -385,17 +413,6 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     except Exception as e:
         logger.error("Batch Sonnet background thread failed: %s", e)
         _mark_session_error(db_path, session_id, str(e)[:500])
-
-
-def _update_session_counter(conn, session_id: int, counter: str) -> None:
-    """Increment a batch session counter ('scored' or 'skipped') and commit."""
-    if counter not in ("scored", "skipped"):
-        raise ValueError(f"Invalid counter name: {counter!r}")
-    conn.execute(
-        f"UPDATE batch_score_sessions SET {counter} = {counter} + 1 WHERE id = ?",
-        (session_id,),
-    )
-    conn.commit()
 
 
 def _finish_session(conn, db_path: str, session_id: int, status: str, session_type: str) -> None:
