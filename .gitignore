@@ -20,6 +20,7 @@ __pycache__/
 
 # Reports
 reports/
+eval_results/
 
 # IDE
 .vscode/
