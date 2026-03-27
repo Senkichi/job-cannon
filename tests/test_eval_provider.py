@@ -1,4 +1,4 @@
-"""Unit tests for eval_provider.py pure functions.
+"""Unit tests for eval_provider.py pure functions and CLI orchestrator.
 
 Covers:
 - sample_jobs: DB query filtering, row structure
@@ -6,6 +6,8 @@ Covers:
 - compute_metrics: Pearson r, schema adherence, latency stats, edge cases
 - compute_verdict: SUITABLE/MARGINAL/NOT_RECOMMENDED mapping
 - save_report: directory creation, JSON output structure
+- run_eval: no-jobs exit path
+- parse_args: defaults and custom argument parsing
 """
 
 from __future__ import annotations
@@ -13,8 +15,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,7 +25,9 @@ import eval_provider
 from eval_provider import (
     compute_metrics,
     compute_verdict,
+    parse_args,
     reconstruct_prompt,
+    run_eval,
     sample_jobs,
     save_report,
 )
@@ -472,3 +477,111 @@ class TestSaveReport:
         report = {"meta": {}, "aggregate": {}, "per_job": []}
         result = save_report(report, "gemini", output_dir=str(tmp_path))
         assert isinstance(result, Path)
+
+
+# ---------------------------------------------------------------------------
+# Tests: run_eval (integration — no-jobs exit path)
+# ---------------------------------------------------------------------------
+
+
+class TestRunEval:
+    def test_run_eval_no_jobs_exits(self, tmp_path):
+        """run_eval calls sys.exit(1) when no Sonnet-scored jobs exist in DB."""
+        # Build minimal config and profile stubs
+        mock_config = {
+            "db": {"path": str(tmp_path / "jobs.db")},
+            "profile": {},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}},
+        }
+        mock_profile = {"positions": [], "skills": [], "education": []}
+        mock_thresholds = {
+            "correlation_suitable": 0.85,
+            "correlation_marginal": 0.70,
+            "adherence_suitable": 0.95,
+            "adherence_marginal": 0.80,
+        }
+
+        # In-memory connection with no qualifying rows
+        empty_conn = sqlite3.connect(":memory:")
+        empty_conn.row_factory = sqlite3.Row
+        empty_conn.execute(
+            """CREATE TABLE jobs (
+                dedup_key TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                company TEXT NOT NULL,
+                location TEXT NOT NULL,
+                salary_min INTEGER,
+                salary_max INTEGER,
+                jd_full TEXT,
+                sonnet_score REAL,
+                fit_analysis TEXT,
+                haiku_score INTEGER
+            )"""
+        )
+
+        @contextmanager
+        def mock_standalone_conn(_db_path):
+            yield empty_conn
+
+        with (
+            patch("eval_provider.load_config", return_value=mock_config),
+            patch("eval_provider.load_profile", return_value=mock_profile),
+            patch("eval_provider.standalone_connection", mock_standalone_conn),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_eval(
+                provider="gemini",
+                model=None,
+                sample_size=10,
+                thresholds=mock_thresholds,
+                skip_confirm=True,
+            )
+
+        assert exc_info.value.code == 1
+
+        empty_conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_args
+# ---------------------------------------------------------------------------
+
+
+class TestParseArgs:
+    def test_parse_args_defaults(self):
+        """parse_args with only --provider uses correct defaults."""
+        args = parse_args(["--provider", "gemini"])
+        assert args.provider == "gemini"
+        assert args.model is None
+        assert args.sample_size == 20
+        assert args.correlation_suitable == pytest.approx(0.85)
+        assert args.correlation_marginal == pytest.approx(0.70)
+        assert args.adherence_suitable == pytest.approx(0.95)
+        assert args.adherence_marginal == pytest.approx(0.80)
+        assert args.yes is False
+
+    def test_parse_args_custom(self):
+        """parse_args correctly parses all custom arguments."""
+        args = parse_args([
+            "--provider", "ollama",
+            "--model", "llama3",
+            "--sample-size", "5",
+            "--correlation-suitable", "0.90",
+            "--correlation-marginal", "0.75",
+            "--adherence-suitable", "0.98",
+            "--adherence-marginal", "0.85",
+            "--yes",
+        ])
+        assert args.provider == "ollama"
+        assert args.model == "llama3"
+        assert args.sample_size == 5
+        assert args.correlation_suitable == pytest.approx(0.90)
+        assert args.correlation_marginal == pytest.approx(0.75)
+        assert args.adherence_suitable == pytest.approx(0.98)
+        assert args.adherence_marginal == pytest.approx(0.85)
+        assert args.yes is True
+
+    def test_parse_args_requires_provider(self):
+        """parse_args raises SystemExit when --provider is missing."""
+        with pytest.raises(SystemExit):
+            parse_args([])

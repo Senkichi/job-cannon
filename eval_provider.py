@@ -1,29 +1,41 @@
-"""Evaluation framework pure functions for benchmarking alternative model providers.
+"""Evaluation framework for benchmarking alternative model providers.
 
-Provides five pure functions used by the CLI evaluation tool (Plan 02):
+Provides pure functions (Plan 01) and CLI orchestrator (Plan 02):
+
+Pure functions:
 - sample_jobs: Query baseline jobs with stored Sonnet scores
 - reconstruct_prompt: Rebuild the exact Sonnet prompt from a job row
 - compute_metrics: Pearson r, schema adherence rate, latency stats
 - compute_verdict: Map metrics to SUITABLE/MARGINAL/NOT_RECOMMENDED
 - save_report: Write JSON report to eval_results/ directory
 
-All functions are side-effect-free except save_report (writes a file).
-No Flask dependencies — designed for standalone CLI use.
+CLI orchestrator (Plan 02):
+- run_eval: End-to-end evaluation: sample -> call provider -> metrics -> report
+- parse_args: argparse entry point
+- main: __main__ entry point
 
-Usage (via Plan 02 CLI wrapper):
+Usage:
     python eval_provider.py --provider gemini --sample-size 20
+    python eval_provider.py --provider ollama --model llama3 --yes
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
-from datetime import datetime
+import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from job_finder.config import load_config
+from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import call_model, resolve_provider_config
+from job_finder.web.profile_schema import load_profile
 from job_finder.web.scoring_types import format_salary_range
-from job_finder.web.sonnet_evaluator import _SYSTEM_PROMPT
+from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, _SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +311,272 @@ def save_report(
 
     file_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return file_path
+
+
+# ---------------------------------------------------------------------------
+# run_eval orchestrator
+# ---------------------------------------------------------------------------
+
+
+def run_eval(
+    provider: str,
+    model: str | None,
+    sample_size: int,
+    thresholds: dict,
+    skip_confirm: bool = False,
+) -> None:
+    """Orchestrate a full provider evaluation: sample, call, measure, report.
+
+    Args:
+        provider: Provider name to evaluate ("gemini" or "ollama").
+        model: Model identifier override. If None, use config's default for sonnet tier.
+        sample_size: Number of jobs to sample from the DB.
+        thresholds: Dict with keys correlation_suitable, correlation_marginal,
+                    adherence_suitable, adherence_marginal.
+        skip_confirm: If True, skip the confirmation prompt.
+    """
+    # 1. Load config and profile
+    config = load_config()
+    experience_profile = load_profile()
+
+    # 2. Build eval config override — route sonnet tier to target provider, no fallback
+    resolved = resolve_provider_config("sonnet", config)
+    eval_model = model or resolved["model"]
+    eval_config = dict(config)
+    eval_config["providers"] = {
+        "sonnet": {
+            "provider": provider,
+            "model": eval_model,
+            "fallback": None,
+        }
+    }
+
+    # 3. Open DB and sample jobs — connection wraps entire loop (call_model needs it)
+    with standalone_connection(config["db"]["path"]) as conn:
+        jobs = sample_jobs(conn, sample_size)
+
+        if len(jobs) == 0:
+            print("No Sonnet-scored jobs found. Run batch Sonnet scoring first.")
+            sys.exit(1)
+
+        # 4. Confirmation prompt
+        if not skip_confirm:
+            print(f"\nEvaluation Plan:")
+            print(f"  Provider : {provider}")
+            print(f"  Model    : {eval_model}")
+            print(f"  Jobs     : {len(jobs)}")
+            answer = input("\nProceed? [y/N]: ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("Aborted.")
+                sys.exit(0)
+
+        # 5. Per-job evaluation loop
+        per_job_results: list[dict] = []
+        total = len(jobs)
+
+        for i, job in enumerate(jobs):
+            system, user_message = reconstruct_prompt(job, experience_profile, config)
+            messages = [{"role": "user", "content": user_message}]
+
+            t0 = time.perf_counter()
+            eval_score: float | None = None
+            schema_valid = False
+            error: str | None = None
+
+            try:
+                result = call_model(
+                    tier="sonnet",
+                    system=system,
+                    messages=messages,
+                    conn=conn,
+                    config=eval_config,
+                    output_schema=SONNET_SCHEMA,
+                    job_id=job["dedup_key"],
+                    purpose="provider_eval",
+                    max_tokens=2048,
+                    client=None,
+                )
+                eval_score = result.data.get("score")
+                schema_valid = result.schema_valid
+            except Exception as exc:
+                error = str(exc)
+
+            latency = time.perf_counter() - t0
+
+            baseline = job["sonnet_score"]
+            print(
+                f"[{i + 1}/{total}] {job['title']} @ {job['company']} "
+                f"— score: {eval_score} (baseline: {baseline}) {latency:.1f}s"
+                + (f" [ERROR: {error}]" if error else "")
+            )
+
+            per_job_results.append({
+                "dedup_key": job["dedup_key"],
+                "title": job["title"],
+                "company": job["company"],
+                "baseline_score": baseline,
+                "eval_score": eval_score,
+                "schema_valid": schema_valid,
+                "latency_seconds": latency,
+                "error": error,
+            })
+
+        # 6. Compute metrics and verdict
+        metrics = compute_metrics(per_job_results)
+        verdict = compute_verdict(
+            metrics.get("score_correlation"),
+            metrics["schema_adherence_rate"],
+            thresholds,
+        )
+
+        # 7. Build and save report
+        report = {
+            "meta": {
+                "provider": provider,
+                "model": eval_model,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "sample_size": len(jobs),
+                "db_path": config["db"]["path"],
+            },
+            "aggregate": {
+                **metrics,
+                "verdict": verdict,
+                "thresholds_used": thresholds,
+            },
+            "per_job": per_job_results,
+        }
+        report_path = save_report(report, provider)
+
+    # 8. Print summary
+    _supports_color = sys.stdout.isatty()
+    _verdict_colors = {
+        "SUITABLE": "\033[92m",      # green
+        "MARGINAL": "\033[93m",      # yellow
+        "NOT_RECOMMENDED": "\033[91m",  # red
+    }
+    _reset = "\033[0m"
+
+    verdict_display = verdict
+    if _supports_color and verdict in _verdict_colors:
+        verdict_display = f"{_verdict_colors[verdict]}{verdict}{_reset}"
+
+    corr = metrics.get("score_correlation")
+    corr_str = f"{corr:.3f}" if corr is not None else "N/A (insufficient data)"
+
+    print("\n" + "=" * 60)
+    print(f"VERDICT: {verdict_display}")
+    print("=" * 60)
+    print(f"  Score correlation (Pearson r) : {corr_str}")
+    print(f"  Schema adherence rate         : {metrics['schema_adherence_rate']:.1%}")
+    print(f"  Median latency                : {metrics['median_latency_seconds']:.1f}s")
+    print(f"  Mean latency                  : {metrics['mean_latency_seconds']:.1f}s")
+    print(f"  Report saved to               : {report_path}")
+    print("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# argparse CLI entry point
+# ---------------------------------------------------------------------------
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments for eval_provider.
+
+    Args:
+        argv: Argument list (default: sys.argv[1:]).
+
+    Returns:
+        Parsed argparse.Namespace.
+    """
+    parser = argparse.ArgumentParser(
+        prog="eval_provider",
+        description=(
+            "Benchmark an alternative model provider against stored Sonnet scores.\n\n"
+            "Samples jobs with baseline Sonnet scores from the DB, calls the target\n"
+            "provider with the same prompts, and computes score correlation and schema\n"
+            "adherence to produce a SUITABLE/MARGINAL/NOT_RECOMMENDED verdict."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--provider",
+        required=True,
+        choices=["gemini", "ollama"],
+        help="Provider to evaluate.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Model identifier override (e.g. 'gemini-1.5-pro', 'llama3'). "
+            "Defaults to the model configured for the sonnet tier."
+        ),
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Number of jobs to sample from the DB (default: 20).",
+    )
+    parser.add_argument(
+        "--correlation-suitable",
+        type=float,
+        default=0.85,
+        metavar="R",
+        help="Pearson r threshold for SUITABLE verdict (default: 0.85).",
+    )
+    parser.add_argument(
+        "--correlation-marginal",
+        type=float,
+        default=0.70,
+        metavar="R",
+        help="Pearson r threshold for MARGINAL verdict (default: 0.70).",
+    )
+    parser.add_argument(
+        "--adherence-suitable",
+        type=float,
+        default=0.95,
+        metavar="RATE",
+        help="Schema adherence rate threshold for SUITABLE verdict (default: 0.95).",
+    )
+    parser.add_argument(
+        "--adherence-marginal",
+        type=float,
+        default=0.80,
+        metavar="RATE",
+        help="Schema adherence rate threshold for MARGINAL verdict (default: 0.80).",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip confirmation prompt (non-interactive mode).",
+    )
+    return parser.parse_args(argv)
+
+
+# ---------------------------------------------------------------------------
+# __main__ entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Parse CLI args and run provider evaluation."""
+    args = parse_args()
+    thresholds = {
+        "correlation_suitable": args.correlation_suitable,
+        "correlation_marginal": args.correlation_marginal,
+        "adherence_suitable": args.adherence_suitable,
+        "adherence_marginal": args.adherence_marginal,
+    }
+    run_eval(
+        provider=args.provider,
+        model=args.model,
+        sample_size=args.sample_size,
+        thresholds=thresholds,
+        skip_confirm=args.yes,
+    )
+
+
+if __name__ == "__main__":
+    main()
