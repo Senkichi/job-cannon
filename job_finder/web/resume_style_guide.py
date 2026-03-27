@@ -17,8 +17,7 @@ import sqlite3
 
 import anthropic
 
-from job_finder.config import DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
 
@@ -160,11 +159,6 @@ def extract_style_guide(
     """
     try:
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
 
         if existing_guide:
             system = (
@@ -197,19 +191,19 @@ def extract_style_guide(
                 f"Extract the formatting and style preferences from this resume."
             )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=STYLE_GUIDE_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=STYLE_GUIDE_SCHEMA,
             job_id=None,
             purpose="resume_style_extraction",
-            config=config,
             max_tokens=1024,
+            client=client,
         )
-        return result
+        return result_obj.data
 
     except Exception as e:
         logger.warning("extract_style_guide: failed: %s", e)
@@ -274,20 +268,20 @@ def merge_guidelines_into_guide(
             f"Merge the guidelines into the style guide."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=STYLE_GUIDE_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=STYLE_GUIDE_SCHEMA,
             job_id=None,
             purpose=purpose,
-            config=config,
             max_tokens=2048,
+            client=client,
         )
 
-        return result
+        return result_obj.data
 
     except Exception as e:
         logger.warning("merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
@@ -322,17 +316,12 @@ def migrate_style_guide(
         existing_guide = load_style_guide(style_guide_path)
 
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
             client=client,
-            model=model,
+            model="",
             conn=conn,
             config=config,
             mode="populate_new",
