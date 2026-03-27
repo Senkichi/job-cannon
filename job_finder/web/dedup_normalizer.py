@@ -190,20 +190,18 @@ def normalize_title(title: str) -> str:
 
 
 def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
-    """Compute the normalized dedup_key for a job.
-
-    Location is INTENTIONALLY EXCLUDED — same company + same title = same job
-    regardless of location text differences.
+    """Backward-compat wrapper. Prefer Job.normalized_dedup_key().
 
     Args:
         company: Raw company name.
         title: Raw job title.
-        location: Ignored. Kept for backward-compatible call signatures.
+        location: Ignored.
 
     Returns:
         String in format "{normalized_company}|{normalized_title}"
     """
-    return f"{normalize_company(company)}|{normalize_title(title)}"
+    from job_finder.models import Job
+    return Job.normalized_dedup_key(company, title, location)
 
 
 def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
@@ -237,7 +235,7 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     groups: dict[str, list[dict]] = {}
     for row in rows:
         row_dict = dict(row)
-        norm_key = normalized_dedup_key(row_dict["company"], row_dict["title"])
+        norm_key = f"{normalize_company(row_dict['company'])}|{normalize_title(row_dict['title'])}"
         groups.setdefault(norm_key, []).append(row_dict)
 
     merged_count = 0

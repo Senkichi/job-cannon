@@ -266,29 +266,29 @@ class TestNormalizeTitle:
 
 class TestNormalizedDedupKey:
     def test_location_excluded_from_key(self):
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
-        key_sf = normalized_dedup_key("Klaviyo Inc.", "Sr. Software Engineer", "San Francisco, CA")
-        key_nyc = normalized_dedup_key("Klaviyo", "Senior Software Engineer", "NYC")
+        from job_finder.models import Job
+        key_sf = Job.normalized_dedup_key("Klaviyo Inc.", "Sr. Software Engineer", "San Francisco, CA")
+        key_nyc = Job.normalized_dedup_key("Klaviyo", "Senior Software Engineer", "NYC")
         assert key_sf == key_nyc
 
     def test_key_format_is_company_pipe_title(self):
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
-        key = normalized_dedup_key("Google LLC", "Senior Engineer")
+        from job_finder.models import Job
+        key = Job.normalized_dedup_key("Google LLC", "Senior Engineer")
         assert "|" in key
         # Should not have a third segment (no location)
         parts = key.split("|")
         assert len(parts) == 2
 
     def test_different_companies_differ(self):
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
-        key1 = normalized_dedup_key("Google", "Engineer")
-        key2 = normalized_dedup_key("Meta", "Engineer")
+        from job_finder.models import Job
+        key1 = Job.normalized_dedup_key("Google", "Engineer")
+        key2 = Job.normalized_dedup_key("Meta", "Engineer")
         assert key1 != key2
 
     def test_different_titles_differ(self):
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
-        key1 = normalized_dedup_key("Google", "Engineer")
-        key2 = normalized_dedup_key("Google", "Manager")
+        from job_finder.models import Job
+        key1 = Job.normalized_dedup_key("Google", "Engineer")
+        key2 = Job.normalized_dedup_key("Google", "Manager")
         assert key1 != key2
 
 
@@ -299,7 +299,7 @@ class TestNormalizedDedupKey:
 class TestJobDedupKey:
     def test_dedup_key_uses_normalized_format(self):
         """Job.dedup_key should return company|title (no location)."""
-        from job_finder.web.dedup_normalizer import normalized_dedup_key
+        from job_finder.models import Job as JobModel
         job = Job(
             title="Sr. Engineer",
             company="Klaviyo Inc.",
@@ -307,7 +307,7 @@ class TestJobDedupKey:
             source="test",
             source_url="https://example.com",
         )
-        expected = normalized_dedup_key("Klaviyo Inc.", "Sr. Engineer")
+        expected = JobModel.normalized_dedup_key("Klaviyo Inc.", "Sr. Engineer")
         assert job.dedup_key == expected
 
     def test_dedup_key_ignores_location(self):
@@ -507,7 +507,8 @@ class TestRunRetroactiveDedup:
 
     def test_dedup_key_updated_to_normalized_format(self, mem_db):
         """After retroactive dedup, canonical row's dedup_key is the new normalized format."""
-        from job_finder.web.dedup_normalizer import normalized_dedup_key, run_retroactive_dedup
+        from job_finder.models import Job
+        from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
         _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
                     first_seen="2026-01-01T00:00:00")
@@ -516,7 +517,7 @@ class TestRunRetroactiveDedup:
 
         rows = mem_db.execute("SELECT dedup_key FROM jobs").fetchall()
         assert len(rows) == 1
-        expected_key = normalized_dedup_key("Acme Inc.", "Senior Engineer")
+        expected_key = Job.normalized_dedup_key("Acme Inc.", "Senior Engineer")
         assert rows[0]["dedup_key"] == expected_key
 
     def test_offers_higher_status_than_rejected(self, mem_db):
