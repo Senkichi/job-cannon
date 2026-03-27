@@ -181,7 +181,7 @@ def test_call_model_routes_to_configured_provider(tmp_path):
 
         result = call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
-    mock_make_adapter.assert_called_once_with("gemini", None, conn, config)
+    mock_make_adapter.assert_called_once_with("gemini", None, conn, config, job_id=None, purpose="")
     assert result.provider == "gemini"
 
 
@@ -264,7 +264,7 @@ def test_call_model_fallback_to_anthropic(tmp_path):
             client=mock_client,
         )
 
-    mock_anthropic_cls.assert_called_once_with(client=mock_client, conn=conn, config=config)
+    mock_anthropic_cls.assert_called_once_with(client=mock_client, conn=conn, config=config, job_id=None, purpose="")
     assert result.provider == "anthropic"
     assert result.data == {"score": 70}
 

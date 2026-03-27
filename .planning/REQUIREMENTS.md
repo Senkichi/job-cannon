@@ -25,7 +25,7 @@ Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap ph
 
 - [x] **MIGR-01**: All call_claude() call sites migrated to call_model() with logical tier names
 - [x] **MIGR-02**: All direct anthropic.Anthropic() usage in blueprints/orchestrators refactored to use provider layer
-- [x] **MIGR-03**: config.example.yaml updated with providers section examples
+- [ ] **MIGR-03**: config.example.yaml updated with providers section examples
 
 ### Cost Tracking
 
@@ -104,7 +104,7 @@ None identified for this milestone.
 | ADAPT-03 | Phase 25 | Complete |
 | MIGR-01 | Phase 27 | Complete |
 | MIGR-02 | Phase 27 | Complete |
-| MIGR-03 | Phase 27 | Complete |
+| MIGR-03 | Phase 27 | Pending |
 | COST-01 | Phase 24 | Pending |
 | COST-02 | Phase 26 | Complete |
 | COST-03 | Phase 26 | Complete |

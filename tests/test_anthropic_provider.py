@@ -96,6 +96,8 @@ def test_call_passes_all_params_to_call_claude(provider, mock_client, mock_conn)
         messages=messages,
         output_schema=schema,
         conn=mock_conn,
+        job_id=None,
+        purpose="",
         config={},
         max_tokens=2048,
         timeout=30.0,
