@@ -58,7 +58,7 @@
 
 - [x] **Phase 19: Housekeeping** — Move 11 completed todos from pending/ to done/ (completed 2026-03-27)
 - [x] **Phase 20: Surgical Fixes** — Mechanical fixes: Indeed dedup, renames, models.py layer violation, SQLite helper, config thread-safety (completed 2026-03-27)
-- [x] **Phase 21: Test Coverage** — Companies blueprint test suite (completed 2026-03-27)
+- [x] **Phase 21: Test Coverage** — Companies blueprint test suite (completed 2026-03-27)
 - [ ] **Phase 22: Module Splits** — Decompose 7 god-object modules along responsibility boundaries
 - [ ] **Phase 23: N+1 Batching** — Batch 5 N+1 query patterns across scoring and detection pipelines
 
@@ -117,7 +117,15 @@ Plans:
   6. `pipeline_runner.py` and `scoring_runner.py` exist with scoring orchestration in the new module
   7. `settings.py` and `guidelines.py` blueprints are registered and all settings/guidelines routes respond correctly
   8. Full test suite passes with no regressions after all splits
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+- [ ] 22-01-PLAN.md -- Split ats_scanner.py into ats_detection.py + ats_prober.py + ats_scanner.py
+- [ ] 22-02-PLAN.md -- Split resume_generator.py into resume_generator.py + resume_multi_version.py
+- [ ] 22-03-PLAN.md -- Split settings.py into settings.py + guidelines.py blueprint
+- [ ] 22-04-PLAN.md -- Split data_enricher.py into enrichment_tiers.py + company_enricher.py + data_enricher.py
+- [ ] 22-05-PLAN.md -- Split dashboard.py into batch_scoring.py + sync.py + dashboard.py blueprints
+- [ ] 22-06-PLAN.md -- Split profile.py into resume_review.py + profile_recommendations.py + profile.py blueprints
+- [ ] 22-07-PLAN.md -- Split pipeline_runner.py into scoring_runner.py + pipeline_runner.py
 
 ### Phase 23: N+1 Batching
 **Goal**: Five N+1 query patterns are replaced with batch queries, reducing per-job DB round-trips during scoring and stale detection to O(1) per batch
@@ -156,6 +164,6 @@ Plans:
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
 | 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
-| 21. Test Coverage | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 22. Module Splits | v1.4 | 0/TBD | Not started | - |
+| 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
+| 22. Module Splits | v1.4 | 0/7 | Not started | - |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
