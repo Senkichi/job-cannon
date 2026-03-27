@@ -24,14 +24,12 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None
+import anthropic
 
-from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.config import DEFAULT_MULTI_VERSION_THRESHOLD
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import call_model
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 
@@ -262,21 +260,6 @@ def generate_resume_single(
     Returns:
         Structured resume dict matching RESUME_SCHEMA, or None if budget exceeded.
     """
-    # Budget gate -- callers decide what to do on False
-    if not cost_gate(conn, config, "sonnet"):
-        logger.info(
-            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
-            job_row.get("title"),
-            job_row.get("company"),
-        )
-        return None
-
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("sonnet", DEFAULT_MODEL_SONNET)
-    )
-
     # Build fit_analysis context from job_row if present
     fit_analysis = job_row.get("fit_analysis")
     priority_skills: list[str] = []
@@ -351,22 +334,26 @@ def generate_resume_single(
         user_message += f"- Contact line: {contact_hint}\n"
 
     try:
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=RESUME_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=RESUME_SCHEMA,
             job_id=job_row.get("dedup_key"),
             purpose="resume_generation",
-            config=config,
             max_tokens=4096,
+            client=client,
         )
-    except Exception:
-        logger.error("call_claude failed in generate_resume_single for '%s'",
-                      job_row.get("dedup_key"), exc_info=True)
-        raise
+    except BudgetExceededError:
+        logger.info(
+            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
+            job_row.get("title"),
+            job_row.get("company"),
+        )
+        return None
+    result = result_obj.data
 
     logger.debug(
         "generate_resume_single: generated resume for '%s' @ '%s'",
@@ -526,19 +513,15 @@ def generate_resume_background(
             # Upload to Drive
             drive_service = get_drive_service()
             folder_id = config.get("drive", {}).get("folder_id", "")
-            if not folder_id:
-                logger.warning("Drive folder_id not configured — skipping upload for gen_id=%s", gen_id)
-                doc_url = None
-            else:
-                convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
+            convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
 
-                doc_url = upload_to_drive(
-                    drive_service,
-                    doc_name,
-                    docx_buffer,
-                    folder_id=folder_id,
-                    convert_to_gdoc=convert_to_gdoc,
-                )
+            doc_url = upload_to_drive(
+                drive_service,
+                doc_name,
+                docx_buffer,
+                folder_id=folder_id,
+                convert_to_gdoc=convert_to_gdoc,
+            )
 
             # Transition: generating -> done (update generation_type alongside status)
             conn.execute(

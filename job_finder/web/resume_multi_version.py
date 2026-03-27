@@ -8,9 +8,9 @@ from typing import Any, Callable
 
 import anthropic
 
-from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import call_model
 from job_finder.web.resume_generator import (
     RESUME_SCHEMA,
     STRATEGY_POOL,
@@ -43,12 +43,6 @@ def _haiku_select_strategies(
         List of exactly 3 strategy identifier strings from STRATEGY_POOL.
         Falls back to first 3 from STRATEGY_POOL if Haiku call fails.
     """
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("haiku", DEFAULT_MODEL_HAIKU)
-    )
-
     # Build strategy descriptions for the prompt
     strategy_list = "\n".join(
         f"- {name}: {_STRATEGY_DESCRIPTIONS.get(name, name)}"
@@ -88,19 +82,19 @@ def _haiku_select_strategies(
     }
 
     try:
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=strategy_schema,
             conn=conn,
+            config=config,
+            output_schema=strategy_schema,
             job_id=job_row.get("dedup_key"),
             purpose="resume_strategy",
-            config=config,
             max_tokens=512,
+            client=client,
         )
-        strategies = result.get("strategies", [])
+        strategies = result_obj.data.get("strategies", [])
         # Validate: ensure we got 3 valid strategy identifiers
         valid = [s for s in strategies if s in STRATEGY_POOL]
         if len(valid) >= 3:
@@ -156,18 +150,6 @@ def _generate_single_variant(
             f"STRATEGY EMPHASIS: {strategy_desc}. "
             f"Weight your achievement selection and summary framing toward this angle."
         )
-
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
-
-        # Check budget gate
-        if not cost_gate(conn, config, "sonnet"):
-            raise RuntimeError(
-                f"Budget exceeded during variant generation for strategy: {strategy}"
-            )
 
         # Build the same user message as generate_resume_single
         fit_analysis = job_row.get("fit_analysis")
@@ -239,19 +221,24 @@ def _generate_single_variant(
         if contact_hint:
             user_message += f"- Contact line: {contact_hint}\n"
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
-            system=strategy_system,
-            messages=[{"role": "user", "content": user_message}],
-            output_schema=RESUME_SCHEMA,
-            conn=conn,
-            job_id=job_row.get("dedup_key"),
-            purpose="resume_generation",
-            config=config,
-            max_tokens=4096,
-        )
-        return result
+        try:
+            result_obj = call_model(
+                tier="sonnet",
+                system=strategy_system,
+                messages=[{"role": "user", "content": user_message}],
+                conn=conn,
+                config=config,
+                output_schema=RESUME_SCHEMA,
+                job_id=job_row.get("dedup_key"),
+                purpose="resume_generation",
+                max_tokens=4096,
+                client=client,
+            )
+        except BudgetExceededError:
+            raise RuntimeError(
+                f"Budget exceeded during variant generation for strategy: {strategy}"
+            )
+        return result_obj.data
 
 
 def generate_resume_multi(
@@ -357,12 +344,6 @@ def _synthesize_variants(
     with standalone_connection(db_path) as conn:
         client = anthropic.Anthropic()
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
-
         synthesis_system = (
             "You are a resume editor. You have multiple resume variants for the same candidate "
             "and job. Select the BEST professional summary, the BEST achievement bullets for "
@@ -394,16 +375,16 @@ def _synthesize_variants(
             f"- Output a single unified resume combining the best elements\n"
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="sonnet",
             system=synthesis_system,
             messages=[{"role": "user", "content": user_message}],
-            output_schema=RESUME_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=RESUME_SCHEMA,
             job_id=job_row.get("dedup_key"),
             purpose="resume_synthesis",
-            config=config,
             max_tokens=4096,
+            client=client,
         )
-        return result
+        return result_obj.data
