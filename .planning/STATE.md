@@ -1,29 +1,29 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Tech Debt Sweep
-status: v1.4 milestone complete
-last_updated: "2026-03-27T07:22:40.283Z"
+milestone: v1.0
+milestone_name: milestone
+status: Ready to execute
+last_updated: "2026-03-27T18:38:00.000Z"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 7
+  completed_phases: 1
+  total_plans: 13
+  completed_plans: 10
 ---
 
 # State
 
 ## Current Position
 
-Phase: 23 (N+1 Batching) — EXECUTING
-Plan: 2 of 3
+Phase: 24 (Provider Foundation) — COMPLETE
+Plan: 1 of 1
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 23 — N+1 Batching
+**Current focus:** Phase 24 — Provider Foundation (complete)
 
 ## Performance Metrics
 
@@ -35,8 +35,9 @@ See: .planning/PROJECT.md (updated 2026-03-25)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 22-01: 12min (2 tasks, 7 files)
 - Phase 23-01: 4min (1 task TDD, 2 files)
-- Average duration: ~8min
-- Total execution time: ~41min
+- Phase 24-01: 2min (1 task TDD, 3 files)
+- Average duration: ~7min
+- Total execution time: ~43min
 
 *Updated after each plan completion*
 
@@ -106,5 +107,11 @@ None.
 - Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
 - Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
 
+### Decisions Made in Phase 24
+
+- _TIER_DEFAULTS dict maps tier names to DEFAULT_MODEL_* constants — single lookup table for resolve_provider_config, no if/elif chain (Plan 01)
+- providers/__init__.py empty package marker (docstring only) — Phase 25 populates with adapter modules, no re-exports (Plan 01)
+- resolve_provider_config returns plain dict — simple, JSON-serializable; Phase 26 dispatcher will consume it (Plan 01)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 23 Plan 01 (N+1 Batch Prefetch in Scoring Runner)*
+*Last session: 2026-03-27 — Completed Phase 24 Plan 01 (Provider Foundation — ModelResult, BaseProvider, resolve_provider_config)*
