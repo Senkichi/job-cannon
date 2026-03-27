@@ -158,6 +158,8 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     from job_finder.web.blueprints.companies import companies_bp
     from job_finder.web.blueprints.costs import costs_bp
     from job_finder.web.blueprints.dashboard import dashboard_bp
+    from job_finder.web.blueprints.batch_scoring import batch_scoring_bp
+    from job_finder.web.blueprints.sync import sync_bp
     from job_finder.web.blueprints.detections import detections_bp
     from job_finder.web.blueprints.feedback import feedback_bp
     from job_finder.web.blueprints.jobs import jobs_bp
@@ -174,6 +176,8 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.register_blueprint(costs_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(batch_scoring_bp)
+    app.register_blueprint(sync_bp)
     app.register_blueprint(detections_bp)
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(profile_bp)
