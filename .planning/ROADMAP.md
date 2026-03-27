@@ -69,7 +69,7 @@
 **Milestone Goal:** Make all AI model calls configurable to route through Anthropic, Gemini, or Ollama via config.yaml, with an evaluation framework to benchmark alternatives before switching.
 
 - [x] **Phase 24: Provider Foundation** (2/2 plans) — completed 2026-03-27
-- [ ] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations
+- [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
 - [ ] **Phase 26: Dispatcher & Cost Tracking** — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
 - [ ] **Phase 27: Caller Migration** — Migrate all call sites from call_claude() to call_model()
 - [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
@@ -85,11 +85,11 @@
   2. Gemini adapter uses response_schema for structured output and retries automatically on HTTP 429 rate-limit errors
   3. Ollama adapter checks local service health on initialization and raises a clear error if unreachable
   4. All three adapters conform to the BaseProvider interface and are independently unit-testable with mocked transports
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 Plans:
 - [x] 25-01-PLAN.md — Install dependencies + Anthropic adapter (TDD)
 - [x] 25-02-PLAN.md — Gemini adapter with response_json_schema and 429 retry (TDD)
-- [ ] 25-03-PLAN.md — Ollama adapter with REST API and health check (TDD)
+- [x] 25-03-PLAN.md — Ollama adapter with REST API and health check (TDD)
 
 ### Phase 26: Dispatcher & Cost Tracking
 **Goal**: call_model() exists as the single dispatch point — it routes by tier, validates output schema, retries with error context, falls back to Anthropic, bypasses budget for free providers, and records provider in cost rows
@@ -153,7 +153,7 @@ Plans:
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 25. Provider Adapters | v1.5 | 2/3 | In Progress|  |
+| 25. Provider Adapters | v1.5 | 3/3 | Complete   | 2026-03-27 |
 | 26. Dispatcher & Cost Tracking | v1.5 | 0/? | Not started | - |
 | 27. Caller Migration | v1.5 | 0/? | Not started | - |
 | 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
