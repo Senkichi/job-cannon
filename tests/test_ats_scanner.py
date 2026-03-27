@@ -75,7 +75,7 @@ class TestExtractAtsFromUrls:
 
     def test_lever_jobs_url_returns_lever_and_slug(self):
         """jobs.lever.co/{slug}/... returns ('lever', slug)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.lever.co/acme/abc-123"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -83,7 +83,7 @@ class TestExtractAtsFromUrls:
 
     def test_lever_api_url_returns_lever_and_slug(self):
         """api.lever.co/v0/postings/{slug}/... returns ('lever', slug)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://api.lever.co/v0/postings/stripe?mode=json"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -91,7 +91,7 @@ class TestExtractAtsFromUrls:
 
     def test_greenhouse_boards_url_returns_greenhouse_and_slug(self):
         """boards.greenhouse.io/{slug}/... returns ('greenhouse', slug)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://boards.greenhouse.io/airbnb/jobs/12345"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -99,7 +99,7 @@ class TestExtractAtsFromUrls:
 
     def test_greenhouse_api_url_returns_greenhouse_and_slug(self):
         """boards-api.greenhouse.io/v1/boards/{slug}/... returns ('greenhouse', slug)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://boards-api.greenhouse.io/v1/boards/waymo/jobs"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -107,7 +107,7 @@ class TestExtractAtsFromUrls:
 
     def test_ashby_url_returns_ashby_and_slug(self):
         """jobs.ashbyhq.com/{slug}/... returns ('ashby', slug)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.ashbyhq.com/OpenAI/abc-uuid"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -115,7 +115,7 @@ class TestExtractAtsFromUrls:
 
     def test_non_ats_url_returns_none_none(self):
         """LinkedIn URL returns (None, None)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://www.linkedin.com/jobs/view/1234567/"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
@@ -123,14 +123,14 @@ class TestExtractAtsFromUrls:
 
     def test_empty_list_returns_none_none(self):
         """Empty source_urls list returns (None, None)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         platform, slug = extract_ats_from_urls([])
         assert platform is None
         assert slug is None
 
     def test_ashby_slug_preserves_exact_casing(self):
         """Ashby slug preserves exact URL casing (case-sensitive per Research Pitfall 3)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.ashbyhq.com/Ramp/some-job-uuid"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -138,7 +138,7 @@ class TestExtractAtsFromUrls:
 
     def test_multiple_urls_returns_first_match(self):
         """First ATS URL in list wins."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = [
             "https://www.linkedin.com/jobs/view/999/",
             "https://jobs.lever.co/stripe/job-id",
@@ -2144,7 +2144,7 @@ class TestAtsUrlPatternAudit:
 
     def test_lever_jobs_url_with_uuid_job_id(self):
         """Lever jobs.lever.co/{slug}/{uuid} format extracts correct slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.lever.co/stripe/abc123-def456-789"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2152,7 +2152,7 @@ class TestAtsUrlPatternAudit:
 
     def test_lever_jobs_url_with_query_params(self):
         """Lever URL with query params (?lever-origin=applied) still extracts slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.lever.co/openai/12345678-abcd-efgh?lever-origin=applied"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2160,7 +2160,7 @@ class TestAtsUrlPatternAudit:
 
     def test_lever_api_url_with_pagination_params(self):
         """Lever api.lever.co/v0/postings/{slug}?mode=json&skip=0&limit=100 extracts slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://api.lever.co/v0/postings/figma?mode=json&skip=0&limit=100"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2177,7 +2177,7 @@ class TestAtsUrlPatternAudit:
 
     def test_greenhouse_boards_url_with_job_id(self):
         """Greenhouse boards.greenhouse.io/{slug}/jobs/{id} extracts correct slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://boards.greenhouse.io/airbnb/jobs/6082884"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -2190,7 +2190,7 @@ class TestAtsUrlPatternAudit:
         # return incorrect slug for embed links. This is acceptable as real job URLs use the
         # /company/jobs/ID format.
         """
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         # boards.greenhouse.io/embed/job_board/js?for=waymo is an embed URL, not a direct job URL.
         # The regex matches /embed as the slug — this is a known pattern limitation.
         urls = ["https://boards.greenhouse.io/embed/job_board/js?for=waymo"]
@@ -2200,7 +2200,7 @@ class TestAtsUrlPatternAudit:
 
     def test_greenhouse_api_url_with_query_params(self):
         """Greenhouse boards-api URL with ?content=true extracts correct slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://boards-api.greenhouse.io/v1/boards/databricks/jobs?content=true"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -2217,7 +2217,7 @@ class TestAtsUrlPatternAudit:
 
     def test_ashby_url_with_job_id_preserves_case(self):
         """Ashby URL with job UUID preserves exact slug casing (case-sensitive)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.ashbyhq.com/OpenAI/12345-abcde-fghij"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2225,7 +2225,7 @@ class TestAtsUrlPatternAudit:
 
     def test_ashby_url_company_page_no_job_id(self):
         """Ashby URL with just company slug (no job ID) extracts slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.ashbyhq.com/Ramp"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2233,7 +2233,7 @@ class TestAtsUrlPatternAudit:
 
     def test_ashby_url_with_query_params(self):
         """Ashby URL with ?departmentId query param extracts slug."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://jobs.ashbyhq.com/notion/abcdef?departmentId=engineering"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2250,7 +2250,7 @@ class TestAtsUrlPatternAudit:
 
     def test_lever_wins_over_linkedin_in_mixed_url_list(self):
         """URL list with LinkedIn first and Lever second — Lever (first ATS match) wins."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = [
             "https://www.linkedin.com/jobs/view/987654321/",
             "https://jobs.lever.co/stripe/some-uuid",
@@ -2261,7 +2261,7 @@ class TestAtsUrlPatternAudit:
 
     def test_non_ats_greenhouse_domain_returns_none(self):
         """Greenhouse marketing URL (not a job board) returns (None, None)."""
-        from job_finder.web.ats_scanner import extract_ats_from_urls
+        from job_finder.web.ats_detection import extract_ats_from_urls
         urls = ["https://www.greenhouse.io/blog/hiring"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
