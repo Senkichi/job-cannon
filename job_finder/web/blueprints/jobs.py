@@ -386,22 +386,21 @@ def paste_jd(dedup_key: str):
     # Attempt Sonnet evaluation (budget-gated)
     error = None
     try:
-        from job_finder.web.claude_client import cost_gate
+        from job_finder.web.claude_client import BudgetExceededError
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
+        import anthropic
         config = current_app.config.get("JF_CONFIG", {})
-        if cost_gate(conn, config, "sonnet"):
-            import anthropic
-            client = anthropic.Anthropic()
-            profile = load_scoring_profile(config)
+        client = anthropic.Anthropic()
+        profile = load_scoring_profile(config)
 
-            # Refresh job row with jd_full
-            job = get_job(conn, dedup_key)
-            score_and_persist_sonnet(conn, job, config, client, profile)
-        else:
-            logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-            error = "Budget cap reached. Sonnet scoring skipped."
+        # Refresh job row with jd_full
+        job = get_job(conn, dedup_key)
+        score_and_persist_sonnet(conn, job, config, client, profile)
 
+    except BudgetExceededError:
+        logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+        error = "Budget cap reached. Sonnet scoring skipped."
     except ImportError as e:
         logger.warning("paste-jd: Sonnet evaluator not available: %s", e)
         error = "Scoring unavailable. JD saved for later."
@@ -457,35 +456,34 @@ def rescore(dedup_key: str):
     error = None
     t0 = _time.time()
     try:
-        from job_finder.web.claude_client import cost_gate
+        from job_finder.web.claude_client import BudgetExceededError
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
+        import anthropic
         config = current_app.config.get("JF_CONFIG", {})
-        if cost_gate(conn, config, "sonnet"):
-            import anthropic
-            client = anthropic.Anthropic()
-            profile = load_scoring_profile(config)
+        client = anthropic.Anthropic()
+        profile = load_scoring_profile(config)
 
-            result = score_and_persist_sonnet(conn, job, config, client, profile)
-            if result:
-                try:
-                    log_activity(
-                        db_path,
-                        ACTION_RESCORE,
-                        entity_id=dedup_key,
-                        metadata={
-                            "old_score": old_score,
-                            "new_score": result.get("score"),
-                            "duration_seconds": round(_time.time() - t0, 2),
-                            "status": "success",
-                        },
-                    )
-                except Exception:
-                    pass
-        else:
-            logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-            error = "Budget cap reached. Sonnet scoring skipped."
+        result = score_and_persist_sonnet(conn, job, config, client, profile)
+        if result:
+            try:
+                log_activity(
+                    db_path,
+                    ACTION_RESCORE,
+                    entity_id=dedup_key,
+                    metadata={
+                        "old_score": old_score,
+                        "new_score": result.get("score"),
+                        "duration_seconds": round(_time.time() - t0, 2),
+                        "status": "success",
+                    },
+                )
+            except Exception:
+                pass
 
+    except BudgetExceededError:
+        logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+        error = "Budget cap reached. Sonnet scoring skipped."
     except ImportError as e:
         logger.warning("rescore: Sonnet evaluator not available: %s", e)
         error = "Re-scoring failed. Try again later."

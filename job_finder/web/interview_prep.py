@@ -17,9 +17,9 @@ from datetime import datetime, timezone
 import anthropic
 import requests
 
-from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
+from job_finder.web.claude_client import BudgetExceededError
+from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 
 logger = logging.getLogger(__name__)
@@ -209,26 +209,8 @@ def _run_prep_generation(
         # --- Fetch company info via SerpAPI (best-effort) ---
         company_info = _fetch_company_info(company, config)
 
-        # --- Budget gate ---
-        if not cost_gate(conn, config, "sonnet"):  # "sonnet" tier covers Opus too
-            error_msg = "Monthly budget cap reached. Interview prep skipped."
-            logger.info(
-                "generate_interview_prep_background: budget exceeded for %s", dedup_key
-            )
-            conn.execute(
-                "UPDATE interview_preps SET status = 'error', error_msg = ? WHERE id = ?",
-                (error_msg, prep_id),
-            )
-            conn.commit()
-            return
-
         # --- Build system prompt ---
         system_prompt = _build_system_prompt(title, company, jd_full, profile, fit_analysis, company_info)
-
-        # --- Determine Opus model ---
-        opus_model = (
-            config.get("scoring", {}).get("models", {}).get("opus", DEFAULT_MODEL_OPUS)
-        )
 
         # --- Call Opus ---
         client = anthropic.Anthropic()
@@ -236,9 +218,8 @@ def _run_prep_generation(
             {"role": "user", "content": "Generate the interview preparation for this job application."}
         ]
 
-        result, cost_usd = call_claude(
-            client=client,
-            model=opus_model,
+        result_obj = call_model(
+            tier="opus",
             system=system_prompt,
             messages=messages,
             output_schema=INTERVIEW_PREP_SCHEMA,
@@ -247,7 +228,10 @@ def _run_prep_generation(
             purpose="opus_interview_prep",
             config=config,
             max_tokens=4096,
+            client=client,
         )
+        result = result_obj.data
+        cost_usd = result_obj.cost_usd
 
         # --- Store results ---
         company_brief = result.get("company_brief", "")

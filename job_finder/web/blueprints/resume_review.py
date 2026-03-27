@@ -36,8 +36,7 @@ from job_finder.web.activity_tracker import (
     ACTION_SAVE_CONFLICTS,
     ACTION_EXTRACT_STYLE,
 )
-from job_finder.config import DEFAULT_MODEL_HAIKU
-from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import call_model
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile
 
@@ -155,11 +154,6 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
     """
     try:
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
 
         system = (
             "You are a resume conflict analyzer. Compare a PDF resume against a structured "
@@ -181,9 +175,8 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
             f"Identify conflicts (differences/additions) between the PDF and the profile."
         )
 
-        result, _cost = call_claude(
-            client=client,
-            model=model,
+        result_obj = call_model(
+            tier="haiku",
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=CONFLICT_SCHEMA,
@@ -192,8 +185,9 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
             purpose="resume_conflict_review",
             config=config,
             max_tokens=2048,
+            client=client,
         )
-        return result.get("conflicts", [])
+        return result_obj.data.get("conflicts", [])
 
     except Exception as e:
         logger.warning("_compare_conflicts: failed to compare conflicts: %s", e)
