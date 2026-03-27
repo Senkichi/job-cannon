@@ -6,8 +6,8 @@ across linkedin_parser, glassdoor_parser, and ziprecruiter_parser.
 Also provides shared salary parsing (parse_salary_range) used by all four
 parsers, eliminating near-identical regex + K-notation conversion code.
 
-Note: indeed_parser intentionally uses its own meta-email pattern set (it
-must NOT filter on "N new jobs" lines, which are real alerts for Indeed).
+Note: indeed_parser uses is_meta_email with _INDEED_META_PATTERNS as extra_patterns
+(must NOT filter on "N new jobs" lines, which are real alerts for Indeed).
 """
 
 import re
