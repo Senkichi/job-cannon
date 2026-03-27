@@ -298,6 +298,7 @@ def find_careers_url(
     """
     try:
         resp = requests.get(homepage_url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp.raise_for_status()
     except Exception as e:
         logger.debug("find_careers_url('%s') request failed: %s", homepage_url, e)
         return None
@@ -395,6 +396,7 @@ def scrape_careers_page(
     """
     try:
         resp = requests.get(careers_url, timeout=_TIMEOUT, headers=_HEADERS)
+        resp.raise_for_status()
     except Exception as e:
         logger.debug("scrape_careers_page('%s') request failed: %s", careers_url, e)
         return []
