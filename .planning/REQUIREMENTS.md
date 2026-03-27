@@ -30,8 +30,8 @@ Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap ph
 ### Cost Tracking
 
 - [ ] **COST-01**: Provider column added to scoring_costs table with 'anthropic' default
-- [ ] **COST-02**: Cost stats include per-provider grouping alongside existing per-feature breakdown
-- [ ] **COST-03**: Costs page shows provider breakdown
+- [x] **COST-02**: Cost stats include per-provider grouping alongside existing per-feature breakdown
+- [x] **COST-03**: Costs page shows provider breakdown
 
 ### Evaluation Framework
 
@@ -106,8 +106,8 @@ None identified for this milestone.
 | MIGR-02 | Phase 27 | Pending |
 | MIGR-03 | Phase 27 | Pending |
 | COST-01 | Phase 24 | Pending |
-| COST-02 | Phase 26 | Pending |
-| COST-03 | Phase 26 | Pending |
+| COST-02 | Phase 26 | Complete |
+| COST-03 | Phase 26 | Complete |
 | EVAL-01 | Phase 28 | Pending |
 | EVAL-02 | Phase 28 | Pending |
 | EVAL-03 | Phase 28 | Pending |

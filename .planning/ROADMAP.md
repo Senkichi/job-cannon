@@ -103,8 +103,8 @@ Plans:
   5. The Costs page shows a per-provider breakdown of API spend alongside the existing per-feature breakdown
 **Plans:** 2 plans
 Plans:
-- [ ] 26-01-PLAN.md — call_model() dispatcher with schema retry, fallback, budget bypass, and record_cost provider param
-- [ ] 26-02-PLAN.md — Per-provider cost breakdown query and Costs page UI
+- [x] 26-01-PLAN.md — call_model() dispatcher with schema retry, fallback, budget bypass, and record_cost provider param
+- [x] 26-02-PLAN.md — Per-provider cost breakdown query and Costs page UI
 
 ### Phase 27: Caller Migration
 **Goal**: Every call site in the codebase uses call_model() with a logical tier name — no direct call_claude() calls or raw anthropic.Anthropic() usage remain in blueprint or orchestrator code
