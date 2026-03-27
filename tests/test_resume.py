@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
+
 
 class TestDocxFormatter:
     """build_resume_docx produces a valid .docx BytesIO."""
@@ -665,19 +667,24 @@ class TestSinglePassGeneration:
             "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
         }
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
-            mock_call.return_value = (mock_response.content[0].input, 0.05)
+        with patch("job_finder.web.resume_generator.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data=mock_response.content[0].input,
+                cost_usd=0.05,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
             generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
 
         conn.close()
 
-        assert mock_call.called, "call_claude was not called"
+        assert mock_call.called, "call_model was not called"
         call_kwargs = mock_call.call_args
         # purpose should be 'resume_generation'
-        actual_purpose = call_kwargs[1].get("purpose") or call_kwargs[0][7] if call_kwargs[0] else None
-        if actual_purpose is None:
-            # Try keyword access
-            actual_purpose = call_kwargs.kwargs.get("purpose")
+        actual_purpose = call_kwargs.kwargs.get("purpose")
         assert actual_purpose == "resume_generation", (
             f"Expected purpose='resume_generation', got: {actual_purpose}"
         )
@@ -707,20 +714,19 @@ class TestClosedWorldConstraint:
         }
 
         captured_system = {}
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
-            mock_call.return_value = ({
-                "name": "Jane",
-                "contact_line": "",
-                "summary": "test",
-                "skills": [],
-                "positions": [],
-                "education": [],
-            }, 0.01)
+        with patch("job_finder.web.resume_generator.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data={"name": "Jane", "contact_line": "", "summary": "test", "skills": [], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
             generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
             if mock_call.called:
-                captured_system["system"] = mock_call.call_args.kwargs.get("system") or (
-                    mock_call.call_args[0][2] if mock_call.call_args[0] else ""
-                )
+                captured_system["system"] = mock_call.call_args.kwargs.get("system")
 
         conn.close()
 
@@ -1148,8 +1154,16 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = ({"strategies": strategies_returned, "reasoning": "test"}, 0.001)
+        with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data={"strategies": strategies_returned, "reasoning": "test"},
+                cost_usd=0.001,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
             result = _haiku_select_strategies(mock_client, job_row, conn, config)
 
         conn.close()
@@ -1181,16 +1195,24 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = ({"strategies": STRATEGY_POOL[:3], "reasoning": "test"}, 0.001)
+        with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data={"strategies": STRATEGY_POOL[:3], "reasoning": "test"},
+                cost_usd=0.001,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
             _haiku_select_strategies(mock_client, job_row, conn, config)
 
         conn.close()
-        assert mock_call.called, "call_claude was not called"
+        assert mock_call.called, "call_model was not called"
         call_kwargs = mock_call.call_args.kwargs
-        model = call_kwargs.get("model") or mock_call.call_args[0][1]
-        purpose = call_kwargs.get("purpose") or mock_call.call_args[0][7]
-        assert "haiku" in model.lower(), f"Expected Haiku model, got: {model}"
+        tier = call_kwargs.get("tier")
+        purpose = call_kwargs.get("purpose")
+        assert tier == "haiku", f"Expected tier='haiku', got: {tier}"
         assert purpose == "resume_strategy", f"Expected purpose='resume_strategy', got: {purpose}"
 
     def test_haiku_select_strategies_fallback_on_failure(self, tmp_db_path):
@@ -1219,7 +1241,7 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=Exception("API failure")):
+        with patch("job_finder.web.resume_multi_version.call_model", side_effect=Exception("API failure")):
             result = _haiku_select_strategies(mock_client, job_row, conn, config)
 
         conn.close()
@@ -1279,19 +1301,23 @@ class TestParallelVariantGeneration:
 
         sample_resume = self._make_sample_resume()
 
-        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = (
-                {**sample_resume, "strategies": STRATEGY_POOL[:3], "reasoning": "test"},
-                0.01,
+        with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data={**sample_resume, "strategies": STRATEGY_POOL[:3], "reasoning": "test"},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
-                    mock_anthropic.Anthropic.return_value = MagicMock()
-                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+            with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
+                mock_anthropic.Anthropic.return_value = MagicMock()
+                generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Should be called: 1 (strategy) + 3 (variants) + 1 (synthesis) = 5 times
         assert mock_call.call_count >= 5, (
-            f"Expected at least 5 call_claude invocations, got: {mock_call.call_count}"
+            f"Expected at least 5 call_model invocations, got: {mock_call.call_count}"
         )
 
     def test_generate_resume_multi_uses_different_strategies(self, tmp_db_path, sample_resume_data):
@@ -1326,20 +1352,17 @@ class TestParallelVariantGeneration:
         sample_resume = self._make_sample_resume()
         system_prompts = []
 
-        original_call_claude = None
-
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             system_prompts.append(kwargs.get("system", ""))
             purpose = kwargs.get("purpose", "")
             if purpose == "resume_strategy":
-                return ({"strategies": STRATEGY_POOL[:3], "reasoning": "ok"}, 0.001)
-            return (sample_resume, 0.01)
+                return ModelResult(data={"strategies": STRATEGY_POOL[:3], "reasoning": "ok"}, cost_usd=0.001, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
+            return ModelResult(data=sample_resume, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
-                    mock_anthropic.Anthropic.return_value = MagicMock()
-                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+        with patch("job_finder.web.resume_multi_version.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
+                mock_anthropic.Anthropic.return_value = MagicMock()
+                generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Filter out strategy-selection and synthesis system prompts; keep variant generation prompts
         variant_prompts = [p for p in system_prompts if "STRATEGY EMPHASIS" in p]
@@ -1396,19 +1419,26 @@ class TestThreadSafety:
             return original_connect(path, **kwargs)
 
         with patch("job_finder.web.resume_multi_version.sqlite3.connect", side_effect=tracking_connect):
-            with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-                mock_call.return_value = (sample_resume, 0.01)
-                with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                    mock_client_factory = MagicMock()
-                    mock_client_factory.return_value = MagicMock()
-                    _generate_single_variant(
-                        tmp_db_path,
-                        mock_client_factory,
-                        job_row,
-                        sample_resume_data,
-                        "impact_focused",
-                        config,
-                    )
+            with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+                mock_call.return_value = ModelResult(
+                    data=sample_resume,
+                    cost_usd=0.01,
+                    input_tokens=0,
+                    output_tokens=0,
+                    model="test-model",
+                    provider="anthropic",
+                    schema_valid=True,
+                )
+                mock_client_factory = MagicMock()
+                mock_client_factory.return_value = MagicMock()
+                _generate_single_variant(
+                    tmp_db_path,
+                    mock_client_factory,
+                    job_row,
+                    sample_resume_data,
+                    "impact_focused",
+                    config,
+                )
 
         assert len(connect_calls) >= 1, (
             "_generate_single_variant must open its own sqlite3 connection"
@@ -1581,12 +1611,19 @@ class TestSynthesisPass:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = (expected_result, 0.05)
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    result = _synthesize_variants(tmp_db_path, variants, job_row, config)
+        with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data=expected_result,
+                cost_usd=0.05,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
+            with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
+                mock_ant.Anthropic.return_value = MagicMock()
+                result = _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         required_keys = RESUME_SCHEMA.get("required", [])
         for key in required_keys:
@@ -1635,15 +1672,22 @@ class TestSynthesisPass:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = (synth_result, 0.05)
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+        with patch("job_finder.web.resume_multi_version.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data=synth_result,
+                cost_usd=0.05,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
+            with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
+                mock_ant.Anthropic.return_value = MagicMock()
+                _synthesize_variants(tmp_db_path, variants, job_row, config)
 
-        assert mock_call.called, "call_claude not called in _synthesize_variants"
-        purpose = mock_call.call_args.kwargs.get("purpose") or mock_call.call_args[0][7]
+        assert mock_call.called, "call_model not called in _synthesize_variants"
+        purpose = mock_call.call_args.kwargs.get("purpose")
         assert purpose == "resume_synthesis", (
             f"Expected purpose='resume_synthesis', got: {purpose}"
         )
@@ -1702,18 +1746,17 @@ class TestSynthesisPass:
 
         captured_messages = {}
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages["messages"] = kwargs.get("messages", [])
-            return (synth_result, 0.05)
+            return ModelResult(data=synth_result, cost_usd=0.05, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+        with patch("job_finder.web.resume_multi_version.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
+                mock_ant.Anthropic.return_value = MagicMock()
+                _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         messages = captured_messages.get("messages", [])
-        assert messages, "No messages passed to call_claude from _synthesize_variants"
+        assert messages, "No messages passed to call_model from _synthesize_variants"
         user_content = " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
         assert "UNIQUE_VARIANT_1_SUMMARY" in user_content, (
             "Variant 1 content not included in synthesis prompt"
@@ -2740,34 +2783,31 @@ class TestPreferenceInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
-            return (
-                {
-                    "name": "Jane Doe",
-                    "contact_line": "jane@example.com",
-                    "summary": "Experienced DS.",
-                    "skills": ["Python"],
-                    "positions": [],
-                    "education": [],
-                },
-                0.01,
+            return ModelResult(
+                data={"name": "Jane Doe", "contact_line": "jane@example.com", "summary": "Experienced DS.", "skills": ["Python"], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                mock_client = MagicMock()
-                generate_resume_single(
-                    mock_client,
-                    self._make_job_row(),
-                    self._make_profile(),
-                    conn,
-                    self._make_config(),
-                )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            mock_client = MagicMock()
+            generate_resume_single(
+                mock_client,
+                self._make_job_row(),
+                self._make_profile(),
+                conn,
+                self._make_config(),
+            )
 
         conn.close()
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" in user_message, (
             "Expected '## Formatting Preferences' section in user_message"
@@ -2795,34 +2835,31 @@ class TestPreferenceInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
-            return (
-                {
-                    "name": "Jane Doe",
-                    "contact_line": "",
-                    "summary": "DS.",
-                    "skills": [],
-                    "positions": [],
-                    "education": [],
-                },
-                0.01,
+            return ModelResult(
+                data={"name": "Jane Doe", "contact_line": "", "summary": "DS.", "skills": [], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                mock_client = MagicMock()
-                generate_resume_single(
-                    mock_client,
-                    self._make_job_row(),
-                    self._make_profile(),
-                    conn,
-                    self._make_config(),
-                )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            mock_client = MagicMock()
+            generate_resume_single(
+                mock_client,
+                self._make_job_row(),
+                self._make_profile(),
+                conn,
+                self._make_config(),
+            )
 
         conn.close()
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "soft guidelines" in user_message, (
             "Expected 'soft guidelines' framing in preferences section"
@@ -2845,35 +2882,32 @@ class TestPreferenceInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
-            return (
-                {
-                    "name": "Jane Doe",
-                    "contact_line": "",
-                    "summary": "DS.",
-                    "skills": [],
-                    "positions": [],
-                    "education": [],
-                },
-                0.01,
+            return ModelResult(
+                data={"name": "Jane Doe", "contact_line": "", "summary": "DS.", "skills": [], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
-                    generate_resume_single(
-                        mock_client,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                mock_client = MagicMock()
+                generate_resume_single(
+                    mock_client,
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" not in user_message, (
             "Should NOT include preferences section when table is empty"
@@ -2899,35 +2933,32 @@ class TestPreferenceInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
-            return (
-                {
-                    "name": "Jane Doe",
-                    "contact_line": "",
-                    "summary": "DS.",
-                    "skills": [],
-                    "positions": [],
-                    "education": [],
-                },
-                0.01,
+            return ModelResult(
+                data={"name": "Jane Doe", "contact_line": "", "summary": "DS.", "skills": [], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
-                    generate_resume_single(
-                        mock_client,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                mock_client = MagicMock()
+                generate_resume_single(
+                    mock_client,
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" not in user_message, (
             "Should NOT include preferences section when all prefs have applied_at set"
@@ -2950,33 +2981,30 @@ class TestPreferenceInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
-            return (
-                {
-                    "name": "Jane Doe",
-                    "contact_line": "",
-                    "summary": "DS.",
-                    "skills": [],
-                    "positions": [],
-                    "education": [],
-                },
-                0.01,
+            return ModelResult(
+                data={"name": "Jane Doe", "contact_line": "", "summary": "DS.", "skills": [], "positions": [], "education": []},
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
             )
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                mock_client = MagicMock()
-                _generate_single_variant(
-                    tmp_db_path,
-                    lambda: mock_client,
-                    self._make_job_row(),
-                    self._make_profile(),
-                    STRATEGY_POOL[0],
-                    self._make_config(),
-                )
+        with patch("job_finder.web.resume_multi_version.call_model", side_effect=capturing_call_model):
+            mock_client = MagicMock()
+            _generate_single_variant(
+                tmp_db_path,
+                lambda: mock_client,
+                self._make_job_row(),
+                self._make_profile(),
+                STRATEGY_POOL[0],
+                self._make_config(),
+            )
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" in user_message, (
             "Expected '## Formatting Preferences' section in variant path user_message"
@@ -3036,8 +3064,8 @@ class TestStyleGuideInjection:
         return conn
 
     def _canned_resume_response(self):
-        return (
-            {
+        return ModelResult(
+            data={
                 "name": "Jane Doe",
                 "contact_line": "",
                 "summary": "DS.",
@@ -3045,7 +3073,12 @@ class TestStyleGuideInjection:
                 "positions": [],
                 "education": [],
             },
-            0.01,
+            cost_usd=0.01,
+            input_tokens=0,
+            output_tokens=0,
+            model="test-model",
+            provider="anthropic",
+            schema_valid=True,
         )
 
     def test_style_guide_directives_appear_in_generate_resume_single(self, tmp_db_path):
@@ -3058,7 +3091,7 @@ class TestStyleGuideInjection:
         conn = self._make_db(tmp_db_path)
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
             return self._canned_resume_response()
 
@@ -3070,21 +3103,20 @@ class TestStyleGuideInjection:
             "date_format": "MMM YYYY",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    mock_client = MagicMock()
-                    generate_resume_single(
-                        mock_client,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
+                mock_client = MagicMock()
+                generate_resume_single(
+                    mock_client,
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" in user_message, (
             "Expected '## Formatting Preferences' section from style guide"
@@ -3101,21 +3133,20 @@ class TestStyleGuideInjection:
         conn = self._make_db(tmp_db_path)
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
             return self._canned_resume_response()
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
-                    generate_resume_single(
-                        mock_client,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with patch("job_finder.web.resume_generator.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                mock_client = MagicMock()
+                generate_resume_single(
+                    mock_client,
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
@@ -3137,7 +3168,7 @@ class TestStyleGuideInjection:
 
         captured_messages = []
 
-        def capturing_call_claude(**kwargs):
+        def capturing_call_model(**kwargs):
             captured_messages.extend(kwargs.get("messages", []))
             return self._canned_resume_response()
 
@@ -3146,20 +3177,19 @@ class TestStyleGuideInjection:
             "tone": "professional",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    mock_client = MagicMock()
-                    _generate_single_variant(
-                        tmp_db_path,
-                        lambda: mock_client,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        STRATEGY_POOL[0],
-                        self._make_config(),
-                    )
+        with patch("job_finder.web.resume_multi_version.call_model", side_effect=capturing_call_model):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
+                mock_client = MagicMock()
+                _generate_single_variant(
+                    tmp_db_path,
+                    lambda: mock_client,
+                    self._make_job_row(),
+                    self._make_profile(),
+                    STRATEGY_POOL[0],
+                    self._make_config(),
+                )
 
-        assert captured_messages, "call_claude was not called"
+        assert captured_messages, "call_model was not called"
         user_message = captured_messages[0]["content"]
         assert "Formatting Preferences" in user_message, (
             "Expected '## Formatting Preferences' section in variant path from style guide"

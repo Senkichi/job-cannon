@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
 from job_finder.web.resume_style_guide import load_style_guide, save_style_guide
 
 
@@ -230,8 +231,16 @@ class TestExtractStyleGuide:
             "tone": "direct",
             "date_format": "MMM YYYY",
         }
-        with patch("job_finder.web.resume_style_guide.call_claude") as mock_call:
-            mock_call.return_value = (canned, 0.01)
+        with patch("job_finder.web.resume_style_guide.call_model") as mock_call:
+            mock_call.return_value = ModelResult(
+                data=canned,
+                cost_usd=0.01,
+                input_tokens=0,
+                output_tokens=0,
+                model="test-model",
+                provider="anthropic",
+                schema_valid=True,
+            )
             result = extract_style_guide(
                 raw_text="Sample resume text with plenty of content...",
                 existing_guide={},
@@ -257,11 +266,11 @@ class TestExtractStyleGuide:
 
         captured_messages = []
 
-        def capture_call(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured_messages.extend(messages)
-            return (existing, 0.01)
+        def capture_call(**kwargs):
+            captured_messages.extend(kwargs.get("messages", []))
+            return ModelResult(data=existing, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=capture_call):
+        with patch("job_finder.web.resume_style_guide.call_model", side_effect=capture_call):
             extract_style_guide(
                 raw_text="Resume content...",
                 existing_guide=existing,
@@ -282,7 +291,7 @@ class TestExtractStyleGuide:
             "bullet_style": "dashes", "verb_tense": "past",
             "section_order": [], "tone": "direct", "date_format": "MMM YYYY",
         }
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")):
+        with patch("job_finder.web.resume_style_guide.call_model", side_effect=Exception("API error")):
             result = extract_style_guide(
                 raw_text="Resume content...",
                 existing_guide=existing,
@@ -315,14 +324,14 @@ class TestMigrateStyleGuide:
 
         captured = {}
 
-        def capture_call_kw(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured["purpose"] = purpose
-            captured["output_schema"] = output_schema
+        def capture_call_kw(**kwargs):
+            captured["purpose"] = kwargs.get("purpose")
+            captured["output_schema"] = kwargs.get("output_schema")
             merged = dict(existing)
             merged["summary_formula"] = "Title + years"
-            return (merged, 0.05)
+            return ModelResult(data=merged, cost_usd=0.05, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=capture_call_kw):
+        with patch("job_finder.web.resume_style_guide.call_model", side_effect=capture_call_kw):
             result = migrate_style_guide(sample_config, migrated_conn, style_guide_path=guide_path)
 
         assert captured["purpose"] == "style_guide_migration"
@@ -338,7 +347,7 @@ class TestMigrateStyleGuide:
         merged["summary_formula"] = "Title + years"
         merged["role_archetype"] = "IC leader"
 
-        with patch("job_finder.web.resume_style_guide.call_claude", return_value=(merged, 0.05)):
+        with patch("job_finder.web.resume_style_guide.call_model", return_value=ModelResult(data=merged, cost_usd=0.05, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)):
             result = migrate_style_guide(sample_config, migrated_conn, style_guide_path=guide_path)
 
         assert result is not None
@@ -352,6 +361,6 @@ class TestMigrateStyleGuide:
         with open(guide_path, "w") as f:
             json.dump({}, f)
 
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")):
+        with patch("job_finder.web.resume_style_guide.call_model", side_effect=Exception("API error")):
             result = migrate_style_guide(sample_config, migrated_conn, style_guide_path=guide_path)
         assert result is None
