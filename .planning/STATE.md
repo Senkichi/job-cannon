@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
-status: executing
-last_updated: "2026-03-27T02:38:11.621Z"
+status: verifying
+last_updated: "2026-03-27T03:07:55.718Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 75
 ---
 
@@ -19,10 +19,10 @@ progress:
 
 Phase: 20 (Surgical Fixes) — EXECUTING
 Plan: 3 of 3
-Status: Executing Phase 20
-Last activity: 2026-03-27 -- Phase 20 Plan 02 complete (FIX-03, FIX-05)
+Status: Phase complete — ready for verification
+Last activity: 2026-03-27
 
-Progress: [████████░░] 75%
+Progress: [██████████] 100%
 
 ## Project Reference
 
@@ -41,8 +41,9 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 20-01: 15min (2 tasks, 15 files)
 - Phase 20-02: 24min (2 tasks, 7 files)
-- Average duration: ~13min
-- Total execution time: ~64min
+- Phase 20-03: 49min (1 task, 20 files)
+- Average duration: ~19min
+- Total execution time: ~113min
 
 *Updated after each plan completion*
 
@@ -80,9 +81,16 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - get_config_snapshot lives in db_helpers.py (not a new module) since it pairs naturally with the per-request connection helper pattern
 - Background threads take config snapshot at job-start via get_config_snapshot(app) rather than reading individual keys from shared app.config dict
 
+### Decisions Made in Phase 20 Plan 03
+
+- standalone_connection() extracted to db_helpers.py (after close_db) — single context manager for all background/CLI sqlite3 connections; sets Row factory + WAL mode, guarantees close via contextlib
+- Files with sqlite3.Connection type hints or sqlite3.IntegrityError/OperationalError in except clauses retain `import sqlite3`; files that only used it for sqlite3.connect() have the import removed
+- dashboard.py _run_batch_*_bg outer exception handlers changed from _fail_session(conn) to _mark_session_error(db_path) — conn is not in scope in the outer except block
+- resume_generator.py mid-function close/reopen pattern eliminated — generate_resume_multi() uses standalone_connection internally so no connection conflict; single with standalone_connection covers entire function body
+
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-27 — Phase 20 Plan 02 complete: Job.normalized_dedup_key static method + get_config_snapshot. 1533 tests pass.*
+*Last session: 2026-03-27 — Phase 20 Plan 03 complete: standalone_connection() context manager + 37 call site sweep. 1533 tests pass.*

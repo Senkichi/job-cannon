@@ -57,7 +57,7 @@
 **Milestone Goal:** Resolve all outstanding tech debt — move completed todos, apply surgical fixes, add test coverage, decompose god-object modules, and batch N+1 queries.
 
 - [x] **Phase 19: Housekeeping** — Move 11 completed todos from pending/ to done/ (completed 2026-03-27)
-- [ ] **Phase 20: Surgical Fixes** — Mechanical fixes: Indeed dedup, renames, models.py layer violation, SQLite helper, config thread-safety
+- [x] **Phase 20: Surgical Fixes** — Mechanical fixes: Indeed dedup, renames, models.py layer violation, SQLite helper, config thread-safety (completed 2026-03-27)
 - [ ] **Phase 21: Test Coverage** — Companies blueprint test suite
 - [ ] **Phase 22: Module Splits** — Decompose 7 god-object modules along responsibility boundaries
 - [ ] **Phase 23: N+1 Batching** — Batch 5 N+1 query patterns across scoring and detection pipelines
@@ -90,7 +90,7 @@ Plans:
 Plans:
 - [x] 20-01-PLAN.md -- Deduplicate Indeed meta-email detection + rename four symbols
 - [x] 20-02-PLAN.md -- Move normalized_dedup_key to Job static method + add get_config_snapshot
-- [ ] 20-03-PLAN.md -- Extract standalone_connection and sweep 37 call sites
+- [x] 20-03-PLAN.md -- Extract standalone_connection and sweep 37 call sites
 
 ### Phase 21: Test Coverage
 **Goal**: The companies blueprint is covered by an automated test suite with the same depth as other blueprint tests
@@ -153,7 +153,7 @@ Plans:
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 20. Surgical Fixes | v1.4 | 2/3 | In Progress|  |
+| 20. Surgical Fixes | v1.4 | 3/3 | Complete   | 2026-03-27 |
 | 21. Test Coverage | v1.4 | 0/TBD | Not started | - |
 | 22. Module Splits | v1.4 | 0/TBD | Not started | - |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
