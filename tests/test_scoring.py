@@ -1894,7 +1894,7 @@ class TestBatchHaikuBorderlineReeval:
 
     def test_batch_borderline_triggers_reeval(self, migrated_db, batch_config):
         """Job scoring 48 in batch Haiku triggers second call with max_chars=4000."""
-        from job_finder.web.blueprints.dashboard import _run_batch_haiku_bg
+        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
 
         path, conn = migrated_db
         dedup_key = "batch|borderline|remote"
@@ -1937,7 +1937,7 @@ class TestBatchHaikuBorderlineReeval:
 
     def test_batch_above_band_no_reeval(self, migrated_db, batch_config):
         """Job scoring 70 in batch Haiku does NOT trigger re-eval."""
-        from job_finder.web.blueprints.dashboard import _run_batch_haiku_bg
+        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
 
         path, conn = migrated_db
         dedup_key = "batch|above|band"
@@ -1965,7 +1965,7 @@ class TestBatchHaikuBorderlineReeval:
 
     def test_batch_borderline_reeval_overwrites_score(self, migrated_db, batch_config):
         """Re-eval score replaces initial borderline score in jobs table."""
-        from job_finder.web.blueprints.dashboard import _run_batch_haiku_bg
+        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
 
         path, conn = migrated_db
         dedup_key = "batch|overwrite|remote"
