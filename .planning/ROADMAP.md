@@ -85,9 +85,9 @@
   2. Gemini adapter uses response_schema for structured output and retries automatically on HTTP 429 rate-limit errors
   3. Ollama adapter checks local service health on initialization and raises a clear error if unreachable
   4. All three adapters conform to the BaseProvider interface and are independently unit-testable with mocked transports
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 Plans:
-- [ ] 25-01-PLAN.md — Install dependencies + Anthropic adapter (TDD)
+- [x] 25-01-PLAN.md — Install dependencies + Anthropic adapter (TDD)
 - [ ] 25-02-PLAN.md — Gemini adapter with response_json_schema and 429 retry (TDD)
 - [ ] 25-03-PLAN.md — Ollama adapter with REST API and health check (TDD)
 
@@ -153,7 +153,7 @@ Plans:
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 25. Provider Adapters | v1.5 | 0/3 | Not started | - |
+| 25. Provider Adapters | v1.5 | 1/3 | In Progress|  |
 | 26. Dispatcher & Cost Tracking | v1.5 | 0/? | Not started | - |
 | 27. Caller Migration | v1.5 | 0/? | Not started | - |
 | 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
