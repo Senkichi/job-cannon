@@ -367,7 +367,7 @@ class TestCallSiteIntegration:
         }
 
         with app.test_client() as client:
-            with patch("job_finder.web.scheduler.trigger_sync", return_value=mock_summary):
+            with patch("job_finder.web.scheduler.run_sync_now", return_value=mock_summary):
                 resp = client.post("/dashboard/sync")
                 # Sync redirects to dashboard
                 assert resp.status_code in (200, 302)

@@ -800,7 +800,7 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
         session_id: ID of the batch_score_sessions row to update.
         app: Flask application instance (use _get_current_object() before thread spawn).
     """
-    from job_finder.web.scheduler import trigger_sync
+    from job_finder.web.scheduler import run_sync_now
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -814,7 +814,7 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
 
         # Run the full sync pipeline synchronously in this background thread
         with app.app_context():
-            summary = trigger_sync(app)
+            summary = run_sync_now(app)
 
         # Store results: scored=jobs_new, total=total_fetched, skipped=error_count
         jobs_new = summary.get("jobs_new", 0)
@@ -870,9 +870,9 @@ def sync():
     """Quick action: Sync Now — triggers immediate ingestion via pipeline runner."""
     db_path = current_app.config["DB_PATH"]
     try:
-        from job_finder.web.scheduler import trigger_sync
+        from job_finder.web.scheduler import run_sync_now
 
-        summary = trigger_sync(current_app._get_current_object())
+        summary = run_sync_now(current_app._get_current_object())
 
         jobs_new = summary.get("jobs_new", 0)
         gmail_fetched = summary.get("gmail_fetched", 0)

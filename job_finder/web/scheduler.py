@@ -380,8 +380,8 @@ def init_scheduler(app) -> None:
         # -- Homepage discovery (daily 6:30 AM) ----------------------------
 
         def _import_homepage_discovery():
-            from job_finder.web.homepage_discoverer import discover_homepages_batch
-            return discover_homepages_batch
+            from job_finder.web.homepage_discoverer import run_homepage_discovery
+            return run_homepage_discovery
 
         scheduler.add_job(
             _make_simple_job(app, "Homepage discovery", _import_homepage_discovery),
@@ -397,7 +397,7 @@ def init_scheduler(app) -> None:
         logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
 
 
-def trigger_sync(app) -> dict:
+def run_sync_now(app) -> dict:
     """Trigger an immediate ingestion run (for the Sync Now button).
 
     Runs synchronously in the current thread. Returns the ingestion summary.

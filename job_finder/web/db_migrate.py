@@ -402,7 +402,7 @@ MIGRATIONS = [
     ],
 
     # Migration 17: Add homepage_probe_attempted_at column to companies table.
-    # Enables retry-avoidance in discover_homepages_batch — companies already
+    # Enables retry-avoidance in run_homepage_discovery — companies already
     # attempted (whether found or not) are skipped on subsequent runs.
     [
         "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL",

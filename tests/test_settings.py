@@ -196,7 +196,7 @@ class TestGuidelinesImport:
             "date_format": "MMM YYYY",
         }
         client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.settings._merge_guidelines_into_guide") as mock_merge:
+        with patch("job_finder.web.blueprints.settings.merge_guidelines_into_guide") as mock_merge:
             mock_merge.return_value = merged_result
             with patch("job_finder.web.blueprints.settings.anthropic.Anthropic"):
                 resp = client.post(

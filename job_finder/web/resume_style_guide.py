@@ -7,7 +7,7 @@ Provides:
     save_style_guide      -- Save style guide dict to JSON file
     _build_style_guide_directives -- Convert guide dict to list of prompt directive strings
     extract_style_guide   -- Call Sonnet to extract/merge style preferences from resume text
-    _merge_guidelines_into_guide  -- Merge guidelines text into existing guide via Sonnet (helper)
+    merge_guidelines_into_guide  -- Merge guidelines text into existing guide via Sonnet (helper)
     migrate_style_guide   -- Populate new structured fields from guidelines doc via Sonnet
 """
 
@@ -56,7 +56,7 @@ STYLE_GUIDE_SCHEMA = {
 }
 
 # Human-readable labels for each field
-_FIELD_LABELS = {
+FIELD_LABELS = {
     "bullet_style": "Bullet style",
     "verb_tense": "Verb tense",
     "section_order": "Section order",
@@ -119,7 +119,7 @@ def _build_style_guide_directives(guide: dict) -> list[str]:
         return []
 
     directives = []
-    for field, label in _FIELD_LABELS.items():
+    for field, label in FIELD_LABELS.items():
         value = guide.get(field)
         if not value:
             continue
@@ -216,7 +216,7 @@ def extract_style_guide(
         return None
 
 
-def _merge_guidelines_into_guide(
+def merge_guidelines_into_guide(
     guidelines_text: str,
     existing_guide: dict,
     client,
@@ -290,7 +290,7 @@ def _merge_guidelines_into_guide(
         return result
 
     except Exception as e:
-        logger.warning("_merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
+        logger.warning("merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
         return None
 
 
@@ -328,7 +328,7 @@ def migrate_style_guide(
             .get("sonnet", DEFAULT_MODEL_SONNET)
         )
 
-        result = _merge_guidelines_into_guide(
+        result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
             client=client,

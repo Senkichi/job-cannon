@@ -154,8 +154,8 @@ class TestSchemaExpansion:
         assert "consistency_notes" not in STYLE_GUIDE_SCHEMA["properties"]
 
     def test_consistency_notes_removed_from_field_labels(self):
-        from job_finder.web.resume_style_guide import _FIELD_LABELS
-        assert "consistency_notes" not in _FIELD_LABELS
+        from job_finder.web.resume_style_guide import FIELD_LABELS
+        assert "consistency_notes" not in FIELD_LABELS
 
     def test_required_fields_unchanged(self):
         from job_finder.web.resume_style_guide import STYLE_GUIDE_SCHEMA
