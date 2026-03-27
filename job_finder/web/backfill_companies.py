@@ -39,7 +39,7 @@ from thefuzz import fuzz
 from job_finder.config import load_config, COMPANY_DENYLIST, get_company_denylist
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.ats_scanner import probe_ats_slugs, upsert_company
-from job_finder.web.data_enricher import enrich_company_info
+from job_finder.web.company_enricher import enrich_company_info
 from job_finder.web.dedup_normalizer import normalize_company
 
 logger = logging.getLogger(__name__)

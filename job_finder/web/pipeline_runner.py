@@ -45,7 +45,8 @@ except ImportError:
     evaluate_job_sonnet = None  # type: ignore[assignment]
 
 try:
-    from job_finder.web.data_enricher import enrich_job, enrich_company_info
+    from job_finder.web.data_enricher import enrich_job
+    from job_finder.web.company_enricher import enrich_company_info
 except ImportError:
     enrich_job = None  # type: ignore[assignment]
     enrich_company_info = None  # type: ignore[assignment]
