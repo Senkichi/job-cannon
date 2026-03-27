@@ -551,6 +551,6 @@ def _apply_migration(
 
     # Update version counter after all statements succeed
     assert isinstance(version, int), f"Migration version must be int, got {type(version)}"
-    conn.execute(f"PRAGMA user_version = {version}")
+    conn.execute("PRAGMA user_version = " + str(int(version)))
     conn.commit()
     print(f"[db_migrate] Migration {version} applied successfully.")
