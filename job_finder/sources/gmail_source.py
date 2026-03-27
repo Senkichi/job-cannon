@@ -7,7 +7,7 @@ Run `python -m job_finder.gmail_auth` to set up authentication.
 import base64
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from google.auth.transport.requests import Request
@@ -38,6 +38,11 @@ SENDER_PARSERS = {
 
 TOKEN_PATH = "token.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+# Intentional hardcoded default — parse failures are a local debugging artifact,
+# not user data, so this path does not belong in config.yaml.  Override by
+# passing a different directory to _archive_parse_failure if needed.
+PARSE_FAILURES_DIR = "data/parse_failures"
 
 # Meta-email indicator phrases (checked against lowercased first 200 chars of body)
 _ARCHIVE_META_INDICATORS = [
@@ -75,8 +80,8 @@ def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
     return True
 
 
-def _archive_parse_failure(sender: str, body: str) -> None:
-    """Archive HTML body from a failed parse to data/parse_failures/.
+def _archive_parse_failure(sender: str, body: str, *, failures_dir: str = PARSE_FAILURES_DIR) -> None:
+    """Archive HTML body from a failed parse to PARSE_FAILURES_DIR.
 
     Filename: {sender_domain}_{ISO_timestamp}.html
     Creates directory if needed. Logs warning on write failure — never raises.
@@ -84,12 +89,13 @@ def _archive_parse_failure(sender: str, body: str) -> None:
     Args:
         sender: Sender email address (used for filename prefix).
         body: Raw email body HTML to archive.
+        failures_dir: Directory to write failure files into (default: PARSE_FAILURES_DIR).
     """
     try:
-        os.makedirs("data/parse_failures", exist_ok=True)
+        os.makedirs(failures_dir, exist_ok=True)
         domain = sender.split("@")[-1].replace(".", "_") if "@" in sender else sender
         ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-        path = f"data/parse_failures/{domain}_{ts}.html"
+        path = f"{failures_dir}/{domain}_{ts}.html"
         with open(path, "w", encoding="utf-8") as f:
             f.write(body)
         logger.info("Parse failure archived: %s", path)
@@ -267,6 +273,6 @@ class GmailSource:
         # Fallback to internalDate
         internal_date = message.get("internalDate")
         if internal_date:
-            return datetime.fromtimestamp(int(internal_date) / 1000)
+            return datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc)
 
         return None
