@@ -7,6 +7,7 @@
 - ✅ **v1.2 Migration & Stabilization** — Phases 13-14 (shipped 2026-03-24)
 - ✅ **v1.3 Fixes & Improvements** — Phases 15-18 (shipped 2026-03-26)
 - ✅ **v1.4 Tech Debt Sweep** — Phases 19-23 (shipped 2026-03-27)
+- 🚧 **v1.5 Multi-Provider Model Routing** — Phases 24-28 (in progress)
 
 ## Phases
 
@@ -63,6 +64,74 @@
 
 </details>
 
+### 🚧 v1.5 Multi-Provider Model Routing (In Progress)
+
+**Milestone Goal:** Make all AI model calls configurable to route through Anthropic, Gemini, or Ollama via config.yaml, with an evaluation framework to benchmark alternatives before switching.
+
+- [ ] **Phase 24: Provider Foundation** — Core types, config resolution, DB migration for provider cost tracking
+- [ ] **Phase 25: Provider Adapters** — Anthropic, Gemini, and Ollama adapter implementations
+- [ ] **Phase 26: Dispatcher & Cost Tracking** — call_model() dispatcher with retry, fallback, budget bypass, and cost UI
+- [ ] **Phase 27: Caller Migration** — Migrate all call sites from call_claude() to call_model()
+- [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
+
+## Phase Details
+
+### Phase 24: Provider Foundation
+**Goal**: The routing infrastructure exists — config resolution, shared types, and DB schema — so adapters and the dispatcher can be built on a stable foundation
+**Depends on**: Phase 23
+**Requirements**: INFRA-01, INFRA-05, COST-01
+**Success Criteria** (what must be TRUE):
+  1. config.yaml with a `providers` section resolves logical tier names ("sonnet", "haiku", "opus") to provider + model pairs
+  2. config.yaml without a `providers` section defaults to Anthropic routing with no code change required
+  3. The scoring_costs table has a `provider` column with 'anthropic' as the default for all existing rows
+  4. ModelResult and BaseProvider types exist and are importable from the provider layer
+**Plans**: TBD
+
+### Phase 25: Provider Adapters
+**Goal**: Three provider adapters are implemented and independently testable — Anthropic wrapping existing internals, Gemini via google-genai, and Ollama via local REST
+**Depends on**: Phase 24
+**Requirements**: ADAPT-01, ADAPT-02, ADAPT-03
+**Success Criteria** (what must be TRUE):
+  1. Anthropic adapter calls call_claude() internally and returns a ModelResult with structured output
+  2. Gemini adapter uses response_schema for structured output and retries automatically on HTTP 429 rate-limit errors
+  3. Ollama adapter checks local service health on initialization and raises a clear error if unreachable
+  4. All three adapters conform to the BaseProvider interface and are independently unit-testable with mocked transports
+**Plans**: TBD
+
+### Phase 26: Dispatcher & Cost Tracking
+**Goal**: call_model() exists as the single dispatch point — it routes by tier, validates output schema, retries with error context, falls back to Anthropic, bypasses budget for free providers, and records provider in cost rows
+**Depends on**: Phase 25
+**Requirements**: INFRA-02, INFRA-03, INFRA-04, COST-02, COST-03
+**Success Criteria** (what must be TRUE):
+  1. call_model("sonnet", prompt, schema) routes to whichever provider is configured for that tier
+  2. When a provider returns a response that fails schema validation, call_model() retries once with the schema errors appended to the prompt
+  3. When retry also fails, call_model() re-dispatches to Anthropic as configured fallback
+  4. Calls routed to Gemini free tier or Ollama skip budget gate checks entirely
+  5. The Costs page shows a per-provider breakdown of API spend alongside the existing per-feature breakdown
+**Plans**: TBD
+
+### Phase 27: Caller Migration
+**Goal**: Every call site in the codebase uses call_model() with a logical tier name — no direct call_claude() calls or raw anthropic.Anthropic() usage remain in blueprint or orchestrator code
+**Depends on**: Phase 26
+**Requirements**: MIGR-01, MIGR-02, MIGR-03
+**Success Criteria** (what must be TRUE):
+  1. All 18+ call_claude() call sites are replaced with call_model() using logical tier names ("sonnet", "haiku", "opus")
+  2. No blueprint or orchestrator module directly instantiates anthropic.Anthropic() — all such usage goes through the provider layer
+  3. config.example.yaml contains a fully-documented `providers` section that demonstrates routing Sonnet to Gemini or Ollama
+  4. The app starts and scores jobs end-to-end with the existing Anthropic config after migration
+**Plans**: TBD
+
+### Phase 28: Evaluation Framework
+**Goal**: A CLI tool lets the developer run data-driven comparisons of alternative providers against stored Sonnet results, producing a JSON report with a clear SUITABLE/MARGINAL/NOT_RECOMMENDED verdict
+**Depends on**: Phase 26
+**Requirements**: EVAL-01, EVAL-02, EVAL-03, EVAL-04
+**Success Criteria** (what must be TRUE):
+  1. Running the CLI tool with a provider and sample size reconstructs Sonnet prompts from real stored job results and submits them to the target provider
+  2. The report includes score correlation, schema adherence rate, and median latency for each sampled job
+  3. The tool outputs a verdict (SUITABLE/MARGINAL/NOT_RECOMMENDED) computed from configurable thresholds against those metrics
+  4. A JSON report file is saved to eval_results/ containing aggregate metrics and per-job details for offline review
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -85,8 +154,13 @@
 | 16. Homepage Discovery | v1.3 | 2/2 | Complete | 2026-03-26 |
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
-| 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
-| 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
+| 19. Housekeeping | v1.4 | 1/1 | Complete | 2026-03-27 |
+| 20. Surgical Fixes | v1.4 | 3/3 | Complete | 2026-03-27 |
+| 21. Test Coverage | v1.4 | 1/1 | Complete | 2026-03-27 |
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
+| 24. Provider Foundation | v1.5 | 0/? | Not started | - |
+| 25. Provider Adapters | v1.5 | 0/? | Not started | - |
+| 26. Dispatcher & Cost Tracking | v1.5 | 0/? | Not started | - |
+| 27. Caller Migration | v1.5 | 0/? | Not started | - |
+| 28. Evaluation Framework | v1.5 | 0/? | Not started | - |
