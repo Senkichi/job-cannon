@@ -514,6 +514,8 @@ def rescore(dedup_key: str):
             pass
 
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],

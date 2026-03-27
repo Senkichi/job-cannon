@@ -375,7 +375,12 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        os.replace(tmp_path, config_path)
+        try:
+            os.replace(tmp_path, config_path)
+        except PermissionError as exc:
+            raise PermissionError(
+                f"Could not save config — file may be locked by another process: {exc}"
+            ) from exc
     except Exception:
         try:
             tmp_path.unlink(missing_ok=True)

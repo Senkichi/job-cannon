@@ -148,7 +148,6 @@ def run_haiku_scoring(
 
                 if score >= threshold:
                     sonnet_queue.append(dedup_key)
-
                     # Fire high-score notification
                     try:
                         from job_finder.web.notifier import notify_high_score

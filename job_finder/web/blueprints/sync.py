@@ -116,7 +116,7 @@ def sync_status(session_id):
                     skipped=session["skipped"],
                 )
         except (ValueError, TypeError):
-            logger.debug("timestamp parse failed in sync_status", exc_info=True)
+            logger.debug("Sync timeout check failed for session %s", session_id, exc_info=True)
 
     # Terminal states: done, error, cancelled — return done fragment (NO polling hx-trigger)
     if status in ("done", "error", "cancelled"):
