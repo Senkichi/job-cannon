@@ -293,7 +293,7 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 conn.commit()
                 return
 
-            # BATCH-05: In-memory counters (was per-job _update_session_counter calls)
+            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
@@ -381,7 +381,7 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                 conn.commit()
                 return
 
-            # BATCH-05: In-memory counters (was per-job _update_session_counter calls)
+            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
