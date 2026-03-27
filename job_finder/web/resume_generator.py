@@ -26,9 +26,10 @@ from typing import Any, Optional
 
 import anthropic
 
-from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
-from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.config import DEFAULT_MULTI_VERSION_THRESHOLD
+from job_finder.web.claude_client import BudgetExceededError, cost_gate
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import call_model
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 
@@ -259,21 +260,6 @@ def generate_resume_single(
     Returns:
         Structured resume dict matching RESUME_SCHEMA, or None if budget exceeded.
     """
-    # Budget gate -- callers decide what to do on False
-    if not cost_gate(conn, config, "sonnet"):
-        logger.info(
-            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
-            job_row.get("title"),
-            job_row.get("company"),
-        )
-        return None
-
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("sonnet", DEFAULT_MODEL_SONNET)
-    )
-
     # Build fit_analysis context from job_row if present
     fit_analysis = job_row.get("fit_analysis")
     priority_skills: list[str] = []
@@ -347,18 +333,27 @@ def generate_resume_single(
     if contact_hint:
         user_message += f"- Contact line: {contact_hint}\n"
 
-    result, _cost = call_claude(
-        client=client,
-        model=model,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-        output_schema=RESUME_SCHEMA,
-        conn=conn,
-        job_id=job_row.get("dedup_key"),
-        purpose="resume_generation",
-        config=config,
-        max_tokens=4096,
-    )
+    try:
+        result_obj = call_model(
+            tier="sonnet",
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+            conn=conn,
+            config=config,
+            output_schema=RESUME_SCHEMA,
+            job_id=job_row.get("dedup_key"),
+            purpose="resume_generation",
+            max_tokens=4096,
+            client=client,
+        )
+    except BudgetExceededError:
+        logger.info(
+            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
+            job_row.get("title"),
+            job_row.get("company"),
+        )
+        return None
+    result = result_obj.data
 
     logger.debug(
         "generate_resume_single: generated resume for '%s' @ '%s'",

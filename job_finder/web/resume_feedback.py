@@ -25,9 +25,9 @@ import anthropic
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-from job_finder.config import DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
+from job_finder.web.claude_client import BudgetExceededError, cost_gate
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import call_model
 from job_finder.web.drive_uploader import get_drive_service
 
 logger = logging.getLogger(__name__)
@@ -210,18 +210,19 @@ def _extract_preferences(
 
     try:
         client = anthropic.Anthropic()
-        result, cost = call_claude(
-            client=client,
-            model=DEFAULT_MODEL_SONNET,
+        result_obj = call_model(
+            tier="sonnet",
             system=system_prompt,
             messages=messages,
-            output_schema=PREFERENCE_EXTRACTION_SCHEMA,
             conn=conn,
+            config=config,
+            output_schema=PREFERENCE_EXTRACTION_SCHEMA,
             job_id=job_id,
             purpose="sonnet_resume_feedback",
-            config=config,
             max_tokens=1024,
+            client=client,
         )
+        result = result_obj.data
     except BudgetExceededError:
         logger.info("Budget exceeded — skipping preference extraction")
         return []
@@ -487,18 +488,19 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
 
         try:
             client = anthropic.Anthropic()
-            result, cost = call_claude(
-                client=client,
-                model=DEFAULT_MODEL_SONNET,
+            result_obj = call_model(
+                tier="sonnet",
                 system=system_prompt,
                 messages=messages,
-                output_schema=PREFERENCE_EXTRACTION_SCHEMA,
                 conn=conn,
+                config=config,
+                output_schema=PREFERENCE_EXTRACTION_SCHEMA,
                 job_id=None,
                 purpose="sonnet_preference_consolidation",
-                config=config,
                 max_tokens=1024,
+                client=client,
             )
+            result = result_obj.data
         except BudgetExceededError:
             logger.info("Budget exceeded during consolidation")
             return {"consolidated": False, "count": count, "budget_exceeded": True}
