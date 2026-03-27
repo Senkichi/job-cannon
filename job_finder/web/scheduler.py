@@ -197,7 +197,7 @@ def init_scheduler(app) -> None:
 
         def _import_stale():
             from job_finder.web.stale_detector import run_stale_detection
-            return lambda db_path, config: run_stale_detection(db_path)
+            return lambda db_path, config: run_stale_detection(db_path, config)
 
         def _import_stale_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_STALE_DETECTION
