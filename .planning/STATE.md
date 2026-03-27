@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Fixes & Improvements
 status: Ready to execute
-last_updated: "2026-03-27T05:55:45.747Z"
+last_updated: "2026-03-27T05:51:38.944Z"
 progress:
   total_phases: 4
-  completed_phases: 4
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 3
 ---
 
 # State
@@ -16,7 +16,7 @@ progress:
 ## Current Position
 
 Phase: 22 (Module Splits) — IN PROGRESS
-Plan: 2 of 7 — DONE
+Plan: 5 of 7 — DONE
 
 ## Project Reference
 
@@ -92,8 +92,9 @@ None.
 - Re-export all moved symbols from ats_scanner.py for backward compatibility — avoids updating 8+ callers that import from ats_scanner (Plan 01)
 - Python module singleton ensures patch("ats_scanner.requests.get") still works for probe_ats_slugs tests after probe functions moved to ats_prober.py (Plan 01)
 - caplog logger target updated to ats_prober in test_log_levels.py — _handle_scan_error logs via its own module's logger, not ats_scanner (Plan 01)
-- Patch targets for enrich_job tier calls stay in data_enricher namespace (not enrichment_tiers) — functions imported into that namespace via from...import (Plan 04)
-- enrich_company_info re-exported from data_enricher via noqa F401 import for backward compat with any unchecked callers (Plan 04)
+- batch_scoring_bp and sync_bp use url_prefix='/dashboard' — multiple blueprints can share url_prefix, no URL changes needed (Plan 05)
+- Background thread functions (_run_batch_haiku_bg, _run_batch_sonnet_bg, _run_sync_bg) colocated with their blueprint, not extracted to shared utilities (Plan 05)
+- test_async_sync.py needed no import changes — uses Flask test client URLs only, no direct function imports (Plan 05)
 
 ---
-*Last session: 2026-03-27 — Completed Phase 22 Plan 04 (SPLIT-02 data_enricher split)*
+*Last session: 2026-03-27 — Completed Phase 22 Plan 05 (Dashboard Module Split)*
