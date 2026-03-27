@@ -97,8 +97,8 @@ def test_description_reformat_skipped_in_testing():
 # ---------------------------------------------------------------------------
 
 
-def test_description_reformat_skipped_without_api_key():
-    """run_description_reformat_once does not spawn a thread when ANTHROPIC_API_KEY is absent."""
+def test_description_reformat_skipped_without_anthropic():
+    """run_description_reformat_once does not spawn a thread when anthropic is not installed."""
     started: list = []
 
     class _SyncThread:
@@ -108,20 +108,21 @@ def test_description_reformat_skipped_without_api_key():
         def start(self):
             started.append(True)
 
-    env_without_key = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-    with patch("threading.Thread", _SyncThread), patch.dict("os.environ", env_without_key, clear=True):
+    # Simulate anthropic not being importable
+    with patch("threading.Thread", _SyncThread), \
+         patch.dict("sys.modules", {"anthropic": None}):
         run_description_reformat_once("/fake/path.db", {})
 
-    assert started == [], "No thread should start without ANTHROPIC_API_KEY"
+    assert started == [], "No thread should start without anthropic installed"
 
 
 # ---------------------------------------------------------------------------
-# run_description_reformat_once — thread launched when key present
+# run_description_reformat_once — thread launched (key via telemetry)
 # ---------------------------------------------------------------------------
 
 
-def test_description_reformat_spawns_thread_with_api_key():
-    """run_description_reformat_once spawns a daemon thread when ANTHROPIC_API_KEY is set."""
+def test_description_reformat_spawns_thread():
+    """run_description_reformat_once spawns a daemon thread (key from telemetry)."""
     started: list = []
     daemon_flags: list = []
 
@@ -133,12 +134,10 @@ def test_description_reformat_spawns_thread_with_api_key():
             # Don't actually run: we just want to confirm start() is called
             started.append(True)
 
-    with patch("threading.Thread", _SyncThread), \
-         patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}), \
-         patch("anthropic.Anthropic", MagicMock(), create=True):
+    with patch("threading.Thread", _SyncThread):
         run_description_reformat_once("/fake/path.db", {})
 
-    assert started == [True], "Thread should be started when API key is present"
+    assert started == [True], "Thread should be started"
     assert daemon_flags == [True], "Thread should be daemon=True"
 
 

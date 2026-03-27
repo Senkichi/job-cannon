@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
