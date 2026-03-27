@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
 
 
@@ -1226,7 +1227,7 @@ _REC_APP_CONFIG = {
     "output": {"default_format": "cli", "max_results": 50},
 }
 
-# Canned recommendation response from mocked call_claude
+# Canned recommendation response for mocked call_model
 _CANNED_REC_RESULT = {
     "recommendations": [
         {
@@ -1236,6 +1237,19 @@ _CANNED_REC_RESULT = {
         }
     ]
 }
+
+
+def _make_model_result(data: dict) -> ModelResult:
+    """Helper to build a ModelResult for patching call_model in tests."""
+    return ModelResult(
+        data=data,
+        cost_usd=0.001,
+        input_tokens=100,
+        output_tokens=50,
+        model="claude-haiku-4-5",
+        provider="anthropic",
+        schema_valid=True,
+    )
 
 
 class TestProfileRecommendations:
@@ -1295,8 +1309,8 @@ class TestProfileRecommendations:
         import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
         monkeypatch.setattr(
             profile_recs_mod,
-            "call_claude",
-            lambda **kwargs: (_CANNED_REC_RESULT, 0.001),
+            "call_model",
+            lambda **kwargs: _make_model_result(_CANNED_REC_RESULT),
         )
         resp = rec_client.get(
             "/profile/recommendation?field=skills&message=Missing%20skill"
@@ -1333,8 +1347,8 @@ class TestProfileRecommendations:
         }
         monkeypatch.setattr(
             profile_recs_mod,
-            "call_claude",
-            lambda **kwargs: (batch_result, 0.002),
+            "call_model",
+            lambda **kwargs: _make_model_result(batch_result),
         )
 
         resp = rec_client.post("/profile/recommendations-all")

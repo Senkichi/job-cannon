@@ -80,6 +80,44 @@ scoring:
   # Score threshold for generating multiple resume versions
   multi_version_threshold: 80
 
+# --- Multi-provider model routing (optional) ---
+# By default, all tiers route to Anthropic using the models specified above.
+# Configure providers here to route specific tiers to Gemini or Ollama.
+# Requires: google-genai package (for Gemini), or local Ollama server.
+#
+# providers:
+#   # Sonnet tier — deep evaluation, resume generation, enrichment
+#   sonnet:
+#     provider: anthropic          # "anthropic" | "gemini" | "ollama"
+#     model: claude-sonnet-4-6     # Provider-specific model ID
+#     fallback: anthropic          # Fall back to Anthropic on schema validation failure
+#
+#   # Haiku tier — fast scoring, description reformatting, careers scraping
+#   haiku:
+#     provider: anthropic
+#     model: claude-haiku-4-5
+#     fallback: null               # No fallback (null = disabled)
+#
+#   # Opus tier — profile extraction, interview prep, rejection analysis
+#   opus:
+#     provider: anthropic
+#     model: claude-opus-4-6
+#     fallback: null
+#
+# Example: Route Sonnet to Gemini free tier for zero-cost evaluation
+# providers:
+#   sonnet:
+#     provider: gemini
+#     model: gemini-2.0-flash
+#     fallback: anthropic
+#
+# Example: Route Sonnet to local Ollama for offline/private evaluation
+# providers:
+#   sonnet:
+#     provider: ollama
+#     model: llama3.3
+#     fallback: anthropic
+
 # --- Output settings ---
 output:
   default_format: cli

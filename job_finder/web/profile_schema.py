@@ -12,9 +12,8 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from pathlib import Path
-
-from job_finder.config import DEFAULT_MODEL_OPUS
 
 logger = logging.getLogger(__name__)
 
@@ -238,31 +237,49 @@ Resume/markdown to extract from:
 """
 
 
-def extract_profile_from_markdown(markdown_text: str) -> dict:
+def extract_profile_from_markdown(
+    markdown_text: str,
+    conn: sqlite3.Connection | None = None,
+    config: dict | None = None,
+) -> dict:
     """Extract a structured profile from markdown text using Claude Opus.
 
     Args:
         markdown_text: Raw markdown resume/experience text.
+        conn: Open SQLite connection for cost tracking. When provided, cost is
+              recorded in scoring_costs. Pass None only in contexts without DB
+              access (cost will not be tracked).
+        config: Application config dict for model routing (optional — uses
+                Anthropic defaults if None).
 
     Returns:
         Profile dict matching PROFILE_SCHEMA, or an error dict with key 'error'.
     """
     try:
         import anthropic
+        from job_finder.web.model_provider import call_model
 
         client = anthropic.Anthropic()
-        message = client.messages.create(
-            model=DEFAULT_MODEL_OPUS,
-            max_tokens=4096,
+        cfg = config or {}
+
+        result_obj = call_model(
+            tier="opus",
+            system="You are a professional resume parser. Extract structured experience data.",
             messages=[
                 {
                     "role": "user",
                     "content": _EXTRACTION_PROMPT + markdown_text,
                 }
             ],
+            conn=conn,
+            config=cfg,
+            output_schema=None,
+            purpose="profile_extraction",
+            max_tokens=4096,
+            client=client,
         )
 
-        response_text = message.content[0].text.strip()
+        response_text = result_obj.data.get("text", "").strip()
 
         # Strip any accidental code fences
         if response_text.startswith("```"):

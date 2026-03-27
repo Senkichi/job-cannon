@@ -8,7 +8,6 @@ from pathlib import Path
 import anthropic
 from flask import Blueprint, current_app, request
 
-from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.db_helpers import get_db
 from job_finder.web.resume_style_guide import (
     FIELD_LABELS,
@@ -86,17 +85,11 @@ def preview_guidelines_merge():
         db_path = current_app.config["DB_PATH"]
         conn = get_db(db_path)
         client = anthropic.Anthropic()
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
             client=client,
-            model=model,
             conn=conn,
             config=config,
             mode="merge_updates",
