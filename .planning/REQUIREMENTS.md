@@ -35,10 +35,10 @@ Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap ph
 
 ### Evaluation Framework
 
-- [ ] **EVAL-01**: CLI benchmark tool samples jobs with existing Sonnet results and reconstructs prompts
-- [ ] **EVAL-02**: Metrics computed: score correlation, schema adherence, qualitative output, latency
-- [ ] **EVAL-03**: Auto-computed verdict (SUITABLE/MARGINAL/NOT_RECOMMENDED) with configurable thresholds
-- [ ] **EVAL-04**: JSON report saved to eval_results/ with aggregate metrics and per-job details
+- [x] **EVAL-01**: CLI benchmark tool samples jobs with existing Sonnet results and reconstructs prompts
+- [x] **EVAL-02**: Metrics computed: score correlation, schema adherence, qualitative output, latency
+- [x] **EVAL-03**: Auto-computed verdict (SUITABLE/MARGINAL/NOT_RECOMMENDED) with configurable thresholds
+- [x] **EVAL-04**: JSON report saved to eval_results/ with aggregate metrics and per-job details
 
 ## v1.4 Requirements (Complete)
 
@@ -108,10 +108,10 @@ None identified for this milestone.
 | COST-01 | Phase 24 | Pending |
 | COST-02 | Phase 26 | Complete |
 | COST-03 | Phase 26 | Complete |
-| EVAL-01 | Phase 28 | Pending |
-| EVAL-02 | Phase 28 | Pending |
-| EVAL-03 | Phase 28 | Pending |
-| EVAL-04 | Phase 28 | Pending |
+| EVAL-01 | Phase 28 | Complete |
+| EVAL-02 | Phase 28 | Complete |
+| EVAL-03 | Phase 28 | Complete |
+| EVAL-04 | Phase 28 | Complete |
 
 **Coverage:**
 - v1.5 requirements: 18 total

@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-03-27T21:49:25.888Z"
+status: Phase complete — ready for verification
+last_updated: "2026-03-27T21:58:22.137Z"
 progress:
-  total_phases: 7
-  completed_phases: 1
-  total_plans: 13
-  completed_plans: 10
+  total_phases: 10
+  completed_phases: 3
+  total_plans: 18
+  completed_plans: 16
 ---
 
 # State
@@ -111,6 +111,9 @@ None.
 - Import _SYSTEM_PROMPT from sonnet_evaluator rather than duplicating — guarantees prompt equivalence for correlation validity (Plan 01)
 - statistics.StatisticsError caught for zero-variance guard — returns None for pearson_r when all eval scores identical (Plan 01)
 - eval_results/ gitignored at Plan 01 implementation time — personal job data must never be committed (Plan 01)
+- Move load_config/load_profile/standalone_connection/call_model to module level — testability requires patchable eval_provider.* namespace (Plan 02)
+- eval config override sets fallback=None — eval failures must be genuine provider failures, not silently rescued by Anthropic fallback (Plan 02)
+- standalone_connection wraps entire loop (sample + call_model) — call_model needs conn open for cost recording (Plan 02)
 
 ---
-*Last session: 2026-03-27 — Completed Phase 28 Plan 01 (Evaluation Framework Pure Functions TDD)*
+*Last session: 2026-03-27 — Completed Phase 28 Plan 02 (CLI Evaluation Orchestrator)*
