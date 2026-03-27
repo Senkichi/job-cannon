@@ -249,7 +249,7 @@ def test_call_model_fallback_to_anthropic(tmp_path):
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
          patch("job_finder.web.model_provider.cost_gate", return_value=True), \
          patch("job_finder.web.model_provider.record_cost"), \
-         patch("job_finder.web.model_provider.AnthropicProvider") as mock_anthropic_cls:
+         patch("job_finder.web.providers.anthropic_provider.AnthropicProvider") as mock_anthropic_cls:
         mock_gemini_adapter = MagicMock()
         mock_gemini_adapter.call.return_value = bad_result
         mock_make_adapter.return_value = mock_gemini_adapter
