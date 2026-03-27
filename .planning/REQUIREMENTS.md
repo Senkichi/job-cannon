@@ -94,30 +94,30 @@ None identified for this milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | — | Pending |
-| INFRA-02 | — | Pending |
-| INFRA-03 | — | Pending |
-| INFRA-04 | — | Pending |
-| INFRA-05 | — | Pending |
-| ADAPT-01 | — | Pending |
-| ADAPT-02 | — | Pending |
-| ADAPT-03 | — | Pending |
-| MIGR-01 | — | Pending |
-| MIGR-02 | — | Pending |
-| MIGR-03 | — | Pending |
-| COST-01 | — | Pending |
-| COST-02 | — | Pending |
-| COST-03 | — | Pending |
-| EVAL-01 | — | Pending |
-| EVAL-02 | — | Pending |
-| EVAL-03 | — | Pending |
-| EVAL-04 | — | Pending |
+| INFRA-01 | Phase 24 | Pending |
+| INFRA-02 | Phase 26 | Pending |
+| INFRA-03 | Phase 26 | Pending |
+| INFRA-04 | Phase 26 | Pending |
+| INFRA-05 | Phase 24 | Pending |
+| ADAPT-01 | Phase 25 | Pending |
+| ADAPT-02 | Phase 25 | Pending |
+| ADAPT-03 | Phase 25 | Pending |
+| MIGR-01 | Phase 27 | Pending |
+| MIGR-02 | Phase 27 | Pending |
+| MIGR-03 | Phase 27 | Pending |
+| COST-01 | Phase 24 | Pending |
+| COST-02 | Phase 26 | Pending |
+| COST-03 | Phase 26 | Pending |
+| EVAL-01 | Phase 28 | Pending |
+| EVAL-02 | Phase 28 | Pending |
+| EVAL-03 | Phase 28 | Pending |
+| EVAL-04 | Phase 28 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18 (awaiting roadmap)
+- Mapped to phases: 18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-27*
-*Last updated: 2026-03-27 after initial definition*
+*Last updated: 2026-03-27 after roadmap creation (v1.5)*
