@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
 status: executing
-last_updated: "2026-03-27T05:03:36.414Z"
+last_updated: "2026-03-27T05:11:42.297Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 12
-  completed_plans: 6
-  percent: 100
+  completed_plans: 7
+  percent: 58
 ---
 
 # State
@@ -18,11 +18,11 @@ progress:
 ## Current Position
 
 Phase: 22 (Module Splits) — EXECUTING
-Plan: 2 of 7 complete
-Status: Executing Phase 22
-Last activity: 2026-03-27 -- Phase 22 Plan 02 complete
+Plan: 4 of 7 (next to execute)
+Status: Ready to execute
+Last activity: 2026-03-27
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 58%
 
 ## Project Reference
 
@@ -102,9 +102,14 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - resume_multi_version.py adds explicit `import sqlite3` to preserve patch surface for TestThreadSafety.test_each_variant_thread_opens_own_sqlite_connection
 - TestScoreThresholdDispatch patches at resume_multi_version.generate_resume_multi since deferred import binds name there during execution
 
+### Decisions Made in Phase 22 Plan 03
+
+- guidelines_bp shares url_prefix='/settings' with settings_bp — routes stay at same URLs, no template or link changes needed (Plan 03)
+- Monkeypatch targets follow module of definition: test patches must reference guidelines module, not settings module, after the split (Plan 03)
+
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-27 — Phase 22 Plan 02 complete: resume_generator.py split into resume_multi_version.py. 1562 tests pass.*
+*Last session: 2026-03-27 — Phase 22 Plan 03 complete: settings.py split into settings.py + guidelines.py blueprint. 29/29 target tests pass.*

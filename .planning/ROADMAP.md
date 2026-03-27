@@ -121,7 +121,7 @@ Plans:
 Plans:
 - [ ] 22-01-PLAN.md -- Split ats_scanner.py into ats_detection.py + ats_prober.py + ats_scanner.py
 - [x] 22-02-PLAN.md -- Split resume_generator.py into resume_generator.py + resume_multi_version.py
-- [ ] 22-03-PLAN.md -- Split settings.py into settings.py + guidelines.py blueprint
+- [x] 22-03-PLAN.md -- Split settings.py into settings.py + guidelines.py blueprint
 - [ ] 22-04-PLAN.md -- Split data_enricher.py into enrichment_tiers.py + company_enricher.py + data_enricher.py
 - [ ] 22-05-PLAN.md -- Split dashboard.py into batch_scoring.py + sync.py + dashboard.py blueprints
 - [ ] 22-06-PLAN.md -- Split profile.py into resume_review.py + profile_recommendations.py + profile.py blueprints
@@ -165,5 +165,5 @@ Plans:
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
 | 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
 | 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
-| 22. Module Splits | v1.4 | 1/7 | In Progress|  |
+| 22. Module Splits | v1.4 | 2/7 | In Progress|  |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
