@@ -77,4 +77,7 @@ def log_activity(
             conn.commit()
 
     except Exception:
+        # Intentional fault-tolerance: activity logging must never crash the caller.
+        # All call sites (Flask routes, APScheduler jobs) rely on this no-raise contract.
+        # Failures are surfaced via WARNING log with full traceback for observability.
         logger.warning("log_activity failed for action=%s", action, exc_info=True)
