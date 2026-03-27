@@ -131,9 +131,9 @@ def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
 
     for el in detail_els:
         text = el.get_text(strip=True)
-        if _looks_like_salary(text):
+        if looks_like_salary_range(text):
             salary_min, salary_max = _parse_salary(text)
-        elif text and not _looks_like_salary(text):
+        elif text and not looks_like_salary_range(text):
             # First non-salary detail is location
             if location == "Unknown":
                 location = text
@@ -199,7 +199,7 @@ def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Opti
         text = p.get_text(strip=True)
         if not text:
             continue
-        if _looks_like_salary(text):
+        if looks_like_salary_range(text):
             continue
         if _AGE_RE.match(text):
             continue
@@ -217,7 +217,7 @@ def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Opti
             continue
         if _AGE_RE.match(text):
             continue
-        if _looks_like_salary(text):
+        if looks_like_salary_range(text):
             salary_min, salary_max = _parse_salary(text)
         elif location == "Unknown":
             location = text
@@ -253,14 +253,6 @@ def _extract_listing_id(url: str) -> str:
     except Exception:
         logger.debug("glassdoor description extraction failed", exc_info=True)
         return ""
-
-
-def _looks_like_salary(text: str) -> bool:
-    """Check if a text string looks like a salary range.
-
-    Delegates to the shared ``looks_like_salary_range`` in ``_common.py``.
-    """
-    return looks_like_salary_range(text)
 
 
 def _parse_salary(text: str) -> tuple[Optional[int], Optional[int]]:
