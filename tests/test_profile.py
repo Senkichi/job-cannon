@@ -601,9 +601,9 @@ class TestPdfUpload:
         """Test app with temp DB and temp upload directory."""
         from job_finder.web import create_app
 
-        # Point data/resume_uploads to a temp dir by monkeypatching Path in profile module
-        import job_finder.web.blueprints.profile as profile_mod
-        monkeypatch.setattr(profile_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
+        # Point data/resume_uploads to a temp dir by monkeypatching Path in resume_review module
+        import job_finder.web.blueprints.resume_review as resume_review_mod
+        monkeypatch.setattr(resume_review_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
 
         test_config = {
             "db": {"path": tmp_db_path},
@@ -651,7 +651,7 @@ class TestPdfUpload:
         long_text = "A" * 500  # Well above the 200-char threshold
 
         mock_doc = self._make_mock_doc(long_text)
-        monkeypatch.setattr("job_finder.web.blueprints.profile.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
 
         client = app_with_uploads.test_client()
         data = {
@@ -683,14 +683,14 @@ class TestPdfUpload:
     ):
         """POST /profile/upload-pdf archives the PDF bytes to the upload directory."""
         import io
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
 
         upload_dir = str(tmp_path / "resume_uploads")
-        monkeypatch.setattr(profile_mod, "_UPLOAD_DIR", upload_dir)
+        monkeypatch.setattr(resume_review_mod, "_UPLOAD_DIR", upload_dir)
 
         long_text = "B" * 500
         mock_doc = self._make_mock_doc(long_text)
-        monkeypatch.setattr("job_finder.web.blueprints.profile.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
 
         client = app_with_uploads.test_client()
         data = {
@@ -715,7 +715,7 @@ class TestPdfUpload:
         short_text = "A" * 50  # Below the 200-char threshold
 
         mock_doc = self._make_mock_doc(short_text)
-        monkeypatch.setattr("job_finder.web.blueprints.profile.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
 
         data = {
             "pdf_file": (io.BytesIO(b"%PDF-scanned"), "scanned.pdf", "application/pdf"),
@@ -820,12 +820,12 @@ class TestConflictReview:
 
     def _mock_compare_conflicts(self, monkeypatch, conflicts=None):
         """Monkeypatch _compare_conflicts to return canned conflicts."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
         if conflicts is None:
             conflicts = self.CANNED_CONFLICTS
 
         monkeypatch.setattr(
-            profile_mod,
+            resume_review_mod,
             "_compare_conflicts",
             lambda raw_text, profile, conn, config: conflicts,
         )
@@ -834,9 +834,9 @@ class TestConflictReview:
         """GET /profile/review/1 for an existing upload returns 200 with conflict-card content."""
         self._mock_compare_conflicts(monkeypatch)
         # Monkeypatch profile path to avoid reading real experience_profile.json
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
         tmp_profile = str(tmp_path / "profile.json")
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         resp = review_client.get("/profile/review/1")
         assert resp.status_code == 200
@@ -853,7 +853,7 @@ class TestConflictReview:
         self, app_with_upload_row, monkeypatch, tmp_path
     ):
         """POST /profile/save-conflicts with accepted new_skill adds skill to profile."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
         from job_finder.web.profile_schema import load_profile, save_profile
 
         # Use a temp profile with known initial state
@@ -873,7 +873,7 @@ class TestConflictReview:
             "resume_preferences": {"summary_style": "", "emphasis": []},
         }
         save_profile(initial_profile, tmp_profile)
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = app_with_upload_row.test_client()
         payload = {
@@ -899,12 +899,12 @@ class TestConflictReview:
     ):
         """POST /profile/save-conflicts updates resume_upload_reviews.review_status to 'reviewed'."""
         import sqlite3
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
         from job_finder.web.profile_schema import save_profile
 
         tmp_profile = str(tmp_path / "profile.json")
         save_profile({"positions": [], "skills": [], "resume_preferences": {"summary_style": "", "emphasis": []}}, tmp_profile)
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = app_with_upload_row.test_client()
         payload = {
@@ -933,7 +933,7 @@ class TestConflictReview:
         self, app_with_upload_row, monkeypatch, tmp_path
     ):
         """POST /profile/save-conflicts with skip action leaves profile skills unchanged."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
         from job_finder.web.profile_schema import load_profile, save_profile
 
         tmp_profile = str(tmp_path / "profile.json")
@@ -943,7 +943,7 @@ class TestConflictReview:
             "resume_preferences": {"summary_style": "", "emphasis": []},
         }
         save_profile(initial_profile, tmp_profile)
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = app_with_upload_row.test_client()
         payload = {
@@ -1085,8 +1085,8 @@ class TestPhase17ActivityInstrumentation:
     def instrumented_app(self, tmp_db_path, tmp_path, monkeypatch):
         """Test app with temp DB, temp upload dir, and test DB path stashed."""
         from job_finder.web import create_app
-        import job_finder.web.blueprints.profile as profile_mod
-        monkeypatch.setattr(profile_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
+        import job_finder.web.blueprints.resume_review as resume_review_mod
+        monkeypatch.setattr(resume_review_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
         cfg = dict(self._TEST_CONFIG)
         cfg["db"] = {"path": tmp_db_path}
         application = create_app(config=cfg)
@@ -1107,7 +1107,7 @@ class TestPhase17ActivityInstrumentation:
         conn.close()
         return row_id
 
-    @patch("job_finder.web.blueprints.profile.log_activity")
+    @patch("job_finder.web.blueprints.resume_review.log_activity")
     def test_upload_pdf_logs_activity(self, mock_log, instrumented_app, monkeypatch):
         """upload_pdf route calls log_activity with ACTION_UPLOAD_RESUME_PDF."""
         long_text = "A" * 500
@@ -1118,7 +1118,7 @@ class TestPhase17ActivityInstrumentation:
         mock_doc.close = MagicMock()
 
         monkeypatch.setattr(
-            "job_finder.web.blueprints.profile.fitz.open",
+            "job_finder.web.blueprints.resume_review.fitz.open",
             lambda mode, data: mock_doc,
         )
 
@@ -1134,19 +1134,19 @@ class TestPhase17ActivityInstrumentation:
         from job_finder.web.activity_tracker import ACTION_UPLOAD_RESUME_PDF
         assert call_action == ACTION_UPLOAD_RESUME_PDF
 
-    @patch("job_finder.web.blueprints.profile.log_activity")
+    @patch("job_finder.web.blueprints.resume_review.log_activity")
     def test_conflict_review_logs_activity(self, mock_log, instrumented_app, monkeypatch, tmp_path):
         """conflict_review route calls log_activity with ACTION_CONFLICT_REVIEW."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
 
         db_path = instrumented_app._test_db_path
         upload_id = self._insert_upload_row(db_path)
 
         # Monkeypatch _compare_conflicts to avoid Anthropic call
-        monkeypatch.setattr(profile_mod, "_compare_conflicts", lambda *args, **kwargs: [])
+        monkeypatch.setattr(resume_review_mod, "_compare_conflicts", lambda *args, **kwargs: [])
         # Monkeypatch profile path to avoid reading real profile
         tmp_profile = str(tmp_path / "profile.json")
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = instrumented_app.test_client()
         resp = client.get(f"/profile/review/{upload_id}")
@@ -1156,10 +1156,10 @@ class TestPhase17ActivityInstrumentation:
         from job_finder.web.activity_tracker import ACTION_CONFLICT_REVIEW
         assert call_action == ACTION_CONFLICT_REVIEW
 
-    @patch("job_finder.web.blueprints.profile.log_activity")
+    @patch("job_finder.web.blueprints.resume_review.log_activity")
     def test_save_conflicts_logs_activity(self, mock_log, instrumented_app, monkeypatch, tmp_path):
         """save_conflicts route calls log_activity with ACTION_SAVE_CONFLICTS."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.resume_review as resume_review_mod
 
         db_path = instrumented_app._test_db_path
         upload_id = self._insert_upload_row(db_path)
@@ -1167,7 +1167,7 @@ class TestPhase17ActivityInstrumentation:
         # Use a temp profile path
         tmp_profile = str(tmp_path / "profile.json")
         save_profile({"positions": [], "skills": [], "resume_preferences": {}}, tmp_profile)
-        monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = instrumented_app.test_client()
         payload = {"conflicts": [], "decisions": []}
@@ -1182,7 +1182,7 @@ class TestPhase17ActivityInstrumentation:
         from job_finder.web.activity_tracker import ACTION_SAVE_CONFLICTS
         assert call_action == ACTION_SAVE_CONFLICTS
 
-    @patch("job_finder.web.blueprints.profile.log_activity")
+    @patch("job_finder.web.blueprints.resume_review.log_activity")
     def test_extract_style_logs_activity(self, mock_log, instrumented_app, monkeypatch):
         """extract_style route calls log_activity with ACTION_EXTRACT_STYLE."""
         db_path = instrumented_app._test_db_path
@@ -1247,6 +1247,7 @@ class TestProfileRecommendations:
         """Test app for recommendation tests with a temp profile file."""
         from job_finder.web import create_app
         import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
 
         # Create a temp profile with known warnings (no achievements on a position)
         tmp_profile = str(tmp_path / "profile.json")
@@ -1265,7 +1266,9 @@ class TestProfileRecommendations:
             "resume_preferences": {"summary_style": "", "emphasis": []},
         }
         save_profile(profile_data, tmp_profile)
+        # Patch both modules that read _PROFILE_PATH (profile for index route, profile_recs for recommendation routes)
         monkeypatch.setattr(profile_mod, "_PROFILE_PATH", tmp_profile)
+        monkeypatch.setattr(profile_recs_mod, "_PROFILE_PATH", tmp_profile)
 
         cfg = dict(_REC_APP_CONFIG)
         cfg["db"] = {"path": tmp_db_path}
@@ -1289,9 +1292,9 @@ class TestProfileRecommendations:
 
     def test_single_recommendation_route(self, rec_client, monkeypatch):
         """GET /profile/recommendation returns Haiku guidance for a warning."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
         monkeypatch.setattr(
-            profile_mod,
+            profile_recs_mod,
             "call_claude",
             lambda **kwargs: (_CANNED_REC_RESULT, 0.001),
         )
@@ -1312,7 +1315,7 @@ class TestProfileRecommendations:
 
     def test_batch_recommendations_route(self, rec_client, monkeypatch):
         """POST /profile/recommendations-all returns batch guidance for all warnings."""
-        import job_finder.web.blueprints.profile as profile_mod
+        import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
 
         batch_result = {
             "recommendations": [
@@ -1329,7 +1332,7 @@ class TestProfileRecommendations:
             ]
         }
         monkeypatch.setattr(
-            profile_mod,
+            profile_recs_mod,
             "call_claude",
             lambda **kwargs: (batch_result, 0.002),
         )
@@ -1342,7 +1345,6 @@ class TestProfileRecommendations:
 
     def test_apply_fix_add_skill(self, rec_app, tmp_path, monkeypatch):
         """POST /profile/apply-fix with add_skill appends the skill to the profile."""
-        import job_finder.web.blueprints.profile as profile_mod
         from job_finder.web.profile_schema import load_profile
 
         client = rec_app.test_client()
