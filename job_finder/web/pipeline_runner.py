@@ -130,15 +130,22 @@ def run_ingestion(db_path: str, config: dict) -> dict:
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
-        sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
-        summary["haiku_scored"] = haiku_scored_count
-        summary["sonnet_queue"] = sonnet_queue
-        summary["sonnet_queued"] = len(sonnet_queue)
+        try:
+            sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
+            summary["haiku_scored"] = haiku_scored_count
+            summary["sonnet_queue"] = sonnet_queue
+            summary["sonnet_queued"] = len(sonnet_queue)
+        except Exception as e:
+            logger.error("Haiku scoring failed (non-fatal): %s", e)
+            sonnet_queue = []
 
         # Run Sonnet evaluation for jobs above threshold
         if sonnet_queue:
-            sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
-            summary["sonnet_evaluated"] = sonnet_evaluated
+            try:
+                sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
+                summary["sonnet_evaluated"] = sonnet_evaluated
+            except Exception as e:
+                logger.error("Sonnet evaluation failed (non-fatal): %s", e)
     elif new_job_keys and anthropic is None:
         logger.debug(
             "anthropic package not installed -- skipping AI scoring for %d new jobs",
@@ -303,46 +310,56 @@ def _score_and_persist(
             summary["jobs_updated"] += 1
 
         # Company auto-population: create/update company record for every job
-        # Non-fatal: company upsert failure does not crash ingestion
-        # Lazy import to avoid circular: ats_scanner → dedup_normalizer → pipeline_runner
-        try:
-            from job_finder.web.ats_detection import extract_ats_from_urls
-            from job_finder.web.ats_scanner import upsert_company
-        except ImportError:
-            extract_ats_from_urls = None  # type: ignore[assignment]
-            upsert_company = None  # type: ignore[assignment]
-        if upsert_company is not None:
-            try:
-                # job.source_url is a single URL string; wrap in list for extract_ats_from_urls
-                source_url = job.source_url or ""
-                source_urls = [source_url] if source_url else []
-                ats_platform, ats_slug = extract_ats_from_urls(source_urls)
-                probe_status = "hit" if ats_slug else "pending"
-                company_id = upsert_company(
-                    conn,
-                    name=job.company,
-                    ats_platform=ats_platform,
-                    ats_slug=ats_slug,
-                    ats_probe_status=probe_status,
-                )
-                if company_id:
-                    conn.execute(
-                        "UPDATE jobs SET company_id = ? WHERE dedup_key = ?",
-                        (company_id, job.dedup_key),
-                    )
-                    conn.commit()
-            except Exception as company_err:
-                logger.debug(
-                    "Company upsert failed for '%s' (non-fatal): %s",
-                    job.company,
-                    company_err,
-                )
+        _upsert_job_company(conn, job)
 
     except Exception as e:
         error_msg = f"{job.title} @ {job.company}: {e}"
         summary["job_errors"].append(error_msg)
         logger.warning(
             "Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e
+        )
+
+
+def _upsert_job_company(conn, job: Job) -> None:
+    """Create or update the company record associated with a job.
+
+    Non-fatal: any error is logged at DEBUG level and does not crash ingestion.
+    Lazy import to avoid circular: ats_scanner → dedup_normalizer → pipeline_runner.
+
+    Args:
+        conn: Open sqlite3 connection.
+        job: Job object whose company should be upserted.
+    """
+    try:
+        from job_finder.web.ats_detection import extract_ats_from_urls
+        from job_finder.web.ats_scanner import upsert_company
+    except ImportError:
+        return
+
+    try:
+        # job.source_url is a single URL string; wrap in list for extract_ats_from_urls
+        source_url = job.source_url or ""
+        source_urls = [source_url] if source_url else []
+        ats_platform, ats_slug = extract_ats_from_urls(source_urls)
+        probe_status = "hit" if ats_slug else "pending"
+        company_id = upsert_company(
+            conn,
+            name=job.company,
+            ats_platform=ats_platform,
+            ats_slug=ats_slug,
+            ats_probe_status=probe_status,
+        )
+        if company_id:
+            conn.execute(
+                "UPDATE jobs SET company_id = ? WHERE dedup_key = ?",
+                (company_id, job.dedup_key),
+            )
+            conn.commit()
+    except Exception as company_err:
+        logger.debug(
+            "Company upsert failed for '%s' (non-fatal): %s",
+            job.company,
+            company_err,
         )
 
 
