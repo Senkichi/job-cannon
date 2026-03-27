@@ -99,6 +99,33 @@
     {% endif %}
   </div>
 
+  <!-- Provider breakdown table (current calendar month) -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Provider</h2>
+    {% if monthly_provider_breakdown %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-2 font-medium">Provider</th>
+          <th class="pb-2 font-medium text-right">Calls</th>
+          <th class="pb-2 font-medium text-right">Spend</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in monthly_provider_breakdown %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
+          <td class="py-2 text-slate-300 font-mono">{{ item.provider }}</td>
+          <td class="py-2 text-slate-400 text-right">{{ item.calls }}</td>
+          <td class="py-2 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    {% endif %}
+  </div>
+
 </div>
 {% endblock %}
 

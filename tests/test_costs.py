@@ -11,6 +11,7 @@ Tests cover:
 - Dashboard cost card contains /costs "View details" link
 """
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -235,6 +236,13 @@ class TestCostsRoute:
         html = response.data.decode("utf-8")
         assert "This Month by Feature" in html
 
+    def test_costs_page_renders_provider_breakdown_table(self, client):
+        """GET /costs includes the 'This Month by Provider' section heading."""
+        response = client.get("/costs")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "This Month by Provider" in html
+
     def test_budget_cap_from_config(self, tmp_db_path):
         """Budget cap is read from config, not hardcoded — custom value appears in rendered page."""
         from job_finder.web import create_app
@@ -298,3 +306,57 @@ class TestDashboardCostCardLink:
         html = response.data.decode("utf-8")
         assert 'href="/costs"' in html
         assert "View details" in html
+
+
+# ---------------------------------------------------------------------------
+# Tests: provider breakdown data rendering
+# ---------------------------------------------------------------------------
+
+
+class TestProviderBreakdownRendering:
+    def test_costs_page_shows_provider_names(self, tmp_db_path):
+        """Provider names from scoring_costs appear in the provider breakdown table."""
+        from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        now = datetime.now(timezone.utc)
+        ts = now.strftime("%Y-%m-%dT12:00:00Z")
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("j1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.01, ts, "anthropic"),
+        )
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("j2", "haiku_score", "gemini-2.0-flash", 150, 75, 0.0, ts, "gemini"),
+        )
+        conn.commit()
+        conn.close()
+
+        test_config = {
+            "db": {"path": tmp_db_path},
+            "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
+            "profile": {
+                "target_titles": ["Staff Data Scientist"],
+                "target_locations": ["Remote"],
+                "min_salary": 150000,
+                "industries": [],
+                "exclusions": {"title_keywords": [], "companies": []},
+                "skills": [],
+            },
+            "sources": {},
+            "output": {"default_format": "cli", "max_results": 50},
+        }
+        app = create_app(config=test_config)
+        app.config["TESTING"] = True
+        client = app.test_client()
+
+        response = client.get("/costs")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "anthropic" in html
+        assert "gemini" in html
+        assert "This Month by Provider" in html
