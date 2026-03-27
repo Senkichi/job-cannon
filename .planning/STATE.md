@@ -1,29 +1,29 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Tech Debt Sweep
-status: v1.4 milestone complete
-last_updated: "2026-03-27T07:22:40.283Z"
+milestone: v1.0
+milestone_name: milestone
+status: Ready to execute
+last_updated: "2026-03-27T21:49:25.888Z"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 7
+  completed_phases: 1
+  total_plans: 13
+  completed_plans: 10
 ---
 
 # State
 
 ## Current Position
 
-Phase: 23 (N+1 Batching) — EXECUTING
-Plan: 2 of 3
+Phase: 28 (Evaluation Framework) — EXECUTING
+Plan: 2 of 2
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 23 — N+1 Batching
+**Current focus:** Phase 28 — Evaluation Framework
 
 ## Performance Metrics
 
@@ -106,5 +106,11 @@ None.
 - Missing key handling: warning logged and key skipped, consistent with previous per-job behavior (Plan 01)
 - Enrichment path unchanged: enrich_job updates in-memory job_row dict after prefetch, which is correct since enrichment writes to DB directly via conn (Plan 01)
 
+### Decisions Made in Phase 28
+
+- Import _SYSTEM_PROMPT from sonnet_evaluator rather than duplicating — guarantees prompt equivalence for correlation validity (Plan 01)
+- statistics.StatisticsError caught for zero-variance guard — returns None for pearson_r when all eval scores identical (Plan 01)
+- eval_results/ gitignored at Plan 01 implementation time — personal job data must never be committed (Plan 01)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 23 Plan 01 (N+1 Batch Prefetch in Scoring Runner)*
+*Last session: 2026-03-27 — Completed Phase 28 Plan 01 (Evaluation Framework Pure Functions TDD)*
