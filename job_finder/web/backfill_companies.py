@@ -219,6 +219,9 @@ def find_fuzzy_false_positives(
     # Pre-compute normalizations to reduce O(n^2) normalize_company calls to O(n)
     normalized = [normalize_company(c[1]) for c in companies]
 
+    # O(n^2) pairwise scan — acceptable at ~325 companies (~52k pairs, <2s).
+    # If the company count grows significantly, consider an inverted-token index
+    # to prune candidates before calling fuzz.token_set_ratio.
     for i in range(n):
         id_a, name_a, name_raw_a = companies[i]
         norm_a = normalized[i]
