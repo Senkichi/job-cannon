@@ -49,7 +49,7 @@ class Job:
         Returns:
             String in format "{normalized_company}|{normalized_title}"
         """
-        from job_finder.web.dedup_normalizer import normalize_company, normalize_title
+        from job_finder.normalizers import normalize_company, normalize_title
         return f"{normalize_company(company)}|{normalize_title(title)}"
 
     @property
