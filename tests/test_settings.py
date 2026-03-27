@@ -159,7 +159,7 @@ def test_settings_migrate_shows_spinner_indicator(settings_app):
 
 def test_migrate_style_guide_route_returns_200(settings_app):
     client = settings_app.test_client()
-    with patch("job_finder.web.blueprints.settings.migrate_style_guide") as mock_migrate:
+    with patch("job_finder.web.blueprints.guidelines.migrate_style_guide") as mock_migrate:
         mock_migrate.return_value = {"bullet_style": "dashes", "summary_formula": "test"}
         resp = client.post("/settings/migrate-style-guide")
     assert resp.status_code == 200
@@ -196,9 +196,9 @@ class TestGuidelinesImport:
             "date_format": "MMM YYYY",
         }
         client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.settings.merge_guidelines_into_guide") as mock_merge:
+        with patch("job_finder.web.blueprints.guidelines.merge_guidelines_into_guide") as mock_merge:
             mock_merge.return_value = merged_result
-            with patch("job_finder.web.blueprints.settings.anthropic.Anthropic"):
+            with patch("job_finder.web.blueprints.guidelines.anthropic.Anthropic"):
                 resp = client.post(
                     "/settings/preview-guidelines-merge",
                     data={"guidelines_text": "Use dashes for bullets"},
@@ -220,7 +220,7 @@ class TestGuidelinesImport:
             "date_format": "MMM YYYY",
         }
         client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.settings.save_style_guide") as mock_save:
+        with patch("job_finder.web.blueprints.guidelines.save_style_guide") as mock_save:
             resp = client.post(
                 "/settings/apply-guidelines-merge",
                 data={"merged_guide_json": json_mod.dumps(merged_guide)},
