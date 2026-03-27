@@ -134,3 +134,4 @@ Plans:
 | 16. Homepage Discovery | v1.3 | 2/2 | Complete | 2026-03-26 |
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete   | 2026-03-26 |
+| 22. Module Splits | v1.4 | 1/7 | In progress | 2026-03-26 |

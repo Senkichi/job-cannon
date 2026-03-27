@@ -3,38 +3,39 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Fixes & Improvements
 status: Phase complete — ready for verification
-last_updated: "2026-03-26T04:06:05.597Z"
+last_updated: "2026-03-27T05:01:27.211Z"
 progress:
   total_phases: 4
-  completed_phases: 4
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 3
 ---
 
 # State
 
 ## Current Position
 
-Phase: 18 (Async Sync) — COMPLETE
-Plan: 1 of 1 — DONE
+Phase: 22 (Module Splits) — IN PROGRESS
+Plan: 1 of 7 — DONE
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-25)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 18 — Async Sync
+**Current focus:** Phase 22 — Module Splits
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5 (this milestone)
+- Total plans completed: 6 (this milestone)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
-- Average duration: ~8min
-- Total execution time: ~25min
+- Phase 22-01: 12min (2 tasks, 7 files)
+- Average duration: ~9min
+- Total execution time: ~37min
 
 *Updated after each plan completion*
 
@@ -86,5 +87,11 @@ None.
 - Simplified phase labels (running->gmail->done) since trigger_sync is synchronous and opaque — no sub-phase callbacks available (Plan 01)
 - Flask's native app.config["TESTING"] must be set explicitly in test fixtures, separate from JF_CONFIG["TESTING"] (Plan 01)
 
+### Decisions Made in Phase 22
+
+- Re-export all moved symbols from ats_scanner.py for backward compatibility — avoids updating 8+ callers that import from ats_scanner (Plan 01)
+- Python module singleton ensures patch("ats_scanner.requests.get") still works for probe_ats_slugs tests after probe functions moved to ats_prober.py (Plan 01)
+- caplog logger target updated to ats_prober in test_log_levels.py — _handle_scan_error logs via its own module's logger, not ats_scanner (Plan 01)
+
 ---
-*Last session: 2026-03-26 — Completed Phase 18 Plan 01 (Async Sync)*
+*Last session: 2026-03-26 — Completed Phase 22 Plan 01 (ATS Scanner Module Split)*
