@@ -241,6 +241,7 @@
         </button>
         {% endif %}
         <button type="button"
+                aria-label="Archive this job permanently"
                 hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
                 hx-vals='{"pipeline_status": "archived"}'
                 hx-target="#status-cell-{{ jd_key_safe }}"
