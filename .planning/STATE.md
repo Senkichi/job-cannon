@@ -1,42 +1,37 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Tech Debt Sweep
-status: v1.4 milestone complete
-last_updated: "2026-03-27T07:22:40.283Z"
+milestone: v1.5
+milestone_name: Multi-Provider Model Routing
+status: Defining requirements
+last_updated: "2026-03-27"
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # State
 
 ## Current Position
 
-Phase: 23 (N+1 Batching) — EXECUTING
-Plan: 2 of 3
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-27 — Milestone v1.5 started
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-25)
+See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 23 — N+1 Batching
+**Current focus:** v1.5 Multi-Provider Model Routing
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 7 (this milestone)
-- Phase 14-01: 2min (2 tasks, 8 files)
-- Phase 17-01: 8min (3 tasks, 6 files)
-- Phase 18-01: 15min (1 task TDD, 5 files)
-- Phase 22-01: 12min (2 tasks, 7 files)
-- Phase 23-01: 4min (1 task TDD, 2 files)
-- Average duration: ~8min
-- Total execution time: ~41min
+- Total plans completed: 0 (this milestone)
 
 *Updated after each plan completion*
 
