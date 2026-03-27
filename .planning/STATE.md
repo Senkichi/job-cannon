@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
 status: executing
-last_updated: "2026-03-27T02:10:52.473Z"
+last_updated: "2026-03-27T02:38:11.621Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 # State
@@ -18,11 +18,11 @@ progress:
 ## Current Position
 
 Phase: 20 (Surgical Fixes) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Executing Phase 20
-Last activity: 2026-03-27 -- Phase 20 Plan 01 complete (FIX-01, FIX-02)
+Last activity: 2026-03-27 -- Phase 20 Plan 02 complete (FIX-03, FIX-05)
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Project Reference
 
@@ -35,13 +35,14 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Velocity:**
 
-- Total plans completed: 6 (including this session)
+- Total plans completed: 7 (including this session)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 20-01: 15min (2 tasks, 15 files)
-- Average duration: ~10min
-- Total execution time: ~40min
+- Phase 20-02: 24min (2 tasks, 7 files)
+- Average duration: ~13min
+- Total execution time: ~64min
 
 *Updated after each plan completion*
 
@@ -72,9 +73,16 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - Indeed's _INDEED_META_PATTERNS retains only 2 source-specific patterns; "job alert digest" dropped as duplicate of BASE_META_PATTERNS
 - Public functions/constants use no leading underscore (run_homepage_discovery, run_sync_now, merge_guidelines_into_guide, FIELD_LABELS) — private helpers keep _prefix
 
+### Decisions Made in Phase 20 Plan 02
+
+- Job.normalized_dedup_key uses lazy imports inside static method to break circular import between models.py (foundation layer) and dedup_normalizer.py (web layer)
+- run_retroactive_dedup calls normalize_company/normalize_title directly instead of the backward-compat wrapper to avoid a potential circular import chain within dedup_normalizer.py
+- get_config_snapshot lives in db_helpers.py (not a new module) since it pairs naturally with the per-request connection helper pattern
+- Background threads take config snapshot at job-start via get_config_snapshot(app) rather than reading individual keys from shared app.config dict
+
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-27 — Phase 20 Plan 01 complete: Indeed dedup + 4 symbol renames. 1533 tests pass.*
+*Last session: 2026-03-27 — Phase 20 Plan 02 complete: Job.normalized_dedup_key static method + get_config_snapshot. 1533 tests pass.*
