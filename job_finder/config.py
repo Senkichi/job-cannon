@@ -110,14 +110,20 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
             f"  3. See docs/SETUP.md for full configuration reference\n"
         )
 
-    with open(path, "r", encoding="utf-8") as f:
-        try:
-            cfg = yaml.safe_load(f)
-        except yaml.YAMLError as exc:
-            raise ValueError(
-                f"Config file contains invalid YAML: {config_path}\n{exc}\n"
-                f"See config.example.yaml for the expected structure."
-            ) from exc
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                cfg = yaml.safe_load(f)
+            except yaml.YAMLError as exc:
+                raise ValueError(
+                    f"Config file contains invalid YAML: {config_path}\n{exc}\n"
+                    f"See config.example.yaml for the expected structure."
+                ) from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"Config file is not valid UTF-8: {config_path}\n"
+            f"Ensure the file is saved with UTF-8 encoding.\n{exc}"
+        ) from exc
 
     if cfg is None:
         raise ValueError(
