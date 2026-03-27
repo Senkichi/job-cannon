@@ -1127,7 +1127,8 @@ class TestMultiVersionStrategySelection:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, _haiku_select_strategies
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import _haiku_select_strategies
 
         run_migrations(tmp_db_path)
         conn = _sqlite3.connect(tmp_db_path)
@@ -1147,7 +1148,7 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = ({"strategies": strategies_returned, "reasoning": "test"}, 0.001)
             result = _haiku_select_strategies(mock_client, job_row, conn, config)
 
@@ -1160,7 +1161,8 @@ class TestMultiVersionStrategySelection:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, _haiku_select_strategies
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import _haiku_select_strategies
 
         run_migrations(tmp_db_path)
         conn = _sqlite3.connect(tmp_db_path)
@@ -1179,7 +1181,7 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = ({"strategies": STRATEGY_POOL[:3], "reasoning": "test"}, 0.001)
             _haiku_select_strategies(mock_client, job_row, conn, config)
 
@@ -1197,7 +1199,8 @@ class TestMultiVersionStrategySelection:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, _haiku_select_strategies
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import _haiku_select_strategies
 
         run_migrations(tmp_db_path)
         conn = _sqlite3.connect(tmp_db_path)
@@ -1216,7 +1219,7 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=Exception("API failure")):
+        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=Exception("API failure")):
             result = _haiku_select_strategies(mock_client, job_row, conn, config)
 
         conn.close()
@@ -1251,7 +1254,8 @@ class TestParallelVariantGeneration:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, generate_resume_multi
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import generate_resume_multi
 
         run_migrations(tmp_db_path)
 
@@ -1275,13 +1279,13 @@ class TestParallelVariantGeneration:
 
         sample_resume = self._make_sample_resume()
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (
                 {**sample_resume, "strategies": STRATEGY_POOL[:3], "reasoning": "test"},
                 0.01,
             )
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_generator.anthropic") as mock_anthropic:
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
                     mock_anthropic.Anthropic.return_value = MagicMock()
                     generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
@@ -1296,7 +1300,8 @@ class TestParallelVariantGeneration:
         from unittest.mock import MagicMock, call, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, generate_resume_multi
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import generate_resume_multi
 
         run_migrations(tmp_db_path)
 
@@ -1330,9 +1335,9 @@ class TestParallelVariantGeneration:
                 return ({"strategies": STRATEGY_POOL[:3], "reasoning": "ok"}, 0.001)
             return (sample_resume, 0.01)
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_generator.anthropic") as mock_anthropic:
+        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
                     mock_anthropic.Anthropic.return_value = MagicMock()
                     generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
@@ -1356,7 +1361,7 @@ class TestThreadSafety:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import _generate_single_variant
+        from job_finder.web.resume_multi_version import _generate_single_variant
 
         run_migrations(tmp_db_path)
 
@@ -1390,10 +1395,10 @@ class TestThreadSafety:
             connect_calls.append(path)
             return original_connect(path, **kwargs)
 
-        with patch("job_finder.web.resume_generator.sqlite3.connect", side_effect=tracking_connect):
-            with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.sqlite3.connect", side_effect=tracking_connect):
+            with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
                 mock_call.return_value = (sample_resume, 0.01)
-                with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
                     mock_client_factory = MagicMock()
                     mock_client_factory.return_value = MagicMock()
                     _generate_single_variant(
@@ -1432,7 +1437,8 @@ class TestPartialFailure:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, generate_resume_multi
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import generate_resume_multi
 
         run_migrations(tmp_db_path)
 
@@ -1463,12 +1469,12 @@ class TestPartialFailure:
                 raise RuntimeError("Variant 1 failed")
             return self._make_sample_resume(suffix=f"_{strategy}")
 
-        with patch("job_finder.web.resume_generator._generate_single_variant", side_effect=mock_generate_variant):
-            with patch("job_finder.web.resume_generator._haiku_select_strategies") as mock_strat:
+        with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=mock_generate_variant):
+            with patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat:
                 mock_strat.return_value = STRATEGY_POOL[:3]
-                with patch("job_finder.web.resume_generator._synthesize_variants") as mock_synth:
+                with patch("job_finder.web.resume_multi_version._synthesize_variants") as mock_synth:
                     mock_synth.return_value = sample_resume
-                    with patch("job_finder.web.resume_generator.anthropic") as mock_ant:
+                    with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
                         mock_ant.Anthropic.return_value = MagicMock()
                         result = generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
@@ -1488,7 +1494,8 @@ class TestPartialFailure:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import STRATEGY_POOL, generate_resume_multi
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import generate_resume_multi
 
         run_migrations(tmp_db_path)
 
@@ -1510,10 +1517,10 @@ class TestPartialFailure:
             "sonnet_score": 85.0,
         }
 
-        with patch("job_finder.web.resume_generator._generate_single_variant", side_effect=RuntimeError("all fail")):
-            with patch("job_finder.web.resume_generator._haiku_select_strategies") as mock_strat:
+        with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=RuntimeError("all fail")):
+            with patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat:
                 mock_strat.return_value = STRATEGY_POOL[:3]
-                with patch("job_finder.web.resume_generator.anthropic") as mock_ant:
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
                     mock_ant.Anthropic.return_value = MagicMock()
                     with pytest.raises(RuntimeError, match="All resume variants failed"):
                         generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
@@ -1528,7 +1535,8 @@ class TestSynthesisPass:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import RESUME_SCHEMA, _synthesize_variants
+        from job_finder.web.resume_generator import RESUME_SCHEMA
+        from job_finder.web.resume_multi_version import _synthesize_variants
 
         run_migrations(tmp_db_path)
 
@@ -1573,10 +1581,10 @@ class TestSynthesisPass:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (expected_result, 0.05)
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_generator.anthropic") as mock_ant:
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
                     mock_ant.Anthropic.return_value = MagicMock()
                     result = _synthesize_variants(tmp_db_path, variants, job_row, config)
 
@@ -1590,7 +1598,7 @@ class TestSynthesisPass:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import _synthesize_variants
+        from job_finder.web.resume_multi_version import _synthesize_variants
 
         run_migrations(tmp_db_path)
 
@@ -1627,10 +1635,10 @@ class TestSynthesisPass:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.call_claude") as mock_call:
+        with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (synth_result, 0.05)
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_generator.anthropic") as mock_ant:
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
                     mock_ant.Anthropic.return_value = MagicMock()
                     _synthesize_variants(tmp_db_path, variants, job_row, config)
 
@@ -1646,7 +1654,7 @@ class TestSynthesisPass:
         from unittest.mock import MagicMock, patch
 
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.resume_generator import _synthesize_variants
+        from job_finder.web.resume_multi_version import _synthesize_variants
 
         run_migrations(tmp_db_path)
 
@@ -1698,9 +1706,9 @@ class TestSynthesisPass:
             captured_messages["messages"] = kwargs.get("messages", [])
             return (synth_result, 0.05)
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_generator.anthropic") as mock_ant:
+        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
                     mock_ant.Anthropic.return_value = MagicMock()
                     _synthesize_variants(tmp_db_path, variants, job_row, config)
 
@@ -1763,7 +1771,7 @@ class TestScoreThresholdDispatch:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.generate_resume_multi", return_value=mock_resume) as mock_multi:
+        with patch("job_finder.web.resume_multi_version.generate_resume_multi", return_value=mock_resume) as mock_multi:
             with patch("job_finder.web.resume_generator.generate_resume_single") as mock_single:
                 with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                     mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
@@ -1819,7 +1827,7 @@ class TestScoreThresholdDispatch:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.generate_resume_multi") as mock_multi:
+        with patch("job_finder.web.resume_multi_version.generate_resume_multi") as mock_multi:
             with patch("job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume) as mock_single:
                 with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                     mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
@@ -1875,7 +1883,7 @@ class TestScoreThresholdDispatch:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.generate_resume_multi", return_value=mock_resume):
+        with patch("job_finder.web.resume_multi_version.generate_resume_multi", return_value=mock_resume):
             with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                 mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
                 with patch("job_finder.web.resume_generator.get_drive_service"):
@@ -2933,7 +2941,8 @@ class TestPreferenceInjection:
         import sqlite3 as _sqlite3
         from unittest.mock import MagicMock, patch
 
-        from job_finder.web.resume_generator import STRATEGY_POOL, _generate_single_variant
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import _generate_single_variant
 
         self._make_db_with_preferences(tmp_db_path, [
             {"preference_text": "Use metrics in every bullet", "preference_type": "content_addition"},
@@ -2955,8 +2964,8 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
+        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
                 mock_client = MagicMock()
                 _generate_single_variant(
                     tmp_db_path,
@@ -3120,7 +3129,8 @@ class TestStyleGuideInjection:
         """_generate_single_variant includes style guide directives in Formatting Preferences."""
         from unittest.mock import MagicMock, patch
 
-        from job_finder.web.resume_generator import STRATEGY_POOL, _generate_single_variant
+        from job_finder.web.resume_generator import STRATEGY_POOL
+        from job_finder.web.resume_multi_version import _generate_single_variant
 
         conn = self._make_db(tmp_db_path)
         conn.close()
@@ -3136,8 +3146,8 @@ class TestStyleGuideInjection:
             "tone": "professional",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
+        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
                     mock_client = MagicMock()
                     _generate_single_variant(
