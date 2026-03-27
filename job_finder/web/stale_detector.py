@@ -21,20 +21,24 @@ _STALE_THRESHOLD_DAYS = 14   # Mark job as stale after this many days without re
 _ARCHIVE_THRESHOLD_DAYS = 30  # Auto-archive passive-stage jobs after this many days
 
 
-def run_stale_detection(db_path: str) -> dict:
+def run_stale_detection(db_path: str, config: dict | None = None) -> dict:
     """Run stale detection and auto-archive on the job database.
 
     Creates its own SQLite connection (thread-safe for background jobs).
 
     Rules:
-    - Stale: last_seen < 14 days ago → set is_stale = 1
-    - Re-seen: last_seen >= 14 days ago and was stale → set is_stale = 0
-    - Auto-archive: last_seen < 30 days ago AND pipeline_status IN
+    - Stale: last_seen older than stale_threshold_days → set is_stale = 1
+    - Re-seen: last_seen within stale_threshold_days and was stale → set is_stale = 0
+    - Auto-archive: last_seen older than archive_threshold_days AND pipeline_status IN
       ('discovered', 'reviewing') → set pipeline_status = 'archived'
       (does NOT archive applied/phone_screen/technical/onsite/offer/accepted)
 
     Args:
         db_path: Path to the SQLite database file.
+        config: Optional app config dict. If provided, reads thresholds from
+            config["stale_detection"]["stale_threshold_days"] and
+            config["stale_detection"]["archive_threshold_days"].
+            Falls back to module-level constants when absent.
 
     Returns:
         dict with keys:
@@ -42,30 +46,34 @@ def run_stale_detection(db_path: str) -> dict:
             stale_cleared (int): Jobs cleared from stale (re-seen).
             archived (int): Jobs auto-archived.
     """
+    stale_cfg = (config or {}).get("stale_detection", {})
+    stale_days = int(stale_cfg.get("stale_threshold_days", _STALE_THRESHOLD_DAYS))
+    archive_days = int(stale_cfg.get("archive_threshold_days", _ARCHIVE_THRESHOLD_DAYS))
+
     with standalone_connection(db_path) as conn:
         try:
-            # Mark jobs as stale: not seen for _STALE_THRESHOLD_DAYS+ days
+            # Mark jobs as stale: not seen for stale_days+ days
             cursor = conn.execute(
                 "UPDATE jobs SET is_stale = 1 "
-                f"WHERE last_seen < datetime('now', '-{_STALE_THRESHOLD_DAYS} days') AND is_stale = 0"
+                f"WHERE last_seen < datetime('now', '-{stale_days} days') AND is_stale = 0"
             )
             stale_marked = cursor.rowcount
 
             # Clear stale flag for jobs seen recently again
             cursor = conn.execute(
                 "UPDATE jobs SET is_stale = 0 "
-                f"WHERE last_seen >= datetime('now', '-{_STALE_THRESHOLD_DAYS} days') AND is_stale = 1"
+                f"WHERE last_seen >= datetime('now', '-{stale_days} days') AND is_stale = 1"
             )
             stale_cleared = cursor.rowcount
 
             conn.commit()
 
-            # Auto-archive discovered/reviewing jobs not seen for 30+ days
+            # Auto-archive discovered/reviewing jobs not seen for archive_days+ days
             # CRITICAL: only archive passive stages, never active pipeline stages.
             # BATCH-03: batch UPDATE + executemany INSERT instead of per-row status calls
             rows_to_archive = conn.execute(
                 "SELECT dedup_key, pipeline_status FROM jobs "
-                f"WHERE last_seen < datetime('now', '-{_ARCHIVE_THRESHOLD_DAYS} days') "
+                f"WHERE last_seen < datetime('now', '-{archive_days} days') "
                 "AND pipeline_status IN ('discovered', 'reviewing')"
             ).fetchall()
 
