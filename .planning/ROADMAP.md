@@ -88,7 +88,7 @@ Plans:
   5. `get_config_snapshot()` exists and is used by background threads (scheduler, stale detector) instead of direct `config` dict access
 **Plans**: 3 plans
 Plans:
-- [ ] 20-01-PLAN.md -- Deduplicate Indeed meta-email detection + rename four symbols
+- [x] 20-01-PLAN.md -- Deduplicate Indeed meta-email detection + rename four symbols
 - [ ] 20-02-PLAN.md -- Move normalized_dedup_key to Job static method + add get_config_snapshot
 - [ ] 20-03-PLAN.md -- Extract standalone_connection and sweep 37 call sites
 
@@ -153,7 +153,7 @@ Plans:
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 20. Surgical Fixes | v1.4 | 0/3 | Not started | - |
+| 20. Surgical Fixes | v1.4 | 1/3 | In Progress|  |
 | 21. Test Coverage | v1.4 | 0/TBD | Not started | - |
 | 22. Module Splits | v1.4 | 0/TBD | Not started | - |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |
