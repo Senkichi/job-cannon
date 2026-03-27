@@ -148,9 +148,9 @@ class TestPipelineRunnerLogLevels:
     def test_haiku_no_result_logs_at_debug(self, caplog):
         """'Haiku: no result for' uses logger.debug not WARNING."""
         import inspect
-        import job_finder.web.pipeline_runner as runner_module
+        import job_finder.web.scoring_runner as scoring_runner_module
 
-        source = inspect.getsource(runner_module._run_haiku_scoring)
+        source = inspect.getsource(scoring_runner_module.run_haiku_scoring)
         # Find the line(s) referencing "no result for"
         lines = source.splitlines()
         for i, line in enumerate(lines):

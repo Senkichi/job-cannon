@@ -918,14 +918,14 @@ class TestPipelineIntegration:
     """
 
     def test_enrich_job_called_before_haiku_in_pipeline(self, tmp_db_path):
-        """enrich_job is called BEFORE score_job_haiku in _run_haiku_scoring.
+        """enrich_job is called BEFORE score_job_haiku in run_haiku_scoring.
 
         Sets up a temp DB with a job missing jd_full, then calls
-        _run_haiku_scoring with mocked enrich_job and score_job_haiku.
+        run_haiku_scoring with mocked enrich_job and score_job_haiku.
         Verifies call order via side_effect call tracking.
         """
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_runner import run_haiku_scoring
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -962,11 +962,11 @@ class TestPipelineIntegration:
             "sources": {"serpapi": {"api_key": ""}},
         }
 
-        with patch("job_finder.web.pipeline_runner.enrich_job", side_effect=mock_enrich), \
-             patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.enrich_job", side_effect=mock_enrich), \
+             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            _run_haiku_scoring(
+            run_haiku_scoring(
                 ["acme|data-scientist|remote"], config, tmp_db_path
             )
 
@@ -981,16 +981,16 @@ class TestPipelineIntegration:
         )
 
     def test_sonnet_evaluation_does_not_call_fetch_jd(self):
-        """_run_sonnet_evaluation source does not reference fetch_jd.
+        """run_sonnet_evaluation source does not reference fetch_jd.
 
         Verifies via inspect.getsource that the no-JD-fetch contract is
         maintained — fetch_jd should not appear anywhere in the function body.
         """
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
 
-        source = inspect.getsource(_run_sonnet_evaluation)
+        source = inspect.getsource(run_sonnet_evaluation)
         assert "fetch_jd" not in source, (
-            "_run_sonnet_evaluation still references fetch_jd — "
+            "run_sonnet_evaluation still references fetch_jd — "
             "JD fetching should be handled exclusively by enrich_job"
         )
 

@@ -897,7 +897,7 @@ class TestCompanyAutoPopulation:
 
 
 class TestScoringResultUnwrap:
-    """Regression tests: _run_haiku_scoring and _run_sonnet_evaluation correctly
+    """Regression tests: run_haiku_scoring and run_sonnet_evaluation correctly
     unwrap ScoringResult via .data and .status instead of treating it as a dict."""
 
     def _make_job_row(self, db_path: str, dedup_key: str = "testco|data scientist|remote",
@@ -915,8 +915,8 @@ class TestScoringResultUnwrap:
         return dedup_key
 
     def test_haiku_scoring_unwraps_scoring_result(self, migrated_db_path):
-        """_run_haiku_scoring correctly extracts score from ScoringResult.data."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        """run_haiku_scoring correctly extracts score from ScoringResult.data."""
+        from job_finder.web.scoring_runner import run_haiku_scoring
         from job_finder.web.scoring_types import ScoringResult
 
         dedup_key = self._make_job_row(migrated_db_path)
@@ -934,13 +934,13 @@ class TestScoringResultUnwrap:
 
         config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", return_value=scoring_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
-             patch("job_finder.web.pipeline_runner.should_exclude", return_value=(False, None)), \
-             patch("job_finder.web.pipeline_runner.enrich_job", None):
+        with patch("job_finder.web.scoring_runner.score_job_haiku", return_value=scoring_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.scoring_runner.should_exclude", return_value=(False, None)), \
+             patch("job_finder.web.scoring_runner.enrich_job", None):
             mock_anthropic.Anthropic.return_value = MagicMock()
 
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], config, migrated_db_path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], config, migrated_db_path)
 
         assert haiku_scored == 1, f"Expected 1 haiku-scored job, got {haiku_scored}"
 
@@ -954,8 +954,8 @@ class TestScoringResultUnwrap:
         assert row[0] == 75, f"Expected haiku_score=75, got {row[0]}"
 
     def test_haiku_scoring_handles_error_scoring_result(self, migrated_db_path):
-        """_run_haiku_scoring gracefully handles ScoringResult with data=None (error status)."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        """run_haiku_scoring gracefully handles ScoringResult with data=None (error status)."""
+        from job_finder.web.scoring_runner import run_haiku_scoring
         from job_finder.web.scoring_types import ScoringResult
 
         dedup_key = self._make_job_row(migrated_db_path, dedup_key="testco|engineer|remote")
@@ -964,19 +964,19 @@ class TestScoringResultUnwrap:
 
         config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", return_value=error_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
-             patch("job_finder.web.pipeline_runner.should_exclude", return_value=(False, None)), \
-             patch("job_finder.web.pipeline_runner.enrich_job", None):
+        with patch("job_finder.web.scoring_runner.score_job_haiku", return_value=error_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.scoring_runner.should_exclude", return_value=(False, None)), \
+             patch("job_finder.web.scoring_runner.enrich_job", None):
             mock_anthropic.Anthropic.return_value = MagicMock()
 
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], config, migrated_db_path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], config, migrated_db_path)
 
         assert haiku_scored == 0, f"Expected 0 scored jobs on error, got {haiku_scored}"
 
     def test_sonnet_evaluation_unwraps_scoring_result(self, migrated_db_path):
-        """_run_sonnet_evaluation correctly extracts score from ScoringResult.data."""
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        """run_sonnet_evaluation correctly extracts score from ScoringResult.data."""
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
         from job_finder.web.scoring_types import ScoringResult
 
         dedup_key = self._make_job_row(
@@ -1001,12 +1001,12 @@ class TestScoringResultUnwrap:
 
         config = {"scoring": {}, "profile": {}}
 
-        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=scoring_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic, \
-             patch("job_finder.web.pipeline_runner.enrich_company_info", None):
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=scoring_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic, \
+             patch("job_finder.web.scoring_runner.enrich_company_info", None):
             mock_anthropic.Anthropic.return_value = MagicMock()
 
-            count = _run_sonnet_evaluation([dedup_key], config, migrated_db_path)
+            count = run_sonnet_evaluation([dedup_key], config, migrated_db_path)
 
         assert count == 1, f"Expected 1 sonnet-evaluated job, got {count}"
 

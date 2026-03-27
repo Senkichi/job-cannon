@@ -664,9 +664,10 @@ class TestHaikuPipelineIntegration:
             description="Test job description",
         )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(72)), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -701,9 +702,10 @@ class TestHaikuPipelineIntegration:
             description="Great job",
         )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(80)), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -731,9 +733,10 @@ class TestHaikuPipelineIntegration:
             description="Entry-level job",
         )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(40)), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -784,9 +787,10 @@ class TestHaikuPipelineIntegration:
                 status="success",
             )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=flaky_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[job1, job2]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -803,7 +807,7 @@ class TestHaikuPipelineIntegration:
 
 
 class TestExclusionFilterIntegration:
-    """Verify exclusion filter is wired into pipeline_runner._run_haiku_scoring."""
+    """Verify exclusion filter is wired into scoring_runner.run_haiku_scoring."""
 
     @pytest.fixture
     def pipeline_config(self, tmp_path):
@@ -860,9 +864,10 @@ class TestExclusionFilterIntegration:
                 status="success",
             )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[excluded_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -909,9 +914,10 @@ class TestExclusionFilterIntegration:
                 status="success",
             )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku",
+        with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=mock_score), \
              patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[good_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
             mock_anthropic_module.Anthropic.return_value = MagicMock()
@@ -1143,10 +1149,10 @@ class TestSonnetEvaluator:
 # ---------------------------------------------------------------------------
 
 class TestSonnetPipelineIntegration:
-    """Verify _run_sonnet_evaluation() uses pre-enriched jd_full, runs Sonnet, persists results.
+    """Verify run_sonnet_evaluation() uses pre-enriched jd_full, runs Sonnet, persists results.
 
     As of Phase 10, jd_full is populated by enrich_job BEFORE Haiku scoring.
-    _run_sonnet_evaluation no longer fetches JD — it relies on jd_full already
+    run_sonnet_evaluation no longer fetches JD — it relies on jd_full already
     being present in the jobs table from the enrichment pipeline.
     """
 
@@ -1214,19 +1220,19 @@ class TestSonnetPipelineIntegration:
         )
 
     def test_uses_existing_jd_full_for_sonnet(self, job_with_jd, pipeline_config, mock_sonnet_result):
-        """_run_sonnet_evaluation uses pre-populated jd_full (set by enrich_job before Haiku).
+        """run_sonnet_evaluation uses pre-populated jd_full (set by enrich_job before Haiku).
 
         Phase 10: JD fetching moved to enrich_job before Haiku scoring. Sonnet
         no longer fetches JDs — it relies on jd_full already being in the DB.
         """
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            count = _run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
+            count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 1
         row = conn.execute(
@@ -1236,15 +1242,15 @@ class TestSonnetPipelineIntegration:
         assert row["jd_full"] == "Full job description text for Senior Data Scientist at Acme Analytics."
 
     def test_writes_sonnet_score_to_db(self, job_with_jd, pipeline_config, mock_sonnet_result):
-        """_run_sonnet_evaluation must write sonnet_score to jobs table."""
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        """run_sonnet_evaluation must write sonnet_score to jobs table."""
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            count = _run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
+            count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 1
         row = conn.execute(
@@ -1253,15 +1259,15 @@ class TestSonnetPipelineIntegration:
         assert row["sonnet_score"] == 85
 
     def test_writes_fit_analysis_as_json(self, job_with_jd, pipeline_config, mock_sonnet_result):
-        """_run_sonnet_evaluation must write fit_analysis as valid JSON string."""
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        """run_sonnet_evaluation must write fit_analysis as valid JSON string."""
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            _run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
+            run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         row = conn.execute(
             "SELECT fit_analysis FROM jobs WHERE dedup_key = 'acme|senior-ds|remote'"
@@ -1277,7 +1283,7 @@ class TestSonnetPipelineIntegration:
         Phase 10: No JD fetch attempt — job is skipped if jd_full is absent after
         the enrichment pipeline ran before Haiku scoring.
         """
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
 
         path, conn = migrated_db
         conn.execute(
@@ -1292,9 +1298,9 @@ class TestSonnetPipelineIntegration:
         )
         conn.commit()
 
-        with patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            count = _run_sonnet_evaluation(["corp|job|loc"], pipeline_config, path)
+            count = run_sonnet_evaluation(["corp|job|loc"], pipeline_config, path)
 
         assert count == 0
         row = conn.execute("SELECT sonnet_score FROM jobs WHERE dedup_key='corp|job|loc'").fetchone()
@@ -1302,15 +1308,15 @@ class TestSonnetPipelineIntegration:
 
     def test_budget_exceeded_skips_gracefully(self, job_with_jd, pipeline_config):
         """Budget exceeded during Sonnet -> graceful skip, haiku_score preserved."""
-        from job_finder.web.pipeline_runner import _run_sonnet_evaluation
+        from job_finder.web.scoring_runner import run_sonnet_evaluation
         from job_finder.web.claude_client import BudgetExceededError
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.pipeline_runner.evaluate_job_sonnet", return_value=None), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=None), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            count = _run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
+            count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 0
         # haiku_score must be unchanged
@@ -1640,7 +1646,7 @@ class TestStaleDetection:
 
 
 class TestBorderlineReeval:
-    """Verify the borderline re-evaluation band (C2) in _run_haiku_scoring.
+    """Verify the borderline re-evaluation band (C2) in run_haiku_scoring.
 
     Jobs scoring 42-54 on the initial Haiku call get a second Haiku call with
     max_chars=4000 before the Sonnet decision.
@@ -1689,7 +1695,7 @@ class TestBorderlineReeval:
     def test_borderline_job_gets_reeval_call(self, migrated_db, pipeline_config):
         """Job with initial haiku_score=48 (in 42-54 band) triggers second score_job_haiku
         call with max_chars=4000, purpose='haiku_reeval'. Final DB score is re-eval score."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_runner import run_haiku_scoring
 
         path, conn = migrated_db
         dedup_key = "borderline|job|remote"
@@ -1715,10 +1721,10 @@ class TestBorderlineReeval:
                     status="success",
                 )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], pipeline_config, path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # score_job_haiku must be called twice (initial + re-eval)
         assert call_count["n"] == 2
@@ -1733,7 +1739,7 @@ class TestBorderlineReeval:
 
     def test_borderline_job_filtered_after_reeval(self, migrated_db, pipeline_config):
         """Job with initial=48, re-eval=38: haiku_score saved as 38, NOT in sonnet_queue."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_runner import run_haiku_scoring
 
         path, conn = migrated_db
         dedup_key = "borderline|filtered|remote"
@@ -1758,10 +1764,10 @@ class TestBorderlineReeval:
                     status="success",
                 )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], pipeline_config, path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Two calls were made
         assert call_count["n"] == 2
@@ -1776,7 +1782,7 @@ class TestBorderlineReeval:
     def test_above_band_skips_reeval(self, migrated_db, pipeline_config):
         """Job with initial haiku_score=65 (above 54 band ceiling) goes directly to
         sonnet_queue with no re-eval call."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_runner import run_haiku_scoring
 
         path, conn = migrated_db
         dedup_key = "above|band|remote"
@@ -1793,10 +1799,10 @@ class TestBorderlineReeval:
                 status="success",
             )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], pipeline_config, path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Only one call (no re-eval)
         assert call_count["n"] == 1
@@ -1805,7 +1811,7 @@ class TestBorderlineReeval:
 
     def test_below_threshold_skips_reeval(self, migrated_db, pipeline_config):
         """Job with initial haiku_score=30 (below threshold 42) is filtered with no re-eval."""
-        from job_finder.web.pipeline_runner import _run_haiku_scoring
+        from job_finder.web.scoring_runner import run_haiku_scoring
 
         path, conn = migrated_db
         dedup_key = "below|threshold|remote"
@@ -1822,10 +1828,10 @@ class TestBorderlineReeval:
                 status="success",
             )
 
-        with patch("job_finder.web.pipeline_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic:
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
+             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = MagicMock()
-            sonnet_queue, haiku_scored = _run_haiku_scoring([dedup_key], pipeline_config, path)
+            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Only one call (no re-eval below threshold)
         assert call_count["n"] == 1
