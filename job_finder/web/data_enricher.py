@@ -172,12 +172,13 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Tier 1: ddg — DuckDuckGo Instant Answer API
         # ---------------------------------------------------------------
-        # Check if remaining missing fields are all below DDG (nothing to do)
-        remaining = _find_missing_fields({**job_row, **_resolve_from_fragments(fragments, missing, job_row)})
-        if not remaining:
-            enriched = _resolve_from_fragments(fragments, missing, job_row)
-            _persist(conn, job_row, enriched, "free")
-            return enriched
+        # Check if remaining missing fields are all below DDG (nothing to do).
+        # Re-resolve here handles the partial-exception case where sub-tiers A/B
+        # populated fragments but L164 was never reached due to an exception.
+        enriched_from_free = _resolve_from_fragments(fragments, missing, job_row)
+        if not _find_missing_fields({**job_row, **enriched_from_free}):
+            _persist(conn, job_row, enriched_from_free, "free")
+            return enriched_from_free
 
         if start_idx <= TIER_ORDER.index("ddg"):
             try:
@@ -278,8 +279,8 @@ def enrich_job(
             and jd_still_missing
         ):
             try:
-                # Check cost gate before calling Sonnet
-                gate_ok = cost_gate(conn, config, "sonnet")
+                # Check cost gate before calling Sonnet (requires a live DB connection)
+                gate_ok = conn is not None and cost_gate(conn, config, "sonnet")
                 if gate_ok:
                     sonnet_result = extract_with_sonnet(
                         fragments, job_row, anthropic_client, conn, config
