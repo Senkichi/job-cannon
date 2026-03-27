@@ -15,6 +15,7 @@ from job_finder.web.claude_client import (
     get_cost_stats,
     get_daily_cost_breakdown,
     get_monthly_feature_breakdown,
+    get_monthly_provider_breakdown,
 )
 from job_finder.web.db_helpers import get_db
 
@@ -42,11 +43,13 @@ def index():
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
     daily_breakdown = get_daily_cost_breakdown(conn)
     monthly_breakdown = get_monthly_feature_breakdown(conn)
+    monthly_provider_breakdown = get_monthly_provider_breakdown(conn)
 
     return render_template(
         "costs/index.html",
         cost_stats=cost_stats,
         daily_breakdown=daily_breakdown,
         monthly_breakdown=monthly_breakdown,
+        monthly_provider_breakdown=monthly_provider_breakdown,
         budget_cap=budget_cap,
     )
