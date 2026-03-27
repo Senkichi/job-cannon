@@ -27,7 +27,7 @@ from typing import Any, Optional
 import anthropic
 
 from job_finder.config import DEFAULT_MULTI_VERSION_THRESHOLD
-from job_finder.web.claude_client import BudgetExceededError, cost_gate
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import call_model
 from job_finder.web.docx_formatter import build_resume_docx
