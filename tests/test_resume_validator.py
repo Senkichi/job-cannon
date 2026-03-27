@@ -17,6 +17,8 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,35 +56,59 @@ def _test_config():
     }
 
 
-def _mock_call_claude_clean(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-    """Mock call_claude returning a clean audit (no violations)."""
-    return {"passed": True, "violations": []}, 0.01
+def _mock_call_model_clean(**kwargs):
+    """Mock call_model returning a clean audit (no violations)."""
+    return ModelResult(
+        data={"passed": True, "violations": []},
+        cost_usd=0.01,
+        input_tokens=0,
+        output_tokens=0,
+        model="test-model",
+        provider="anthropic",
+        schema_valid=True,
+    )
 
 
-def _mock_call_claude_violations(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-    """Mock call_claude returning one error violation."""
-    return {
-        "passed": False,
-        "violations": [
-            {
-                "category": "content_integrity",
-                "description": "Skill 'dbt' listed in Skills section but not found in experience profile",
-                "severity": "error",
-                "location": "skills",
-            }
-        ],
-    }, 0.01
+def _mock_call_model_violations(**kwargs):
+    """Mock call_model returning one error violation."""
+    return ModelResult(
+        data={
+            "passed": False,
+            "violations": [
+                {
+                    "category": "content_integrity",
+                    "description": "Skill 'dbt' listed in Skills section but not found in experience profile",
+                    "severity": "error",
+                    "location": "skills",
+                }
+            ],
+        },
+        cost_usd=0.01,
+        input_tokens=0,
+        output_tokens=0,
+        model="test-model",
+        provider="anthropic",
+        schema_valid=True,
+    )
 
 
-def _mock_call_claude_fixed(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-    """Mock call_claude returning a fixed resume dict."""
-    return {
-        "name": "Jane Doe",
-        "contact_line": "jane@example.com",
-        "summary": "A data scientist with 8 years of experience.",
-        "skills": ["Python", "SQL", "A/B Testing"],
-        "positions": [],
-    }, 0.01
+def _mock_call_model_fixed(**kwargs):
+    """Mock call_model returning a fixed resume dict."""
+    return ModelResult(
+        data={
+            "name": "Jane Doe",
+            "contact_line": "jane@example.com",
+            "summary": "A data scientist with 8 years of experience.",
+            "skills": ["Python", "SQL", "A/B Testing"],
+            "positions": [],
+        },
+        cost_usd=0.01,
+        input_tokens=0,
+        output_tokens=0,
+        model="test-model",
+        provider="anthropic",
+        schema_valid=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +181,7 @@ class TestValidateResume:
         profile = {"skills": ["Python", "SQL"], "positions": []}
         jd_text = "We need a data scientist with Python and SQL."
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_clean):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=_mock_call_model_clean):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = validate_resume(resume_data, jd_text, profile, conn, config)
 
@@ -177,7 +203,7 @@ class TestValidateResume:
         profile = {"skills": ["Python", "SQL"], "positions": []}
         jd_text = "Looking for dbt experience."
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_violations):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=_mock_call_model_violations):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = validate_resume(resume_data, jd_text, profile, conn, config)
 
@@ -200,7 +226,7 @@ class TestValidateResume:
         def raise_exception(*args, **kwargs):
             raise RuntimeError("API connection error")
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=raise_exception):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=raise_exception):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = validate_resume(resume_data, "", profile, conn, config)
 
@@ -220,7 +246,7 @@ class TestValidateResume:
         def raise_budget(*args, **kwargs):
             raise BudgetExceededError("Monthly budget cap reached")
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=raise_budget):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=raise_budget):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = validate_resume(resume_data, "", profile, conn, config)
 
@@ -256,7 +282,7 @@ class TestFixResumeViolations:
             }
         ]
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_fixed):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=_mock_call_model_fixed):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = fix_resume_violations(resume_data, violations, profile, conn, config)
 
@@ -289,7 +315,7 @@ class TestFixResumeViolations:
         def raise_exception(*args, **kwargs):
             raise RuntimeError("Sonnet API error")
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=raise_exception):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=raise_exception):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = fix_resume_violations(resume_data, violations, profile, conn, config)
 
@@ -332,11 +358,11 @@ class TestFixResumeViolations:
 
         captured_messages = []
 
-        def capture_call(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured_messages.extend(messages)
-            return _mock_call_claude_fixed(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens)
+        def capture_call(**kwargs):
+            captured_messages.extend(kwargs.get("messages", []))
+            return _mock_call_model_fixed(**kwargs)
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=capture_call):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=capture_call):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 fix_resume_violations(resume_data, violations, profile, conn, config)
 
@@ -374,11 +400,11 @@ class TestFixResumeViolations:
 
         call_count = []
 
-        def count_calls(*args, **kwargs):
+        def count_calls(**kwargs):
             call_count.append(1)
-            return _mock_call_claude_fixed(*args, **kwargs)
+            return _mock_call_model_fixed(**kwargs)
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=count_calls):
+        with patch("job_finder.web.resume_validator.call_model", side_effect=count_calls):
             with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                 result = fix_resume_violations(resume_data, violations, profile, conn, config)
 
@@ -493,8 +519,16 @@ class TestValidatorBackgroundIntegration:
         mock_validation = {"passed": True, "violations": []}
 
         with patch("job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME):
-            with patch("job_finder.web.resume_validator.call_claude") as mock_cc:
-                mock_cc.return_value = (mock_validation, 0.01)
+            with patch("job_finder.web.resume_validator.call_model") as mock_cc:
+                mock_cc.return_value = ModelResult(
+                    data=mock_validation,
+                    cost_usd=0.01,
+                    input_tokens=0,
+                    output_tokens=0,
+                    model="test-model",
+                    provider="anthropic",
+                    schema_valid=True,
+                )
                 with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                     with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                         mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
@@ -547,12 +581,12 @@ class TestValidatorBackgroundIntegration:
         def multi_return(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
-                return (mock_validation_with_error, 0.01)
+                return ModelResult(data=mock_validation_with_error, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
             else:
-                return (mock_fixed_resume, 0.01)
+                return ModelResult(data=mock_fixed_resume, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
         with patch("job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume_with_error):
-            with patch("job_finder.web.resume_validator.call_claude", side_effect=multi_return):
+            with patch("job_finder.web.resume_validator.call_model", side_effect=multi_return):
                 with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                     with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                         mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
@@ -590,7 +624,7 @@ class TestValidatorBackgroundIntegration:
         gen_id = _setup_resume_gen_db(db_path)
 
         with patch("job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME):
-            with patch("job_finder.web.resume_validator.call_claude", side_effect=RuntimeError("Sonnet down")):
+            with patch("job_finder.web.resume_validator.call_model", side_effect=RuntimeError("Sonnet down")):
                 with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
                     with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                         mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
@@ -643,24 +677,15 @@ class TestValidatorQuickApplyIntegration:
 
             mock_client = MagicMock()
 
-            call_count = [0]
-            # First call: generation; second call: audit
-            def side_effect(*args, **kwargs):
-                call_count[0] += 1
-                if call_count[0] == 1:
-                    # This is the resume generation call via call_claude
-                    return (_MOCK_RESUME, 0.01)
-                else:
-                    # This is the audit call
-                    return ({"passed": True, "violations": []}, 0.01)
+            _mr_resume = ModelResult(data=_MOCK_RESUME, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
+            _mr_audit = ModelResult(data={"passed": True, "violations": []}, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-            with patch("job_finder.web.resume_generator.call_claude", side_effect=side_effect):
-                with patch("job_finder.web.resume_validator.call_claude", return_value=({"passed": True, "violations": []}, 0.01)):
+            with patch("job_finder.web.resume_generator.call_model", return_value=_mr_resume):
+                with patch("job_finder.web.resume_validator.call_model", return_value=_mr_audit):
                     with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
-                        with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                            result = generate_resume_single(
-                                mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
-                            )
+                        result = generate_resume_single(
+                            mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
+                        )
 
             assert result is not None
             assert "name" in result
@@ -696,20 +721,20 @@ class TestValidatorQuickApplyIntegration:
 
             audit_call_count = [0]
 
-            def audit_side_effect(*args, **kwargs):
+            def audit_side_effect(**kwargs):
                 audit_call_count[0] += 1
                 if audit_call_count[0] == 1:
-                    return (audit_result, 0.01)
+                    return ModelResult(data=audit_result, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
                 else:
-                    return (fixed_resume, 0.01)
+                    return ModelResult(data=fixed_resume, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
 
-            with patch("job_finder.web.resume_generator.call_claude", return_value=(resume_with_error, 0.01)):
-                with patch("job_finder.web.resume_validator.call_claude", side_effect=audit_side_effect):
+            _mr_gen = ModelResult(data=resume_with_error, cost_usd=0.01, input_tokens=0, output_tokens=0, model="test-model", provider="anthropic", schema_valid=True)
+            with patch("job_finder.web.resume_generator.call_model", return_value=_mr_gen):
+                with patch("job_finder.web.resume_validator.call_model", side_effect=audit_side_effect):
                     with patch("job_finder.web.resume_validator.anthropic.Anthropic"):
-                        with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                            result = generate_resume_single(
-                                mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
-                            )
+                        result = generate_resume_single(
+                            mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
+                        )
 
             # Result should be the fixed resume (without dbt)
             assert result is not None
