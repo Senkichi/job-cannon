@@ -58,7 +58,7 @@
 
 - [x] **Phase 19: Housekeeping** — Move 11 completed todos from pending/ to done/ (completed 2026-03-27)
 - [x] **Phase 20: Surgical Fixes** — Mechanical fixes: Indeed dedup, renames, models.py layer violation, SQLite helper, config thread-safety (completed 2026-03-27)
-- [ ] **Phase 21: Test Coverage** — Companies blueprint test suite
+- [x] **Phase 21: Test Coverage** — Companies blueprint test suite (completed 2026-03-27)
 - [ ] **Phase 22: Module Splits** — Decompose 7 god-object modules along responsibility boundaries
 - [ ] **Phase 23: N+1 Batching** — Batch 5 N+1 query patterns across scoring and detection pipelines
 
@@ -102,7 +102,7 @@ Plans:
   3. Overall test suite still passes (no regressions introduced)
 **Plans**: 1 plan
 Plans:
-- [ ] 21-01-PLAN.md -- Companies blueprint test suite (all 8 routes)
+- [x] 21-01-PLAN.md -- Companies blueprint test suite (all 8 routes)
 
 ### Phase 22: Module Splits
 **Goal**: Seven god-object modules are decomposed into focused files; no file exceeds its target LOC ceiling and all imports resolve without circular dependencies
@@ -156,6 +156,6 @@ Plans:
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
 | 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
-| 21. Test Coverage | v1.4 | 0/1 | Not started | - |
+| 21. Test Coverage | v1.4 | 1/1 | Complete   | 2026-03-27 |
 | 22. Module Splits | v1.4 | 0/TBD | Not started | - |
 | 23. N+1 Batching | v1.4 | 0/TBD | Not started | - |

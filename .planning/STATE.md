@@ -3,24 +3,24 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Tech Debt Sweep
 status: verifying
-last_updated: "2026-03-27T03:07:55.718Z"
+last_updated: "2026-03-27T04:11:56.529Z"
 last_activity: 2026-03-27
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 75
+  completed_phases: 3
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # State
 
 ## Current Position
 
-Phase: 20 (Surgical Fixes) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-03-27
+Phase: 21 (Test Coverage) — COMPLETE
+Plan: 1 of 1
+Status: Phase 21 complete — all plans done, ready for milestone verification
+Last activity: 2026-03-27 — Phase 21 Plan 01 complete: 29-test companies blueprint suite, 1562 tests pass
 
 Progress: [██████████] 100%
 
@@ -29,21 +29,22 @@ Progress: [██████████] 100%
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 20 — Surgical Fixes
+**Current focus:** Phase 21 — Test Coverage
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 7 (including this session)
+- Total plans completed: 8 (including this session)
 - Phase 14-01: 2min (2 tasks, 8 files)
 - Phase 17-01: 8min (3 tasks, 6 files)
 - Phase 18-01: 15min (1 task TDD, 5 files)
 - Phase 20-01: 15min (2 tasks, 15 files)
 - Phase 20-02: 24min (2 tasks, 7 files)
 - Phase 20-03: 49min (1 task, 20 files)
-- Average duration: ~19min
-- Total execution time: ~113min
+- Phase 21-01: 8min (2 tasks, 1 file)
+- Average duration: ~18min
+- Total execution time: ~121min
 
 *Updated after each plan completion*
 
@@ -88,9 +89,15 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 - dashboard.py _run_batch_*_bg outer exception handlers changed from _fail_session(conn) to _mark_session_error(db_path) — conn is not in scope in the outer except block
 - resume_generator.py mid-function close/reopen pattern eliminated — generate_resume_multi() uses standalone_connection internally so no connection conflict; single with standalone_connection covers entire function body
 
+### Decisions Made in Phase 21 Plan 01
+
+- Patch upsert_company at source module (job_finder.web.ats_scanner) not blueprint namespace — locally imported functions inside a route body never appear in the blueprint's module namespace, so patch must target the definition site
+- TESTING: True in top-level JF_CONFIG dict activates probe_ats_slugs/run_ats_scan guards; probe_single_company has no TESTING guard and requires explicit unittest.mock.patch
+- Blueprint test fixture chain: migrated_db -> companies_app (with TESTING=True) -> companies_client; same pattern as detections blueprint
+
 ### Blockers/Concerns
 
 None.
 
 ---
-*Last session: 2026-03-27 — Phase 20 Plan 03 complete: standalone_connection() context manager + 37 call site sweep. 1533 tests pass.*
+*Last session: 2026-03-27 — Phase 21 Plan 01 complete: 29-test companies blueprint suite. 1562 tests pass.*
