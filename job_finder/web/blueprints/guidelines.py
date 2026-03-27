@@ -6,9 +6,9 @@ import logging
 from pathlib import Path
 
 import anthropic
-from flask import Blueprint, current_app, render_template, request
+from flask import Blueprint, current_app, request
 
-from job_finder.config import DEFAULT_MODEL_SONNET, load_config
+from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.db_helpers import get_db
 from job_finder.web.resume_style_guide import (
     FIELD_LABELS,
@@ -22,8 +22,6 @@ from job_finder.web.resume_style_guide import (
 logger = logging.getLogger(__name__)
 
 guidelines_bp = Blueprint("guidelines", __name__, url_prefix="/settings")
-
-_CONFIG_PATH = "config.yaml"
 
 
 @guidelines_bp.route("/migrate-style-guide", methods=["POST"], strict_slashes=False)
