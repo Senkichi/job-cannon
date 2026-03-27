@@ -24,7 +24,12 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import anthropic
+try:
+    import anthropic
+    _anthropic_available = True
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
+    _anthropic_available = False
 
 from job_finder.config import DEFAULT_MULTI_VERSION_THRESHOLD
 from job_finder.web.claude_client import BudgetExceededError
@@ -231,7 +236,7 @@ def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
             "ORDER BY preference_type, detected_at"
         ).fetchall()
         return [row[0] if isinstance(row, tuple) else row["preference_text"] for row in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         # Table may not exist in test DBs or older schemas — degrade gracefully
         logger.debug("Failed to load resume preferences (non-fatal)", exc_info=True)
         return []
@@ -353,6 +358,14 @@ def generate_resume_single(
             job_row.get("company"),
         )
         return None
+    except Exception as exc:
+        logger.error(
+            "generate_resume_single: call_model failed for '%s' @ '%s': %s",
+            job_row.get("title"),
+            job_row.get("company"),
+            exc,
+        )
+        raise
     result = result_obj.data
 
     logger.debug(
@@ -419,7 +432,8 @@ def generate_resume_background(
             multi_threshold = (
                 config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
             )
-            sonnet_score = float(job_row.get("sonnet_score") or 0.0)
+            raw_score = job_row.get("sonnet_score")
+            sonnet_score = float(raw_score) if raw_score is not None else 0.0
             use_multi = sonnet_score >= multi_threshold
 
             if use_multi:
@@ -513,6 +527,10 @@ def generate_resume_background(
             # Upload to Drive
             drive_service = get_drive_service()
             folder_id = config.get("drive", {}).get("folder_id", "")
+            if not folder_id:
+                raise ValueError(
+                    "drive.folder_id is not configured — set it in Settings before generating resumes."
+                )
             convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
 
             doc_url = upload_to_drive(

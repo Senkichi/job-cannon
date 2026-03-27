@@ -474,7 +474,7 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
             },
         )
     except Exception:
-        logger.debug("activity logging failed in _finish_session", exc_info=True)
+        logger.warning("_finish_session: failed to log activity for session %s", session_id, exc_info=True)
 
 
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
