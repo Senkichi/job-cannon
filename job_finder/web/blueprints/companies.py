@@ -22,7 +22,8 @@ from flask import (
     url_for,
 )
 
-from job_finder.web.ats_scanner import probe_ats_slugs, probe_single_company, run_ats_scan
+from job_finder.web.ats_prober import probe_single_company
+from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
 from job_finder.web.db_helpers import get_db
 
 logger = logging.getLogger(__name__)

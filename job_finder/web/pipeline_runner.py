@@ -329,7 +329,8 @@ def _score_and_persist(
         # Non-fatal: company upsert failure does not crash ingestion
         # Lazy import to avoid circular: ats_scanner → dedup_normalizer → pipeline_runner
         try:
-            from job_finder.web.ats_scanner import extract_ats_from_urls, upsert_company
+            from job_finder.web.ats_detection import extract_ats_from_urls
+            from job_finder.web.ats_scanner import upsert_company
         except ImportError:
             extract_ats_from_urls = None  # type: ignore[assignment]
             upsert_company = None  # type: ignore[assignment]
