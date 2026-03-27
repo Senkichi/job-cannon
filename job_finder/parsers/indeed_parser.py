@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import parse_salary_range
+from job_finder.parsers._common import parse_salary_range, is_meta_email
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,11 @@ _MATCH_PREAMBLE_END_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# Meta-email patterns checked against the first 200 characters only.
+# Indeed-specific meta-email patterns (checked in addition to BASE_META_PATTERNS).
 # IMPORTANT: Do NOT filter on "new jobs" or "N new jobs" — those ARE real alerts.
 # Only filter administrative / digest emails with NO individual job cards.
-_META_PATTERNS = [
-    re.compile(r"job alert digest|weekly digest", re.IGNORECASE),
+# Note: "job alert digest|weekly digest" is already in BASE_META_PATTERNS.
+_INDEED_META_PATTERNS = [
     re.compile(r"confirm.*email.*(?:address|subscription)", re.IGNORECASE),
     re.compile(r"unsubscribe from.*alerts?$", re.IGNORECASE | re.MULTILINE),
 ]
@@ -150,15 +150,6 @@ _FOOTER_RE = re.compile(
 _LOCATION_RE = re.compile(
     r"\b(remote|hybrid|onsite|on-site|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2}|[A-Z]{2}\s*\d{5})\b"
 )
-
-
-def _is_meta_email(preamble: str) -> bool:
-    """Return True if the email preamble matches known meta-email patterns.
-
-    Only inspects the first 200 characters of the body to avoid false positives
-    from job titles or descriptions that contain pattern-matching words.
-    """
-    return any(pattern.search(preamble) for pattern in _META_PATTERNS)
 
 
 def _looks_like_html(body: str) -> bool:
@@ -345,7 +336,7 @@ def parse_indeed_alert(body: str, email_date: Optional[datetime] = None) -> list
     if not body or not body.strip():
         return []
 
-    if _is_meta_email(body[:200]):
+    if is_meta_email(body[:200], extra_patterns=_INDEED_META_PATTERNS):
         logger.debug("Indeed parser: skipping meta-email (digest/admin)")
         return []
 
