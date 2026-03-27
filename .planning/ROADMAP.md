@@ -60,7 +60,7 @@
 - [x] **Phase 20: Surgical Fixes** — Mechanical fixes: Indeed dedup, renames, models.py layer violation, SQLite helper, config thread-safety (completed 2026-03-27)
 - [x] **Phase 21: Test Coverage** — Companies blueprint test suite (completed 2026-03-27)
 - [x] **Phase 22: Module Splits** — Decompose 7 god-object modules along responsibility boundaries (7/7 plans, completed 2026-03-27)
-- [ ] **Phase 23: N+1 Batching** — Batch 5 N+1 query patterns across scoring and detection pipelines
+- [x] **Phase 23: N+1 Batching** — Batch 5 N+1 query patterns across scoring and detection pipelines (3/3 plans, completed 2026-03-27)
 
 ## Phase Details
 
@@ -140,7 +140,7 @@ Plans:
   6. Full test suite passes and no functional scoring or pipeline behavior changed
 **Plans**: 3 plans
 Plans:
-- [ ] 23-01-PLAN.md -- Batch prefetch in scoring_runner.py (Haiku + Sonnet)
+- [x] 23-01-PLAN.md -- Batch prefetch in scoring_runner.py (Haiku + Sonnet)
 - [x] 23-02-PLAN.md -- Batch archive in stale_detector.py
 - [x] 23-03-PLAN.md -- Pre-loop cancellation + deferred counters in batch_scoring.py
 
@@ -170,4 +170,4 @@ Plans:
 | 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
 | 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
-| 23. N+1 Batching | v1.4 | 2/3 | In Progress|  |
+| 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
