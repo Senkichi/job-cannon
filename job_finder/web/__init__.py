@@ -169,6 +169,8 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
     from job_finder.web.blueprints.resume import resume_bp
+    from job_finder.web.blueprints.resume_review import resume_review_bp
+    from job_finder.web.blueprints.profile_recommendations import profile_recs_bp
     from job_finder.web.blueprints.settings import settings_bp
 
     # companies_bp, resume_bp, feedback_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
@@ -181,6 +183,8 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.register_blueprint(detections_bp)
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(resume_review_bp)
+    app.register_blueprint(profile_recs_bp)
     app.register_blueprint(settings_bp)
 
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---
