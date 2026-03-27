@@ -36,6 +36,7 @@ import anthropic
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
 from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 
@@ -516,9 +517,7 @@ def _generate_single_variant(
         Exception: Any error from generate_resume_single propagates up to
             generate_resume_multi for partial-failure handling.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         client = client_factory()
 
         # Build strategy-specific system prompt
@@ -625,9 +624,6 @@ def _generate_single_variant(
         )
         return result
 
-    finally:
-        conn.close()
-
 
 def generate_resume_multi(
     db_path: str,
@@ -655,13 +651,9 @@ def generate_resume_multi(
         RuntimeError: If all 3 variant generators fail.
     """
     # Step 1: Haiku selects 3 strategies
-    strategy_conn = sqlite3.connect(db_path)
-    strategy_conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as strategy_conn:
         strategy_client = anthropic.Anthropic()
         strategies = _haiku_select_strategies(strategy_client, job_row, strategy_conn, config)
-    finally:
-        strategy_conn.close()
 
     logger.debug(
         "generate_resume_multi: selected strategies %s for '%s' @ '%s'",
@@ -733,9 +725,7 @@ def _synthesize_variants(
     Returns:
         Final synthesized resume dict matching RESUME_SCHEMA.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         client = anthropic.Anthropic()
 
         model = (
@@ -789,9 +779,6 @@ def _synthesize_variants(
         )
         return result
 
-    finally:
-        conn.close()
-
 
 # ---------------------------------------------------------------------------
 # Background thread function
@@ -820,157 +807,145 @@ def _generate_resume_background(
         profile: Experience profile dict.
         config: Application config dict.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
-        # Transition: pending -> generating
-        conn.execute(
-            "UPDATE resume_generations SET status = 'generating' WHERE id = ?",
-            (gen_id,),
-        )
-        conn.commit()
-
-        # Determine dispatch: single or multi based on sonnet_score threshold
-        multi_threshold = (
-            config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
-        )
-        sonnet_score = float(job_row.get("sonnet_score") or 0.0)
-        use_multi = sonnet_score >= multi_threshold
-
-        if use_multi:
-            # Multi-version synthesis: 3 strategy-focused variants + synthesis pass
-            # Note: generate_resume_multi manages its own connections per thread
-            logger.info(
-                "_generate_resume_background: using multi-version synthesis for gen_id=%s "
-                "(sonnet_score=%.1f >= threshold=%d)",
-                gen_id, sonnet_score, multi_threshold,
-            )
-            # Close the conn briefly since generate_resume_multi opens its own connections
-            # We re-open for status updates after it returns
-            conn.close()
-            try:
-                resume_data = generate_resume_multi(db_path, job_row, profile, config)
-                generation_type = "multi"
-            finally:
-                conn = sqlite3.connect(db_path)
-                conn.row_factory = sqlite3.Row
-        else:
-            # Single-pass generation
-            client = anthropic.Anthropic()
-            resume_data = generate_resume_single(client, job_row, profile, conn, config)
-            generation_type = "single"
-
-            if resume_data is None:
-                # Budget exceeded
-                conn.execute(
-                    "UPDATE resume_generations SET status = 'error', error_msg = ? WHERE id = ?",
-                    ("Monthly budget exceeded", gen_id),
-                )
-                conn.commit()
-                logger.info("_generate_resume_background: budget exceeded for gen_id=%s", gen_id)
-                return
-
-        # --- Validate generated resume ---
-        from job_finder.web.resume_validator import validate_resume, fix_resume_violations
-        import json as _json
-
-        validation_report = None
+    with standalone_connection(db_path) as conn:
         try:
-            jd_text = job_row.get("jd_full", "")
-            validation_report = validate_resume(resume_data, jd_text, profile, conn, config)
-
-            # Save validation report to DB
+            # Transition: pending -> generating
             conn.execute(
-                "UPDATE resume_generations SET validation_report = ? WHERE id = ?",
-                (_json.dumps(validation_report), gen_id),
+                "UPDATE resume_generations SET status = 'generating' WHERE id = ?",
+                (gen_id,),
             )
             conn.commit()
 
-            # Auto-fix if error-severity violations found
-            has_errors = any(
-                v.get("severity") == "error"
-                for v in validation_report.get("violations", [])
+            # Determine dispatch: single or multi based on sonnet_score threshold
+            multi_threshold = (
+                config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
             )
-            if has_errors:
-                logger.info(
-                    "_generate_resume_background: %d error violations, running fix pass for gen_id=%s",
-                    sum(1 for v in validation_report["violations"] if v.get("severity") == "error"),
-                    gen_id,
-                )
-                fixed_resume = fix_resume_violations(
-                    resume_data,
-                    validation_report["violations"],
-                    profile,
-                    conn,
-                    config,
-                )
-                # Update validation report with fix info
-                validation_report["fix_applied"] = True
-                validation_report["original_resume_skills"] = resume_data.get("skills", [])
-                validation_report["fixed_resume_skills"] = fixed_resume.get("skills", [])
-                resume_data = fixed_resume
+            sonnet_score = float(job_row.get("sonnet_score") or 0.0)
+            use_multi = sonnet_score >= multi_threshold
 
-                # Update the stored report with fix info
+            if use_multi:
+                # Multi-version synthesis: 3 strategy-focused variants + synthesis pass
+                # Note: generate_resume_multi manages its own connections per thread
+                logger.info(
+                    "_generate_resume_background: using multi-version synthesis for gen_id=%s "
+                    "(sonnet_score=%.1f >= threshold=%d)",
+                    gen_id, sonnet_score, multi_threshold,
+                )
+                resume_data = generate_resume_multi(db_path, job_row, profile, config)
+                generation_type = "multi"
+            else:
+                # Single-pass generation
+                client = anthropic.Anthropic()
+                resume_data = generate_resume_single(client, job_row, profile, conn, config)
+                generation_type = "single"
+
+                if resume_data is None:
+                    # Budget exceeded
+                    conn.execute(
+                        "UPDATE resume_generations SET status = 'error', error_msg = ? WHERE id = ?",
+                        ("Monthly budget exceeded", gen_id),
+                    )
+                    conn.commit()
+                    logger.info("_generate_resume_background: budget exceeded for gen_id=%s", gen_id)
+                    return
+
+            # --- Validate generated resume ---
+            from job_finder.web.resume_validator import validate_resume, fix_resume_violations
+            import json as _json
+
+            validation_report = None
+            try:
+                jd_text = job_row.get("jd_full", "")
+                validation_report = validate_resume(resume_data, jd_text, profile, conn, config)
+
+                # Save validation report to DB
                 conn.execute(
                     "UPDATE resume_generations SET validation_report = ? WHERE id = ?",
                     (_json.dumps(validation_report), gen_id),
                 )
                 conn.commit()
-        except Exception as e:
-            logger.warning(
-                "_generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
+
+                # Auto-fix if error-severity violations found
+                has_errors = any(
+                    v.get("severity") == "error"
+                    for v in validation_report.get("violations", [])
+                )
+                if has_errors:
+                    logger.info(
+                        "_generate_resume_background: %d error violations, running fix pass for gen_id=%s",
+                        sum(1 for v in validation_report["violations"] if v.get("severity") == "error"),
+                        gen_id,
+                    )
+                    fixed_resume = fix_resume_violations(
+                        resume_data,
+                        validation_report["violations"],
+                        profile,
+                        conn,
+                        config,
+                    )
+                    # Update validation report with fix info
+                    validation_report["fix_applied"] = True
+                    validation_report["original_resume_skills"] = resume_data.get("skills", [])
+                    validation_report["fixed_resume_skills"] = fixed_resume.get("skills", [])
+                    resume_data = fixed_resume
+
+                    # Update the stored report with fix info
+                    conn.execute(
+                        "UPDATE resume_generations SET validation_report = ? WHERE id = ?",
+                        (_json.dumps(validation_report), gen_id),
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning(
+                    "_generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
+                )
+
+            # Format as .docx
+            docx_buffer = build_resume_docx(resume_data)
+
+            # Build document name: "Company - Title - YYYY-MM-DD"
+            company = job_row.get("company", "Unknown")
+            title = job_row.get("title", "Resume")
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            doc_name = f"{company} - {title} - {date_str}"
+
+            # Upload to Drive
+            drive_service = get_drive_service()
+            folder_id = config.get("drive", {}).get("folder_id", "")
+            convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
+
+            doc_url = upload_to_drive(
+                drive_service,
+                doc_name,
+                docx_buffer,
+                folder_id=folder_id,
+                convert_to_gdoc=convert_to_gdoc,
             )
 
-        # Format as .docx
-        docx_buffer = build_resume_docx(resume_data)
-
-        # Build document name: "Company - Title - YYYY-MM-DD"
-        company = job_row.get("company", "Unknown")
-        title = job_row.get("title", "Resume")
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        doc_name = f"{company} - {title} - {date_str}"
-
-        # Upload to Drive
-        drive_service = get_drive_service()
-        folder_id = config.get("drive", {}).get("folder_id", "")
-        convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
-
-        doc_url = upload_to_drive(
-            drive_service,
-            doc_name,
-            docx_buffer,
-            folder_id=folder_id,
-            convert_to_gdoc=convert_to_gdoc,
-        )
-
-        # Transition: generating -> done (update generation_type alongside status)
-        conn.execute(
-            "UPDATE resume_generations SET status = 'done', doc_url = ?, generation_type = ? WHERE id = ?",
-            (doc_url, generation_type, gen_id),
-        )
-        conn.commit()
-        logger.info(
-            "_generate_resume_background: done for gen_id=%s, type=%s, url=%s",
-            gen_id, generation_type, doc_url,
-        )
-
-    except Exception as e:
-        error_msg = str(e)[:500]
-        try:
+            # Transition: generating -> done (update generation_type alongside status)
             conn.execute(
-                "UPDATE resume_generations SET status = 'error', error_msg = ? WHERE id = ?",
-                (error_msg, gen_id),
+                "UPDATE resume_generations SET status = 'done', doc_url = ?, generation_type = ? WHERE id = ?",
+                (doc_url, generation_type, gen_id),
             )
             conn.commit()
-        except Exception:
-            logger.exception("_generate_resume_background: failed to update error state for gen_id=%s", gen_id)
-        logger.warning(
-            "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
-        )
+            logger.info(
+                "_generate_resume_background: done for gen_id=%s, type=%s, url=%s",
+                gen_id, generation_type, doc_url,
+            )
 
-    finally:
-        conn.close()
+        except Exception as e:
+            error_msg = str(e)[:500]
+            try:
+                conn.execute(
+                    "UPDATE resume_generations SET status = 'error', error_msg = ? WHERE id = ?",
+                    (error_msg, gen_id),
+                )
+                conn.commit()
+            except Exception:
+                logger.exception("_generate_resume_background: failed to update error state for gen_id=%s", gen_id)
+            logger.warning(
+                "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import anthropic
 
 from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.claude_client import call_claude, cost_gate
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +125,8 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
             cost_usd (float): Opus API cost for this run (0.0 if skipped).
             budget_exceeded (bool): True if budget gate blocked the call.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    with standalone_connection(db_path) as conn:
         return _run_analysis(conn, config)
-    finally:
-        conn.close()
 
 
 def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:

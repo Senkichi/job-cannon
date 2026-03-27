@@ -18,6 +18,7 @@ import anthropic
 import requests
 
 from job_finder.config import DEFAULT_MODEL_OPUS
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 
@@ -145,13 +146,8 @@ def generate_interview_prep_background(
         db_path: Path to the SQLite database file.
         config: Application config dict.
     """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         _run_prep_generation(conn, dedup_key, config)
-    finally:
-        conn.close()
 
 
 def _run_prep_generation(

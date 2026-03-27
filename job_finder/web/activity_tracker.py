@@ -10,8 +10,9 @@ Design constraints:
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timezone
+
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +68,13 @@ def log_activity(
         occurred_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         metadata_json = json.dumps(metadata or {})
 
-        conn = sqlite3.connect(db_path)
-        try:
+        with standalone_connection(db_path) as conn:
             conn.execute(
                 "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) "
                 "VALUES (?, ?, ?, ?)",
                 (action, entity_id, metadata_json, occurred_at),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     except Exception:
         logger.warning("log_activity failed for action=%s", action, exc_info=True)

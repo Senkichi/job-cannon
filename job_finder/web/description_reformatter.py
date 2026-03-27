@@ -22,11 +22,11 @@ Exports:
 
 import logging
 import re
-import sqlite3
 from typing import Optional, Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def reformat_description(
 
 def run_description_reformat_pass(
     db_path: str,
-    anthropic_api_key: str,
+    anthropic_api_key: str | None = None,
     config: Optional[dict] = None,
 ) -> int:
     """One-time background pass to reformat all job descriptions.
@@ -138,7 +138,8 @@ def run_description_reformat_pass(
 
     Args:
         db_path: Absolute path to the SQLite database file.
-        anthropic_api_key: Anthropic API key to initialize the client.
+        anthropic_api_key: Anthropic API key (optional; if None, uses
+            anthropic-telemetry auto-injection from config.toml).
         config: Optional application config dict.
 
     Returns:
@@ -151,69 +152,64 @@ def run_description_reformat_pass(
     if db_path == ":memory:":
         return 0
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=anthropic_api_key)
+        with standalone_connection(db_path) as conn:
+            import anthropic
+            client = anthropic.Anthropic(api_key=anthropic_api_key) if anthropic_api_key else anthropic.Anthropic()
 
-        rows = conn.execute(
-            "SELECT dedup_key, description FROM jobs "
-            "WHERE description_reformatted = 0 AND description IS NOT NULL"
-        ).fetchall()
+            rows = conn.execute(
+                "SELECT dedup_key, description FROM jobs "
+                "WHERE description_reformatted = 0 AND description IS NOT NULL"
+            ).fetchall()
 
-        reformatted_count = 0
+            reformatted_count = 0
 
-        for row in rows:
-            dedup_key = row["dedup_key"]
-            original = row["description"]
+            for row in rows:
+                dedup_key = row["dedup_key"]
+                original = row["description"]
 
-            try:
-                reformatted = reformat_description(
-                    original, client, conn=conn, config=config
-                )
-
-                if reformatted != original and reformatted is not None:
-                    # Text changed — update both description and flag
-                    conn.execute(
-                        "UPDATE jobs SET description = ?, description_reformatted = 1 "
-                        "WHERE dedup_key = ?",
-                        (reformatted, dedup_key),
-                    )
-                    reformatted_count += 1
-                else:
-                    # Text unchanged (already formatted or Haiku returned same text)
-                    # Mark as processed so it's not retried
-                    conn.execute(
-                        "UPDATE jobs SET description_reformatted = 1 WHERE dedup_key = ?",
-                        (dedup_key,),
-                    )
-
-                conn.commit()
-
-            except Exception as e:
-                logger.warning(
-                    "Failed to reformat description for '%s' (non-fatal): %s",
-                    dedup_key,
-                    e,
-                )
-                # Mark as processed anyway to avoid infinite retry loop
                 try:
-                    conn.execute(
-                        "UPDATE jobs SET description_reformatted = 1 WHERE dedup_key = ?",
-                        (dedup_key,),
+                    reformatted = reformat_description(
+                        original, client, conn=conn, config=config
                     )
-                    conn.commit()
-                except Exception:
-                    logger.debug("description reformat commit failed", exc_info=True)
 
-        logger.info("Reformatted %d job descriptions", reformatted_count)
-        return reformatted_count
+                    if reformatted != original and reformatted is not None:
+                        # Text changed — update both description and flag
+                        conn.execute(
+                            "UPDATE jobs SET description = ?, description_reformatted = 1 "
+                            "WHERE dedup_key = ?",
+                            (reformatted, dedup_key),
+                        )
+                        reformatted_count += 1
+                    else:
+                        # Text unchanged (already formatted or Haiku returned same text)
+                        # Mark as processed so it's not retried
+                        conn.execute(
+                            "UPDATE jobs SET description_reformatted = 1 WHERE dedup_key = ?",
+                            (dedup_key,),
+                        )
+
+                    conn.commit()
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to reformat description for '%s' (non-fatal): %s",
+                        dedup_key,
+                        e,
+                    )
+                    # Mark as processed anyway to avoid infinite retry loop
+                    try:
+                        conn.execute(
+                            "UPDATE jobs SET description_reformatted = 1 WHERE dedup_key = ?",
+                            (dedup_key,),
+                        )
+                        conn.commit()
+                    except Exception:
+                        logger.debug("description reformat commit failed", exc_info=True)
+
+            logger.info("Reformatted %d job descriptions", reformatted_count)
+            return reformatted_count
 
     except Exception as e:
         logger.warning("run_description_reformat_pass failed: %s", e)
         return 0
-
-    finally:
-        conn.close()

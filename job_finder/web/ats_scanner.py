@@ -28,6 +28,7 @@ from typing import Optional
 
 import requests
 
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.dedup_normalizer import normalize_company
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
@@ -647,10 +648,7 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
     summary = {"probed": 0, "hits": 0, "misses": 0}
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         # Only probe companies with pending status
         pending = conn.execute(
             "SELECT id, name_raw FROM companies WHERE ats_probe_status = 'pending'"
@@ -713,9 +711,6 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
             # Polite delay between companies (0.5s per Research Open Question 2)
             time.sleep(0.5)
-
-    finally:
-        conn.close()
 
     logger.info(
         "probe_ats_slugs: probed=%d, hits=%d, misses=%d",
@@ -1028,9 +1023,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     }
     all_new_job_keys: list[str] = []
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
     # Create Anthropic client for Haiku fallback calls in careers scraper
     _anthropic_client = None
     try:
@@ -1039,7 +1031,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     except (ImportError, Exception):
         logger.debug("Anthropic client not available — Haiku fallbacks disabled")
 
-    try:
+    with standalone_connection(db_path) as conn:
         # Query companies with confirmed ATS slug (hit) AND error companies eligible
         # for retry (past their retry_after backoff window).
         companies = conn.execute(
@@ -1081,9 +1073,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 from job_finder.db import upsert_job
                 from job_finder.models import Job
 
-                scan_conn = sqlite3.connect(db_path)
-                scan_conn.row_factory = sqlite3.Row
-                try:
+                with standalone_connection(db_path) as scan_conn:
                     for job_dict in job_dicts:
                         try:
                             # First-seen salary wins: only set salary if job is new
@@ -1146,11 +1136,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             error_msg = f"{company_name} job error: {job_err}"
                             summary["errors"].append(error_msg)
                             logger.warning("ATS scan job error: %s", error_msg)
-                finally:
-                    try:
-                        scan_conn.close()
-                    except Exception:
-                        logger.debug("ats scan step failed", exc_info=True)
 
                 # Log company scan
                 conn.execute(
@@ -1265,9 +1250,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     from job_finder.db import upsert_job
                     from job_finder.models import Job
 
-                    html_conn = sqlite3.connect(db_path)
-                    html_conn.row_factory = sqlite3.Row
-                    try:
+                    with standalone_connection(db_path) as html_conn:
                         for scraped_job in scraped_jobs:
                             try:
                                 job = Job(
@@ -1289,11 +1272,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 error_msg = f"{miss_company_name} HTML job error: {job_err}"
                                 summary["errors"].append(error_msg)
                                 logger.warning("ATS HTML fallback job error: %s", error_msg)
-                    finally:
-                        try:
-                            html_conn.close()
-                        except Exception:
-                            logger.debug("html scan step failed", exc_info=True)
 
                     # Step 4: Log company scan
                     conn.execute(
@@ -1413,9 +1391,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             conn.commit()
         except Exception as runs_err:
             logger.warning("Failed to insert ATS scan activity feed entry: %s", runs_err)
-
-    finally:
-        conn.close()
 
     logger.info(
         "ATS scan complete: %d companies scanned, %d jobs discovered, %d new, %d haiku-scored",

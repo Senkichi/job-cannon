@@ -15,10 +15,11 @@ per run. Stamps homepage_probe_attempted_at on every company processed
 
 import logging
 import re
-import sqlite3
 from typing import Optional
 
 import requests
+
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +168,7 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
     if config:
         api_key = config.get("serpapi", {}).get("api_key")
 
-    conn = sqlite3.connect(db_path)
-    try:
+    with standalone_connection(db_path) as conn:
         companies = conn.execute(
             f"SELECT id, name_raw, ats_platform, ats_slug "
             f"FROM companies "
@@ -235,9 +235,6 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
                     (company_id,)
                 )
                 conn.commit()
-
-    finally:
-        conn.close()
 
     return {
         "companies_checked": companies_checked,

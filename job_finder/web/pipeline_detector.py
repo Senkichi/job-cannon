@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from job_finder.db import update_pipeline_status
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -153,54 +154,49 @@ def run_pipeline_detection(db_path: str, config: dict) -> dict:
         "errors": [],
     }
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
-        service = _get_gmail_service(config)
-        if service is None:
-            logger.warning("Pipeline detection: Gmail service unavailable, skipping")
-            summary["errors"].append("Gmail authentication failed")
-            return summary
-
-        emails = _fetch_pipeline_emails(service, lookback_days=3)
-        summary["emails_scanned"] = len(emails)
-
-        # Load all active jobs once to avoid repeated DB queries
-        jobs = _load_active_jobs(conn)
-
-        for email in emails:
-            try:
-                result = _process_email(email, conn, jobs, config=config)
-                if result == "auto_updated":
-                    summary["auto_updated"] += 1
-                elif result == "queued":
-                    summary["queued"] += 1
-                else:
-                    summary["skipped"] += 1
-            except Exception as e:
-                msg = f"Error processing email {email.get('message_id', '?')}: {e}"
-                logger.warning(msg)
-                summary["errors"].append(msg)
-
-        logger.info(
-            "Pipeline detection: %d scanned, %d auto-updated, %d queued, %d skipped",
-            summary["emails_scanned"],
-            summary["auto_updated"],
-            summary["queued"],
-            summary["skipped"],
-        )
-
-    except Exception as e:
-        logger.exception("Pipeline detection failed: %s", e)
-        summary["errors"].append(str(e))
+    with standalone_connection(db_path) as conn:
         try:
-            conn.rollback()
-        except Exception:
-            logger.debug("conn.rollback() failed in pipeline detection", exc_info=True)
+            service = _get_gmail_service(config)
+            if service is None:
+                logger.warning("Pipeline detection: Gmail service unavailable, skipping")
+                summary["errors"].append("Gmail authentication failed")
+                return summary
 
-    finally:
-        conn.close()
+            emails = _fetch_pipeline_emails(service, lookback_days=3)
+            summary["emails_scanned"] = len(emails)
+
+            # Load all active jobs once to avoid repeated DB queries
+            jobs = _load_active_jobs(conn)
+
+            for email in emails:
+                try:
+                    result = _process_email(email, conn, jobs, config=config)
+                    if result == "auto_updated":
+                        summary["auto_updated"] += 1
+                    elif result == "queued":
+                        summary["queued"] += 1
+                    else:
+                        summary["skipped"] += 1
+                except Exception as e:
+                    msg = f"Error processing email {email.get('message_id', '?')}: {e}"
+                    logger.warning(msg)
+                    summary["errors"].append(msg)
+
+            logger.info(
+                "Pipeline detection: %d scanned, %d auto-updated, %d queued, %d skipped",
+                summary["emails_scanned"],
+                summary["auto_updated"],
+                summary["queued"],
+                summary["skipped"],
+            )
+
+        except Exception as e:
+            logger.exception("Pipeline detection failed: %s", e)
+            summary["errors"].append(str(e))
+            try:
+                conn.rollback()
+            except Exception:
+                logger.debug("conn.rollback() failed in pipeline detection", exc_info=True)
 
     return summary
 

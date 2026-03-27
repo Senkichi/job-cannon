@@ -37,6 +37,7 @@ from typing import Optional
 from thefuzz import fuzz
 
 from job_finder.config import load_config, COMPANY_DENYLIST, get_company_denylist
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.ats_scanner import probe_ats_slugs, upsert_company
 from job_finder.web.data_enricher import enrich_company_info
 from job_finder.web.dedup_normalizer import normalize_company
@@ -571,10 +572,7 @@ def main() -> None:
     config = load_config()
     db_path = config["db"]["path"]
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         # Print initial state
         null_count = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
@@ -613,9 +611,6 @@ def main() -> None:
         print(f"ATS hits:                {ats_result.get('hits', 0)}")
         print(f"ATS misses:              {ats_result.get('misses', 0)}")
         print(f"DDG enriched:            {ddg_count}")
-
-    finally:
-        conn.close()
 
 
 if __name__ == "__main__":

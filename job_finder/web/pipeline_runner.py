@@ -30,6 +30,7 @@ from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_LOOKBACK_DAYS, DE
 from job_finder.db import upsert_job, log_run, JOBS_ALL_COLUMNS
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
 from job_finder.web.scoring_orchestrator import (
@@ -112,11 +113,9 @@ def run_ingestion(db_path: str, config: dict) -> dict:
     new_job_keys: list[str] = []
 
     # New connection per call -- thread-safe
-    runner_conn = sqlite3.connect(db_path)
-    runner_conn.row_factory = sqlite3.Row
     scorer = JobScorer(config)
 
-    try:
+    with standalone_connection(db_path) as runner_conn:
         # --- Gmail ingestion ---
         gmail_jobs = _fetch_gmail(config, runner_conn, summary)
 
@@ -145,13 +144,6 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 log_run(runner_conn, "serpapi", summary["serpapi_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log SerpAPI run: %s", e)
-
-    finally:
-        # Always close the connection to release the file lock (important on Windows)
-        try:
-            runner_conn.close()
-        except Exception:
-            logger.warning("db close failed during ingestion", exc_info=True)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
@@ -434,10 +426,7 @@ def _run_haiku_scoring(
     sonnet_queue: list[str] = []
     haiku_scored = 0
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         for dedup_key in new_job_keys:
             try:
                 row = conn.execute(
@@ -532,9 +521,6 @@ def _run_haiku_scoring(
                     "Haiku scoring error for job '%s': %s -- continuing", dedup_key, e
                 )
 
-    finally:
-        conn.close()
-
     logger.info(
         "Haiku scored %d jobs, %d above threshold (>=%d) for Sonnet",
         haiku_scored,
@@ -578,10 +564,7 @@ def _run_sonnet_evaluation(
     client = anthropic.Anthropic()
     sonnet_evaluated = 0
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    try:
+    with standalone_connection(db_path) as conn:
         for dedup_key in sonnet_queue:
             try:
                 row = conn.execute(
@@ -641,9 +624,6 @@ def _run_sonnet_evaluation(
                     "Sonnet evaluation error for job '%s': %s -- continuing", dedup_key, e
                 )
 
-    finally:
-        conn.close()
-
     logger.info("Sonnet evaluated %d jobs", sonnet_evaluated)
     return sonnet_evaluated
 
@@ -666,13 +646,9 @@ def _check_budget_alert(config: dict, db_path: str) -> None:
         return
 
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        try:
+        with standalone_connection(db_path) as conn:
             from job_finder.web.claude_client import get_cost_stats
             stats = get_cost_stats(conn)
-        finally:
-            conn.close()
 
         monthly_spend = stats.get("month", 0.0)
         if monthly_spend <= 0:

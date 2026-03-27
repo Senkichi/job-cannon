@@ -34,6 +34,7 @@ from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MODEL_HAIKU, DEFA
 from job_finder.db import persist_haiku_score, persist_sonnet_score
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
 from job_finder.web.haiku_scorer import score_job_haiku
@@ -395,13 +396,7 @@ def main() -> None:
         print("Warning: SerpAPI key not configured — SerpAPI tier will be skipped.")
 
     # Open own connection (thread-safe, not Flask g.db)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-
-    # Enable WAL mode for safe concurrent access
-    conn.execute("PRAGMA journal_mode=WAL")
-
-    try:
+    with standalone_connection(db_path) as conn:
         client = _anthropic.Anthropic()
 
         print("\n=== Phase 1: Convergence Enrichment Passes ===")
@@ -437,9 +432,6 @@ def main() -> None:
         print(f"  Enriched: {total_enriched}")
         print(f"  Sonnet evaluated: {sonnet_count}")
         print(f"  Borderline re-scored: {rescore_count}")
-
-    finally:
-        conn.close()
 
 
 if __name__ == "__main__":

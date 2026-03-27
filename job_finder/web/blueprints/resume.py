@@ -19,7 +19,6 @@ Routes:
 
 import json
 import logging
-import sqlite3
 import threading
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
@@ -30,7 +29,7 @@ from flask import Blueprint, current_app, render_template
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.activity_tracker import log_activity, ACTION_GENERATE_RESUME, ACTION_QUICK_APPLY
 from job_finder.web.blueprints import trigger_interview_prep_if_applied
-from job_finder.web.db_helpers import get_db
+from job_finder.web.db_helpers import get_db, standalone_connection
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 from job_finder.web.profile_schema import load_profile
@@ -210,10 +209,7 @@ def quick_apply(dedup_key: str):
         profile = load_profile(profile_path)
 
         # Open a direct connection (not g.db) -- this call may take 30-60s
-        direct_conn = sqlite3.connect(db_path)
-        direct_conn.row_factory = sqlite3.Row
-
-        try:
+        with standalone_connection(db_path) as direct_conn:
             client = anthropic.Anthropic()
 
             resume_data = generate_resume_single(client, job_row, profile, direct_conn, config)
@@ -263,9 +259,6 @@ def quick_apply(dedup_key: str):
                 (dedup_key, now_str, model, "done", doc_url, "single"),
             )
             direct_conn.commit()
-
-        finally:
-            direct_conn.close()
 
     # Set pipeline_status to 'applied'
     update_pipeline_status(conn, dedup_key, "applied", source="quick_apply")

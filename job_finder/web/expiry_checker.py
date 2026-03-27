@@ -18,13 +18,14 @@ Architecture:
 import json
 import logging
 import re
-import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
+
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -398,114 +399,110 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
     batch_size = expiry_config.get("batch_size", 20)
     recheck_days = expiry_config.get("recheck_days", 3)
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    with standalone_connection(db_path) as conn:
+        try:
+            # Query candidate jobs: discovered/reviewing, not recently checked
+            recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
+            rows = conn.execute(
+                """SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id as company_row_id
+                   FROM jobs j
+                   LEFT JOIN companies c ON j.company_id = c.id
+                   WHERE j.pipeline_status IN ('discovered', 'reviewing')
+                     AND (j.expiry_checked_at IS NULL OR j.expiry_checked_at < ?)
+                   ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC
+                   LIMIT ?""",
+                (recheck_cutoff, batch_size),
+            ).fetchall()
 
-    try:
-        # Query candidate jobs: discovered/reviewing, not recently checked
-        recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
-        rows = conn.execute(
-            """SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id as company_row_id
-               FROM jobs j
-               LEFT JOIN companies c ON j.company_id = c.id
-               WHERE j.pipeline_status IN ('discovered', 'reviewing')
-                 AND (j.expiry_checked_at IS NULL OR j.expiry_checked_at < ?)
-               ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC
-               LIMIT ?""",
-            (recheck_cutoff, batch_size),
-        ).fetchall()
+            archived = 0
+            live = 0
+            inconclusive = 0
 
-        archived = 0
-        live = 0
-        inconclusive = 0
+            for row in rows:
+                job = dict(row)
+                company = None
+                if job.get("ats_platform"):
+                    company = {
+                        "ats_platform": job["ats_platform"],
+                        "ats_slug": job["ats_slug"],
+                        "homepage_url": job.get("homepage_url"),
+                        "id": job.get("company_row_id"),
+                    }
+                elif job.get("homepage_url"):
+                    company = {
+                        "homepage_url": job["homepage_url"],
+                        "ats_platform": None,
+                        "ats_slug": None,
+                    }
 
-        for row in rows:
-            job = dict(row)
-            company = None
-            if job.get("ats_platform"):
-                company = {
-                    "ats_platform": job["ats_platform"],
-                    "ats_slug": job["ats_slug"],
-                    "homepage_url": job.get("homepage_url"),
-                    "id": job.get("company_row_id"),
-                }
-            elif job.get("homepage_url"):
-                company = {
-                    "homepage_url": job["homepage_url"],
-                    "ats_platform": None,
-                    "ats_slug": None,
-                }
+                # Check careers page failure backoff (Signal 2 only)
+                company_id = job.get("company_row_id")
+                skip_careers = False
+                with _careers_lock:
+                    skip_until = _careers_skip_until.get(company_id) if company_id else None
+                if skip_until and datetime.now(timezone.utc) < skip_until:
+                    skip_careers = True
+                    logger.debug(
+                        "run_expiry_check: skipping careers check for company %s (backoff)",
+                        company_id,
+                    )
 
-            # Check careers page failure backoff (Signal 2 only)
-            company_id = job.get("company_row_id")
-            skip_careers = False
-            with _careers_lock:
-                skip_until = _careers_skip_until.get(company_id) if company_id else None
-            if skip_until and datetime.now(timezone.utc) < skip_until:
-                skip_careers = True
-                logger.debug(
-                    "run_expiry_check: skipping careers check for company %s (backoff)",
-                    company_id,
-                )
+                try:
+                    result, evidence = _check_job_expiry(job, company, config, skip_careers=skip_careers)
+                except Exception as e:
+                    logger.warning("run_expiry_check: error checking %s: %s", job["dedup_key"], e)
+                    inconclusive += 1
+                    continue
 
-            try:
-                result, evidence = _check_job_expiry(job, company, config, skip_careers=skip_careers)
-            except Exception as e:
-                logger.warning("run_expiry_check: error checking %s: %s", job["dedup_key"], e)
-                inconclusive += 1
-                continue
+                now = datetime.now(timezone.utc).isoformat()
 
-            now = datetime.now(timezone.utc).isoformat()
+                # Track careers page outcome for backoff
+                if not skip_careers and company_id:
+                    if "careers_page" in evidence:
+                        _record_careers_outcome(company_id, success=True)
+                    elif result == INCONCLUSIVE and company and company.get("homepage_url"):
+                        # Careers page was attempted but inconclusive (possible failure)
+                        _record_careers_outcome(company_id, success=False)
 
-            # Track careers page outcome for backoff
-            if not skip_careers and company_id:
-                if "careers_page" in evidence:
-                    _record_careers_outcome(company_id, success=True)
-                elif result == INCONCLUSIVE and company and company.get("homepage_url"):
-                    # Careers page was attempted but inconclusive (possible failure)
-                    _record_careers_outcome(company_id, success=False)
+                if result == EXPIRED:
+                    from job_finder.db import update_pipeline_status
+                    update_pipeline_status(
+                        conn, job["dedup_key"], "archived",
+                        source="expiry_check", evidence=evidence,
+                    )
+                    conn.execute(
+                        "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
+                        (now, job["dedup_key"]),
+                    )
+                    conn.commit()
+                    archived += 1
+                    logger.info("run_expiry_check: archived %s (%s)", job["dedup_key"], evidence)
 
-            if result == EXPIRED:
-                from job_finder.db import update_pipeline_status
-                update_pipeline_status(
-                    conn, job["dedup_key"], "archived",
-                    source="expiry_check", evidence=evidence,
-                )
-                conn.execute(
-                    "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
-                    (now, job["dedup_key"]),
-                )
-                conn.commit()
-                archived += 1
-                logger.info("run_expiry_check: archived %s (%s)", job["dedup_key"], evidence)
+                elif result == LIVE:
+                    conn.execute(
+                        "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
+                        (now, job["dedup_key"]),
+                    )
+                    conn.commit()
+                    live += 1
 
-            elif result == LIVE:
-                conn.execute(
-                    "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
-                    (now, job["dedup_key"]),
-                )
-                conn.commit()
-                live += 1
+                else:
+                    inconclusive += 1
+                    logger.debug("run_expiry_check: inconclusive for %s", job["dedup_key"])
 
-            else:
-                inconclusive += 1
-                logger.debug("run_expiry_check: inconclusive for %s", job["dedup_key"])
+                # Rate limit between jobs
+                time.sleep(_INTER_REQUEST_DELAY)
 
-            # Rate limit between jobs
-            time.sleep(_INTER_REQUEST_DELAY)
+            result_summary = {
+                "checked": len(rows),
+                "archived": archived,
+                "live": live,
+                "inconclusive": inconclusive,
+            }
+            logger.info("run_expiry_check complete: %s", result_summary)
+            return result_summary
 
-        result_summary = {
-            "checked": len(rows),
-            "archived": archived,
-            "live": live,
-            "inconclusive": inconclusive,
-        }
-        logger.info("run_expiry_check complete: %s", result_summary)
-        return result_summary
-
-    except Exception:
-        conn.rollback()
-        logger.exception("run_expiry_check failed")
-        raise
-    finally:
-        conn.close()
+        except Exception:
+            conn.rollback()
+            logger.exception("run_expiry_check failed")
+            raise
