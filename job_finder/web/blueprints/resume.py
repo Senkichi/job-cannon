@@ -23,7 +23,11 @@ import threading
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
-import anthropic
+try:
+    import anthropic
+    _anthropic_available = True
+except ImportError:
+    _anthropic_available = False
 from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_MODEL_SONNET
@@ -33,7 +37,11 @@ from job_finder.web.db_helpers import get_db, standalone_connection
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 from job_finder.web.profile_schema import load_profile
-from job_finder.web.resume_generator import _generate_resume_background, generate_resume_single
+from job_finder.web.resume_generator import (
+    generate_resume_background,
+    generate_resume_single,
+    _generate_resume_background,  # backward-compat alias used by some test patches
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +97,7 @@ def generate(dedup_key: str):
 
     # Start background thread (daemon so it doesn't block app shutdown)
     t = threading.Thread(
-        target=_generate_resume_background,
+        target=generate_resume_background,
         args=(db_path, gen_id, job_row, profile, config),
         daemon=True,
     )
@@ -136,9 +144,39 @@ def status(dedup_key: str, gen_id: int):
     ).fetchone()
 
     if row is None:
-        return "Generation record not found.", 404
+        return render_template(
+            "jobs/_resume_error.html",
+            dedup_key=dedup_key,
+            gen_id=gen_id,
+            error_msg="Generation record not found.",
+        ), 404
 
     gen_status = row["status"] if row["status"] else "pending"
+
+    # Timeout safety net: if generation has been running for >10 minutes, mark error
+    if gen_status in ("pending", "generating") and row["generated_at"]:
+        try:
+            started = datetime.fromisoformat(row["generated_at"].replace("Z", "+00:00"))
+            elapsed_minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+            if elapsed_minutes > 10:
+                logger.warning(
+                    "Resume gen_id=%s timed out after %.1f minutes", gen_id, elapsed_minutes
+                )
+                with standalone_connection(db_path) as timeout_conn:
+                    timeout_conn.execute(
+                        "UPDATE resume_generations SET status = 'error', error_msg = ? "
+                        "WHERE id = ? AND status IN ('pending', 'generating')",
+                        ("Generation timed out (>10 min)", gen_id),
+                    )
+                    timeout_conn.commit()
+                return render_template(
+                    "jobs/_resume_error.html",
+                    dedup_key=dedup_key,
+                    gen_id=gen_id,
+                    error_msg="Generation timed out (>10 min)",
+                )
+        except (ValueError, TypeError):
+            pass
 
     if gen_status == "done":
         return render_template(
@@ -210,6 +248,13 @@ def quick_apply(dedup_key: str):
 
         # Open a direct connection (not g.db) -- this call may take 30-60s
         with standalone_connection(db_path) as direct_conn:
+            if not _anthropic_available:
+                return render_template(
+                    "jobs/_resume_error.html",
+                    dedup_key=dedup_key,
+                    gen_id=None,
+                    error_msg="Anthropic library not installed -- cannot generate resume.",
+                )
             client = anthropic.Anthropic()
 
             resume_data = generate_resume_single(client, job_row, profile, direct_conn, config)
@@ -232,18 +277,27 @@ def quick_apply(dedup_key: str):
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             doc_name = f"{company} - {title} - {date_str}"
 
-            # Upload to Drive
-            drive_service = get_drive_service()
-            folder_id = config.get("drive", {}).get("folder_id", "")
-            convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
+            # Upload to Drive -- wrap so Drive errors surface as user-facing messages
+            try:
+                drive_service = get_drive_service()
+                folder_id = config.get("drive", {}).get("folder_id", "")
+                convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
 
-            doc_url = upload_to_drive(
-                drive_service,
-                doc_name,
-                docx_buffer,
-                folder_id=folder_id,
-                convert_to_gdoc=convert_to_gdoc,
-            )
+                doc_url = upload_to_drive(
+                    drive_service,
+                    doc_name,
+                    docx_buffer,
+                    folder_id=folder_id,
+                    convert_to_gdoc=convert_to_gdoc,
+                )
+            except Exception as exc:
+                logger.error("quick_apply: Drive upload failed for '%s': %s", dedup_key, exc)
+                return render_template(
+                    "jobs/_resume_error.html",
+                    dedup_key=dedup_key,
+                    gen_id=None,
+                    error_msg=f"Drive upload failed: {exc}",
+                )
 
             # Insert done resume_generations row
             model = (

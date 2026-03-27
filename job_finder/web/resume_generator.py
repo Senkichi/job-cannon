@@ -3,8 +3,8 @@
 Provides:
     RESUME_SCHEMA        -- JSON schema for structured Sonnet resume output.
     STRATEGY_POOL        -- Pool of resume strategy identifiers for multi-version.
-    generate_resume_single   -- Generate tailored resume dict via Sonnet.
-    _generate_resume_background  -- Background thread: full gen + Drive upload.
+    generate_resume_single      -- Generate tailored resume dict via Sonnet.
+    generate_resume_background  -- Background thread: full gen + Drive upload.
 
 Multi-version synthesis functions live in resume_multi_version.py:
     generate_resume_multi, _haiku_select_strategies,
@@ -388,7 +388,7 @@ def generate_resume_single(
 # Background thread function
 # ---------------------------------------------------------------------------
 
-def _generate_resume_background(
+def generate_resume_background(
     db_path: str,
     gen_id: int,
     job_row: dict,
@@ -433,7 +433,7 @@ def _generate_resume_background(
                 # Deferred import avoids circular import at module load time
                 from job_finder.web.resume_multi_version import generate_resume_multi
                 logger.info(
-                    "_generate_resume_background: using multi-version synthesis for gen_id=%s "
+                    "generate_resume_background: using multi-version synthesis for gen_id=%s "
                     "(sonnet_score=%.1f >= threshold=%d)",
                     gen_id, sonnet_score, multi_threshold,
                 )
@@ -452,7 +452,7 @@ def _generate_resume_background(
                         ("Monthly budget exceeded", gen_id),
                     )
                     conn.commit()
-                    logger.info("_generate_resume_background: budget exceeded for gen_id=%s", gen_id)
+                    logger.info("generate_resume_background: budget exceeded for gen_id=%s", gen_id)
                     return
 
             # --- Validate generated resume ---
@@ -478,7 +478,7 @@ def _generate_resume_background(
                 )
                 if has_errors:
                     logger.info(
-                        "_generate_resume_background: %d error violations, running fix pass for gen_id=%s",
+                        "generate_resume_background: %d error violations, running fix pass for gen_id=%s",
                         sum(1 for v in validation_report["violations"] if v.get("severity") == "error"),
                         gen_id,
                     )
@@ -503,7 +503,7 @@ def _generate_resume_background(
                     conn.commit()
             except Exception as e:
                 logger.warning(
-                    "_generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
+                    "generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
                 )
 
             # Format as .docx
@@ -535,7 +535,7 @@ def _generate_resume_background(
             )
             conn.commit()
             logger.info(
-                "_generate_resume_background: done for gen_id=%s, type=%s, url=%s",
+                "generate_resume_background: done for gen_id=%s, type=%s, url=%s",
                 gen_id, generation_type, doc_url,
             )
 
@@ -548,10 +548,15 @@ def _generate_resume_background(
                 )
                 conn.commit()
             except Exception:
-                logger.exception("_generate_resume_background: failed to update error state for gen_id=%s", gen_id)
+                logger.exception("generate_resume_background: failed to update error state for gen_id=%s", gen_id)
             logger.warning(
-                "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
+                "generate_resume_background: error for gen_id=%s: %s", gen_id, e
             )
+
+
+# Backward-compatible alias -- tests and older callers that imported the private name
+# still work; new code should use generate_resume_background.
+_generate_resume_background = generate_resume_background
 
 
 # ---------------------------------------------------------------------------
