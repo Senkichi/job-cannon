@@ -2,24 +2,24 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Cascading Free Provider Routing
-status: executing
-stopped_at: Completed 29-cascade-config-rate-limiting/29-01-PLAN.md
-last_updated: "2026-03-29T23:00:31.398Z"
+status: verifying
+stopped_at: Completed 29-cascade-config-rate-limiting/29-02-PLAN.md
+last_updated: "2026-03-29T23:11:03.014Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # State
 
 ## Current Position
 
-Phase: 29 (Cascade Config & Rate Limiting) — EXECUTING
+Phase: 29 (Cascade Config & Rate Limiting) — COMPLETE (2/2 plans)
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-29
 
 ## Project Reference
@@ -45,9 +45,13 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - daily_limits values: cerebras: 350, groq: 170 (conservative below measured 363/181 hard caps)
 - Empty fallback_chain in config preserves existing single-fallback behavior — no breaking change
 - `_daily_usage` is module-level in model_provider.py, resets on date rollover via `_usage_date` comparison
-- DB bootstrap on rollover: `SELECT provider, COUNT(*) FROM scoring_costs WHERE date(created_at) = date('now') GROUP BY provider`
+- DB bootstrap on rollover: `SELECT provider, COUNT(*) FROM scoring_costs WHERE date(timestamp) = date('now') GROUP BY provider` (column is `timestamp`, NOT `created_at`)
 - scoring_provider column default is 'anthropic' — migration is non-destructive for existing rows
 - Per-model prompt variant is optional in fallback_chain entries; absent = use default fewshot
+- `_ensure_usage_current(conn)` is the date-rollover guard (Plan 02); Phase 30 calls it at top of call_model()
+- `_check_daily_limit` and `_increment_usage` are pure (no conn dependency); conn only needed for DB bootstrap
+- Module state (_daily_usage, _usage_date) directly mutated in tests via `_reset_daily_state` fixture — no dedicated reset function needed
+- Full suite: 1800 tests passing after Plan 02 (10 new daily tracker tests)
 
 ### Carried Forward from v1.5
 
@@ -70,6 +74,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-29T23:00:31.396Z
-Stopped at: Completed 29-cascade-config-rate-limiting/29-01-PLAN.md
+Last session: 2026-03-29T23:11:03.012Z
+Stopped at: Completed 29-cascade-config-rate-limiting/29-02-PLAN.md
 Resume file: None
