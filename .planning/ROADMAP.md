@@ -79,7 +79,7 @@
 ### v2.0 Cascading Free Provider Routing
 
 - [x] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage (completed 2026-03-29)
-- [ ] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic
+- [x] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic (completed 2026-03-29)
 - [ ] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs
 - [ ] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end
 
@@ -110,7 +110,9 @@ Plans:
   3. A provider with no API key configured is silently skipped (not an error)
   4. When every provider in the chain is exhausted or unavailable, `call_model()` raises `RuntimeError` with a descriptive message
   5. Cascade execution tests all pass (skip exhausted, 429 mark-and-skip, all-exhausted error)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [x] 30-01-PLAN.md -- Cascade dispatch loop (tests + call_model cascade implementation)
 
 ### Phase 31: Prompts & Attribution
 **Goal**: Production scoring uses fewshot examples by default, per-model prompt variants thread through the cascade, and every scored job records which provider produced its score
@@ -167,7 +169,7 @@ Plans:
 | 26. Dispatcher & Cost Tracking | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 27. Caller Migration | v1.5 | 4/4 | Complete | 2026-03-27 |
 | 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete   | 2026-03-29 |
-| 30. Cascade Execution | v2.0 | 0/? | Not started | - |
+| 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete    | 2026-03-29 |
+| 30. Cascade Execution | v2.0 | 1/1 | Complete   | 2026-03-29 |
 | 31. Prompts & Attribution | v2.0 | 0/? | Not started | - |
 | 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |
