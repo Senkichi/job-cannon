@@ -1,64 +1,62 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Multi-Provider Model Routing
+milestone: v2.0
+milestone_name: Cascading Free Provider Routing
 status: executing
-stopped_at: Completed 27-04-PLAN.md
-last_updated: "2026-03-27T21:41:58.758Z"
-last_activity: 2026-03-27 -- Phase 28 execution started
+stopped_at: Completed 29-cascade-config-rate-limiting/29-01-PLAN.md
+last_updated: "2026-03-29T23:00:31.398Z"
+last_activity: 2026-03-29
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 9
-  percent: 100
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # State
 
 ## Current Position
 
-Phase: 28 (Evaluation Framework) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 28
-Last activity: 2026-03-27 -- Phase 28 execution started
-
-Progress: [██████████] 100%
+Phase: 29 (Cascade Config & Rate Limiting) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-03-29
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-27)
+See: .planning/PROJECT.md (updated 2026-03-29)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 28 — Evaluation Framework
+**Current focus:** Phase 29 — Cascade Config & Rate Limiting
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3 (this milestone)
+- Total plans completed: 0 (this milestone)
 
 *Updated after each plan completion*
 
 ## Accumulated Context
 
-### Key Design Decisions (v1.5)
+### Key Design Decisions (v2.0)
+
+- Decided cascade order: Cerebras qwen-3-235b (primary, fewshot, 363/day) -> Groq llama-4-scout (fewshot-distribution, 181/day) -> Ollama qwen2.5:14b (fewshot, unlimited) -> Anthropic Sonnet (paid, last resort)
+- daily_limits values: cerebras: 350, groq: 170 (conservative below measured 363/181 hard caps)
+- Empty fallback_chain in config preserves existing single-fallback behavior — no breaking change
+- `_daily_usage` is module-level in model_provider.py, resets on date rollover via `_usage_date` comparison
+- DB bootstrap on rollover: `SELECT provider, COUNT(*) FROM scoring_costs WHERE date(created_at) = date('now') GROUP BY provider`
+- scoring_provider column default is 'anthropic' — migration is non-destructive for existing rows
+- Per-model prompt variant is optional in fallback_chain entries; absent = use default fewshot
+
+### Carried Forward from v1.5
 
 - call_model() is the single dispatch point — all callers use logical tier names ("sonnet", "haiku", "opus"), never provider-specific model IDs
-- call_claude() internals stay untouched; Anthropic adapter wraps them (no behavior change for existing paths)
-- Budget gate bypass: free providers (Gemini free tier, Ollama) skip budget checks entirely — cost_gate not called
-- Schema validation retry: dispatcher retries once with schema errors appended to prompt before falling back to Anthropic
-- Configurable fallback: if retry fails, re-dispatch to Anthropic (not hardcoded — config specifies fallback provider)
-- COST-01 DB migration adds `provider` column with 'anthropic' default — existing rows unaffected
-- eval_results/ directory for evaluation JSON reports (CLI tool, not web UI)
-- Phase 28 (Evaluation Framework) depends on Phase 26 (Dispatcher) but is independent of Phase 27 (Caller Migration)
-- OllamaProvider uses requests library (not ollama SDK) — stream=False is hardcoded correctness requirement, format=json guarantees parseable output
-- OllamaProvider health check on init with 5s timeout — prevents silent failures during Flask startup
-- Schema embedded in system prompt for Ollama (lacks native schema enforcement); format=json guarantees valid JSON
-- AnthropicProvider stores job_id and purpose at init, forwards to call_claude for correct cost attribution (plan 27-01)
-- ctx parameter removed from score_job_haiku and evaluate_job_sonnet — no external callers used it (plan 27-01)
-- profile_schema.extract_profile_from_markdown accepts optional conn+config — caller passes real conn for cost tracking (plan 27-04)
-- guidelines.py model= argument removed from merge_guidelines_into_guide call — forward-compatible with Plan 03 migration (plan 27-04)
+- Budget gate bypass: free providers (Gemini free tier, Ollama, Groq, Cerebras) skip budget checks entirely
+- Schema validation retry: dispatcher retries once with schema errors appended to prompt before falling back
+- OllamaProvider uses requests library — stream=False hardcoded, format=json guarantees parseable output
+- AnthropicProvider stores job_id and purpose at init, forwards to call_claude for correct cost attribution
+- scoring_costs table already has `provider` column
 
 ### Blockers/Concerns
 
@@ -66,11 +64,12 @@ None.
 
 ### Implementation Reference
 
-- Design spec: `docs/superpowers/specs/2026-03-27-multi-provider-model-routing-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-03-27-multi-provider-model-routing.md`
+- Implementation plan: `.planning/IMPLEMENTATION_PLAN_V2.md`
+- Eval results: `eval_results/` (72+ runs from benchmarking session)
+- Provider eval session notes: `.claude/projects/C--Users-senki-repos-job-cannon/memory/project_provider_eval_session.md`
 
 ## Session Continuity
 
-Last session: 2026-03-27T21:11:30Z
-Stopped at: Completed 27-04-PLAN.md
+Last session: 2026-03-29T23:00:31.396Z
+Stopped at: Completed 29-cascade-config-rate-limiting/29-01-PLAN.md
 Resume file: None
