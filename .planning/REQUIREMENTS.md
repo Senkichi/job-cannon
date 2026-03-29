@@ -1,123 +1,104 @@
 # Requirements: Job Cannon
 
-**Defined:** 2026-03-27
+**Defined:** 2026-03-29
 **Core Value:** Surface the best-fit jobs fast and keep the application pipeline visible
 
-## v1.5 Requirements
+## v2.0 Requirements
 
-Requirements for Multi-Provider Model Routing milestone. Each maps to roadmap phases.
+Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap phases.
 
-### Provider Infrastructure
+### Cascade Routing
 
-- [ ] **INFRA-01**: Dispatcher resolves logical tier names ("sonnet", "haiku", "opus") to provider + model via config.yaml providers section
-- [x] **INFRA-02**: Schema validation retries once on failure with augmented prompt including schema errors
-- [x] **INFRA-03**: Configurable fallback re-dispatches to Anthropic when retry fails
-- [x] **INFRA-04**: Budget gate bypassed for free providers (Gemini free tier, Ollama)
-- [ ] **INFRA-05**: Missing providers section defaults to Anthropic routing (backwards compatible)
+- [x] **CASC-01**: `resolve_provider_config()` parses `fallback_chain` list from tier config and `daily_limits` from providers config
+- [ ] **CASC-02**: Daily rate limit tracker with in-memory counters that bootstrap from `scoring_costs` DB on date rollover
+- [ ] **CASC-03**: `call_model()` iterates fallback chain, skipping providers that are exhausted, unavailable (missing API key), or over budget
+- [ ] **CASC-04**: 429 HTTP responses mark the provider as exhausted for the day and cascade to next
+- [ ] **CASC-05**: Per-model prompt variant override in fallback chain config, threaded to sonnet evaluator
+- [x] **CASC-06**: Empty `fallback_chain` preserves existing single-fallback behavior (backward compatibility)
+- [ ] **CASC-07**: All providers exhausted raises `RuntimeError` with clear message
 
-### Provider Adapters
+### Provider Attribution
 
-- [x] **ADAPT-01**: Anthropic adapter wraps existing call_claude() internals with tool-choice structured output
-- [x] **ADAPT-02**: Gemini adapter uses google-genai SDK with response_schema structured output and 429 rate-limit retry
-- [x] **ADAPT-03**: Ollama adapter uses REST API with JSON format + schema-in-prompt, health-check on init
+- [ ] **ATTR-01**: DB migration adds `scoring_provider` column to `jobs` table with `'anthropic'` default
+- [ ] **ATTR-02**: `persist_sonnet_score()` accepts and stores provider from scoring result
+- [ ] **ATTR-03**: Provider attribution threaded from `call_model()` through `evaluate_job_sonnet()` to orchestrator to DB
 
-### Caller Migration
+### Production Prompts
 
-- [x] **MIGR-01**: All call_claude() call sites migrated to call_model() with logical tier names
-- [x] **MIGR-02**: All direct anthropic.Anthropic() usage in blueprints/orchestrators refactored to use provider layer
-- [ ] **MIGR-03**: config.example.yaml updated with providers section examples
+- [ ] **PRMT-01**: Fewshot examples moved from `eval_provider.py` into `sonnet_evaluator.py` as production default
+- [ ] **PRMT-02**: Distribution awareness instructions available for providers configured with `fewshot-distribution` variant
 
-### Cost Tracking
+### Testing
 
-- [ ] **COST-01**: Provider column added to scoring_costs table with 'anthropic' default
-- [x] **COST-02**: Cost stats include per-provider grouping alongside existing per-feature breakdown
-- [x] **COST-03**: Costs page shows provider breakdown
+- [x] **TEST-01**: Cascade config parsing tests (fallback chain + backward compat)
+- [ ] **TEST-02**: Cascade execution tests (skip exhausted, handle 429, all-exhausted error)
+- [ ] **TEST-03**: Daily limit tracker tests (check, increment, date rollover reset)
+- [ ] **TEST-04**: Provider attribution DB test (`scoring_provider` written and read)
 
-### Evaluation Framework
+### Config
 
-- [x] **EVAL-01**: CLI benchmark tool samples jobs with existing Sonnet results and reconstructs prompts
-- [x] **EVAL-02**: Metrics computed: score correlation, schema adherence, qualitative output, latency
-- [x] **EVAL-03**: Auto-computed verdict (SUITABLE/MARGINAL/NOT_RECOMMENDED) with configurable thresholds
-- [x] **EVAL-04**: JSON report saved to eval_results/ with aggregate metrics and per-job details
+- [x] **CONF-01**: `config.example.yaml` documents cascade config schema with `fallback_chain` and `daily_limits`
+- [ ] **CONF-02**: Production `config.yaml` wired with decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic)
 
-## v1.4 Requirements (Complete)
+## Previous Milestones (Complete)
 
-### Housekeeping
+<details>
+<summary>v1.5 Multi-Provider Model Routing (18 requirements)</summary>
 
-- [x] **HOUSE-01**: Move 11 completed todos from pending/ to done/
+- [x] INFRA-01 through INFRA-05: Provider infrastructure
+- [x] ADAPT-01 through ADAPT-03: Provider adapters
+- [x] MIGR-01 through MIGR-03: Caller migration
+- [x] COST-01 through COST-03: Cost tracking
+- [x] EVAL-01 through EVAL-04: Evaluation framework
 
-### Surgical Fixes
+</details>
 
-- [x] **FIX-01**: Deduplicate Indeed `_is_meta_email` via `_common.is_meta_email` with `extra_patterns`
-- [x] **FIX-02**: Rename `discover_homepages_batch` → `run_homepage_discovery`, `trigger_sync` → `run_sync_now`, `_merge_guidelines_into_guide` → `merge_guidelines_into_guide`, `_FIELD_LABELS` → `FIELD_LABELS`
-- [x] **FIX-03**: Move `normalized_dedup_key()` from web layer into `models.py` as `Job.normalized_dedup_key()` static method
-- [x] **FIX-04**: Extract `standalone_connection()` context manager into `db_helpers.py`, replace 35+ boilerplate occurrences
-- [x] **FIX-05**: Add `get_config_snapshot()` helper for background thread config access
+<details>
+<summary>v1.4 Tech Debt Sweep (18 requirements)</summary>
 
-### Test Coverage
+- [x] HOUSE-01, FIX-01 through FIX-05, TEST-01, SPLIT-01 through SPLIT-07, BATCH-01 through BATCH-05
 
-- [x] **TEST-01**: Create `tests/test_companies.py` covering companies blueprint routes (index, expand, collapse, toggle, update_slug, retry)
-
-### Module Splits
-
-- [x] **SPLIT-01**: Split `ats_scanner.py` (1500 LOC) → `ats_scanner.py` + `ats_detection.py` + `ats_prober.py`
-- [x] **SPLIT-02**: Split `data_enricher.py` (~1100 LOC) → `data_enricher.py` + `enrichment_tiers.py` + `company_enricher.py`
-- [x] **SPLIT-03**: Split `dashboard.py` (956 LOC) → `dashboard.py` + `batch_scoring.py` + `sync.py` blueprints
-- [x] **SPLIT-04**: Split `resume_generator.py` (1019 LOC) → `resume_generator.py` + `resume_multi_version.py`
-- [x] **SPLIT-05**: Split `profile.py` (901 LOC) → `profile.py` + `resume_review.py` + `profile_recommendations.py` blueprints
-- [x] **SPLIT-06**: Split `pipeline_runner.py` (692 LOC) → `pipeline_runner.py` + `scoring_runner.py`
-- [x] **SPLIT-07**: Split `settings.py` (602 LOC) → `settings.py` + `guidelines.py` blueprints
-
-### N+1 Query Batching
-
-- [x] **BATCH-01**: Batch Haiku scoring reads — single `SELECT ... WHERE dedup_key IN (?)` per batch
-- [x] **BATCH-02**: Batch Sonnet evaluation reads — same pattern as BATCH-01
-- [x] **BATCH-03**: Batch stale detector updates — single `UPDATE ... WHERE dedup_key IN (?)`
-- [x] **BATCH-04**: Batch dashboard cancellation check — check once per batch, not per job
-- [x] **BATCH-05**: Defer session counter update — increment once after batch completes
-
-## Future Requirements
-
-None identified for this milestone.
+</details>
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Haiku/Opus call site migration to alternative providers | Config supports it, but v1.5 focuses on Sonnet-tier calls |
-| Per-purpose provider routing | All Sonnet calls route to same provider in v1.5 |
-| Shadow mode / always-on evaluation | On-demand benchmarking sufficient |
-| Settings page UI for provider management | Config.yaml only for v1.5 |
-| Modifying existing call_claude() behavior | Stays untouched as Anthropic adapter backend |
+| Score recalibration across providers | Deferred — provider attribution stored for future retroactive calibration |
+| UI provider badge on job cards | Deferred — column populated but not displayed yet |
+| SambaNova in cascade | Stuck at 20 RPD, not competitive until billing upgrade |
+| Haiku tier cascade | Haiku is cheap ($0.001/job), not worth cascading |
+| Async/parallel provider calls | Unnecessary for single-user localhost app |
+| Settings page UI for cascade config | Config.yaml only for v2.0 |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 24 | Pending |
-| INFRA-02 | Phase 26 | Complete |
-| INFRA-03 | Phase 26 | Complete |
-| INFRA-04 | Phase 26 | Complete |
-| INFRA-05 | Phase 24 | Pending |
-| ADAPT-01 | Phase 25 | Complete |
-| ADAPT-02 | Phase 25 | Complete |
-| ADAPT-03 | Phase 25 | Complete |
-| MIGR-01 | Phase 27 | Complete |
-| MIGR-02 | Phase 27 | Complete |
-| MIGR-03 | Phase 27 | Pending |
-| COST-01 | Phase 24 | Pending |
-| COST-02 | Phase 26 | Complete |
-| COST-03 | Phase 26 | Complete |
-| EVAL-01 | Phase 28 | Complete |
-| EVAL-02 | Phase 28 | Complete |
-| EVAL-03 | Phase 28 | Complete |
-| EVAL-04 | Phase 28 | Complete |
+| CASC-01 | Phase 29 | Complete |
+| CASC-02 | Phase 29 | Pending |
+| CASC-06 | Phase 29 | Complete |
+| CONF-01 | Phase 29 | Complete |
+| TEST-01 | Phase 29 | Complete |
+| TEST-03 | Phase 29 | Pending |
+| CASC-03 | Phase 30 | Pending |
+| CASC-04 | Phase 30 | Pending |
+| CASC-07 | Phase 30 | Pending |
+| TEST-02 | Phase 30 | Pending |
+| CASC-05 | Phase 31 | Pending |
+| PRMT-01 | Phase 31 | Pending |
+| PRMT-02 | Phase 31 | Pending |
+| ATTR-01 | Phase 31 | Pending |
+| ATTR-02 | Phase 31 | Pending |
+| ATTR-03 | Phase 31 | Pending |
+| TEST-04 | Phase 31 | Pending |
+| CONF-02 | Phase 32 | Pending |
 
 **Coverage:**
-- v1.5 requirements: 18 total
-- Mapped to phases: 18
+- v2.0 requirements: 16 total
+- Mapped to phases: 16
 - Unmapped: 0
 
 ---
-*Requirements defined: 2026-03-27*
-*Last updated: 2026-03-27 after roadmap creation (v1.5)*
+*Requirements defined: 2026-03-29*
+*Last updated: 2026-03-29 after roadmap creation (Phases 29-32)*

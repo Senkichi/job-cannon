@@ -7,7 +7,8 @@
 - ✅ **v1.2 Migration & Stabilization** — Phases 13-14 (shipped 2026-03-24)
 - ✅ **v1.3 Fixes & Improvements** — Phases 15-18 (shipped 2026-03-26)
 - ✅ **v1.4 Tech Debt Sweep** — Phases 19-23 (shipped 2026-03-27)
-- 🚧 **v1.5 Multi-Provider Model Routing** — Phases 24-28 (in progress)
+- ✅ **v1.5 Multi-Provider Model Routing** — Phases 24-28 (shipped 2026-03-27)
+- 🔄 **v2.0 Cascading Free Provider Routing** — Phases 29-32 (in progress)
 
 ## Phases
 
@@ -64,77 +65,75 @@
 
 </details>
 
-### 🚧 v1.5 Multi-Provider Model Routing (In Progress)
+<details>
+<summary>✅ v1.5 Multi-Provider Model Routing (Phases 24-28) — SHIPPED 2026-03-27</summary>
 
-**Milestone Goal:** Make all AI model calls configurable to route through Anthropic, Gemini, or Ollama via config.yaml, with an evaluation framework to benchmark alternatives before switching.
+- [x] Phase 24: Provider Foundation (2/2 plans) — completed 2026-03-27
+- [x] Phase 25: Provider Adapters (3/3 plans) — completed 2026-03-27
+- [x] Phase 26: Dispatcher & Cost Tracking (2/2 plans) — completed 2026-03-27
+- [x] Phase 27: Caller Migration (4/4 plans) — completed 2026-03-27
+- [x] Phase 28: Evaluation Framework (2/2 plans) — completed 2026-03-27
 
-- [x] **Phase 24: Provider Foundation** (2/2 plans) — completed 2026-03-27
-- [x] **Phase 25: Provider Adapters** (3 plans) — Anthropic, Gemini, and Ollama adapter implementations (completed 2026-03-27)
-- [x] **Phase 26: Dispatcher & Cost Tracking** (1/3 plans complete) — call_model() dispatcher with retry, fallback, budget bypass, and cost UI (completed 2026-03-27)
-- [x] **Phase 27: Caller Migration** (4 plans) — Migrate all call sites from call_claude() to call_model() (completed 2026-03-27)
-- [ ] **Phase 28: Evaluation Framework** — CLI benchmark tool for comparing provider quality vs. stored Sonnet results
+</details>
+
+### v2.0 Cascading Free Provider Routing
+
+- [ ] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage
+- [ ] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic
+- [ ] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs
+- [ ] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end
 
 ## Phase Details
 
-### Phase 25: Provider Adapters
-**Goal**: Three provider adapters are implemented and independently testable — Anthropic wrapping existing internals, Gemini via google-genai, and Ollama via local REST
-**Depends on**: Phase 24
-**Requirements**: ADAPT-01, ADAPT-02, ADAPT-03
+### Phase 29: Cascade Config & Rate Limiting
+**Goal**: The app can parse a `fallback_chain` from config and accurately track daily provider usage in memory
+**Depends on**: Phase 28 (Provider Foundation complete)
+**Requirements**: CASC-01, CASC-02, CASC-06, CONF-01, TEST-01, TEST-03
 **Success Criteria** (what must be TRUE):
-  1. Anthropic adapter calls call_claude() internally and returns a ModelResult with structured output
-  2. Gemini adapter uses response_schema for structured output and retries automatically on HTTP 429 rate-limit errors
-  3. Ollama adapter checks local service health on initialization and raises a clear error if unreachable
-  4. All three adapters conform to the BaseProvider interface and are independently unit-testable with mocked transports
-**Plans:** 3/3 plans complete
+  1. `resolve_provider_config()` returns a `fallback_chain` list (empty list when config has no chain, preserving old single-fallback behavior)
+  2. Daily usage counters reset automatically at midnight and bootstrap from `scoring_costs` DB on the new day
+  3. A provider at its daily limit is correctly identified as exhausted; a provider under its limit passes the check
+  4. `config.example.yaml` shows a complete, commented cascade config block that new users can copy
+  5. Config parse tests and daily limit tracker tests all pass
+**Plans**: 2 plans
 Plans:
-- [x] 25-01-PLAN.md — Install dependencies + Anthropic adapter (TDD)
-- [x] 25-02-PLAN.md — Gemini adapter with response_json_schema and 429 retry (TDD)
-- [x] 25-03-PLAN.md — Ollama adapter with REST API and health check (TDD)
+- [x] 29-01-PLAN.md -- Cascade config parsing (resolve_provider_config + config.example.yaml + tests)
+- [ ] 29-02-PLAN.md -- Daily rate limit tracker (module-level state + helper functions + tests)
 
-### Phase 26: Dispatcher & Cost Tracking
-**Goal**: call_model() exists as the single dispatch point — it routes by tier, validates output schema, retries with error context, falls back to Anthropic, bypasses budget for free providers, and records provider in cost rows
-**Depends on**: Phase 25
-**Requirements**: INFRA-02, INFRA-03, INFRA-04, COST-02, COST-03
+### Phase 30: Cascade Execution
+**Goal**: `call_model()` walks the fallback chain, skipping exhausted or unavailable providers, and surfaces a clear error when all are exhausted
+**Depends on**: Phase 29
+**Requirements**: CASC-03, CASC-04, CASC-07, TEST-02
 **Success Criteria** (what must be TRUE):
-  1. call_model("sonnet", prompt, schema) routes to whichever provider is configured for that tier
-  2. When a provider returns a response that fails schema validation, call_model() retries once with the schema errors appended to the prompt
-  3. When retry also fails, call_model() re-dispatches to Anthropic as configured fallback
-  4. Calls routed to Gemini free tier or Ollama skip budget gate checks entirely
-  5. The Costs page shows a per-provider breakdown of API spend alongside the existing per-feature breakdown
-**Plans:** 2/2 plans complete
-Plans:
-- [x] 26-01-PLAN.md — call_model() dispatcher with schema retry, fallback, budget bypass, and record_cost provider param
-- [x] 26-02-PLAN.md — Per-provider cost breakdown query and Costs page UI
+  1. When the primary provider is at its daily limit, scoring continues using the next provider in the chain without any user intervention
+  2. A 429 response from any provider marks that provider as exhausted for the day and immediately cascades to the next provider
+  3. A provider with no API key configured is silently skipped (not an error)
+  4. When every provider in the chain is exhausted or unavailable, `call_model()` raises `RuntimeError` with a descriptive message
+  5. Cascade execution tests all pass (skip exhausted, 429 mark-and-skip, all-exhausted error)
+**Plans**: TBD
 
-### Phase 27: Caller Migration
-**Goal**: Every call site in the codebase uses call_model() with a logical tier name — no direct call_claude() calls or raw anthropic.Anthropic() usage remain in blueprint or orchestrator code
-**Depends on**: Phase 26
-**Requirements**: MIGR-01, MIGR-02, MIGR-03
+### Phase 31: Prompts & Attribution
+**Goal**: Production scoring uses fewshot examples by default, per-model prompt variants thread through the cascade, and every scored job records which provider produced its score
+**Depends on**: Phase 30
+**Requirements**: CASC-05, PRMT-01, PRMT-02, ATTR-01, ATTR-02, ATTR-03, TEST-04
 **Success Criteria** (what must be TRUE):
-  1. All 18+ call_claude() call sites are replaced with call_model() using logical tier names ("sonnet", "haiku", "opus")
-  2. No blueprint or orchestrator module directly instantiates anthropic.Anthropic() — all such usage goes through the provider layer
-  3. config.example.yaml contains a fully-documented `providers` section that demonstrates routing Sonnet to Gemini or Ollama
-  4. The app starts and scores jobs end-to-end with the existing Anthropic config after migration
-**Plans:** 4/4 plans complete
-Plans:
-- [x] 27-01-PLAN.md — Core scoring path (haiku_scorer, sonnet_evaluator, scoring_runner, batch_scoring)
-- [x] 27-02-PLAN.md — Enrichment, description reformatter, and careers scraper
-- [x] 27-03-PLAN.md — Resume pipeline (generator, multi-version, feedback, style guide, validator)
-- [x] 27-04-PLAN.md — Intelligence, blueprints, special cases, and config.example.yaml
+  1. `sonnet_evaluator.py` includes fewshot examples in the system prompt without any extra config — existing jobs scored after this phase are evaluated with fewshot by default
+  2. A cascade entry with `prompt_variant: fewshot-distribution` causes the evaluator to use the distribution-aware instructions for that provider
+  3. After scoring, `SELECT scoring_provider FROM jobs WHERE dedup_key = ?` returns the name of the provider that produced the score (not NULL, not the default)
+  4. Existing jobs without a provider value default to `'anthropic'` (migration is non-destructive)
+  5. Provider attribution DB test passes: score a job, verify `scoring_provider` column written correctly
+**Plans**: TBD
 
-### Phase 28: Evaluation Framework
-**Goal**: A CLI tool lets the developer run data-driven comparisons of alternative providers against stored Sonnet results, producing a JSON report with a clear SUITABLE/MARGINAL/NOT_RECOMMENDED verdict
-**Depends on**: Phase 26
-**Requirements**: EVAL-01, EVAL-02, EVAL-03, EVAL-04
+### Phase 32: Integration & Config Wiring
+**Goal**: Production `config.yaml` runs the decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic) and the full pipeline can be verified cascade-working end-to-end
+**Depends on**: Phase 31
+**Requirements**: CONF-02
 **Success Criteria** (what must be TRUE):
-  1. Running the CLI tool with a provider and sample size reconstructs Sonnet prompts from real stored job results and submits them to the target provider
-  2. The report includes score correlation, schema adherence rate, and median latency for each sampled job
-  3. The tool outputs a verdict (SUITABLE/MARGINAL/NOT_RECOMMENDED) computed from configurable thresholds against those metrics
-  4. A JSON report file is saved to eval_results/ containing aggregate metrics and per-job details for offline review
-**Plans:** 2 plans
-Plans:
-- [ ] 28-01-PLAN.md — Pure functions TDD (sampling, prompt reconstruction, metrics, verdict, report)
-- [ ] 28-02-PLAN.md — CLI orchestrator, argparse entry point, .gitignore entry
+  1. `config.yaml` has `fallback_chain` wired with Cerebras as primary, Groq second, Ollama third, Anthropic last, with correct model IDs and per-model prompt variants
+  2. `daily_limits` for Cerebras (350) and Groq (170) are set in config
+  3. Setting `daily_limits.cerebras: 2` and triggering scoring causes the second job to be scored by Groq (verifiable via `scoring_provider` column)
+  4. All 1786+ tests continue to pass after config wiring
+**Plans**: TBD
 
 ## Progress
 
@@ -158,13 +157,17 @@ Plans:
 | 16. Homepage Discovery | v1.3 | 2/2 | Complete | 2026-03-26 |
 | 17. Code Quality | v1.3 | 1/1 | Complete | 2026-03-26 |
 | 18. Async Sync | v1.3 | 1/1 | Complete | 2026-03-26 |
-| 19. Housekeeping | v1.4 | 1/1 | Complete   | 2026-03-27 |
-| 20. Surgical Fixes | v1.4 | 3/3 | Complete    | 2026-03-27 |
-| 21. Test Coverage | v1.4 | 1/1 | Complete    | 2026-03-27 |
+| 19. Housekeeping | v1.4 | 1/1 | Complete | 2026-03-27 |
+| 20. Surgical Fixes | v1.4 | 3/3 | Complete | 2026-03-27 |
+| 21. Test Coverage | v1.4 | 1/1 | Complete | 2026-03-27 |
 | 22. Module Splits | v1.4 | 7/7 | Complete | 2026-03-27 |
 | 23. N+1 Batching | v1.4 | 3/3 | Complete | 2026-03-27 |
 | 24. Provider Foundation | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 25. Provider Adapters | v1.5 | 3/3 | Complete    | 2026-03-27 |
-| 26. Dispatcher & Cost Tracking | v1.5 | 0/2 | Complete    | 2026-03-27 |
-| 27. Caller Migration | v1.5 | 4/4 | Complete    | 2026-03-27 |
-| 28. Evaluation Framework | v1.5 | 0/2 | Not started | - |
+| 25. Provider Adapters | v1.5 | 3/3 | Complete | 2026-03-27 |
+| 26. Dispatcher & Cost Tracking | v1.5 | 2/2 | Complete | 2026-03-27 |
+| 27. Caller Migration | v1.5 | 4/4 | Complete | 2026-03-27 |
+| 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
+| 29. Cascade Config & Rate Limiting | v2.0 | 1/2 | In Progress|  |
+| 30. Cascade Execution | v2.0 | 0/? | Not started | - |
+| 31. Prompts & Attribution | v2.0 | 0/? | Not started | - |
+| 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |
