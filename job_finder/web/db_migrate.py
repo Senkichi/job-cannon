@@ -417,6 +417,12 @@ MIGRATIONS = [
     [
         "ALTER TABLE scoring_costs ADD COLUMN provider TEXT DEFAULT 'anthropic'",
     ],
+
+    # Migration 19: Add opus_score column for Opus baseline evaluation.
+    # Stores Opus-generated scores as gold-standard baseline for model comparison.
+    [
+        "ALTER TABLE jobs ADD COLUMN opus_score REAL DEFAULT NULL",
+    ],
 ]
 
 

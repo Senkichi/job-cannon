@@ -39,31 +39,118 @@ from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, _SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
+# Prompt variant system prompts
+# ---------------------------------------------------------------------------
+
+PROMPT_VARIANT_DEFAULT = "default"
+PROMPT_VARIANT_RUBRIC = "rubric"
+PROMPT_VARIANT_FEWSHOT = "fewshot"
+PROMPT_VARIANT_FEWSHOT_RUBRIC = "fewshot-rubric"
+
+_RUBRIC_SYSTEM_PROMPT = (
+    "You are a senior career advisor evaluating job fit. Analyze the full job description "
+    "against the candidate's experience profile.\n\n"
+    "## Scoring Rubric\n\n"
+    "**90-100 (Exceptional fit):** Candidate meets ALL required qualifications and most "
+    "preferred ones. Direct industry experience. Seniority level matches exactly. Location "
+    "and salary expectations fully aligned. Should apply immediately.\n\n"
+    "**80-89 (Strong fit):** Candidate meets most required qualifications. Relevant "
+    "transferable experience compensates for minor gaps. Good seniority alignment. "
+    "Location/salary mostly aligned. Worth a strong application.\n\n"
+    "**65-79 (Good fit):** Candidate meets core requirements but has notable gaps in "
+    "preferred qualifications or industry experience. Seniority within one level. "
+    "May require relocation or salary flexibility. Worth applying.\n\n"
+    "**50-64 (Partial fit):** Candidate meets some requirements but has significant gaps. "
+    "Different industry, missing key technical skills, or seniority mismatch of 2+ levels. "
+    "Apply only if very interested in the company/role.\n\n"
+    "**30-49 (Weak fit):** Candidate meets few requirements. Major skill gaps, wrong "
+    "seniority level, or fundamental mismatch in domain/industry. Not recommended.\n\n"
+    "**0-29 (Poor fit):** Fundamental mismatch. Wrong field entirely, entry-level role "
+    "for senior candidate (or vice versa), or completely misaligned preferences.\n\n"
+    "## Common Scoring Errors to Avoid\n\n"
+    "- Do NOT inflate scores for remote roles just because the candidate prefers remote.\n"
+    "- Do NOT give 60+ to roles requiring skills the candidate completely lacks.\n"
+    "- Do NOT score above 50 when seniority is mismatched by 3+ levels.\n"
+    "- DO penalize salary mismatches: if the role pays significantly below minimum, reduce score.\n"
+    "- DO distinguish between 'nice to have' and 'required' qualifications.\n\n"
+    "Be specific about strengths (cite concrete experience), gaps (be honest but "
+    "constructive), and resume priority skills."
+)
+
+_FEWSHOT_EXAMPLES = (
+    "\n\n## Calibration Examples\n\n"
+    "### Example 1: Score 15 (Poor fit)\n"
+    "Junior Marketing Coordinator role requiring social media management, content creation, "
+    "and 1-2 years marketing experience. Candidate is a Senior Data Scientist with 10+ years "
+    "in analytics. Complete domain mismatch, wrong seniority direction.\n\n"
+    "### Example 2: Score 38 (Weak fit)\n"
+    "Data Engineer role requiring extensive Spark, Kafka, and Airflow experience with AWS "
+    "infrastructure. Candidate has strong SQL and Python but minimal distributed systems or "
+    "data pipeline engineering experience. Adjacent field but significant skill gaps.\n\n"
+    "### Example 3: Score 62 (Partial fit)\n"
+    "Product Analytics Manager at a fintech startup requiring team management, A/B testing, "
+    "and financial domain knowledge. Candidate has analytics experience and A/B testing but "
+    "in healthcare, not finance. No direct reports experience.\n\n"
+    "### Example 4: Score 78 (Good fit)\n"
+    "Senior Data Scientist at a healthcare company requiring Python, ML, statistical modeling, "
+    "and healthcare analytics. Candidate has all technical skills and healthcare domain "
+    "experience but is targeting a more senior title (Lead/Staff level).\n\n"
+    "### Example 5: Score 91 (Exceptional fit)\n"
+    "Staff Data Scientist / Analytics Lead at a health tech SaaS company, remote, $160K-200K. "
+    "Requires experimentation design, causal inference, team leadership, Python, SQL. "
+    "Candidate matches on every dimension: skills, seniority, domain, location, salary.\n"
+)
+
+_FEWSHOT_SYSTEM_PROMPT = _SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
+
+_FEWSHOT_RUBRIC_SYSTEM_PROMPT = _RUBRIC_SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
+
+PROMPT_VARIANTS: dict[str, str] = {
+    PROMPT_VARIANT_DEFAULT: _SYSTEM_PROMPT,
+    PROMPT_VARIANT_RUBRIC: _RUBRIC_SYSTEM_PROMPT,
+    PROMPT_VARIANT_FEWSHOT: _FEWSHOT_SYSTEM_PROMPT,
+    PROMPT_VARIANT_FEWSHOT_RUBRIC: _FEWSHOT_RUBRIC_SYSTEM_PROMPT,
+}
+
+
+# ---------------------------------------------------------------------------
 # sample_jobs
 # ---------------------------------------------------------------------------
 
 
-def sample_jobs(conn: Any, n: int) -> list[dict]:
-    """Return up to n jobs that have stored Sonnet scores and full job descriptions.
+def sample_jobs(conn: Any, n: int, baseline: str = "sonnet") -> list[dict]:
+    """Return up to n jobs that have stored baseline scores and full JDs.
 
     Args:
         conn: Open sqlite3 connection with row_factory=sqlite3.Row.
         n: Maximum number of rows to return.
+        baseline: Which score to use as ground truth. "sonnet" (default)
+                  filters by sonnet_score IS NOT NULL. "opus" filters by
+                  opus_score IS NOT NULL and includes the opus_score column.
 
     Returns:
-        List of plain dicts with keys: dedup_key, title, company, location,
-        salary_min, salary_max, jd_full, sonnet_score, fit_analysis, haiku_score.
-        Returns empty list when no qualifying rows exist.
+        List of plain dicts. Returns empty list when no qualifying rows exist.
     """
-    rows = conn.execute(
-        "SELECT dedup_key, title, company, location, "
-        "salary_min, salary_max, jd_full, sonnet_score, "
-        "fit_analysis, haiku_score "
-        "FROM jobs "
-        "WHERE sonnet_score IS NOT NULL AND jd_full IS NOT NULL "
-        "ORDER BY RANDOM() LIMIT ?",
-        (n,),
-    ).fetchall()
+    if baseline == "opus":
+        rows = conn.execute(
+            "SELECT dedup_key, title, company, location, "
+            "salary_min, salary_max, jd_full, sonnet_score, "
+            "fit_analysis, haiku_score, opus_score "
+            "FROM jobs "
+            "WHERE opus_score IS NOT NULL AND jd_full IS NOT NULL "
+            "ORDER BY RANDOM() LIMIT ?",
+            (n,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT dedup_key, title, company, location, "
+            "salary_min, salary_max, jd_full, sonnet_score, "
+            "fit_analysis, haiku_score "
+            "FROM jobs "
+            "WHERE sonnet_score IS NOT NULL AND jd_full IS NOT NULL "
+            "ORDER BY RANDOM() LIMIT ?",
+            (n,),
+        ).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -76,13 +163,13 @@ def reconstruct_prompt(
     job_row: dict,
     experience_profile: dict,
     config: dict,
+    prompt_variant: str = "default",
 ) -> tuple[str, str]:
-    """Reconstruct the exact Sonnet prompt for a given job row.
+    """Reconstruct the scoring prompt for a given job row.
 
     Replicates the prompt-building logic from evaluate_job_sonnet() in
     sonnet_evaluator.py. Returns (system_prompt, user_message) where
-    system_prompt is imported directly from sonnet_evaluator to ensure
-    no drift.
+    system_prompt is selected by prompt_variant.
 
     Args:
         job_row: Job record dict with keys: title, company, location,
@@ -90,6 +177,8 @@ def reconstruct_prompt(
         experience_profile: Experience profile dict with positions, skills,
                             education keys.
         config: Application config dict; reads config["profile"] for
+        prompt_variant: System prompt variant to use. One of "default",
+                       "rubric", "fewshot", "fewshot-rubric".
                 candidate preferences (target_titles, target_locations,
                 min_salary, industries).
 
@@ -154,7 +243,7 @@ def reconstruct_prompt(
         f"**Education:**\n"
         + (
             "\n".join(
-                f"  - {ed.get('degree', '')} — {ed.get('institution', '')} ({ed.get('graduation', '')})"
+                f"  - {ed.get('degree', '')} - {ed.get('institution', '')} ({ed.get('graduation', '')})"
                 + (f" | Thesis: {ed['thesis']}" if ed.get("thesis") else "")
                 for ed in education
             )
@@ -172,7 +261,8 @@ def reconstruct_prompt(
         f"Provide structured output."
     )
 
-    return (_SYSTEM_PROMPT, user_message)
+    system_prompt = PROMPT_VARIANTS.get(prompt_variant, _SYSTEM_PROMPT)
+    return (system_prompt, user_message)
 
 
 # ---------------------------------------------------------------------------
@@ -324,16 +414,25 @@ def run_eval(
     sample_size: int,
     thresholds: dict,
     skip_confirm: bool = False,
+    delay: float = 0.0,
+    retries: int = 0,
+    prompt_variant: str = "default",
+    baseline: str = "sonnet",
 ) -> None:
     """Orchestrate a full provider evaluation: sample, call, measure, report.
 
     Args:
-        provider: Provider name to evaluate ("gemini" or "ollama").
+        provider: Provider name to evaluate.
         model: Model identifier override. If None, use config's default for sonnet tier.
         sample_size: Number of jobs to sample from the DB.
         thresholds: Dict with keys correlation_suitable, correlation_marginal,
                     adherence_suitable, adherence_marginal.
         skip_confirm: If True, skip the confirmation prompt.
+        delay: Seconds to wait between API calls (for rate-limited providers).
+        retries: Number of retries on 429/5xx errors with exponential backoff.
+        prompt_variant: System prompt variant ("default", "rubric", "fewshot",
+                       "fewshot-rubric").
+        baseline: Ground-truth score to compare against ("sonnet" or "opus").
     """
     # 1. Load config and profile
     config = load_config()
@@ -353,10 +452,11 @@ def run_eval(
 
     # 3. Open DB and sample jobs — connection wraps entire loop (call_model needs it)
     with standalone_connection(config["db"]["path"]) as conn:
-        jobs = sample_jobs(conn, sample_size)
+        jobs = sample_jobs(conn, sample_size, baseline=baseline)
 
         if len(jobs) == 0:
-            print("No Sonnet-scored jobs found. Run batch Sonnet scoring first.")
+            baseline_label = "Opus" if baseline == "opus" else "Sonnet"
+            print(f"No {baseline_label}-scored jobs found. Run baseline scoring first.")
             sys.exit(1)
 
         # 4. Confirmation prompt
@@ -365,6 +465,12 @@ def run_eval(
             print(f"  Provider : {provider}")
             print(f"  Model    : {eval_model}")
             print(f"  Jobs     : {len(jobs)}")
+            print(f"  Prompt   : {prompt_variant}")
+            print(f"  Baseline : {baseline}")
+            if delay > 0:
+                print(f"  Delay    : {delay:.1f}s between calls")
+            if retries > 0:
+                print(f"  Retries  : {retries} (exponential backoff)")
             answer = input("\nProceed? [y/N]: ").strip().lower()
             if answer not in ("y", "yes"):
                 print("Aborted.")
@@ -375,38 +481,54 @@ def run_eval(
         total = len(jobs)
 
         for i, job in enumerate(jobs):
-            system, user_message = reconstruct_prompt(job, experience_profile, config)
+            system, user_message = reconstruct_prompt(
+                job, experience_profile, config, prompt_variant=prompt_variant
+            )
             messages = [{"role": "user", "content": user_message}]
+
+            # Throttle: delay between calls (skip before first call)
+            if delay > 0 and i > 0:
+                time.sleep(delay)
 
             t0 = time.perf_counter()
             eval_score: float | None = None
             schema_valid = False
             error: str | None = None
 
-            try:
-                result = call_model(
-                    tier="sonnet",
-                    system=system,
-                    messages=messages,
-                    conn=conn,
-                    config=eval_config,
-                    output_schema=SONNET_SCHEMA,
-                    job_id=job["dedup_key"],
-                    purpose="provider_eval",
-                    max_tokens=2048,
-                    client=None,
-                )
-                eval_score = result.data.get("score")
-                schema_valid = result.schema_valid
-            except Exception as exc:
-                error = str(exc)
+            for attempt in range(1 + retries):
+                try:
+                    result = call_model(
+                        tier="sonnet",
+                        system=system,
+                        messages=messages,
+                        conn=conn,
+                        config=eval_config,
+                        output_schema=SONNET_SCHEMA,
+                        job_id=job["dedup_key"],
+                        purpose="provider_eval",
+                        max_tokens=2048,
+                        client=None,
+                    )
+                    eval_score = result.data.get("score")
+                    schema_valid = result.schema_valid
+                    error = None
+                    break
+                except Exception as exc:
+                    error = str(exc)
+                    is_retryable = "429" in error or "500" in error or "502" in error or "503" in error
+                    if is_retryable and attempt < retries:
+                        backoff = min(2 ** attempt * 5, 120)
+                        print(f"  -> Retry {attempt + 1}/{retries} in {backoff}s...")
+                        time.sleep(backoff)
+                    else:
+                        break
 
             latency = time.perf_counter() - t0
 
-            baseline = job["sonnet_score"]
+            baseline_score = job["opus_score"] if baseline == "opus" else job["sonnet_score"]
             print(
                 f"[{i + 1}/{total}] {job['title']} @ {job['company']} "
-                f"— score: {eval_score} (baseline: {baseline}) {latency:.1f}s"
+                f"- score: {eval_score} (baseline: {baseline_score}) {latency:.1f}s"
                 + (f" [ERROR: {error}]" if error else "")
             )
 
@@ -414,7 +536,7 @@ def run_eval(
                 "dedup_key": job["dedup_key"],
                 "title": job["title"],
                 "company": job["company"],
-                "baseline_score": baseline,
+                "baseline_score": baseline_score,
                 "eval_score": eval_score,
                 "schema_valid": schema_valid,
                 "latency_seconds": latency,
@@ -437,6 +559,10 @@ def run_eval(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "sample_size": len(jobs),
                 "db_path": config["db"]["path"],
+                "prompt_variant": prompt_variant,
+                "baseline": baseline,
+                "delay_seconds": delay,
+                "retries": retries,
             },
             "aggregate": {
                 **metrics,
@@ -501,7 +627,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         required=True,
-        choices=["gemini", "ollama"],
+        choices=["gemini", "ollama", "ollm", "mistral", "cohere", "sambanova", "openrouter"],
         help="Provider to evaluate.",
     )
     parser.add_argument(
@@ -552,6 +678,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip confirmation prompt (non-interactive mode).",
     )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        metavar="SECS",
+        help="Seconds to wait between API calls (default: 0). Useful for rate-limited providers.",
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Number of retries on 429/5xx errors with exponential backoff (default: 0).",
+    )
+    parser.add_argument(
+        "--prompt-variant",
+        default="default",
+        choices=["default", "rubric", "fewshot", "fewshot-rubric"],
+        help="System prompt variant for scoring (default: default).",
+    )
+    parser.add_argument(
+        "--baseline",
+        default="sonnet",
+        choices=["sonnet", "opus"],
+        help="Baseline score to compare against (default: sonnet).",
+    )
     return parser.parse_args(argv)
 
 
@@ -575,6 +727,10 @@ def main() -> None:
         sample_size=args.sample_size,
         thresholds=thresholds,
         skip_confirm=args.yes,
+        delay=args.delay,
+        retries=args.retries,
+        prompt_variant=args.prompt_variant,
+        baseline=args.baseline,
     )
 
 
