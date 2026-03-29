@@ -307,6 +307,63 @@ def test_call_model_skips_budget_for_ollama(tmp_path):
     mock_cost_gate.assert_not_called()
 
 
+def test_call_model_skips_budget_for_ollm(tmp_path):
+    """call_model does NOT call cost_gate when provider is ollm."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"sonnet": {"provider": "ollm", "model": "llama3-8B-chat"}}}
+    conn = _migrated_conn(tmp_path)
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = _make_result(provider="ollm")
+        mock_make_adapter.return_value = mock_adapter
+
+        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+
+    mock_cost_gate.assert_not_called()
+
+
+def test_call_model_skips_budget_for_openrouter(tmp_path):
+    """call_model does NOT call cost_gate when provider is openrouter."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"sonnet": {"provider": "openrouter", "model": "qwen/qwen3-coder:free"}}}
+    conn = _migrated_conn(tmp_path)
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = _make_result(provider="openrouter")
+        mock_make_adapter.return_value = mock_adapter
+
+        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+
+    mock_cost_gate.assert_not_called()
+
+
+def test_call_model_skips_budget_for_sambanova(tmp_path):
+    """call_model does NOT call cost_gate when provider is sambanova."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"sonnet": {"provider": "sambanova", "model": "Qwen3-235B-A22B"}}}
+    conn = _migrated_conn(tmp_path)
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = _make_result(provider="sambanova")
+        mock_make_adapter.return_value = mock_adapter
+
+        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+
+    mock_cost_gate.assert_not_called()
+
+
 def test_call_model_checks_budget_for_anthropic(tmp_path):
     """call_model calls cost_gate when provider is anthropic."""
     from job_finder.web.model_provider import call_model

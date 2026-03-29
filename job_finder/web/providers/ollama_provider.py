@@ -23,7 +23,7 @@ from job_finder.web.model_provider import BaseProvider, ModelResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
-_DEFAULT_TIMEOUT = 120.0
+_DEFAULT_TIMEOUT = 300.0
 _HEALTH_CHECK_TIMEOUT = 5.0
 
 

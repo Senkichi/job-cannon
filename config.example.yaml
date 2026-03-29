@@ -117,6 +117,20 @@ scoring:
 #     provider: ollama
 #     model: llama3.3
 #     fallback: anthropic
+#
+# Example: Route Sonnet to local oLLM (ollm-tools server) for full-precision inference
+# providers:
+#   sonnet:
+#     provider: ollm
+#     model: llama3-8B-chat
+#     fallback: anthropic
+#
+# Example: Route Sonnet to Mistral AI (requires MISTRAL_API_KEY env var)
+# providers:
+#   sonnet:
+#     provider: mistral
+#     model: mistral-small-latest
+#     fallback: anthropic
 
 # --- Output settings ---
 output:
