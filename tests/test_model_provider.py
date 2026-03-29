@@ -10,6 +10,7 @@ import sqlite3
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+import requests
 
 from job_finder.web.model_provider import (
     BaseProvider,
@@ -613,3 +614,203 @@ def test_ensure_usage_current_noop_same_day(tmp_path, _reset_daily_state):
     _mp._ensure_usage_current(conn)
     # Should NOT reset — same day
     assert _mp._daily_usage == {"cerebras": 42}
+
+
+# ---------------------------------------------------------------------------
+# Cascade execution tests (CASC-03, CASC-04, CASC-07, TEST-02)
+# ---------------------------------------------------------------------------
+
+# Shared config for cascade tests: cerebras primary -> groq -> anthropic
+_CASCADE_CONFIG = {
+    "providers": {
+        "sonnet": {
+            "provider": "cerebras",
+            "model": "qwen-3-235b",
+            "fallback_chain": [
+                {"provider": "groq", "model": "scout"},
+                {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+            ],
+        },
+        "daily_limits": {"cerebras": 350, "groq": 170},
+    }
+}
+
+
+def test_cascade_skips_exhausted_provider(tmp_path, _reset_daily_state):
+    """When primary provider is at its daily limit, call_model cascades to second provider."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {"cerebras": 350}  # at limit
+    _mp._usage_date = today
+
+    groq_result = _make_result(provider="groq")
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = groq_result
+        mock_make_adapter.return_value = mock_adapter
+
+        result = call_model(
+            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+        )
+
+    # First call should be to groq (cerebras was at limit and skipped)
+    mock_make_adapter.assert_called_once()
+    first_call_provider = mock_make_adapter.call_args[0][0]
+    assert first_call_provider == "groq"
+    assert result.provider == "groq"
+
+
+def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
+    """When first provider raises ValueError (missing API key), cascade skips to second."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {}
+    _mp._usage_date = today
+
+    groq_result = _make_result(provider="groq")
+
+    mock_groq_adapter = MagicMock()
+    mock_groq_adapter.call.return_value = groq_result
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "cerebras":
+            raise ValueError("API key not set")
+        return mock_groq_adapter
+
+    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect) as mock_make_adapter, \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+
+        result = call_model(
+            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+        )
+
+    # _make_adapter called twice: cerebras (ValueError) then groq
+    assert mock_make_adapter.call_count == 2
+    assert result.provider == "groq"
+
+
+def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
+    """A 429 from a provider marks it exhausted at its daily limit and cascades to next."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {}
+    _mp._usage_date = today
+
+    # Build a requests.HTTPError with status_code 429
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    http_429_error = requests.HTTPError(response=mock_response)
+
+    groq_result = _make_result(provider="groq")
+
+    mock_cerebras_adapter = MagicMock()
+    mock_cerebras_adapter.call.side_effect = http_429_error
+
+    mock_groq_adapter = MagicMock()
+    mock_groq_adapter.call.return_value = groq_result
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "cerebras":
+            return mock_cerebras_adapter
+        return mock_groq_adapter
+
+    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+
+        result = call_model(
+            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+        )
+
+    # Cerebras should be marked exhausted at its configured limit
+    assert _mp._daily_usage.get("cerebras") == 350
+    assert result.provider == "groq"
+
+
+def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
+    """When all providers in chain are exhausted or unavailable, RuntimeError is raised."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    # cerebras and groq both at their daily limits; anthropic has no key
+    _mp._daily_usage = {"cerebras": 350, "groq": 170}
+    _mp._usage_date = today
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "anthropic":
+            raise ValueError("no key")
+        # cerebras and groq are blocked by limit check, never reach _make_adapter
+        raise ValueError(f"unexpected call for {provider_name}")
+
+    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+
+        with pytest.raises(RuntimeError, match="exhausted"):
+            call_model(
+                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            )
+
+
+def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
+    """Each provider in cascade receives the original unaugmented messages (not previous provider's errors)."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {}
+    _mp._usage_date = today
+
+    schema = {
+        "type": "object",
+        "required": ["score"],
+        "properties": {"score": {"type": "integer"}},
+    }
+
+    # cerebras always returns schema-invalid data (no "score" key)
+    bad_result = _make_result(data={"wrong_key": 1})
+    # groq returns valid data
+    good_result = _make_result(provider="groq", data={"score": 80})
+
+    mock_cerebras_adapter = MagicMock()
+    mock_cerebras_adapter.call.return_value = bad_result  # always invalid
+
+    mock_groq_adapter = MagicMock()
+    mock_groq_adapter.call.return_value = good_result
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "cerebras":
+            return mock_cerebras_adapter
+        return mock_groq_adapter
+
+    original_messages = [{"role": "user", "content": "hi"}]
+
+    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+
+        result = call_model(
+            "sonnet", "sys", original_messages, conn, _CASCADE_CONFIG,
+            output_schema=schema,
+        )
+
+    # The groq adapter's first call should receive original messages (not augmented)
+    groq_first_call_messages = mock_groq_adapter.call.call_args_list[0][0][2]
+    assert "Schema validation errors" not in groq_first_call_messages[-1]["content"]
+    assert result.data == {"score": 80}
