@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 from abc import ABC, abstractmethod
+
+import requests
 from dataclasses import dataclass
 from datetime import date as _date
 from typing import Any
@@ -338,11 +340,86 @@ def call_model(
         BudgetExceededError: If cost_gate blocks an Anthropic call.
         RuntimeError: If schema validation fails after retry and no fallback
             is configured.
+        RuntimeError: If all cascade providers are exhausted (when fallback_chain is configured).
     """
     resolved = resolve_provider_config(tier, config)
     provider_name: str = resolved["provider"]
     model: str = resolved["model"]
     fallback: str | None = resolved["fallback"]
+    fallback_chain: list[dict] = resolved["fallback_chain"]
+    daily_limits: dict[str, int] = resolved["daily_limits"]
+
+    # --- Cascade path (non-empty fallback_chain) ---
+    if fallback_chain:
+        _ensure_usage_current(conn)
+
+        chain: list[tuple[str, str]] = [(provider_name, model)] + [
+            (entry["provider"], entry["model"]) for entry in fallback_chain
+        ]
+
+        for provider_name, model_id in chain:
+            # Skip if daily limit exhausted
+            if not _check_daily_limit(provider_name, daily_limits):
+                logger.info("Cascade: %s exhausted, skipping", provider_name)
+                continue
+
+            # Skip if adapter creation fails (missing API key -> ValueError,
+            # Ollama unreachable -> RuntimeError)
+            try:
+                adapter = _make_adapter(
+                    provider_name, client, conn, config,
+                    job_id=job_id, purpose=purpose,
+                )
+            except (ValueError, RuntimeError) as exc:
+                logger.warning("Cascade: %s unavailable: %s", provider_name, exc)
+                continue
+
+            # Budget gate for paid providers
+            if provider_name not in _FREE_PROVIDERS:
+                if not cost_gate(conn, config, tier):
+                    logger.info("Cascade: %s over budget, skipping", provider_name)
+                    continue
+
+            try:
+                result = adapter.call(
+                    model_id, system, messages, output_schema, max_tokens, timeout,
+                )
+                # Schema validation + retry (per-provider, using original messages)
+                errors = _validate_schema(result.data, output_schema)
+                if errors:
+                    augmented = _augment_with_errors(messages, errors)
+                    result = adapter.call(
+                        model_id, system, augmented, output_schema, max_tokens, timeout,
+                    )
+                    errors = _validate_schema(result.data, output_schema)
+                if not errors:
+                    _increment_usage(provider_name)
+                    _maybe_record_cost(result, conn, job_id, purpose)
+                    return result
+                # Schema still invalid after retry — skip to next provider
+                logger.warning(
+                    "Cascade: %s schema invalid after retry, skipping", provider_name,
+                )
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 429:
+                    logger.warning(
+                        "Cascade: %s rate limited (429), marking exhausted",
+                        provider_name,
+                    )
+                    _daily_usage[provider_name] = daily_limits.get(provider_name, 999999)
+                    continue
+                logger.warning("Cascade: %s HTTP error: %s", provider_name, exc)
+                continue
+            except Exception as exc:
+                logger.warning("Cascade: %s error: %s", provider_name, exc)
+                continue
+
+        raise RuntimeError(
+            f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
+            f"Providers tried: {[p for p, _ in chain]}"
+        )
+
+    # --- Backward-compat path (empty fallback_chain) — UNCHANGED from Phase 26 ---
 
     # Budget gate — skip entirely for free providers (INFRA-04)
     if provider_name not in _FREE_PROVIDERS:
