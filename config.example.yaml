@@ -131,6 +131,26 @@ scoring:
 #     provider: mistral
 #     model: mistral-small-latest
 #     fallback: anthropic
+#
+# Example: Cascade through free providers before falling back to paid Anthropic
+# Each provider is tried in order; exhausted/unavailable providers are skipped.
+# daily_limits is a sibling of tier configs (sonnet/haiku/opus), not nested inside them.
+#
+# providers:
+#   sonnet:
+#     provider: cerebras
+#     model: qwen-3-235b-a22b-instruct-2507
+#     fallback_chain:
+#       - provider: groq
+#         model: meta-llama/llama-4-scout-17b-16e-instruct
+#         prompt_variant: fewshot-distribution   # optional per-model prompt override
+#       - provider: ollama
+#         model: qwen2.5:14b
+#       - provider: anthropic
+#         model: claude-sonnet-4-6
+#   daily_limits:
+#     cerebras: 350    # Conservative below measured 363/day hard cap
+#     groq: 170        # Conservative below measured 181/day hard cap
 
 # --- Output settings ---
 output:
