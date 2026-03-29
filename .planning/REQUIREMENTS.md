@@ -10,7 +10,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 ### Cascade Routing
 
 - [x] **CASC-01**: `resolve_provider_config()` parses `fallback_chain` list from tier config and `daily_limits` from providers config
-- [ ] **CASC-02**: Daily rate limit tracker with in-memory counters that bootstrap from `scoring_costs` DB on date rollover
+- [x] **CASC-02**: Daily rate limit tracker with in-memory counters that bootstrap from `scoring_costs` DB on date rollover
 - [ ] **CASC-03**: `call_model()` iterates fallback chain, skipping providers that are exhausted, unavailable (missing API key), or over budget
 - [ ] **CASC-04**: 429 HTTP responses mark the provider as exhausted for the day and cascade to next
 - [ ] **CASC-05**: Per-model prompt variant override in fallback chain config, threaded to sonnet evaluator
@@ -32,7 +32,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 
 - [x] **TEST-01**: Cascade config parsing tests (fallback chain + backward compat)
 - [ ] **TEST-02**: Cascade execution tests (skip exhausted, handle 429, all-exhausted error)
-- [ ] **TEST-03**: Daily limit tracker tests (check, increment, date rollover reset)
+- [x] **TEST-03**: Daily limit tracker tests (check, increment, date rollover reset)
 - [ ] **TEST-04**: Provider attribution DB test (`scoring_provider` written and read)
 
 ### Config
@@ -76,11 +76,11 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CASC-01 | Phase 29 | Complete |
-| CASC-02 | Phase 29 | Pending |
+| CASC-02 | Phase 29 | Complete |
 | CASC-06 | Phase 29 | Complete |
 | CONF-01 | Phase 29 | Complete |
 | TEST-01 | Phase 29 | Complete |
-| TEST-03 | Phase 29 | Pending |
+| TEST-03 | Phase 29 | Complete |
 | CASC-03 | Phase 30 | Pending |
 | CASC-04 | Phase 30 | Pending |
 | CASC-07 | Phase 30 | Pending |

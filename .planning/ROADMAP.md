@@ -78,7 +78,7 @@
 
 ### v2.0 Cascading Free Provider Routing
 
-- [ ] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage
+- [x] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage (completed 2026-03-29)
 - [ ] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic
 - [ ] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs
 - [ ] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end
@@ -98,7 +98,7 @@
 **Plans**: 2 plans
 Plans:
 - [x] 29-01-PLAN.md -- Cascade config parsing (resolve_provider_config + config.example.yaml + tests)
-- [ ] 29-02-PLAN.md -- Daily rate limit tracker (module-level state + helper functions + tests)
+- [x] 29-02-PLAN.md -- Daily rate limit tracker (module-level state + helper functions + tests)
 
 ### Phase 30: Cascade Execution
 **Goal**: `call_model()` walks the fallback chain, skipping exhausted or unavailable providers, and surfaces a clear error when all are exhausted
@@ -167,7 +167,7 @@ Plans:
 | 26. Dispatcher & Cost Tracking | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 27. Caller Migration | v1.5 | 4/4 | Complete | 2026-03-27 |
 | 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
-| 29. Cascade Config & Rate Limiting | v2.0 | 1/2 | In Progress|  |
+| 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete   | 2026-03-29 |
 | 30. Cascade Execution | v2.0 | 0/? | Not started | - |
 | 31. Prompts & Attribution | v2.0 | 0/? | Not started | - |
 | 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |
