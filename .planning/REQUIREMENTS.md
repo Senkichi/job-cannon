@@ -11,11 +11,11 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 
 - [x] **CASC-01**: `resolve_provider_config()` parses `fallback_chain` list from tier config and `daily_limits` from providers config
 - [x] **CASC-02**: Daily rate limit tracker with in-memory counters that bootstrap from `scoring_costs` DB on date rollover
-- [ ] **CASC-03**: `call_model()` iterates fallback chain, skipping providers that are exhausted, unavailable (missing API key), or over budget
-- [ ] **CASC-04**: 429 HTTP responses mark the provider as exhausted for the day and cascade to next
+- [x] **CASC-03**: `call_model()` iterates fallback chain, skipping providers that are exhausted, unavailable (missing API key), or over budget
+- [x] **CASC-04**: 429 HTTP responses mark the provider as exhausted for the day and cascade to next
 - [ ] **CASC-05**: Per-model prompt variant override in fallback chain config, threaded to sonnet evaluator
 - [x] **CASC-06**: Empty `fallback_chain` preserves existing single-fallback behavior (backward compatibility)
-- [ ] **CASC-07**: All providers exhausted raises `RuntimeError` with clear message
+- [x] **CASC-07**: All providers exhausted raises `RuntimeError` with clear message
 
 ### Provider Attribution
 
@@ -31,7 +31,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 ### Testing
 
 - [x] **TEST-01**: Cascade config parsing tests (fallback chain + backward compat)
-- [ ] **TEST-02**: Cascade execution tests (skip exhausted, handle 429, all-exhausted error)
+- [x] **TEST-02**: Cascade execution tests (skip exhausted, handle 429, all-exhausted error)
 - [x] **TEST-03**: Daily limit tracker tests (check, increment, date rollover reset)
 - [ ] **TEST-04**: Provider attribution DB test (`scoring_provider` written and read)
 
@@ -81,10 +81,10 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 | CONF-01 | Phase 29 | Complete |
 | TEST-01 | Phase 29 | Complete |
 | TEST-03 | Phase 29 | Complete |
-| CASC-03 | Phase 30 | Pending |
-| CASC-04 | Phase 30 | Pending |
-| CASC-07 | Phase 30 | Pending |
-| TEST-02 | Phase 30 | Pending |
+| CASC-03 | Phase 30 | Complete |
+| CASC-04 | Phase 30 | Complete |
+| CASC-07 | Phase 30 | Complete |
+| TEST-02 | Phase 30 | Complete |
 | CASC-05 | Phase 31 | Pending |
 | PRMT-01 | Phase 31 | Pending |
 | PRMT-02 | Phase 31 | Pending |

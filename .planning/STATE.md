@@ -3,23 +3,23 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Cascading Free Provider Routing
 status: verifying
-stopped_at: Completed 29-cascade-config-rate-limiting/29-02-PLAN.md
-last_updated: "2026-03-29T23:11:03.014Z"
+stopped_at: Completed 30-cascade-execution/30-01-PLAN.md
+last_updated: "2026-03-29T23:39:57.637Z"
 last_activity: 2026-03-29
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
 ---
 
 # State
 
 ## Current Position
 
-Phase: 29 (Cascade Config & Rate Limiting) — COMPLETE (2/2 plans)
-Plan: 2 of 2
-Status: Phase complete — ready for verification
+Phase: 30 (Cascade Execution) — COMPLETE
+Plan: 1 of 1 (all complete)
+Status: Phase 30 complete — ready for verification
 Last activity: 2026-03-29
 
 ## Project Reference
@@ -27,13 +27,19 @@ Last activity: 2026-03-29
 See: .planning/PROJECT.md (updated 2026-03-29)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 29 — Cascade Config & Rate Limiting
+**Current focus:** Phase 30 — Cascade Execution
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0 (this milestone)
+- Total plans completed: 3 (this milestone)
+
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 29-cascade-config-rate-limiting | 01 | — | — | — |
+| 29-cascade-config-rate-limiting | 02 | — | — | — |
+| 30-cascade-execution | 01 | 6min | 2 | 2 |
 
 *Updated after each plan completion*
 
@@ -52,6 +58,11 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - `_check_daily_limit` and `_increment_usage` are pure (no conn dependency); conn only needed for DB bootstrap
 - Module state (_daily_usage, _usage_date) directly mutated in tests via `_reset_daily_state` fixture — no dedicated reset function needed
 - Full suite: 1800 tests passing after Plan 02 (10 new daily tracker tests)
+- Full suite: 1805 tests passing after Phase 30 Plan 01 (5 new cascade execution tests)
+- Cascade path guarded by `if fallback_chain:` — empty list preserves existing single-fallback behavior exactly
+- Schema failure after retry inside cascade loop does `continue` (not raise) — try next provider before giving up
+- Both `ValueError` and `RuntimeError` caught from `_make_adapter` — ValueError for missing API key, RuntimeError for Ollama health check
+- `_ensure_usage_current(conn)` is first statement in cascade path — before any `_check_daily_limit` call (Pitfall 3 guard)
 
 ### Carried Forward from v1.5
 
@@ -74,6 +85,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-29T23:11:03.012Z
-Stopped at: Completed 29-cascade-config-rate-limiting/29-02-PLAN.md
+Last session: 2026-03-29T23:38:28Z
+Stopped at: Completed 30-cascade-execution/30-01-PLAN.md
 Resume file: None
