@@ -86,7 +86,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 # Providers that are free (no cost_gate needed, record cost via record_cost)
-_FREE_PROVIDERS: frozenset[str] = frozenset({"gemini", "ollama"})
+_FREE_PROVIDERS: frozenset[str] = frozenset({"gemini", "ollama", "ollm", "openrouter", "sambanova"})
 
 
 def _validate_schema(data: dict, schema: dict | None) -> list[str]:
@@ -157,8 +157,13 @@ def _make_adapter(
     """
     # Lazy imports to avoid circular import: providers import from model_provider
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
+    from job_finder.web.providers.cohere_provider import CohereProvider
+    from job_finder.web.providers.openrouter_provider import OpenRouterProvider
+    from job_finder.web.providers.sambanova_provider import SambanovaProvider
     from job_finder.web.providers.gemini_provider import GeminiProvider
+    from job_finder.web.providers.mistral_provider import MistralProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
+    from job_finder.web.providers.ollm_provider import OllmProvider
 
     if provider_name == "anthropic":
         return AnthropicProvider(
@@ -168,6 +173,16 @@ def _make_adapter(
         return GeminiProvider(config=config)
     if provider_name == "ollama":
         return OllamaProvider(config=config)
+    if provider_name == "ollm":
+        return OllmProvider(config=config)
+    if provider_name == "mistral":
+        return MistralProvider(config=config)
+    if provider_name == "cohere":
+        return CohereProvider(config=config)
+    if provider_name == "sambanova":
+        return SambanovaProvider(config=config)
+    if provider_name == "openrouter":
+        return OpenRouterProvider(config=config)
     raise ValueError(f"Unknown provider: {provider_name!r}")
 
 
