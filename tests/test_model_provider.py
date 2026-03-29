@@ -513,3 +513,103 @@ def test_call_model_raises_on_no_fallback(tmp_path):
                 "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
                 output_schema=schema,
             )
+
+
+# ---------------------------------------------------------------------------
+# Daily rate limit tracker tests (TEST-03)
+# ---------------------------------------------------------------------------
+
+import job_finder.web.model_provider as _mp
+
+
+@pytest.fixture(autouse=False)
+def _reset_daily_state():
+    """Reset module-level daily usage state before and after each test."""
+    _mp._daily_usage = {}
+    _mp._usage_date = ""
+    yield
+    _mp._daily_usage = {}
+    _mp._usage_date = ""
+
+
+def test_daily_limit_under_limit(_reset_daily_state):
+    _mp._daily_usage = {"cerebras": 100}
+    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is True
+
+
+def test_daily_limit_at_limit(_reset_daily_state):
+    _mp._daily_usage = {"cerebras": 350}
+    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is False
+
+
+def test_daily_limit_over_limit(_reset_daily_state):
+    _mp._daily_usage = {"cerebras": 351}
+    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is False
+
+
+def test_daily_limit_no_configured_limit(_reset_daily_state):
+    assert _mp._check_daily_limit("ollama", {"cerebras": 350}) is True
+
+
+def test_daily_limit_provider_not_in_usage(_reset_daily_state):
+    """Provider with a configured limit but no usage yet -> allowed."""
+    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is True
+
+
+def test_daily_increment(_reset_daily_state):
+    _mp._increment_usage("cerebras")
+    assert _mp._daily_usage["cerebras"] == 1
+    _mp._increment_usage("cerebras")
+    assert _mp._daily_usage["cerebras"] == 2
+
+
+def test_daily_increment_existing(_reset_daily_state):
+    _mp._daily_usage = {"cerebras": 5}
+    _mp._increment_usage("cerebras")
+    assert _mp._daily_usage["cerebras"] == 6
+
+
+def test_daily_limit_resets_on_new_day(tmp_path, _reset_daily_state):
+    from datetime import datetime, timezone
+    conn = _migrated_conn(tmp_path)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("job1", "test", "qwen", 100, 50, 0.0, now, "cerebras"),
+    )
+    conn.execute(
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("job2", "test", "qwen", 100, 50, 0.0, now, "cerebras"),
+    )
+    conn.execute(
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("job3", "test", "scout", 100, 50, 0.0, now, "groq"),
+    )
+    conn.commit()
+    _mp._init_usage_from_db(conn)
+    assert _mp._daily_usage.get("cerebras") == 2
+    assert _mp._daily_usage.get("groq") == 1
+    assert _mp._usage_date == _mp._date.today().isoformat()
+
+
+def test_ensure_usage_current_triggers_on_date_change(tmp_path, _reset_daily_state):
+    conn = _migrated_conn(tmp_path)
+    _mp._usage_date = "2020-01-01"  # stale date
+    _mp._daily_usage = {"cerebras": 999}  # stale data
+    _mp._ensure_usage_current(conn)
+    # After rollover, stale data should be gone (no scoring_costs rows for today in empty DB)
+    assert _mp._daily_usage == {}
+    assert _mp._usage_date == _mp._date.today().isoformat()
+
+
+def test_ensure_usage_current_noop_same_day(tmp_path, _reset_daily_state):
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._usage_date = today
+    _mp._daily_usage = {"cerebras": 42}
+    _mp._ensure_usage_current(conn)
+    # Should NOT reset — same day
+    assert _mp._daily_usage == {"cerebras": 42}
