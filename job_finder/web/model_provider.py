@@ -2,6 +2,8 @@
 
 Phase 24 deliverables: ModelResult, BaseProvider, resolve_provider_config().
 Phase 26 deliverable: call_model() dispatcher.
+Phase 29 deliverable: daily rate limit tracker (_check_daily_limit, _increment_usage,
+    _init_usage_from_db, _ensure_usage_current).
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import logging
 import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import date as _date
 from typing import Any
 
 from jsonschema import ValidationError, validate
@@ -23,6 +26,68 @@ _TIER_DEFAULTS: dict[str, str] = {
     "sonnet": DEFAULT_MODEL_SONNET,
     "opus": DEFAULT_MODEL_OPUS,
 }
+
+# Daily usage tracking — module-level state for rate limiting.
+# Resets automatically on date rollover; bootstraps from scoring_costs DB.
+_daily_usage: dict[str, int] = {}
+_usage_date: str = ""
+
+
+def _check_daily_limit(provider: str, daily_limits: dict[str, int]) -> bool:
+    """Return True if provider is under its daily limit or has no configured limit.
+
+    Args:
+        provider: Provider name (e.g., "cerebras", "groq").
+        daily_limits: Dict of {provider_name: max_requests_per_day}.
+
+    Returns:
+        True if the provider may be used, False if exhausted.
+    """
+    if provider not in daily_limits:
+        return True
+    return _daily_usage.get(provider, 0) < daily_limits[provider]
+
+
+def _increment_usage(provider: str) -> None:
+    """Increment the daily usage counter for a provider by 1."""
+    global _daily_usage
+    _daily_usage[provider] = _daily_usage.get(provider, 0) + 1
+
+
+def _init_usage_from_db(conn: sqlite3.Connection) -> None:
+    """Bootstrap _daily_usage from scoring_costs for today.
+
+    Called on date rollover to recover counts for providers that were
+    already used today (e.g., after an app restart mid-day).
+
+    Args:
+        conn: Open SQLite connection.
+    """
+    global _daily_usage, _usage_date
+    _daily_usage = {}
+    rows = conn.execute(
+        "SELECT provider, COUNT(*) as cnt "
+        "FROM scoring_costs "
+        "WHERE date(timestamp) = date('now') "
+        "GROUP BY provider"
+    ).fetchall()
+    for row in rows:
+        _daily_usage[row[0]] = row[1]
+    _usage_date = _date.today().isoformat()
+
+
+def _ensure_usage_current(conn: sqlite3.Connection) -> None:
+    """Reset and bootstrap daily usage counters if the date has rolled over.
+
+    Should be called at the start of call_model() so _check_daily_limit
+    and _increment_usage operate on today's data.
+
+    Args:
+        conn: Open SQLite connection for bootstrap query.
+    """
+    today = _date.today().isoformat()
+    if _usage_date != today:
+        _init_usage_from_db(conn)
 
 
 @dataclass(frozen=True, slots=True)
