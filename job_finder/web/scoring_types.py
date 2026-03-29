@@ -38,6 +38,7 @@ class JobRow(TypedDict, total=False):
     comp_data_json: str | None
     haiku_score: int | None
     sonnet_score: float | None
+    opus_score: float | None
     fit_analysis: str | None
     enrichment_tier: str | None
     company_id: str | None

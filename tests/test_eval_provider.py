@@ -585,3 +585,123 @@ class TestParseArgs:
         """parse_args raises SystemExit when --provider is missing."""
         with pytest.raises(SystemExit):
             parse_args([])
+
+    def test_parse_args_prompt_variant_default(self):
+        args = parse_args(["--provider", "gemini"])
+        assert args.prompt_variant == "default"
+
+    def test_parse_args_prompt_variant_rubric(self):
+        args = parse_args(["--provider", "gemini", "--prompt-variant", "rubric"])
+        assert args.prompt_variant == "rubric"
+
+    def test_parse_args_prompt_variant_fewshot(self):
+        args = parse_args(["--provider", "gemini", "--prompt-variant", "fewshot"])
+        assert args.prompt_variant == "fewshot"
+
+    def test_parse_args_prompt_variant_fewshot_rubric(self):
+        args = parse_args(["--provider", "gemini", "--prompt-variant", "fewshot-rubric"])
+        assert args.prompt_variant == "fewshot-rubric"
+
+    def test_parse_args_baseline_default(self):
+        args = parse_args(["--provider", "gemini"])
+        assert args.baseline == "sonnet"
+
+    def test_parse_args_baseline_opus(self):
+        args = parse_args(["--provider", "gemini", "--baseline", "opus"])
+        assert args.baseline == "opus"
+
+
+# ---------------------------------------------------------------------------
+# Prompt Variant Tests
+# ---------------------------------------------------------------------------
+
+
+class TestPromptVariants:
+
+    @pytest.fixture
+    def prompt_inputs(self):
+        job_row = {
+            "title": "Data Scientist", "company": "TestCo", "location": "Remote",
+            "salary_min": 100000, "salary_max": 150000, "jd_full": "Full JD text",
+        }
+        profile = {"positions": [], "skills": ["Python"], "education": []}
+        config = {"profile": {"target_titles": ["Data Scientist"], "target_locations": ["Remote"],
+                              "min_salary": 100000, "industries": ["Tech"]}}
+        return job_row, profile, config
+
+    def test_default_returns_original_system_prompt(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        system, _ = reconstruct_prompt(job, profile, config, prompt_variant="default")
+        assert system == _SYSTEM_PROMPT
+
+    def test_rubric_includes_scoring_rubric(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        system, _ = reconstruct_prompt(job, profile, config, prompt_variant="rubric")
+        assert "Scoring Rubric" in system
+        assert "90-100" in system
+        assert system != _SYSTEM_PROMPT
+
+    def test_fewshot_includes_calibration_examples(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        system, _ = reconstruct_prompt(job, profile, config, prompt_variant="fewshot")
+        assert "Calibration Examples" in system
+        assert "Score 15" in system
+        assert "Score 91" in system
+
+    def test_fewshot_rubric_includes_both(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        system, _ = reconstruct_prompt(job, profile, config, prompt_variant="fewshot-rubric")
+        assert "Scoring Rubric" in system
+        assert "Calibration Examples" in system
+
+    def test_all_variants_produce_same_user_message(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        variants = ["default", "rubric", "fewshot", "fewshot-rubric"]
+        messages = []
+        for v in variants:
+            _, msg = reconstruct_prompt(job, profile, config, prompt_variant=v)
+            messages.append(msg)
+        assert all(m == messages[0] for m in messages)
+
+    def test_unknown_variant_falls_back_to_default(self, prompt_inputs):
+        job, profile, config = prompt_inputs
+        system, _ = reconstruct_prompt(job, profile, config, prompt_variant="nonexistent")
+        assert system == _SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Baseline Selection Tests
+# ---------------------------------------------------------------------------
+
+
+class TestBaselineSelection:
+
+    def test_sample_jobs_opus_filters_by_opus_score(self):
+        """baseline='opus' only returns jobs with opus_score IS NOT NULL."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE jobs ("
+            "  dedup_key TEXT PRIMARY KEY, title TEXT NOT NULL, company TEXT NOT NULL,"
+            "  location TEXT NOT NULL, salary_min INTEGER, salary_max INTEGER,"
+            "  jd_full TEXT, sonnet_score REAL, fit_analysis TEXT, haiku_score INTEGER,"
+            "  opus_score REAL)"
+        )
+        conn.execute(
+            "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ("k1", "T1", "C1", "L1", 80000, 120000, "JD1", 70.0, "{}", 60, 72.0),
+        )
+        conn.execute(
+            "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ("k2", "T2", "C2", "L2", 80000, 120000, "JD2", 65.0, "{}", 55, None),
+        )
+        rows = sample_jobs(conn, 10, baseline="opus")
+        assert len(rows) == 1
+        assert rows[0]["dedup_key"] == "k1"
+        assert "opus_score" in rows[0]
+        conn.close()
+
+    def test_sample_jobs_sonnet_default(self, in_memory_conn):
+        """Default baseline='sonnet' works as before."""
+        rows = sample_jobs(in_memory_conn, 10, baseline="sonnet")
+        assert len(rows) == 3  # 3 qualifying rows in fixture
