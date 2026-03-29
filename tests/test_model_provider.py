@@ -84,7 +84,7 @@ def test_base_provider_subclass_must_implement_call():
 def test_resolve_provider_from_config():
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.5-pro"}}}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "gemini", "model": "gemini-2.5-pro", "fallback": None}
+    assert result == {"provider": "gemini", "model": "gemini-2.5-pro", "fallback": None, "fallback_chain": [], "daily_limits": {}}
 
 
 def test_resolve_provider_with_fallback():
@@ -106,13 +106,13 @@ def test_resolve_provider_with_fallback():
 def test_resolve_provider_missing_falls_back_to_anthropic():
     config = {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}}}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "fallback": None}
+    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "fallback": None, "fallback_chain": [], "daily_limits": {}}
 
 
 def test_resolve_provider_no_providers_section():
     config = {}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "fallback": None}
+    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "fallback": None, "fallback_chain": [], "daily_limits": {}}
 
 
 def test_resolve_provider_tier_model_missing_uses_scoring_models():
@@ -128,13 +128,56 @@ def test_resolve_provider_tier_model_missing_uses_scoring_models():
 def test_resolve_provider_haiku_tier():
     config = {}
     result = resolve_provider_config("haiku", config)
-    assert result == {"provider": "anthropic", "model": "claude-haiku-4-5", "fallback": None}
+    assert result == {"provider": "anthropic", "model": "claude-haiku-4-5", "fallback": None, "fallback_chain": [], "daily_limits": {}}
 
 
 def test_resolve_provider_opus_tier():
     config = {}
     result = resolve_provider_config("opus", config)
-    assert result == {"provider": "anthropic", "model": "claude-opus-4-6", "fallback": None}
+    assert result == {"provider": "anthropic", "model": "claude-opus-4-6", "fallback": None, "fallback_chain": [], "daily_limits": {}}
+
+
+# --- Cascade config parsing tests (TEST-01) ---
+
+
+def test_resolve_with_fallback_chain():
+    config = {"providers": {"sonnet": {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "fallback_chain": [
+            {"provider": "groq", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
+            {"provider": "ollama", "model": "qwen2.5:14b"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+        ],
+    }}}
+    result = resolve_provider_config("sonnet", config)
+    assert result["fallback_chain"] == config["providers"]["sonnet"]["fallback_chain"]
+    assert result["provider"] == "cerebras"
+
+
+def test_resolve_returns_daily_limits():
+    config = {"providers": {"sonnet": {"provider": "cerebras", "model": "qwen-3-235b"}, "daily_limits": {"cerebras": 350, "groq": 170}}}
+    result = resolve_provider_config("sonnet", config)
+    assert result["daily_limits"] == {"cerebras": 350, "groq": 170}
+
+
+def test_resolve_backward_compat_empty_chain():
+    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    result = resolve_provider_config("sonnet", config)
+    assert result["fallback_chain"] == []
+    assert result["daily_limits"] == {}
+    assert result["provider"] == "gemini"  # existing behavior preserved
+
+
+def test_resolve_chain_with_daily_limits_combined():
+    config = {"providers": {
+        "sonnet": {"provider": "cerebras", "model": "qwen-3-235b",
+                   "fallback_chain": [{"provider": "groq", "model": "scout"}]},
+        "daily_limits": {"cerebras": 350},
+    }}
+    result = resolve_provider_config("sonnet", config)
+    assert result["fallback_chain"] == [{"provider": "groq", "model": "scout"}]
+    assert result["daily_limits"] == {"cerebras": 350}
 
 
 # ---------------------------------------------------------------------------
