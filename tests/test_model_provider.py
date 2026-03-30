@@ -814,3 +814,94 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
     groq_first_call_messages = mock_groq_adapter.call.call_args_list[0][0][2]
     assert "Schema validation errors" not in groq_first_call_messages[-1]["content"]
     assert result.data == {"score": 80}
+
+
+# ---------------------------------------------------------------------------
+# Cascade prompt variant injection tests (CASC-05)
+# ---------------------------------------------------------------------------
+
+# Config with prompt_variant on a chain entry
+_CASCADE_VARIANT_CONFIG = {
+    "providers": {
+        "sonnet": {
+            "provider": "cerebras",
+            "model": "qwen-3-235b",
+            "fallback_chain": [
+                {"provider": "groq", "model": "scout", "prompt_variant": "fewshot-distribution"},
+                {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+            ],
+        },
+        "daily_limits": {"cerebras": 350, "groq": 170},
+    }
+}
+
+
+def test_cascade_prompt_variant_overrides_system(tmp_path, _reset_daily_state):
+    """When cascade entry has prompt_variant, adapter.call uses the variant's system prompt."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {"cerebras": 350}  # force cascade to groq
+    _mp._usage_date = today
+
+    groq_result = _make_result(provider="groq")
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = groq_result
+        mock_make_adapter.return_value = mock_adapter
+
+        result = call_model(
+            "sonnet", "original system prompt",
+            [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
+        )
+
+    # groq was selected (cerebras exhausted)
+    assert result.provider == "groq"
+    # adapter.call should have been called with the fewshot-distribution variant, not the original
+    call_args = mock_adapter.call.call_args
+    actual_system = call_args[0][1]  # positional arg: model, system, messages, ...
+    assert "Expected Score Distribution" in actual_system, (
+        "fewshot-distribution variant should include distribution instructions"
+    )
+    assert "original system prompt" not in actual_system, (
+        "original system prompt should be replaced by prompt_variant"
+    )
+
+
+def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state):
+    """When primary cascade entry has no prompt_variant, adapter.call uses the caller's system prompt."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {}
+    _mp._usage_date = today
+
+    cerebras_result = _make_result(provider="cerebras")
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = cerebras_result
+        mock_make_adapter.return_value = mock_adapter
+
+        result = call_model(
+            "sonnet", "custom system prompt",
+            [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
+        )
+
+    # cerebras was selected (primary, no prompt_variant=None)
+    assert result.provider == "cerebras"
+    # adapter.call should have been called with the original system prompt unchanged
+    call_args = mock_adapter.call.call_args
+    actual_system = call_args[0][1]  # positional arg: model, system, messages, ...
+    assert actual_system == "custom system prompt", (
+        f"Primary entry with no prompt_variant should use caller's system prompt unchanged, got: {actual_system!r}"
+    )
