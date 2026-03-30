@@ -81,7 +81,7 @@
 - [x] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage (completed 2026-03-29)
 - [x] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic (completed 2026-03-29)
 - [x] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs (completed 2026-03-30)
-- [ ] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end
+- [x] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end (completed 2026-03-30)
 
 ## Phase Details
 
@@ -139,7 +139,9 @@ Plans:
   2. `daily_limits` for Cerebras (350) and Groq (170) are set in config
   3. Setting `daily_limits.cerebras: 2` and triggering scoring causes the second job to be scored by Groq (verifiable via `scoring_provider` column)
   4. All 1786+ tests continue to pass after config wiring
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [x] 32-01-PLAN.md -- Wire cascade config in config.yaml + test suite verification + smoke test
 
 ## Progress
 
@@ -175,5 +177,5 @@ Plans:
 | 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete    | 2026-03-29 |
 | 30. Cascade Execution | v2.0 | 1/1 | Complete    | 2026-03-29 |
-| 31. Prompts & Attribution | v2.0 | 3/3 | Complete   | 2026-03-30 |
-| 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |
+| 31. Prompts & Attribution | v2.0 | 3/3 | Complete    | 2026-03-30 |
+| 32. Integration & Config Wiring | v2.0 | 1/1 | Complete   | 2026-03-30 |

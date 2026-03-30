@@ -381,6 +381,59 @@ class TestComputeMetrics:
         metrics = compute_metrics(results)
         assert metrics["score_correlation"] is None
 
+    def test_returns_bias_metric_keys(self):
+        """Bias metrics are present in the returned dict."""
+        results = self._make_results([(78, 74), (65, 60), (45, 50)])
+        metrics = compute_metrics(results)
+        for key in ("mean_delta", "mean_absolute_error", "score_std_delta",
+                     "bucket_deltas", "baseline_distribution"):
+            assert key in metrics
+
+    def test_mean_delta_computed_correctly(self):
+        """mean_delta = avg(eval - baseline)."""
+        # Deltas: +30, +30, +30 => mean = +30
+        results = self._make_results([(10, 40), (20, 50), (30, 60)])
+        metrics = compute_metrics(results)
+        assert metrics["mean_delta"] == pytest.approx(30.0)
+        assert metrics["mean_absolute_error"] == pytest.approx(30.0)
+        assert metrics["score_std_delta"] == pytest.approx(0.0)
+
+    def test_mean_delta_negative_bias(self):
+        """Negative deltas (model scores lower) produce negative mean_delta."""
+        # Deltas: -10, -10
+        results = self._make_results([(50, 40), (60, 50)])
+        metrics = compute_metrics(results)
+        assert metrics["mean_delta"] == pytest.approx(-10.0)
+        assert metrics["mean_absolute_error"] == pytest.approx(10.0)
+
+    def test_bucket_deltas_computed(self):
+        """bucket_deltas splits by baseline score range."""
+        results = self._make_results([(10, 40), (40, 60), (70, 80)])
+        metrics = compute_metrics(results)
+        assert metrics["bucket_deltas"]["low"] == pytest.approx(30.0)
+        assert metrics["bucket_deltas"]["mid"] == pytest.approx(20.0)
+        assert metrics["bucket_deltas"]["high"] == pytest.approx(10.0)
+        assert metrics["baseline_distribution"] == {"low": 1, "mid": 1, "high": 1}
+
+    def test_bucket_deltas_empty_buckets(self):
+        """Empty buckets have None delta and 0 count."""
+        # All baselines in high bucket
+        results = self._make_results([(70, 75), (80, 85)])
+        metrics = compute_metrics(results)
+        assert metrics["bucket_deltas"]["low"] is None
+        assert metrics["bucket_deltas"]["mid"] is None
+        assert metrics["bucket_deltas"]["high"] == pytest.approx(5.0)
+        assert metrics["baseline_distribution"]["low"] == 0
+        assert metrics["baseline_distribution"]["high"] == 2
+
+    def test_bias_metrics_none_when_fewer_than_2_pairs(self):
+        """mean_delta etc. are None when fewer than 2 valid pairs."""
+        results = self._make_results([(78, 74), (65, None)])
+        metrics = compute_metrics(results)
+        assert metrics["mean_delta"] is None
+        assert metrics["mean_absolute_error"] is None
+        assert metrics["score_std_delta"] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: compute_verdict
@@ -391,6 +444,10 @@ DEFAULT_THRESHOLDS = {
     "correlation_marginal": 0.70,
     "adherence_suitable": 0.95,
     "adherence_marginal": 0.80,
+    "mae_suitable": 15.0,
+    "mae_marginal": 25.0,
+    "bias_suitable": 10.0,
+    "bias_marginal": 20.0,
 }
 
 
@@ -437,6 +494,45 @@ class TestComputeVerdict:
     def test_marginal_when_adherence_between_thresholds(self):
         """Edge: adherence >= 0.80 but < 0.95, correlation suitable => MARGINAL."""
         verdict = compute_verdict(0.90, 0.88, DEFAULT_THRESHOLDS)
+        assert verdict == "MARGINAL"
+
+    def test_not_recommended_when_mae_above_marginal(self):
+        """MAE above marginal threshold => NOT_RECOMMENDED even if r and adherence pass."""
+        verdict = compute_verdict(0.90, 0.96, DEFAULT_THRESHOLDS, mean_absolute_error=30.0)
+        assert verdict == "NOT_RECOMMENDED"
+
+    def test_marginal_when_mae_between_thresholds(self):
+        """MAE between suitable and marginal => caps at MARGINAL."""
+        verdict = compute_verdict(0.90, 0.96, DEFAULT_THRESHOLDS, mean_absolute_error=20.0)
+        assert verdict == "MARGINAL"
+
+    def test_suitable_requires_low_mae_and_low_bias(self):
+        """SUITABLE requires MAE <= 15 AND |bias| <= 10."""
+        verdict = compute_verdict(
+            0.90, 0.96, DEFAULT_THRESHOLDS,
+            mean_absolute_error=10.0, mean_delta=5.0,
+        )
+        assert verdict == "SUITABLE"
+
+    def test_not_recommended_when_bias_above_marginal(self):
+        """Large positive bias => NOT_RECOMMENDED."""
+        verdict = compute_verdict(
+            0.90, 0.96, DEFAULT_THRESHOLDS,
+            mean_absolute_error=22.0, mean_delta=22.0,
+        )
+        assert verdict == "NOT_RECOMMENDED"
+
+    def test_backward_compat_none_mae_skips_check(self):
+        """When MAE/bias not provided, old behavior preserved."""
+        verdict = compute_verdict(0.90, 0.96, DEFAULT_THRESHOLDS)
+        assert verdict == "SUITABLE"
+
+    def test_marginal_when_bias_between_thresholds(self):
+        """Bias between suitable (10) and marginal (20) => caps at MARGINAL."""
+        verdict = compute_verdict(
+            0.90, 0.96, DEFAULT_THRESHOLDS,
+            mean_absolute_error=12.0, mean_delta=15.0,
+        )
         assert verdict == "MARGINAL"
 
 
@@ -563,6 +659,10 @@ class TestParseArgs:
         assert args.correlation_marginal == pytest.approx(0.70)
         assert args.adherence_suitable == pytest.approx(0.95)
         assert args.adherence_marginal == pytest.approx(0.80)
+        assert args.mae_suitable == pytest.approx(15.0)
+        assert args.mae_marginal == pytest.approx(25.0)
+        assert args.bias_suitable == pytest.approx(10.0)
+        assert args.bias_marginal == pytest.approx(20.0)
         assert args.yes is False
 
     def test_parse_args_custom(self):

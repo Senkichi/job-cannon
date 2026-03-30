@@ -367,6 +367,11 @@ def compute_metrics(results: list[dict]) -> dict:
         - schema_adherence_rate (float): fraction of results where schema_valid=True
         - median_latency_seconds (float): median of latency_seconds values
         - mean_latency_seconds (float): mean of latency_seconds values
+        - mean_delta (float | None): avg(eval - baseline) — raw bias. Positive = inflated.
+        - mean_absolute_error (float | None): avg(|eval - baseline|) — accuracy.
+        - score_std_delta (float | None): stdev of deltas — consistency.
+        - bucket_deltas (dict): avg delta per baseline bucket {low, mid, high}.
+        - baseline_distribution (dict): job count per bucket {low, mid, high}.
     """
     # Filter to pairs where both baseline and eval scores exist
     valid_pairs = [
@@ -390,11 +395,45 @@ def compute_metrics(results: list[dict]) -> dict:
     median_latency = statistics.median(latencies)
     mean_latency = statistics.mean(latencies)
 
+    # --- Bias / accuracy metrics ---
+    mean_delta: float | None = None
+    mean_absolute_error: float | None = None
+    score_std_delta: float | None = None
+    bucket_deltas: dict[str, float | None] = {"low": None, "mid": None, "high": None}
+    baseline_distribution: dict[str, int] = {"low": 0, "mid": 0, "high": 0}
+
+    if len(valid_pairs) >= 2:
+        deltas = [eval_s - base_s for base_s, eval_s in valid_pairs]
+        mean_delta = statistics.fmean(deltas)
+        mean_absolute_error = statistics.fmean([abs(d) for d in deltas])
+        score_std_delta = statistics.stdev(deltas) if len(deltas) >= 2 else 0.0
+
+        # Bucket analysis: low (<30), mid (30-60), high (60+)
+        buckets: dict[str, list[float]] = {"low": [], "mid": [], "high": []}
+        for base_s, eval_s in valid_pairs:
+            delta = eval_s - base_s
+            if base_s < 30:
+                buckets["low"].append(delta)
+            elif base_s < 60:
+                buckets["mid"].append(delta)
+            else:
+                buckets["high"].append(delta)
+
+        for bucket_name, bucket_list in buckets.items():
+            baseline_distribution[bucket_name] = len(bucket_list)
+            if bucket_list:
+                bucket_deltas[bucket_name] = statistics.fmean(bucket_list)
+
     return {
         "score_correlation": score_correlation,
         "schema_adherence_rate": schema_adherence_rate,
         "median_latency_seconds": median_latency,
         "mean_latency_seconds": mean_latency,
+        "mean_delta": mean_delta,
+        "mean_absolute_error": mean_absolute_error,
+        "score_std_delta": score_std_delta,
+        "bucket_deltas": bucket_deltas,
+        "baseline_distribution": baseline_distribution,
     }
 
 
@@ -407,22 +446,31 @@ def compute_verdict(
     pearson_r: float | None,
     adherence_rate: float,
     thresholds: dict,
+    *,
+    mean_absolute_error: float | None = None,
+    mean_delta: float | None = None,
 ) -> str:
     """Map metrics to a SUITABLE/MARGINAL/NOT_RECOMMENDED verdict.
 
-    Verdict logic (strict):
+    Verdict logic (strict AND — all dimensions must pass):
     - SUITABLE: ALL metrics meet SUITABLE thresholds
     - MARGINAL: all meet MARGINAL thresholds but at least one misses SUITABLE
     - NOT_RECOMMENDED: any metric misses MARGINAL threshold
 
+    Dimensions: correlation, schema adherence, MAE (accuracy), bias (mean delta).
     Latency is informational only and does not affect the verdict.
 
     Args:
         pearson_r: Pearson r correlation coefficient, or None (insufficient data).
         adherence_rate: Fraction of results with schema_valid=True (0.0-1.0).
-        thresholds: Dict with keys correlation_suitable, correlation_marginal,
-                    adherence_suitable, adherence_marginal. Missing keys use
-                    defaults (0.85, 0.70, 0.95, 0.80).
+        thresholds: Dict with threshold keys. Missing keys use defaults:
+            correlation_suitable (0.85), correlation_marginal (0.70),
+            adherence_suitable (0.95), adherence_marginal (0.80),
+            mae_suitable (15.0), mae_marginal (25.0),
+            bias_suitable (10.0), bias_marginal (20.0).
+        mean_absolute_error: Average |eval - baseline|. None skips the check
+            (backward compat for old callers).
+        mean_delta: Average (eval - baseline) bias. None skips the check.
 
     Returns:
         "SUITABLE", "MARGINAL", or "NOT_RECOMMENDED".
@@ -431,9 +479,12 @@ def compute_verdict(
     corr_marginal = thresholds.get("correlation_marginal", 0.70)
     adh_suitable = thresholds.get("adherence_suitable", 0.95)
     adh_marginal = thresholds.get("adherence_marginal", 0.80)
+    mae_suitable_t = thresholds.get("mae_suitable", 15.0)
+    mae_marginal_t = thresholds.get("mae_marginal", 25.0)
+    bias_suitable_t = thresholds.get("bias_suitable", 10.0)
+    bias_marginal_t = thresholds.get("bias_marginal", 20.0)
 
     if pearson_r is None:
-        # Cannot compute correlation — insufficient data or zero variance
         corr_ok_suitable = False
         corr_ok_marginal = False
     else:
@@ -443,9 +494,27 @@ def compute_verdict(
     adh_ok_suitable = adherence_rate >= adh_suitable
     adh_ok_marginal = adherence_rate >= adh_marginal
 
-    if corr_ok_suitable and adh_ok_suitable:
+    # MAE and bias: skip check when None (backward compat / insufficient data)
+    if mean_absolute_error is not None:
+        mae_ok_suitable = mean_absolute_error <= mae_suitable_t
+        mae_ok_marginal = mean_absolute_error <= mae_marginal_t
+    else:
+        mae_ok_suitable = True
+        mae_ok_marginal = True
+
+    if mean_delta is not None:
+        bias_ok_suitable = abs(mean_delta) <= bias_suitable_t
+        bias_ok_marginal = abs(mean_delta) <= bias_marginal_t
+    else:
+        bias_ok_suitable = True
+        bias_ok_marginal = True
+
+    all_suitable = corr_ok_suitable and adh_ok_suitable and mae_ok_suitable and bias_ok_suitable
+    all_marginal = corr_ok_marginal and adh_ok_marginal and mae_ok_marginal and bias_ok_marginal
+
+    if all_suitable:
         return "SUITABLE"
-    elif corr_ok_marginal and adh_ok_marginal:
+    elif all_marginal:
         return "MARGINAL"
     else:
         return "NOT_RECOMMENDED"
@@ -629,6 +698,8 @@ def run_eval(
             metrics.get("score_correlation"),
             metrics["schema_adherence_rate"],
             thresholds,
+            mean_absolute_error=metrics.get("mean_absolute_error"),
+            mean_delta=metrics.get("mean_delta"),
         )
 
         # 7. Build and save report
@@ -669,13 +740,34 @@ def run_eval(
     corr = metrics.get("score_correlation")
     corr_str = f"{corr:.3f}" if corr is not None else "N/A (insufficient data)"
 
+    delta = metrics.get("mean_delta")
+    delta_str = f"{delta:+.1f}" if delta is not None else "N/A"
+    mae = metrics.get("mean_absolute_error")
+    mae_str = f"{mae:.1f}" if mae is not None else "N/A"
+    std_d = metrics.get("score_std_delta")
+    std_str = f"{std_d:.1f}" if std_d is not None else "N/A"
+
     print("\n" + "=" * 60)
     print(f"VERDICT: {verdict_display}")
     print("=" * 60)
     print(f"  Score correlation (Pearson r) : {corr_str}")
+    print(f"  Mean delta (bias)             : {delta_str}")
+    print(f"  Mean absolute error           : {mae_str}")
+    print(f"  Score delta std dev           : {std_str}")
     print(f"  Schema adherence rate         : {metrics['schema_adherence_rate']:.1%}")
     print(f"  Median latency                : {metrics['median_latency_seconds']:.1f}s")
     print(f"  Mean latency                  : {metrics['mean_latency_seconds']:.1f}s")
+
+    bucket_deltas = metrics.get("bucket_deltas", {})
+    baseline_dist = metrics.get("baseline_distribution", {})
+    if any(v is not None for v in bucket_deltas.values()):
+        parts = []
+        for b in ("low", "mid", "high"):
+            d = bucket_deltas.get(b)
+            n = baseline_dist.get(b, 0)
+            parts.append(f"{b}={d:+.1f}(n={n})" if d is not None else f"{b}=-(n={n})")
+        print(f"  Bucket deltas (<30/30-60/60+) : {' | '.join(parts)}")
+
     print(f"  Report saved to               : {report_path}")
     print("=" * 60)
 
@@ -754,6 +846,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Schema adherence rate threshold for MARGINAL verdict (default: 0.80).",
     )
     parser.add_argument(
+        "--mae-suitable",
+        type=float,
+        default=15.0,
+        metavar="MAE",
+        help="Mean absolute error threshold for SUITABLE verdict (default: 15.0).",
+    )
+    parser.add_argument(
+        "--mae-marginal",
+        type=float,
+        default=25.0,
+        metavar="MAE",
+        help="Mean absolute error threshold for MARGINAL verdict (default: 25.0).",
+    )
+    parser.add_argument(
+        "--bias-suitable",
+        type=float,
+        default=10.0,
+        metavar="BIAS",
+        help="Absolute mean delta (bias) threshold for SUITABLE verdict (default: 10.0).",
+    )
+    parser.add_argument(
+        "--bias-marginal",
+        type=float,
+        default=20.0,
+        metavar="BIAS",
+        help="Absolute mean delta (bias) threshold for MARGINAL verdict (default: 20.0).",
+    )
+    parser.add_argument(
         "--yes", "-y",
         action="store_true",
         help="Skip confirmation prompt (non-interactive mode).",
@@ -800,6 +920,10 @@ def main() -> None:
         "correlation_marginal": args.correlation_marginal,
         "adherence_suitable": args.adherence_suitable,
         "adherence_marginal": args.adherence_marginal,
+        "mae_suitable": args.mae_suitable,
+        "mae_marginal": args.mae_marginal,
+        "bias_suitable": args.bias_suitable,
+        "bias_marginal": args.bias_marginal,
     }
     run_eval(
         provider=args.provider,

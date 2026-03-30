@@ -4,11 +4,13 @@ Phase 24 deliverables: ModelResult, BaseProvider, resolve_provider_config().
 Phase 26 deliverable: call_model() dispatcher.
 Phase 29 deliverable: daily rate limit tracker (_check_daily_limit, _increment_usage,
     _init_usage_from_db, _ensure_usage_current).
+Phase 32 fix: prompt_variant for primary provider, inter-request throttling, 429 retry.
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from abc import ABC, abstractmethod
 
 import requests
@@ -133,9 +135,11 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
         Dict with keys:
             provider (str): "anthropic" | "gemini" | "ollama"
             model (str): Provider-specific model identifier
+            prompt_variant (str | None): Prompt variant for primary provider
             fallback (str | None): Fallback provider name, or None
             fallback_chain (list[dict]): Ordered list of {provider, model} dicts for cascade, or []
             daily_limits (dict[str, int]): Per-provider daily request caps, or {}
+            throttle_delays (dict[str, float]): Per-provider seconds between requests, or {}
     """
     providers_cfg = config.get("providers", {})
     tier_cfg = providers_cfg.get(tier, {})
@@ -145,16 +149,20 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 
     provider = tier_cfg.get("provider", "anthropic")
     model = tier_cfg.get("model") or default_model
+    prompt_variant = tier_cfg.get("prompt_variant", None)
     fallback = tier_cfg.get("fallback", None)
     fallback_chain = tier_cfg.get("fallback_chain", [])
     daily_limits = providers_cfg.get("daily_limits", {})
+    throttle_delays = providers_cfg.get("throttle_delays", {})
 
     return {
         "provider": provider,
         "model": model,
+        "prompt_variant": prompt_variant,
         "fallback": fallback,
         "fallback_chain": fallback_chain,
         "daily_limits": daily_limits,
+        "throttle_delays": throttle_delays,
     }
 
 
@@ -345,17 +353,22 @@ def call_model(
     resolved = resolve_provider_config(tier, config)
     provider_name: str = resolved["provider"]
     model: str = resolved["model"]
+    primary_variant: str | None = resolved["prompt_variant"]
     fallback: str | None = resolved["fallback"]
     fallback_chain: list[dict] = resolved["fallback_chain"]
     daily_limits: dict[str, int] = resolved["daily_limits"]
+    throttle_delays: dict[str, float] = resolved["throttle_delays"]
 
     # --- Cascade path (non-empty fallback_chain) ---
     if fallback_chain:
         _ensure_usage_current(conn)
 
         chain: list[dict] = [
-            {"provider": provider_name, "model": model, "prompt_variant": None}
+            {"provider": provider_name, "model": model, "prompt_variant": primary_variant}
         ] + list(fallback_chain)
+
+        # Track last-call time per provider for inter-request throttling
+        _last_call: dict[str, float] = {}
 
         for entry in chain:
             entry_provider = entry["provider"]
@@ -391,39 +404,64 @@ def call_model(
                 from job_finder.web.sonnet_evaluator import PROMPT_VARIANTS as _pv
                 effective_system = _pv.get(entry_variant, system)
 
-            try:
-                result = adapter.call(
-                    entry_model, effective_system, messages, output_schema, max_tokens, timeout,
-                )
-                # Schema validation + retry (per-provider, using original messages)
-                errors = _validate_schema(result.data, output_schema)
-                if errors:
-                    augmented = _augment_with_errors(messages, errors)
+            # Inter-request throttle: respect per-provider delay from config
+            delay = throttle_delays.get(entry_provider, 0)
+            if delay > 0:
+                last = _last_call.get(entry_provider, 0)
+                elapsed = time.monotonic() - last
+                if elapsed < delay:
+                    wait = delay - elapsed
+                    logger.debug("Cascade: throttling %s for %.1fs", entry_provider, wait)
+                    time.sleep(wait)
+
+            # 429 retry with backoff (up to 2 retries)
+            max_retries = 2
+            for attempt in range(1 + max_retries):
+                try:
+                    _last_call[entry_provider] = time.monotonic()
                     result = adapter.call(
-                        entry_model, effective_system, augmented, output_schema, max_tokens, timeout,
+                        entry_model, effective_system, messages, output_schema, max_tokens, timeout,
                     )
+                    # Schema validation + retry (per-provider, using original messages)
                     errors = _validate_schema(result.data, output_schema)
-                if not errors:
-                    _increment_usage(entry_provider)
-                    _maybe_record_cost(result, conn, job_id, purpose)
-                    return result
-                # Schema still invalid after retry — skip to next provider
-                logger.warning(
-                    "Cascade: %s schema invalid after retry, skipping", entry_provider,
-                )
-            except requests.HTTPError as exc:
-                if exc.response is not None and exc.response.status_code == 429:
+                    if errors:
+                        augmented = _augment_with_errors(messages, errors)
+                        _last_call[entry_provider] = time.monotonic()
+                        result = adapter.call(
+                            entry_model, effective_system, augmented, output_schema, max_tokens, timeout,
+                        )
+                        errors = _validate_schema(result.data, output_schema)
+                    if not errors:
+                        _increment_usage(entry_provider)
+                        _maybe_record_cost(result, conn, job_id, purpose)
+                        return result
+                    # Schema still invalid after retry — skip to next provider
                     logger.warning(
-                        "Cascade: %s rate limited (429), marking exhausted",
-                        entry_provider,
+                        "Cascade: %s schema invalid after retry, skipping", entry_provider,
                     )
-                    _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
-                    continue
-                logger.warning("Cascade: %s HTTP error: %s", entry_provider, exc)
-                continue
-            except Exception as exc:
-                logger.warning("Cascade: %s error: %s", entry_provider, exc)
-                continue
+                    break  # Don't retry schema failures
+                except requests.HTTPError as exc:
+                    if exc.response is not None and exc.response.status_code == 429:
+                        if attempt < max_retries:
+                            backoff = (2 ** attempt) * 2  # 2s, 4s
+                            logger.warning(
+                                "Cascade: %s rate limited (429), retry %d/%d after %ds",
+                                entry_provider, attempt + 1, max_retries, backoff,
+                            )
+                            time.sleep(backoff)
+                            continue
+                        # Exhausted retries — mark provider as done for today
+                        logger.warning(
+                            "Cascade: %s rate limited (429) after %d retries, marking exhausted",
+                            entry_provider, max_retries,
+                        )
+                        _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
+                        break
+                    logger.warning("Cascade: %s HTTP error: %s", entry_provider, exc)
+                    break  # Non-429 HTTP errors — don't retry
+                except Exception as exc:
+                    logger.warning("Cascade: %s error: %s", entry_provider, exc)
+                    break  # Unknown errors — don't retry
 
         raise RuntimeError(
             f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "

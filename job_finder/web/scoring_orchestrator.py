@@ -176,9 +176,24 @@ def score_and_persist_sonnet(
     if result is None:
         return None
 
-    sonnet_score = result.get("score")
+    raw_score = result.get("score")
     fit_analysis = json.dumps(result.get("fit_analysis", {}))
     provider = result.get("provider")  # Attribution: which provider scored this job
+
+    # Post-hoc isotonic calibration: map raw model score to Opus scale
+    # when a calibration table exists for the provider. Uncalibrated providers
+    # pass through unchanged.
+    from job_finder.web.score_calibration import calibrate_score, has_calibration
+
+    sonnet_score = raw_score
+    if provider and has_calibration(provider) and raw_score is not None:
+        sonnet_score = calibrate_score(raw_score, provider)
+        logger.info(
+            "Calibrated %s score for '%s': %s -> %s",
+            provider, dedup_key, raw_score, sonnet_score,
+        )
+        result["raw_score"] = raw_score
+        result["score"] = sonnet_score
 
     persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis, provider=provider)
 
