@@ -38,7 +38,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 ### Config
 
 - [x] **CONF-01**: `config.example.yaml` documents cascade config schema with `fallback_chain` and `daily_limits`
-- [ ] **CONF-02**: Production `config.yaml` wired with decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic)
+- [x] **CONF-02**: Production `config.yaml` wired with decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic)
 
 ## Previous Milestones (Complete)
 
@@ -92,7 +92,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 | ATTR-02 | Phase 31 | Complete |
 | ATTR-03 | Phase 31 | Complete |
 | TEST-04 | Phase 31 | Complete |
-| CONF-02 | Phase 32 | Pending |
+| CONF-02 | Phase 32 | Complete |
 
 **Coverage:**
 - v2.0 requirements: 16 total
