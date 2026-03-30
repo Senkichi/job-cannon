@@ -353,70 +353,81 @@ def call_model(
     if fallback_chain:
         _ensure_usage_current(conn)
 
-        chain: list[tuple[str, str]] = [(provider_name, model)] + [
-            (entry["provider"], entry["model"]) for entry in fallback_chain
-        ]
+        chain: list[dict] = [
+            {"provider": provider_name, "model": model, "prompt_variant": None}
+        ] + list(fallback_chain)
 
-        for provider_name, model_id in chain:
+        for entry in chain:
+            entry_provider = entry["provider"]
+            entry_model = entry["model"]
+            entry_variant = entry.get("prompt_variant")
+
             # Skip if daily limit exhausted
-            if not _check_daily_limit(provider_name, daily_limits):
-                logger.info("Cascade: %s exhausted, skipping", provider_name)
+            if not _check_daily_limit(entry_provider, daily_limits):
+                logger.info("Cascade: %s exhausted, skipping", entry_provider)
                 continue
 
             # Skip if adapter creation fails (missing API key -> ValueError,
             # Ollama unreachable -> RuntimeError)
             try:
                 adapter = _make_adapter(
-                    provider_name, client, conn, config,
+                    entry_provider, client, conn, config,
                     job_id=job_id, purpose=purpose,
                 )
             except (ValueError, RuntimeError) as exc:
-                logger.warning("Cascade: %s unavailable: %s", provider_name, exc)
+                logger.warning("Cascade: %s unavailable: %s", entry_provider, exc)
                 continue
 
             # Budget gate for paid providers
-            if provider_name not in _FREE_PROVIDERS:
+            if entry_provider not in _FREE_PROVIDERS:
                 if not cost_gate(conn, config, tier):
-                    logger.info("Cascade: %s over budget, skipping", provider_name)
+                    logger.info("Cascade: %s over budget, skipping", entry_provider)
                     continue
+
+            # Resolve effective system prompt for this cascade entry (CASC-05)
+            effective_system = system
+            if entry_variant:
+                # Lazy import to avoid circular dependency (sonnet_evaluator imports call_model)
+                from job_finder.web.sonnet_evaluator import PROMPT_VARIANTS as _pv
+                effective_system = _pv.get(entry_variant, system)
 
             try:
                 result = adapter.call(
-                    model_id, system, messages, output_schema, max_tokens, timeout,
+                    entry_model, effective_system, messages, output_schema, max_tokens, timeout,
                 )
                 # Schema validation + retry (per-provider, using original messages)
                 errors = _validate_schema(result.data, output_schema)
                 if errors:
                     augmented = _augment_with_errors(messages, errors)
                     result = adapter.call(
-                        model_id, system, augmented, output_schema, max_tokens, timeout,
+                        entry_model, effective_system, augmented, output_schema, max_tokens, timeout,
                     )
                     errors = _validate_schema(result.data, output_schema)
                 if not errors:
-                    _increment_usage(provider_name)
+                    _increment_usage(entry_provider)
                     _maybe_record_cost(result, conn, job_id, purpose)
                     return result
                 # Schema still invalid after retry — skip to next provider
                 logger.warning(
-                    "Cascade: %s schema invalid after retry, skipping", provider_name,
+                    "Cascade: %s schema invalid after retry, skipping", entry_provider,
                 )
             except requests.HTTPError as exc:
                 if exc.response is not None and exc.response.status_code == 429:
                     logger.warning(
                         "Cascade: %s rate limited (429), marking exhausted",
-                        provider_name,
+                        entry_provider,
                     )
-                    _daily_usage[provider_name] = daily_limits.get(provider_name, 999999)
+                    _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
                     continue
-                logger.warning("Cascade: %s HTTP error: %s", provider_name, exc)
+                logger.warning("Cascade: %s HTTP error: %s", entry_provider, exc)
                 continue
             except Exception as exc:
-                logger.warning("Cascade: %s error: %s", provider_name, exc)
+                logger.warning("Cascade: %s error: %s", entry_provider, exc)
                 continue
 
         raise RuntimeError(
             f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
-            f"Providers tried: {[p for p, _ in chain]}"
+            f"Providers tried: {[e['provider'] for e in chain]}"
         )
 
     # --- Backward-compat path (empty fallback_chain) — UNCHANGED from Phase 26 ---

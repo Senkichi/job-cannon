@@ -31,7 +31,7 @@ from eval_provider import (
     sample_jobs,
     save_report,
 )
-from job_finder.web.sonnet_evaluator import _SYSTEM_PROMPT
+from job_finder.web.sonnet_evaluator import _BASE_SYSTEM_PROMPT, _SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +227,14 @@ class TestReconstructPrompt:
         assert isinstance(user_message, str)
 
     def test_system_prompt_matches_sonnet_evaluator(self, sample_job_row, sample_experience_profile, sample_config):
-        """Test 5: system_prompt matches _SYSTEM_PROMPT from sonnet_evaluator.py."""
+        """Test 5: default variant system_prompt matches _BASE_SYSTEM_PROMPT from sonnet_evaluator.
+
+        The 'default' eval variant maps to _BASE_SYSTEM_PROMPT (plain prompt without fewshot),
+        preserving the legacy eval baseline behavior. Production scoring uses _SYSTEM_PROMPT
+        (which includes fewshot examples) via the 'fewshot' variant.
+        """
         system_prompt, _ = reconstruct_prompt(sample_job_row, sample_experience_profile, sample_config)
-        assert system_prompt == _SYSTEM_PROMPT
+        assert system_prompt == _BASE_SYSTEM_PROMPT
 
     def test_user_message_contains_job_title(self, sample_job_row, sample_experience_profile, sample_config):
         """Test 6a: user_message contains job title."""
@@ -630,9 +635,10 @@ class TestPromptVariants:
         return job_row, profile, config
 
     def test_default_returns_original_system_prompt(self, prompt_inputs):
+        """The 'default' eval variant returns _BASE_SYSTEM_PROMPT (plain prompt without fewshot)."""
         job, profile, config = prompt_inputs
         system, _ = reconstruct_prompt(job, profile, config, prompt_variant="default")
-        assert system == _SYSTEM_PROMPT
+        assert system == _BASE_SYSTEM_PROMPT
 
     def test_rubric_includes_scoring_rubric(self, prompt_inputs):
         job, profile, config = prompt_inputs
