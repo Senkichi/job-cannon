@@ -281,3 +281,51 @@ class TestUpdatePipelineStatusEvidence:
             "SELECT COUNT(*) FROM pipeline_events WHERE job_id = 'test|noop-evidence|job'"
         ).fetchone()[0]
         assert count == 0, f"Expected no pipeline_event rows (no-op), got: {count}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Provider attribution on persist_sonnet_score (Phase 31 ATTR-01)
+# ---------------------------------------------------------------------------
+
+
+class TestProviderAttribution:
+    """Tests for scoring_provider column and persist_sonnet_score provider param (ATTR-01)."""
+
+    def test_persist_sonnet_score_writes_provider(self, migrated_conn):
+        """persist_sonnet_score with provider= writes the provider to scoring_provider column."""
+        from job_finder.db import persist_sonnet_score
+        _insert_job(migrated_conn, "acme|data-scientist")
+        persist_sonnet_score(
+            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
+            provider="cerebras",
+        )
+        row = migrated_conn.execute(
+            "SELECT scoring_provider FROM jobs WHERE dedup_key = 'acme|data-scientist'"
+        ).fetchone()
+        assert row is not None
+        assert row["scoring_provider"] == "cerebras"
+
+    def test_persist_sonnet_score_defaults_anthropic_when_no_provider(self, migrated_conn):
+        """persist_sonnet_score without provider= preserves column DEFAULT ('anthropic')."""
+        from job_finder.db import persist_sonnet_score
+        _insert_job(migrated_conn, "acme|data-scientist")
+        persist_sonnet_score(
+            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}'
+        )
+        row = migrated_conn.execute(
+            "SELECT scoring_provider FROM jobs WHERE dedup_key = 'acme|data-scientist'"
+        ).fetchone()
+        assert row is not None
+        assert row["scoring_provider"] == "anthropic"
+
+    def test_scoring_provider_in_get_job(self, migrated_conn):
+        """get_job() returns scoring_provider — confirms JOBS_ALL_COLUMNS includes the column."""
+        from job_finder.db import persist_sonnet_score, get_job
+        _insert_job(migrated_conn, "acme|data-scientist")
+        persist_sonnet_score(
+            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
+            provider="groq",
+        )
+        result = get_job(migrated_conn, "acme|data-scientist")
+        assert result is not None
+        assert result["scoring_provider"] == "groq"
