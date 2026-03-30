@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Cascading Free Provider Routing
-status: executing
-stopped_at: Completed 31-prompts-attribution/31-02-PLAN.md
-last_updated: "2026-03-30T00:51:20.478Z"
+status: verifying
+stopped_at: Completed 31-prompts-attribution/31-03-PLAN.md
+last_updated: "2026-03-30T00:58:47.688Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # State
@@ -19,7 +19,7 @@ progress:
 
 Phase: 31 (Prompts & Attribution) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-03-30
 
 ## Project Reference
@@ -44,6 +44,7 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 *Updated after each plan completion*
 | Phase 31-prompts-attribution P01 | 11min | 2 tasks | 4 files |
 | Phase 31-prompts-attribution P02 | 12min | 2 tasks | 5 files |
+| Phase 31-prompts-attribution P03 | 5min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - eval_provider "default" variant maps to `_BASE_SYSTEM_PROMPT` to preserve legacy eval baseline (no fewshot in eval baseline)
 - Cascade chain rebuilt as `list[dict]` to carry `prompt_variant` per entry; lazy import of PROMPT_VARIANTS inside loop avoids circular dependency
 - Full suite: 1815 tests passing after Phase 31 Plan 02 (10 new tests: 5 prompt + 2 cascade variant + 3 test_eval_provider fixes)
+- Inject provider via data dict merge ({**result, "provider": result_obj.provider}) rather than changing ScoringResult NamedTuple — avoids positional unpacking breaks in callers (ATTR-03)
+- Attribution chain closed: call_model() -> ModelResult.provider -> evaluate_job_sonnet data dict -> score_and_persist_sonnet -> persist_sonnet_score(provider=) -> DB scoring_provider column
 
 ### Carried Forward from v1.5
 
@@ -91,6 +94,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T00:51:20.475Z
-Stopped at: Completed 31-prompts-attribution/31-02-PLAN.md
+Last session: 2026-03-30T00:58:47.685Z
+Stopped at: Completed 31-prompts-attribution/31-03-PLAN.md
 Resume file: None
