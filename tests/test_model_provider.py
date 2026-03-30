@@ -471,7 +471,7 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
 
 
 def test_call_model_records_cost_for_gemini(tmp_path):
-    """call_model calls record_cost with provider='gemini' for gemini calls."""
+    """call_model records $0 cost row for free providers like gemini."""
     from job_finder.web.model_provider import call_model
 
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
@@ -479,18 +479,20 @@ def test_call_model_records_cost_for_gemini(tmp_path):
     gemini_result = _make_result(provider="gemini", data={"score": 80})
 
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost") as mock_record_cost:
+         patch("job_finder.web.model_provider.cost_gate", return_value=True):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
         call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
-    mock_record_cost.assert_called_once()
-    call_kwargs = mock_record_cost.call_args
-    # record_cost(conn, job_id, purpose, model, input_tokens, output_tokens, provider=...)
-    assert call_kwargs.kwargs.get("provider") == "gemini" or call_kwargs.args[-1] == "gemini"
+    # Free providers record cost directly in DB at $0 (not via record_cost/compute_cost)
+    row = conn.execute(
+        "SELECT provider, cost_usd FROM scoring_costs ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row["provider"] == "gemini"
+    assert row["cost_usd"] == 0.0
 
 
 def test_call_model_raises_on_no_fallback(tmp_path):
