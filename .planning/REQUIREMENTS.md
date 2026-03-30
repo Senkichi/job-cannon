@@ -21,7 +21,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 
 - [x] **ATTR-01**: DB migration adds `scoring_provider` column to `jobs` table with `'anthropic'` default
 - [x] **ATTR-02**: `persist_sonnet_score()` accepts and stores provider from scoring result
-- [ ] **ATTR-03**: Provider attribution threaded from `call_model()` through `evaluate_job_sonnet()` to orchestrator to DB
+- [x] **ATTR-03**: Provider attribution threaded from `call_model()` through `evaluate_job_sonnet()` to orchestrator to DB
 
 ### Production Prompts
 
@@ -90,7 +90,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 | PRMT-02 | Phase 31 | Complete |
 | ATTR-01 | Phase 31 | Complete |
 | ATTR-02 | Phase 31 | Complete |
-| ATTR-03 | Phase 31 | Pending |
+| ATTR-03 | Phase 31 | Complete |
 | TEST-04 | Phase 31 | Complete |
 | CONF-02 | Phase 32 | Pending |
 

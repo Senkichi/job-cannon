@@ -80,7 +80,7 @@
 
 - [x] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage (completed 2026-03-29)
 - [x] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic (completed 2026-03-29)
-- [ ] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs
+- [x] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs (completed 2026-03-30)
 - [ ] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end
 
 ## Phase Details
@@ -128,7 +128,7 @@ Plans:
 Plans:
 - [x] 31-01-PLAN.md -- DB Migration 20 + persist_sonnet_score provider param + attribution tests
 - [x] 31-02-PLAN.md -- Fewshot production prompts + PROMPT_VARIANTS + cascade prompt variant injection
-- [ ] 31-03-PLAN.md -- Provider attribution threading (evaluate_job_sonnet -> orchestrator -> DB)
+- [x] 31-03-PLAN.md -- Provider attribution threading (evaluate_job_sonnet -> orchestrator -> DB)
 
 ### Phase 32: Integration & Config Wiring
 **Goal**: Production `config.yaml` runs the decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic) and the full pipeline can be verified cascade-working end-to-end
@@ -175,5 +175,5 @@ Plans:
 | 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete    | 2026-03-29 |
 | 30. Cascade Execution | v2.0 | 1/1 | Complete    | 2026-03-29 |
-| 31. Prompts & Attribution | v2.0 | 2/3 | In Progress|  |
+| 31. Prompts & Attribution | v2.0 | 3/3 | Complete   | 2026-03-30 |
 | 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |
