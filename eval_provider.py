@@ -35,7 +35,7 @@ from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import call_model, resolve_provider_config
 from job_finder.web.profile_schema import load_profile
 from job_finder.web.scoring_types import format_salary_range
-from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, _SYSTEM_PROMPT
+from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, _SYSTEM_PROMPT, _BASE_SYSTEM_PROMPT, PROMPT_VARIANTS as _PRODUCTION_VARIANTS
 
 
 # ---------------------------------------------------------------------------
@@ -101,15 +101,95 @@ _FEWSHOT_EXAMPLES = (
     "Candidate matches on every dimension: skills, seniority, domain, location, salary.\n"
 )
 
-_FEWSHOT_SYSTEM_PROMPT = _SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
+_FEWSHOT_SYSTEM_PROMPT = _SYSTEM_PROMPT  # _SYSTEM_PROMPT already includes fewshot examples (PRMT-01)
 
 _FEWSHOT_RUBRIC_SYSTEM_PROMPT = _RUBRIC_SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
 
+_ANCHORING_INSTRUCTIONS = (
+    "\n\n## Score Anchoring\n\n"
+    "CRITICAL: Most jobs should score below 50. A score of 70+ means the candidate is a "
+    "near-perfect match on skills, seniority, domain, AND preferences. Do not inflate scores "
+    "for remote-friendly roles or well-known companies. A Data Engineer role for a Data "
+    "Scientist candidate is a 30-45, not a 65+. An entry-level role for a senior candidate "
+    "is 10-20, not 40+. When in doubt, score lower.\n"
+)
+
+_COT_INSTRUCTIONS = (
+    "\n\n## Evaluation Process\n\n"
+    "Before producing your JSON output, reason through these dimensions:\n"
+    "1. **Required skills match**: List the top 3 required skills. Does the candidate have "
+    "each one? (yes/partial/no)\n"
+    "2. **Seniority alignment**: Is the match exact, close (±1 level), or far (±2+ levels)?\n"
+    "3. **Domain match**: Is the domain the same, adjacent, or completely different?\n"
+    "4. **Preference alignment**: Does the role match target titles, location, salary, industry?\n\n"
+    "Use this structured assessment to inform your final score. Include your reasoning in "
+    "the summary field.\n"
+)
+
+_DISTRIBUTION_INSTRUCTIONS = (
+    "\n\n## Expected Score Distribution\n\n"
+    "When scoring a diverse batch of jobs, expect approximately:\n"
+    "- ~30% should score 0-30 (poor/no fit)\n"
+    "- ~30% should score 30-55 (weak/partial fit)\n"
+    "- ~25% should score 55-75 (partial/good fit)\n"
+    "- ~15% should score 75-100 (good/exceptional fit)\n\n"
+    "If your scores cluster above 60 for most jobs, you are inflating. Most jobs in a "
+    "general search will NOT be a strong fit for a specific candidate.\n"
+)
+
+_COMPARATIVE_ANCHOR = (
+    "\n\n## Reference Anchor\n\n"
+    "The candidate's IDEAL role would be: Staff Data Scientist / Analytics Lead at a health "
+    "tech SaaS company, fully remote, $160K-200K, focused on experimentation design, causal "
+    "inference, and team leadership, using Python, SQL, and statistical modeling.\n\n"
+    "A score of 100 = identical to this ideal. A score of 50 = shares roughly half the key "
+    "attributes. A score of 10 = almost nothing in common. Score each job relative to this "
+    "anchor.\n"
+)
+
+_STRICT_GATES = (
+    "\n\n## Hard Scoring Gates\n\n"
+    "Apply these caps BEFORE your final score:\n"
+    "- Seniority mismatch > 2 levels (e.g., entry-level for a senior candidate) → cap at 35\n"
+    "- Completely different domain (e.g., marketing role for a data scientist) → cap at 25\n"
+    "- >50% of required skills are missing → cap at 45\n"
+    "- Salary below 70% of candidate minimum → cap at 40\n"
+    "- Role title has zero overlap with target titles → reduce by 15 points\n\n"
+    "These gates override any other positive signals. A great company with a bad role fit "
+    "is still a bad fit.\n"
+)
+
+_NEGATIVE_EXAMPLES = (
+    "\n\n## Common Scoring Mistakes to Avoid\n\n"
+    "**WRONG**: Scoring a Junior Marketing Coordinator role as 55 because "
+    "'the candidate could learn marketing.' CORRECT: Score 15 — complete domain mismatch, "
+    "wrong seniority direction, no transferable skills.\n\n"
+    "**WRONG**: Scoring a Data Engineer role as 65 because 'the candidate knows Python and "
+    "SQL.' CORRECT: Score 38 — adjacent field but the candidate lacks Spark, Kafka, Airflow, "
+    "and data pipeline engineering experience. Python/SQL overlap alone is not enough.\n\n"
+    "**WRONG**: Scoring a VP of Engineering role as 60 because 'the candidate has leadership "
+    "potential.' CORRECT: Score 22 — seniority mismatch of 3+ levels, no engineering "
+    "management experience, different career track entirely.\n"
+)
+
+_FEWSHOT_ANCHORED_PROMPT = _SYSTEM_PROMPT + _ANCHORING_INSTRUCTIONS
+_FEWSHOT_COT_PROMPT = _SYSTEM_PROMPT + _COT_INSTRUCTIONS
+_FEWSHOT_DISTRIBUTION_PROMPT = _SYSTEM_PROMPT + _DISTRIBUTION_INSTRUCTIONS
+_FEWSHOT_COMPARATIVE_PROMPT = _SYSTEM_PROMPT + _COMPARATIVE_ANCHOR
+_FEWSHOT_RUBRIC_STRICT_PROMPT = _RUBRIC_SYSTEM_PROMPT + _FEWSHOT_EXAMPLES + _STRICT_GATES
+_FEWSHOT_NEGATIVE_PROMPT = _SYSTEM_PROMPT + _NEGATIVE_EXAMPLES
+
 PROMPT_VARIANTS: dict[str, str] = {
-    PROMPT_VARIANT_DEFAULT: _SYSTEM_PROMPT,
+    PROMPT_VARIANT_DEFAULT: _BASE_SYSTEM_PROMPT,  # plain prompt without fewshot (legacy eval baseline)
     PROMPT_VARIANT_RUBRIC: _RUBRIC_SYSTEM_PROMPT,
     PROMPT_VARIANT_FEWSHOT: _FEWSHOT_SYSTEM_PROMPT,
     PROMPT_VARIANT_FEWSHOT_RUBRIC: _FEWSHOT_RUBRIC_SYSTEM_PROMPT,
+    "fewshot-anchored": _FEWSHOT_ANCHORED_PROMPT,
+    "fewshot-cot": _FEWSHOT_COT_PROMPT,
+    "fewshot-distribution": _PRODUCTION_VARIANTS["fewshot-distribution"],
+    "fewshot-comparative": _FEWSHOT_COMPARATIVE_PROMPT,
+    "fewshot-rubric-strict": _FEWSHOT_RUBRIC_STRICT_PROMPT,
+    "fewshot-negative": _FEWSHOT_NEGATIVE_PROMPT,
 }
 
 
@@ -627,7 +707,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         required=True,
-        choices=["gemini", "ollama", "ollm", "mistral", "cohere", "sambanova", "openrouter"],
+        choices=["cerebras", "cohere", "gemini", "groq", "mistral", "ollama", "ollm", "openrouter", "sambanova"],
         help="Provider to evaluate.",
     )
     parser.add_argument(
@@ -695,7 +775,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--prompt-variant",
         default="default",
-        choices=["default", "rubric", "fewshot", "fewshot-rubric"],
+        choices=list(PROMPT_VARIANTS.keys()),
         help="System prompt variant for scoring (default: default).",
     )
     parser.add_argument(

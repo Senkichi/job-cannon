@@ -80,13 +80,57 @@ SONNET_SCHEMA = {
 # System prompt
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = (
+_BASE_SYSTEM_PROMPT = (
     "You are a senior career advisor evaluating job fit. Analyze the full job description "
     "against the candidate's experience profile. Be specific about strengths (cite concrete "
     "experience), gaps (be honest but constructive), and resume priority skills (what to "
     "emphasize for this specific role). Score calibration: 80+ = excellent fit, apply "
     "immediately; 65-79 = good fit worth applying; 50-64 = partial fit; <50 = poor fit."
 )
+
+_FEWSHOT_EXAMPLES = (
+    "\n\n## Calibration Examples\n\n"
+    "### Example 1: Score 15 (Poor fit)\n"
+    "Junior Marketing Coordinator role requiring social media management, content creation, "
+    "and 1-2 years marketing experience. Candidate is a Senior Data Scientist with 10+ years "
+    "in analytics. Complete domain mismatch, wrong seniority direction.\n\n"
+    "### Example 2: Score 38 (Weak fit)\n"
+    "Data Engineer role requiring extensive Spark, Kafka, and Airflow experience with AWS "
+    "infrastructure. Candidate has strong SQL and Python but minimal distributed systems or "
+    "data pipeline engineering experience. Adjacent field but significant skill gaps.\n\n"
+    "### Example 3: Score 62 (Partial fit)\n"
+    "Product Analytics Manager at a fintech startup requiring team management, A/B testing, "
+    "and financial domain knowledge. Candidate has analytics experience and A/B testing but "
+    "in healthcare, not finance. No direct reports experience.\n\n"
+    "### Example 4: Score 78 (Good fit)\n"
+    "Senior Data Scientist at a healthcare company requiring Python, ML, statistical modeling, "
+    "and healthcare analytics. Candidate has all technical skills and healthcare domain "
+    "experience but is targeting a more senior title (Lead/Staff level).\n\n"
+    "### Example 5: Score 91 (Exceptional fit)\n"
+    "Staff Data Scientist / Analytics Lead at a health tech SaaS company, remote, $160K-200K. "
+    "Requires experimentation design, causal inference, team leadership, Python, SQL. "
+    "Candidate matches on every dimension: skills, seniority, domain, location, salary.\n"
+)
+
+_DISTRIBUTION_INSTRUCTIONS = (
+    "\n\n## Expected Score Distribution\n\n"
+    "When scoring a diverse batch of jobs, expect approximately:\n"
+    "- ~30% should score 0-30 (poor/no fit)\n"
+    "- ~30% should score 30-55 (weak/partial fit)\n"
+    "- ~25% should score 55-75 (partial/good fit)\n"
+    "- ~15% should score 75-100 (good/exceptional fit)\n\n"
+    "If your scores cluster above 60 for most jobs, you are inflating. Most jobs in a "
+    "general search will NOT be a strong fit for a specific candidate.\n"
+)
+
+# Production default: fewshot examples are included by default (PRMT-01)
+_SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
+
+# Per-model prompt variants for cascade config (PRMT-02)
+PROMPT_VARIANTS: dict[str, str] = {
+    "fewshot": _SYSTEM_PROMPT,  # same as default — fewshot IS the default now
+    "fewshot-distribution": _SYSTEM_PROMPT + _DISTRIBUTION_INSTRUCTIONS,
+}
 
 
 def evaluate_job_sonnet(
