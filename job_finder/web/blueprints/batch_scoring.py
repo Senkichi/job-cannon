@@ -281,23 +281,22 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
             ).fetchall()
 
-            # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
-            status_row = conn.execute(
-                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if status_row and status_row["status"] == "cancelling":
-                conn.execute(
-                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (utc_now_iso(), session_id),
-                )
-                conn.commit()
-                return
-
-            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
             for row in rows:
+                # Per-job cancellation check
+                status_row = conn.execute(
+                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if status_row and status_row["status"] == "cancelling":
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'cancelled', scored = ?, skipped = ?, finished_at = ? WHERE id = ?",
+                        (scored_count, skipped_count, utc_now_iso(), session_id),
+                    )
+                    conn.commit()
+                    return
+
                 job_row = dict(row)
 
                 # Pre-Haiku exclusion filter
@@ -322,12 +321,12 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     )
                     skipped_count += 1
 
-            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
-            conn.execute(
-                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                (scored_count, skipped_count, session_id),
-            )
-            conn.commit()
+                # Flush progress after each job so polling shows real-time updates
+                conn.execute(
+                    "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                    (scored_count, skipped_count, session_id),
+                )
+                conn.commit()
 
             # All jobs processed — mark done
             _finish_session(conn, db_path, session_id, "done", "haiku")
@@ -369,23 +368,22 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                 (threshold,),
             ).fetchall()
 
-            # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
-            status_row = conn.execute(
-                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if status_row and status_row["status"] == "cancelling":
-                conn.execute(
-                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (utc_now_iso(), session_id),
-                )
-                conn.commit()
-                return
-
-            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
             for row in rows:
+                # Per-job cancellation check
+                status_row = conn.execute(
+                    "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if status_row and status_row["status"] == "cancelling":
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'cancelled', scored = ?, skipped = ?, finished_at = ? WHERE id = ?",
+                        (scored_count, skipped_count, utc_now_iso(), session_id),
+                    )
+                    conn.commit()
+                    return
+
                 job_row = dict(row)
                 try:
                     result = score_and_persist_sonnet(conn, job_row, config, client, profile)
@@ -400,12 +398,12 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                     )
                     skipped_count += 1
 
-            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
-            conn.execute(
-                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                (scored_count, skipped_count, session_id),
-            )
-            conn.commit()
+                # Flush progress after each job so polling shows real-time updates
+                conn.execute(
+                    "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                    (scored_count, skipped_count, session_id),
+                )
+                conn.commit()
 
             # All jobs processed — mark done
             _finish_session(conn, db_path, session_id, "done", "sonnet")
