@@ -178,7 +178,8 @@ def score_and_persist_sonnet(
 
     sonnet_score = result.get("score")
     fit_analysis = json.dumps(result.get("fit_analysis", {}))
+    provider = result.get("provider")  # Attribution: which provider scored this job
 
-    persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis)
+    persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis, provider=provider)
 
     return result

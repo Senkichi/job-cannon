@@ -250,6 +250,10 @@ def evaluate_job_sonnet(
             client=client,
         )
         result = result_obj.data
+        # Inject provider into data dict for attribution threading (ATTR-03).
+        # Using data dict avoids changing ScoringResult NamedTuple fields
+        # which would break positional unpacking in callers.
+        result = {**result, "provider": result_obj.provider}
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",
             job_row.get("title"),
