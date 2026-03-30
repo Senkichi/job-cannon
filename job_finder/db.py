@@ -25,7 +25,7 @@ JOBS_ALL_COLUMNS = (
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
     "haiku_score, haiku_summary, sonnet_score, fit_analysis, jd_full, is_stale, "
     "company_id, comp_data_json, enrichment_tier, rejection_reviewed, "
-    "locations_raw, description_reformatted, expiry_checked_at"
+    "locations_raw, description_reformatted, expiry_checked_at, scoring_provider"
 )
 
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch needs.
@@ -260,6 +260,7 @@ def persist_sonnet_score(
     dedup_key: str,
     sonnet_score: float,
     fit_analysis: str,
+    provider: str | None = None,
 ) -> None:
     """Persist Sonnet evaluation results for a job.
 
@@ -271,10 +272,12 @@ def persist_sonnet_score(
         dedup_key: The job's primary key.
         sonnet_score: Numeric score from Sonnet deep evaluation.
         fit_analysis: JSON string containing fit analysis details.
+        provider: Provider name that produced the score (e.g. "cerebras"). None preserves existing value.
     """
     conn.execute(
-        "UPDATE jobs SET sonnet_score = ?, fit_analysis = ? WHERE dedup_key = ?",
-        (sonnet_score, fit_analysis, dedup_key),
+        "UPDATE jobs SET sonnet_score = ?, fit_analysis = ?, "
+        "scoring_provider = COALESCE(?, scoring_provider) WHERE dedup_key = ?",
+        (sonnet_score, fit_analysis, provider, dedup_key),
     )
     conn.commit()
 

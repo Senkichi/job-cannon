@@ -423,6 +423,13 @@ MIGRATIONS = [
     [
         "ALTER TABLE jobs ADD COLUMN opus_score REAL DEFAULT NULL",
     ],
+
+    # Migration 20: Provider attribution for Sonnet scoring (ATTR-01).
+    # Records which provider produced each Sonnet score.
+    # Default 'anthropic' for all existing rows (pre-cascade).
+    [
+        "ALTER TABLE jobs ADD COLUMN scoring_provider TEXT DEFAULT 'anthropic'",
+    ],
 ]
 
 
