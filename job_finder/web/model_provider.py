@@ -296,15 +296,21 @@ def _maybe_record_cost(
     """
     if result.provider == "anthropic":
         return  # call_claude() already recorded it
-    record_cost(
-        conn,
-        job_id,
-        purpose,
-        result.model,
-        result.input_tokens,
-        result.output_tokens,
-        provider=result.provider,
+    # Free providers: record cost as $0 instead of calling compute_cost()
+    # which doesn't recognize their model names and falls back to Opus pricing.
+    if result.provider in _FREE_PROVIDERS:
+        cost_usd = 0.0
+    else:
+        cost_usd = result.cost_usd
+    from job_finder.json_utils import utc_now_iso
+    conn.execute(
+        "INSERT INTO scoring_costs "
+        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (job_id, purpose, result.model, result.input_tokens, result.output_tokens,
+         cost_usd, utc_now_iso(), result.provider),
     )
+    conn.commit()
 
 
 def call_model(
