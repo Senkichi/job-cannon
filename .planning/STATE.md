@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Cascading Free Provider Routing
 status: executing
-stopped_at: Completed 31-prompts-attribution/31-01-PLAN.md
-last_updated: "2026-03-30T00:49:48.565Z"
+stopped_at: Completed 31-prompts-attribution/31-02-PLAN.md
+last_updated: "2026-03-30T00:51:20.478Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # State
@@ -18,7 +18,7 @@ progress:
 ## Current Position
 
 Phase: 31 (Prompts & Attribution) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-03-30
 
@@ -43,6 +43,7 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 
 *Updated after each plan completion*
 | Phase 31-prompts-attribution P01 | 11min | 2 tasks | 4 files |
+| Phase 31-prompts-attribution P02 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,10 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - Schema failure after retry inside cascade loop does `continue` (not raise) — try next provider before giving up
 - Both `ValueError` and `RuntimeError` caught from `_make_adapter` — ValueError for missing API key, RuntimeError for Ollama health check
 - `_ensure_usage_current(conn)` is first statement in cascade path — before any `_check_daily_limit` call (Pitfall 3 guard)
+- `_SYSTEM_PROMPT` in sonnet_evaluator now includes fewshot examples by default (PRMT-01); `_BASE_SYSTEM_PROMPT` is the plain version
+- eval_provider "default" variant maps to `_BASE_SYSTEM_PROMPT` to preserve legacy eval baseline (no fewshot in eval baseline)
+- Cascade chain rebuilt as `list[dict]` to carry `prompt_variant` per entry; lazy import of PROMPT_VARIANTS inside loop avoids circular dependency
+- Full suite: 1815 tests passing after Phase 31 Plan 02 (10 new tests: 5 prompt + 2 cascade variant + 3 test_eval_provider fixes)
 
 ### Carried Forward from v1.5
 
@@ -86,6 +91,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T00:49:48.561Z
-Stopped at: Completed 31-prompts-attribution/31-01-PLAN.md
+Last session: 2026-03-30T00:51:20.475Z
+Stopped at: Completed 31-prompts-attribution/31-02-PLAN.md
 Resume file: None

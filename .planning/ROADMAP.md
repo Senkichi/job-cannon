@@ -127,7 +127,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 31-01-PLAN.md -- DB Migration 20 + persist_sonnet_score provider param + attribution tests
-- [ ] 31-02-PLAN.md -- Fewshot production prompts + PROMPT_VARIANTS + cascade prompt variant injection
+- [x] 31-02-PLAN.md -- Fewshot production prompts + PROMPT_VARIANTS + cascade prompt variant injection
 - [ ] 31-03-PLAN.md -- Provider attribution threading (evaluate_job_sonnet -> orchestrator -> DB)
 
 ### Phase 32: Integration & Config Wiring
@@ -175,5 +175,5 @@ Plans:
 | 28. Evaluation Framework | v1.5 | 2/2 | Complete | 2026-03-27 |
 | 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete    | 2026-03-29 |
 | 30. Cascade Execution | v2.0 | 1/1 | Complete    | 2026-03-29 |
-| 31. Prompts & Attribution | v2.0 | 1/3 | In Progress|  |
+| 31. Prompts & Attribution | v2.0 | 2/3 | In Progress|  |
 | 32. Integration & Config Wiring | v2.0 | 0/? | Not started | - |

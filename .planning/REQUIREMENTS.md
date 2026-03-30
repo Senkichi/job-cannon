@@ -13,7 +13,7 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 - [x] **CASC-02**: Daily rate limit tracker with in-memory counters that bootstrap from `scoring_costs` DB on date rollover
 - [x] **CASC-03**: `call_model()` iterates fallback chain, skipping providers that are exhausted, unavailable (missing API key), or over budget
 - [x] **CASC-04**: 429 HTTP responses mark the provider as exhausted for the day and cascade to next
-- [ ] **CASC-05**: Per-model prompt variant override in fallback chain config, threaded to sonnet evaluator
+- [x] **CASC-05**: Per-model prompt variant override in fallback chain config, threaded to sonnet evaluator
 - [x] **CASC-06**: Empty `fallback_chain` preserves existing single-fallback behavior (backward compatibility)
 - [x] **CASC-07**: All providers exhausted raises `RuntimeError` with clear message
 
@@ -25,8 +25,8 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 
 ### Production Prompts
 
-- [ ] **PRMT-01**: Fewshot examples moved from `eval_provider.py` into `sonnet_evaluator.py` as production default
-- [ ] **PRMT-02**: Distribution awareness instructions available for providers configured with `fewshot-distribution` variant
+- [x] **PRMT-01**: Fewshot examples moved from `eval_provider.py` into `sonnet_evaluator.py` as production default
+- [x] **PRMT-02**: Distribution awareness instructions available for providers configured with `fewshot-distribution` variant
 
 ### Testing
 
@@ -85,9 +85,9 @@ Requirements for Cascading Free Provider Routing milestone. Each maps to roadmap
 | CASC-04 | Phase 30 | Complete |
 | CASC-07 | Phase 30 | Complete |
 | TEST-02 | Phase 30 | Complete |
-| CASC-05 | Phase 31 | Pending |
-| PRMT-01 | Phase 31 | Pending |
-| PRMT-02 | Phase 31 | Pending |
+| CASC-05 | Phase 31 | Complete |
+| PRMT-01 | Phase 31 | Complete |
+| PRMT-02 | Phase 31 | Complete |
 | ATTR-01 | Phase 31 | Complete |
 | ATTR-02 | Phase 31 | Complete |
 | ATTR-03 | Phase 31 | Pending |
