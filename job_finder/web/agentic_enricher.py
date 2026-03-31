@@ -192,6 +192,12 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
             logger.debug("Auth wall detected on %s", url[:80])
             return None
 
+        # Reject website chrome, login pages, and wrong page types
+        from job_finder.web.enrichment_tiers import is_chrome_or_login_page
+        if is_chrome_or_login_page(text):
+            logger.debug("Chrome/login page detected on %s", url[:80])
+            return None
+
         # Too short = probably not a job description
         if len(text) < 300:
             return None
