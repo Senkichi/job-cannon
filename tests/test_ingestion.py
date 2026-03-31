@@ -982,7 +982,13 @@ class TestScoringResultUnwrap:
         dedup_key = self._make_job_row(
             migrated_db_path,
             dedup_key="corp|scientist|nyc",
-            jd_full="Full job description text for Sonnet evaluation.",
+            jd_full=(
+                "We are looking for a Data Scientist to join our growing team. "
+                "You will build machine learning models, design experiments, and work "
+                "closely with product and engineering teams to drive data-informed decisions. "
+                "Requirements: 3+ years of experience in data science, proficiency in Python "
+                "and SQL, and a strong foundation in statistics and machine learning."
+            ),
         )
 
         scoring_result = ScoringResult(

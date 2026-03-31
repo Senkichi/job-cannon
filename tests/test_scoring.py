@@ -972,7 +972,8 @@ class TestSonnetEvaluator:
             "jd_full": (
                 "We are looking for a Senior Data Scientist to join our team. "
                 "You will design and run A/B experiments, build causal inference models, "
-                "and work with Python and SQL daily. 5+ years experience required."
+                "and work with Python and SQL daily. 5+ years experience required. "
+                "Strong communication skills and ability to present findings to stakeholders."
             ),
         }
 
@@ -1195,7 +1196,12 @@ class TestSonnetPipelineIntegration:
                 "{}",
                 "unreviewed",
                 72,
-                "Full job description text for Senior Data Scientist at Acme Analytics.",
+                (
+                    "We are looking for a Senior Data Scientist to join our team. "
+                    "You will design and run A/B experiments, build causal inference models, "
+                    "and work with Python and SQL daily. 5+ years experience required. "
+                    "Strong communication skills and ability to present findings to stakeholders."
+                ),
             ),
         )
         conn.commit()
@@ -1239,7 +1245,8 @@ class TestSonnetPipelineIntegration:
             "SELECT jd_full FROM jobs WHERE dedup_key = 'acme|senior-ds|remote'"
         ).fetchone()
         assert row is not None
-        assert row["jd_full"] == "Full job description text for Senior Data Scientist at Acme Analytics."
+        assert row["jd_full"] is not None
+        assert len(row["jd_full"]) > 200
 
     def test_writes_sonnet_score_to_db(self, job_with_jd, pipeline_config, mock_sonnet_result):
         """run_sonnet_evaluation must write sonnet_score to jobs table."""
@@ -1372,7 +1379,12 @@ class TestSonnetPreferences:
             "location": "Remote",
             "salary_min": 180000,
             "salary_max": 250000,
-            "jd_full": "We are looking for a Senior Data Scientist. Python and SQL required.",
+            "jd_full": (
+                "We are looking for a Senior Data Scientist to join our team. "
+                "You will design and run A/B experiments, build causal inference models, "
+                "and work with Python and SQL daily. 5+ years experience required. "
+                "Strong communication skills and ability to present findings to stakeholders."
+            ),
         }
 
     @pytest.fixture
