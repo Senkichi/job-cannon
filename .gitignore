@@ -39,6 +39,23 @@ data/
 .claude/
 AUDIT_LOG.md
 
+# Code review / audit tool working directories
+.nit/
+.nit-supreme/
+.superpowers/
+.playwright-mcp/
+
+# Screenshots from exploration/testing sessions
+*.png
+
+# SQLite WAL artifacts
+*.db-shm
+*.db-wal
+*.db.bak*
+
+# Ephemeral session artifacts
+.planning/CHECKPOINT_*.md
+
 # GSD planning artifacts (codebase/ docs are retained separately in clean export)
 .planning/STATE.md
 .planning/ROADMAP.md
