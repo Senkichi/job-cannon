@@ -430,6 +430,62 @@ MIGRATIONS = [
     [
         "ALTER TABLE jobs ADD COLUMN scoring_provider TEXT DEFAULT 'anthropic'",
     ],
+
+    # Migration 21: Clean up stub JDs — title restatements from AI enrichment.
+    # When all free tiers failed, AI extraction echoed the title as jd_full
+    # (e.g., "Data Manager at Mochi Health" for a Data Manager role).
+    # NULL out these stubs and reset enrichment_tier so jobs can be re-enriched.
+    # Also NULL out sonnet_score/fit_analysis for stubs that were scored with garbage input.
+    [
+        """UPDATE jobs
+           SET jd_full = NULL,
+               enrichment_tier = NULL
+           WHERE jd_full IS NOT NULL
+             AND LENGTH(jd_full) < 200
+             AND enrichment_tier IN ('haiku', 'sonnet', 'exhausted')""",
+        """UPDATE jobs
+           SET sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full IS NULL
+             AND sonnet_score IS NOT NULL""",
+    ],
+
+    # Migration 22: Clean up chrome-polluted JDs — scraped website chrome, LinkedIn
+    # login walls, company overview pages, and search result pages stored as jd_full.
+    # These pass length checks but contain no usable job description content.
+    # NULL out jd_full + scores and reset enrichment_tier for re-enrichment.
+    [
+        # LinkedIn login wall pages (most common: 151 jobs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (jd_full LIKE '%Agree & Join LinkedIn%'
+               OR jd_full LIKE '%Join or sign in to find your next job%'
+               OR jd_full LIKE '%Join to apply for the%')""",
+        # Cookie banners in first 300 chars of jd_full
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (SUBSTR(jd_full, 1, 300) LIKE '%cookie%'
+               OR SUBSTR(jd_full, 1, 300) LIKE '%Close this dialog%'
+               OR SUBSTR(jd_full, 1, 300) LIKE '%third-party partners%')""",
+        # Built In company overview pages (not JDs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (jd_full LIKE '%View All Jobs at%'
+               OR jd_full LIKE '%Recently Posted Jobs at%'
+               OR jd_full LIKE '%Similar Companies Hiring%')""",
+        # LinkedIn search results pages (not individual JDs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND jd_full LIKE '%Past month%Past week%Past 24 hours%'""",
+    ],
 ]
 
 

@@ -84,8 +84,10 @@ def run_haiku_scoring(
                     continue
 
                 # --- Enrichment FIRST (before scoring) ---
+                from job_finder.web.data_enricher import is_stub_jd
                 if enrich_job is not None and (
-                    not job_row.get("jd_full") or job_row.get("salary_min") is None
+                    is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", ""))
+                    or job_row.get("salary_min") is None
                 ):
                     try:
                         serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
@@ -225,10 +227,11 @@ def run_sonnet_evaluation(
                     continue
 
                 # Job should already have jd_full from enrich_job (ran before Haiku scoring).
-                # If still missing after full enrichment pipeline, skip Sonnet eval.
-                if not job_row.get("jd_full"):
+                # If still missing or a stub after full enrichment pipeline, skip Sonnet eval.
+                from job_finder.web.data_enricher import is_stub_jd
+                if is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", "")):
                     logger.info(
-                        "No JD available for '%s' @ '%s' after enrichment, skipping Sonnet eval",
+                        "No JD available for '%s' @ '%s' after enrichment (stub or missing), skipping Sonnet eval",
                         job_row.get("title"),
                         job_row.get("company"),
                     )
