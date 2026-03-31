@@ -37,6 +37,7 @@ from typing import Optional, Any
 
 from job_finder.web.claude_client import cost_gate
 from job_finder.web.enrichment_tiers import (
+    TransientEnrichmentError,
     fetch_direct_jd, query_ats_api, scrape_careers,
     extract_with_sonnet, search_serpapi, search_duckduckgo, extract_with_haiku,
 )
@@ -55,6 +56,10 @@ TIER_ORDER = ["free", "ddg", "haiku", "serpapi", "sonnet", "exhausted"]
 # dict keys from injecting arbitrary column names into dynamic SQL SET clauses.
 _ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max", "location"})
 
+# Minimum character length for jd_full to be considered a real job description.
+# Anything shorter is likely a title restatement or placeholder from the AI.
+_MIN_JD_LENGTH = 200
+
 # Per-field cost ceilings: highest tier allowed to search for this field.
 # After this tier fails for a field, it is abandoned (not escalated further).
 FIELD_TIER_CEILINGS = {
@@ -62,6 +67,35 @@ FIELD_TIER_CEILINGS = {
     "salary_min": "haiku",    # cap at Haiku — not worth SerpAPI/Sonnet for salary alone
     "salary_max": "haiku",
 }
+
+
+# ---------------------------------------------------------------------------
+# Stub JD detection
+# ---------------------------------------------------------------------------
+
+
+def is_stub_jd(jd_text: Optional[str], title: str = "", company: str = "") -> bool:
+    """Return True if jd_text is a stub (title restatement or too short to be useful).
+
+    A real job description contains responsibilities, qualifications, etc.
+    Stubs are produced when AI extraction echoes the title back as jd_full
+    because no real JD content was available in the input fragments.
+
+    Args:
+        jd_text: The jd_full value to check.
+        title: Job title for overlap detection.
+        company: Company name for overlap detection.
+
+    Returns:
+        True if jd_text is missing, too short, or a title restatement.
+    """
+    if not jd_text or not jd_text.strip():
+        return True
+
+    if len(jd_text.strip()) < _MIN_JD_LENGTH:
+        return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -199,37 +233,47 @@ def enrich_job(
         # ---------------------------------------------------------------
         if start_idx <= TIER_ORDER.index("haiku") and anthropic_client is not None:
             try:
-                # Compose search text from all fragments collected so far
+                # Compose search text from all fragments collected so far.
+                # None means no meaningful fragments — skip AI extraction entirely
+                # to avoid hallucinating JDs from titles alone.
                 search_input = _compose_fragment_text(fragments, title, company)
-                haiku_result = extract_with_haiku(
-                    search_input, job_row, anthropic_client, conn, config
-                )
-                if haiku_result:
-                    for k, v in haiku_result.items():
-                        fragments[k] = v
+                if search_input is None:
+                    logger.debug(
+                        "No fragments for '%s' @ '%s' — skipping Haiku extraction",
+                        title, company,
+                    )
+                    # Still advance tier so SerpAPI/Sonnet (which search independently)
+                    # can be attempted on next pass.
+                else:
+                    haiku_result = extract_with_haiku(
+                        search_input, job_row, anthropic_client, conn, config
+                    )
+                    if haiku_result:
+                        for k, v in haiku_result.items():
+                            fragments[k] = v
 
-                # Check what is still missing after Haiku
-                salary_fields = {"salary_min", "salary_max"}
-                enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
-                still_missing_after_haiku = [
-                    f for f in missing if f not in enriched_so_far
-                ]
+                    # Check what is still missing after Haiku
+                    salary_fields = {"salary_min", "salary_max"}
+                    enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
+                    still_missing_after_haiku = [
+                        f for f in missing if f not in enriched_so_far
+                    ]
 
-                if not still_missing_after_haiku:
-                    # All fields satisfied — return now
-                    _persist(conn, job_row, enriched_so_far, "haiku")
-                    return enriched_so_far
+                    if not still_missing_after_haiku:
+                        # All fields satisfied — return now
+                        _persist(conn, job_row, enriched_so_far, "haiku")
+                        return enriched_so_far
 
-                # Check salary ceiling: if ONLY salary fields remain missing after Haiku,
-                # stop escalating (salary ceiling is Haiku).
-                if all(f in salary_fields for f in still_missing_after_haiku):
-                    # Only salary remains missing — don't escalate to SerpAPI/Sonnet for salary
-                    _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "haiku")
-                    return enriched_so_far
+                    # Check salary ceiling: if ONLY salary fields remain missing after Haiku,
+                    # stop escalating (salary ceiling is Haiku).
+                    if all(f in salary_fields for f in still_missing_after_haiku):
+                        # Only salary remains missing — don't escalate to SerpAPI/Sonnet for salary
+                        _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "haiku")
+                        return enriched_so_far
 
-                # Otherwise, some non-salary field (jd_full) is still missing —
-                # partial results from Haiku are accumulated in fragments for use by
-                # SerpAPI/Sonnet; continue escalation.
+                    # Otherwise, some non-salary field (jd_full) is still missing —
+                    # partial results from Haiku are accumulated in fragments for use by
+                    # SerpAPI/Sonnet; continue escalation.
 
             except Exception as e:
                 logger.debug("Haiku tier failed for '%s': %s", title, e)
@@ -237,11 +281,12 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Tier 3: serpapi — Google Jobs search (paid)
         # ---------------------------------------------------------------
-        # SerpAPI only runs if JD is still missing (salary ceiling is Haiku)
-        jd_still_missing = not (
-            job_row.get("jd_full")
-            or fragments.get("url_jd")
-            or fragments.get("jd_full")
+        # SerpAPI only runs if JD is still missing (salary ceiling is Haiku).
+        # Use is_stub_jd to catch title restatements from prior AI tiers.
+        jd_still_missing = (
+            is_stub_jd(job_row.get("jd_full"), title, company)
+            and is_stub_jd(fragments.get("url_jd"), title, company)
+            and is_stub_jd(fragments.get("jd_full"), title, company)
         )
 
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
@@ -260,17 +305,27 @@ def enrich_job(
                         _persist(conn, job_row, enriched, "serpapi")
                         return enriched
 
+            except TransientEnrichmentError as e:
+                # Transient error (429/5xx/timeout): do NOT advance past serpapi.
+                # Persist tier as "haiku" so next call retries serpapi.
+                logger.info(
+                    "SerpAPI transient error for '%s' @ '%s': %s — will retry",
+                    title, company, e,
+                )
+                enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
+                _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "haiku")
+                return enriched_so_far
             except Exception as e:
                 logger.debug("SerpAPI tier failed for '%s': %s", title, e)
 
         # ---------------------------------------------------------------
         # Tier 4: sonnet — Deep extraction from all accumulated fragments
         # ---------------------------------------------------------------
-        # Sonnet only runs if JD is still missing
-        jd_still_missing = not (
-            job_row.get("jd_full")
-            or fragments.get("url_jd")
-            or fragments.get("jd_full")
+        # Sonnet only runs if JD is still missing (stubs don't count)
+        jd_still_missing = (
+            is_stub_jd(job_row.get("jd_full"), title, company)
+            and is_stub_jd(fragments.get("url_jd"), title, company)
+            and is_stub_jd(fragments.get("jd_full"), title, company)
         )
 
         if (
@@ -281,15 +336,32 @@ def enrich_job(
             try:
                 # Check cost gate before calling Sonnet (requires a live DB connection)
                 gate_ok = conn is not None and cost_gate(conn, config, "sonnet")
-                if gate_ok:
-                    sonnet_result = extract_with_sonnet(
-                        fragments, job_row, anthropic_client, conn, config
+                if not gate_ok:
+                    # Budget exceeded: persist as "serpapi" so Sonnet can be retried
+                    # next month when budget resets. Do NOT mark as exhausted.
+                    logger.debug(
+                        "Sonnet cost gate blocked for '%s' @ '%s' — will retry later",
+                        title, company,
                     )
-                    if sonnet_result:
-                        enriched = _filter_non_none(sonnet_result)
-                        if enriched:
-                            _persist(conn, job_row, enriched, "sonnet")
-                            return enriched
+                    enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
+                    _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "serpapi")
+                    return enriched_so_far
+
+                sonnet_result = extract_with_sonnet(
+                    fragments, job_row, anthropic_client, conn, config
+                )
+                if sonnet_result:
+                    enriched = _filter_non_none(sonnet_result)
+                    # Reject stub JDs from Sonnet extraction (title restatements)
+                    if "jd_full" in enriched and is_stub_jd(enriched["jd_full"], title, company):
+                        logger.debug(
+                            "Sonnet returned stub jd_full for '%s' — discarding",
+                            title,
+                        )
+                        enriched.pop("jd_full")
+                    if enriched:
+                        _persist(conn, job_row, enriched, "sonnet")
+                        return enriched
 
             except Exception as e:
                 logger.debug("Sonnet tier failed for '%s': %s", title, e)
@@ -306,51 +378,74 @@ def enrich_job(
 def run_enrichment_backfill(
     db_path: str,
     serpapi_key: Optional[str] = None,
+    anthropic_client: Any = None,
     config: Optional[dict] = None,
     limit: int = 100,
-) -> int:
+) -> dict:
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
 
-    Queries jobs where enrichment_tier IS NULL or in a resumable state
-    (not 'exhausted', 'serpapi', or 'sonnet' — those are already done).
-    Processes up to `limit` jobs per call.
+    First resets prematurely-exhausted jobs (exhausted but still missing jd_full),
+    then processes jobs where enrichment is incomplete.
 
     Args:
         db_path: Absolute path to the SQLite database file.
         serpapi_key: Optional SerpAPI API key.
+        anthropic_client: Optional Anthropic client for Haiku/Sonnet tiers.
         config: Optional application config dict.
         limit: Max number of jobs to process per call.
 
     Returns:
-        Number of jobs that were enriched (had fields added).
+        Dict with 'enriched' count and 'reset' count.
     """
     from job_finder.web.db_helpers import standalone_connection
 
     if config is None:
         config = {}
 
+    result = {"enriched": 0, "reset": 0, "processed": 0}
+
     with standalone_connection(db_path) as conn:
+        # Phase 1: Reset prematurely-exhausted jobs (exhausted but no jd_full).
+        # These were marked exhausted when SerpAPI/Sonnet failed transiently.
+        reset_count = conn.execute(
+            """UPDATE jobs SET enrichment_tier = NULL
+               WHERE enrichment_tier IN ('exhausted', 'agentic_exhausted')
+                 AND (jd_full IS NULL OR TRIM(jd_full) = '' OR LENGTH(TRIM(jd_full)) < 200)""",
+        ).rowcount
+        conn.commit()
+        result["reset"] = reset_count
+        if reset_count:
+            logger.info("Enrichment backfill: reset %d prematurely-exhausted jobs", reset_count)
+
+        # Phase 2: Enrich jobs needing enrichment
         rows = conn.execute(
             """SELECT * FROM jobs
                WHERE enrichment_tier IS NULL
-                  OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')
+                  OR enrichment_tier NOT IN ('exhausted', 'agentic_exhausted', 'serpapi', 'sonnet')
+               ORDER BY first_seen DESC
                LIMIT ?""",
             (limit,),
         ).fetchall()
 
-        enriched_count = 0
         for row in rows:
             job_row = dict(row)
-            result = enrich_job(
+            result["processed"] += 1
+            enriched = enrich_job(
                 job_row,
                 serpapi_key=serpapi_key,
+                anthropic_client=anthropic_client,
                 conn=conn,
                 config=config,
             )
-            if result:
-                enriched_count += 1
+            if enriched:
+                result["enriched"] += 1
 
-        return enriched_count
+        logger.info(
+            "Enrichment backfill: processed %d, enriched %d, reset %d",
+            result["processed"], result["enriched"], result["reset"],
+        )
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -362,13 +457,14 @@ def _find_missing_fields(job_row: dict) -> list:
     """Return list of missing scoring-relevant field names.
 
     A job needs enrichment if any of these are missing:
-    - jd_full: full job description (needed for Sonnet)
+    - jd_full: full job description (needed for Sonnet). Stubs (title
+      restatements < 200 chars) are treated as missing.
     - salary_min: minimum salary
 
     Returns empty list if all fields are present (no enrichment needed).
     """
     missing = []
-    if not job_row.get("jd_full"):
+    if is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", "")):
         missing.append("jd_full")
     if job_row.get("salary_min") is None:
         missing.append("salary_min")
@@ -419,7 +515,7 @@ def _parse_source_urls(source_urls_json: Optional[str]) -> list:
         return []
 
 
-def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
+def _compose_fragment_text(fragments: dict, title: str, company: str) -> Optional[str]:
     """Compose a single text string from all accumulated fragments.
 
     Args:
@@ -428,7 +524,9 @@ def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
         company: Company name for fallback context.
 
     Returns:
-        Aggregated text string for use in Haiku/Sonnet extraction.
+        Aggregated text string for use in Haiku/Sonnet extraction,
+        or None if no meaningful fragments exist (prevents AI tiers from
+        hallucinating JDs from titles alone).
     """
     parts = []
     for key, text in fragments.items():
@@ -437,7 +535,7 @@ def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
 
     if parts:
         return "\n\n".join(parts)
-    return f"Job posting: {title} at {company}"
+    return None
 
 
 def _resolve_from_fragments(
@@ -450,6 +548,8 @@ def _resolve_from_fragments(
     Looks for direct matches: fragments['jd_full'] -> jd_full,
     fragments['url_jd'] -> jd_full, fragments['salary_min'] -> salary_min, etc.
 
+    Rejects stub JDs (title restatements) via is_stub_jd check.
+
     Args:
         fragments: Dict of collected data from free-tier sources.
         missing: List of field names that are still missing.
@@ -458,13 +558,20 @@ def _resolve_from_fragments(
     Returns:
         Dict of {field: value} for fields that fragments can satisfy.
     """
+    title = job_row.get("title", "")
+    company = job_row.get("company", "")
     enriched = {}
     for field in missing:
         # Direct key match
         if field in fragments and fragments[field] is not None:
+            # Reject stub jd_full values
+            if field == "jd_full" and is_stub_jd(fragments[field], title, company):
+                continue
             enriched[field] = fragments[field]
         # url_jd maps to jd_full
         elif field == "jd_full" and fragments.get("url_jd"):
+            if is_stub_jd(fragments["url_jd"], title, company):
+                continue
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)

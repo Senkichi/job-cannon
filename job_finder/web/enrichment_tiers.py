@@ -19,6 +19,15 @@ from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
 
+
+class TransientEnrichmentError(Exception):
+    """Raised when an enrichment tier fails due to a transient error (429, 5xx, timeout).
+
+    Signals to the caller that this tier should be retried later,
+    NOT advanced past.
+    """
+    pass
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -49,10 +58,91 @@ _AUTH_WALL_SIGNATURES = [
     "sign in or join",
     "please verify you are a human",
     "access denied",
+    # LinkedIn variants — the most common source of auth-wall false negatives
+    "agree & join linkedin",
+    "join to apply",
+    "join or sign in to find your next job",
+    "sign in with email",
+    # Generic login/CAPTCHA walls
+    "create your free account",
+    "verify you're not a robot",
+    "enable javascript to view this page",
 ]
 
 # Timeout for external API calls (seconds)
 _TIMEOUT = 10
+
+# Chrome patterns: if the first ~300 chars of scraped text contain these,
+# the page is website chrome (cookie banners, nav), not a real JD.
+_CHROME_HEADER_SIGNATURES = [
+    "cookie",
+    "close this dialog",
+    "we and our third-party partners",
+    "accept all cookies",
+    "manage cookie preferences",
+]
+
+# LinkedIn-specific: page is a login-gated LinkedIn listing (has some job text
+# mixed with login prompts). These appear throughout the text.
+_LINKEDIN_WALL_MARKERS = [
+    "agree & join linkedin",
+    "join or sign in to find your next job",
+    "join to apply for the",
+    "sign in with email",
+    "forgot password?",
+]
+
+# Page-type markers: scraped content is a company overview, search results page,
+# or job board listing — not an individual JD.
+_WRONG_PAGE_SIGNATURES = [
+    "view all jobs at",        # Company overview pages (Built In, etc.)
+    "recently posted jobs at", # Built In company profiles
+    "total employees",         # Built In company overview chrome
+    "perks + benefits",        # Built In company overview chrome
+    "similar companies hiring",  # Built In company overview chrome
+    "jobs at similar companies",  # Built In company overview chrome
+]
+
+
+# ---------------------------------------------------------------------------
+# Content quality validation
+# ---------------------------------------------------------------------------
+
+
+def is_chrome_or_login_page(text: str) -> bool:
+    """Return True if scraped text is website chrome, a login wall, or a wrong page type.
+
+    Checks for:
+    - Cookie banners in the first 300 characters
+    - LinkedIn login page markers anywhere in text
+    - Company overview / job board listing pages (not individual JDs)
+
+    Args:
+        text: Cleaned page text to validate.
+
+    Returns:
+        True if the text should be rejected (not a usable JD).
+    """
+    if not text:
+        return True
+
+    text_lower = text.lower()
+    header_lower = text_lower[:300]
+
+    # Cookie/consent banners at the top of the page
+    if any(sig in header_lower for sig in _CHROME_HEADER_SIGNATURES):
+        return True
+
+    # LinkedIn login wall (markers appear throughout the page)
+    linkedin_hits = sum(1 for sig in _LINKEDIN_WALL_MARKERS if sig in text_lower)
+    if linkedin_hits >= 2:
+        return True
+
+    # Wrong page type (company overview, search results, etc.)
+    if any(sig in text_lower for sig in _WRONG_PAGE_SIGNATURES):
+        return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +177,11 @@ def fetch_direct_jd(url: str) -> Optional[str]:
         text_lower = text.lower()
         if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
             logger.debug("Auth-wall detected for '%s', rejecting", url)
+            return None
+
+        # Reject website chrome, login pages, and wrong page types
+        if is_chrome_or_login_page(text):
+            logger.debug("Chrome/login page detected for '%s', rejecting", url)
             return None
 
         return text[:_MAX_JD_CHARS] if text.strip() else None
@@ -331,7 +426,11 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
 
     Returns:
         Dict with job data (jd_full, salary_min, salary_max, location) or None
-        if no results or an error occurs.
+        if no results found.
+
+    Raises:
+        TransientEnrichmentError: On 429 rate-limit or 5xx server errors.
+            Callers should NOT advance past this tier.
     """
     try:
         params = {
@@ -341,6 +440,12 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
             "num": 1,
         }
         response = requests.get(_SERPAPI_URL, params=params, timeout=_TIMEOUT)
+
+        # Distinguish transient failures from genuine "no results"
+        if response.status_code == 429 or response.status_code >= 500:
+            raise TransientEnrichmentError(
+                f"SerpAPI {response.status_code} for '{query}'"
+            )
         response.raise_for_status()
 
         data = response.json()
@@ -371,6 +476,10 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
 
         return result if result else None
 
+    except TransientEnrichmentError:
+        raise  # Let caller handle transient errors
+    except requests.exceptions.Timeout as e:
+        raise TransientEnrichmentError(f"SerpAPI timeout for '{query}'") from e
     except Exception as e:
         logger.debug("SerpAPI search failed for '%s': %s", query, e)
         return None
