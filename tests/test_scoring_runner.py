@@ -19,6 +19,15 @@ import pytest
 
 _NOW = datetime.now().isoformat()
 
+# Fake JD text > 200 chars (stub detection rejects JDs < 200 chars)
+_LONG_JD = (
+    "We are looking for a Data Scientist to join our growing team. "
+    "You will build machine learning models, design experiments, and work "
+    "closely with product and engineering teams to drive data-informed decisions. "
+    "Requirements: 3+ years of experience in data science, proficiency in Python "
+    "and SQL, and a strong foundation in statistics and machine learning."
+)
+
 
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None = None) -> None:
     """Insert a minimal job row for scoring tests."""
@@ -200,7 +209,7 @@ def test_sonnet_batch_fetch(migrated_db):
     db_path, setup_conn = migrated_db
     keys = ["skey-a", "skey-b", "skey-c"]
     for k in keys:
-        _insert_job(setup_conn, k, jd_full="Full job description text for Sonnet evaluation.")
+        _insert_job(setup_conn, k, jd_full=_LONG_JD)
     setup_conn.commit()
 
     select_calls: list[str] = []
@@ -229,7 +238,7 @@ def test_sonnet_batch_fetch(migrated_db):
 def test_sonnet_missing_key_skipped(migrated_db, caplog):
     """run_sonnet_evaluation logs a warning for a missing key and evaluates only existing ones."""
     db_path, setup_conn = migrated_db
-    _insert_job(setup_conn, "skey-exists", jd_full="Full job description for Sonnet.")
+    _insert_job(setup_conn, "skey-exists", jd_full=_LONG_JD)
     setup_conn.commit()
 
     import job_finder.web.scoring_runner as sr

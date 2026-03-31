@@ -158,12 +158,14 @@ def evaluate_job_sonnet(
         summary, fit_analysis. On failure: status='skipped' (jd_full absent),
         status='budget_exceeded', or status='error', with data=None.
     """
+    from job_finder.web.data_enricher import is_stub_jd
     jd_full = job_row.get("jd_full")
-    if not jd_full:
+    if is_stub_jd(jd_full, job_row.get("title", ""), job_row.get("company", "")):
         logger.debug(
-            "Sonnet eval skipped for '%s' @ '%s': jd_full is absent",
+            "Sonnet eval skipped for '%s' @ '%s': jd_full is absent or stub (%d chars)",
             job_row.get("title"),
             job_row.get("company"),
+            len(jd_full) if jd_full else 0,
         )
         return ScoringResult(data=None, status="skipped")
 

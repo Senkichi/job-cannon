@@ -414,7 +414,7 @@ def test_migration_count_is_thirteen():
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 20
+    assert len(MIGRATIONS) == 22
 
 
 class TestMigration13:
@@ -1121,4 +1121,4 @@ class TestMigration18:
 
     def test_migrations_count_is_19(self):
         """MIGRATIONS list has exactly 20 entries (updated for Migration 20 scoring_provider)."""
-        assert len(MIGRATIONS) == 20
+        assert len(MIGRATIONS) == 22
