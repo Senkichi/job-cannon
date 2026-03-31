@@ -31,18 +31,17 @@ Surface the best-fit jobs fast and keep the application pipeline visible — eve
 - ✓ Data migration from job-finder complete (8 files, config merged, schema verified) — v1.2
 - ✓ Full validation: 1359 tests pass, app renders 592 real jobs — v1.2
 
+- ✓ Cascade config schema with `fallback_chain` list parsed by `resolve_provider_config()` — v2.0
+- ✓ Daily rate limit tracker with in-memory counters bootstrapped from scoring_costs DB — v2.0
+- ✓ Cascade logic in `call_model()` — iterate providers, skip exhausted/unavailable, handle 429s — v2.0
+- ✓ Per-model prompt variant support threaded through cascade config — v2.0
+- ✓ DB migration for `scoring_provider` column on jobs table with provider attribution threading — v2.0
+- ✓ Fewshot examples moved from eval CLI into production sonnet evaluator — v2.0
+- ✓ Full test suite for cascade, rate limiting, backward compatibility, and provider attribution — v2.0
+
 ### Active
 
-- [ ] Adapter-pattern dispatcher (`call_model()`) resolves logical tier names to provider + model via config (v1.5)
-- [ ] Anthropic provider adapter wrapping existing `call_claude()` internals (v1.5)
-- [ ] Gemini provider adapter via `google-genai` SDK with free-tier rate limiting (v1.5)
-- [ ] Ollama provider adapter via local REST API with health-check init (v1.5)
-- [ ] Schema validation with retry and configurable Anthropic fallback (v1.5)
-- [ ] Migrate all call_claude() and direct anthropic.Anthropic() call sites to call_model() (v1.5)
-- [ ] Cost tracking with per-provider breakdown (provider column on scoring_costs) (v1.5)
-- [ ] Budget gate bypass for free providers (Gemini free tier, Ollama local) (v1.5)
-- [ ] CLI evaluation framework benchmarking alternative models against stored Sonnet results (v1.5)
-- [ ] Config-driven provider routing via new `providers` section in config.yaml (v1.5)
+(No active requirements — planning next milestone)
 
 ### Out of Scope
 
@@ -51,30 +50,17 @@ Surface the best-fit jobs fast and keep the application pipeline visible — eve
 - Build step or bundler — Tailwind CDN + HTMX CDN is intentional
 - APScheduler 4.x — breaking async API, pinned <4.0
 
-## Current Milestone: v1.5 Multi-Provider Model Routing
-
-**Goal:** Make all AI model calls configurable to route through Anthropic, Gemini, or Ollama via config.yaml, with an evaluation framework to benchmark alternatives before switching.
-
-**Target features:**
-- Adapter-pattern dispatcher (`call_model()`) with logical tier routing
-- Three provider adapters: Anthropic, Gemini, Ollama
-- Schema validation with retry + configurable Anthropic fallback
-- Caller migration: all 18+ call sites from call_claude() to call_model()
-- Cost tracking with per-provider breakdown
-- CLI evaluation framework for data-driven provider comparisons
-- Budget gate bypass for free providers
-
 ## Current State
 
-v1.4 shipped (2026-03-27). All features operational with real data. 1533+ tests pass. 592+ real jobs in database. Tech debt swept — module splits, N+1 batching, standalone_connection extraction, naming consistency.
+v2.0 shipped (2026-03-30). Cascading free provider routing replaces paid Sonnet evaluation ($0.011/job → $0.00/job) for daily volumes under 400. Cascade order: Cerebras qwen-3-235b (primary) → Groq llama-4-scout → Ollama qwen2.5:14b → Anthropic Sonnet (paid fallback). 1815 tests pass. 592+ real jobs in database. Every scored job records which provider produced its score.
 
-**Shipped in v1.4:** 5 phases, 15 plans. Indeed dedup, naming consistency, standalone_connection extraction, companies test coverage, god-object module splits, N+1 query batching.
+**Shipped in v2.0:** 4 phases, 7 plans. Cascade config parsing, daily rate limiting, dispatch loop with 429 handling, fewshot production prompts, per-model prompt variants, provider attribution to DB, production config wiring.
 
 ## Context
 
 - job-cannon is the single source of truth (job-finder retired after v1.1)
 - 52,381 LOC Python across job_finder/ and tests/
-- 1359 tests, all passing
+- 1786+ tests, all passing
 - All features operational — resume generation, interview prep, rejection analysis, scoring, pipeline tracking
 
 ## Constraints
@@ -115,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-27 after v1.5 milestone start (Multi-Provider Model Routing)*
+*Last updated: 2026-03-30 after v2.0 milestone shipped (Cascading Free Provider Routing)*

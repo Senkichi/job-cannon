@@ -8,7 +8,7 @@
 - ✅ **v1.3 Fixes & Improvements** — Phases 15-18 (shipped 2026-03-26)
 - ✅ **v1.4 Tech Debt Sweep** — Phases 19-23 (shipped 2026-03-27)
 - ✅ **v1.5 Multi-Provider Model Routing** — Phases 24-28 (shipped 2026-03-27)
-- 🔄 **v2.0 Cascading Free Provider Routing** — Phases 29-32 (in progress)
+- ✅ **v2.0 Cascading Free Provider Routing** — Phases 29-32 (shipped 2026-03-30)
 
 ## Phases
 
@@ -76,72 +76,15 @@
 
 </details>
 
-### v2.0 Cascading Free Provider Routing
+<details>
+<summary>✅ v2.0 Cascading Free Provider Routing (Phases 29-32) — SHIPPED 2026-03-30</summary>
 
-- [x] **Phase 29: Cascade Config & Rate Limiting** - Parse fallback_chain config and track daily provider usage (completed 2026-03-29)
-- [x] **Phase 30: Cascade Execution** - Iterate provider chain with 429 handling and exhaustion logic (completed 2026-03-29)
-- [x] **Phase 31: Prompts & Attribution** - Fewshot in production, per-model variants, provider stored on jobs (completed 2026-03-30)
-- [x] **Phase 32: Integration & Config Wiring** - Wire production config.yaml, smoke test cascade end-to-end (completed 2026-03-30)
+- [x] Phase 29: Cascade Config & Rate Limiting (2/2 plans) — completed 2026-03-29
+- [x] Phase 30: Cascade Execution (1/1 plan) — completed 2026-03-29
+- [x] Phase 31: Prompts & Attribution (3/3 plans) — completed 2026-03-30
+- [x] Phase 32: Integration & Config Wiring (1/1 plan) — completed 2026-03-30
 
-## Phase Details
-
-### Phase 29: Cascade Config & Rate Limiting
-**Goal**: The app can parse a `fallback_chain` from config and accurately track daily provider usage in memory
-**Depends on**: Phase 28 (Provider Foundation complete)
-**Requirements**: CASC-01, CASC-02, CASC-06, CONF-01, TEST-01, TEST-03
-**Success Criteria** (what must be TRUE):
-  1. `resolve_provider_config()` returns a `fallback_chain` list (empty list when config has no chain, preserving old single-fallback behavior)
-  2. Daily usage counters reset automatically at midnight and bootstrap from `scoring_costs` DB on the new day
-  3. A provider at its daily limit is correctly identified as exhausted; a provider under its limit passes the check
-  4. `config.example.yaml` shows a complete, commented cascade config block that new users can copy
-  5. Config parse tests and daily limit tracker tests all pass
-**Plans**: 2 plans
-Plans:
-- [x] 29-01-PLAN.md -- Cascade config parsing (resolve_provider_config + config.example.yaml + tests)
-- [x] 29-02-PLAN.md -- Daily rate limit tracker (module-level state + helper functions + tests)
-
-### Phase 30: Cascade Execution
-**Goal**: `call_model()` walks the fallback chain, skipping exhausted or unavailable providers, and surfaces a clear error when all are exhausted
-**Depends on**: Phase 29
-**Requirements**: CASC-03, CASC-04, CASC-07, TEST-02
-**Success Criteria** (what must be TRUE):
-  1. When the primary provider is at its daily limit, scoring continues using the next provider in the chain without any user intervention
-  2. A 429 response from any provider marks that provider as exhausted for the day and immediately cascades to the next provider
-  3. A provider with no API key configured is silently skipped (not an error)
-  4. When every provider in the chain is exhausted or unavailable, `call_model()` raises `RuntimeError` with a descriptive message
-  5. Cascade execution tests all pass (skip exhausted, 429 mark-and-skip, all-exhausted error)
-**Plans**: 1 plan
-Plans:
-- [x] 30-01-PLAN.md -- Cascade dispatch loop (tests + call_model cascade implementation)
-
-### Phase 31: Prompts & Attribution
-**Goal**: Production scoring uses fewshot examples by default, per-model prompt variants thread through the cascade, and every scored job records which provider produced its score
-**Depends on**: Phase 30
-**Requirements**: CASC-05, PRMT-01, PRMT-02, ATTR-01, ATTR-02, ATTR-03, TEST-04
-**Success Criteria** (what must be TRUE):
-  1. `sonnet_evaluator.py` includes fewshot examples in the system prompt without any extra config — existing jobs scored after this phase are evaluated with fewshot by default
-  2. A cascade entry with `prompt_variant: fewshot-distribution` causes the evaluator to use the distribution-aware instructions for that provider
-  3. After scoring, `SELECT scoring_provider FROM jobs WHERE dedup_key = ?` returns the name of the provider that produced the score (not NULL, not the default)
-  4. Existing jobs without a provider value default to `'anthropic'` (migration is non-destructive)
-  5. Provider attribution DB test passes: score a job, verify `scoring_provider` column written correctly
-**Plans**: 3 plans
-Plans:
-- [x] 31-01-PLAN.md -- DB Migration 20 + persist_sonnet_score provider param + attribution tests
-- [x] 31-02-PLAN.md -- Fewshot production prompts + PROMPT_VARIANTS + cascade prompt variant injection
-- [x] 31-03-PLAN.md -- Provider attribution threading (evaluate_job_sonnet -> orchestrator -> DB)
-
-### Phase 32: Integration & Config Wiring
-**Goal**: Production `config.yaml` runs the decided cascade order (Cerebras -> Groq -> Ollama -> Anthropic) and the full pipeline can be verified cascade-working end-to-end
-**Depends on**: Phase 31
-**Requirements**: CONF-02
-**Success Criteria** (what must be TRUE):
-  1. `config.yaml` has `fallback_chain` wired with Cerebras as primary, Groq second, Ollama third, Anthropic last, with correct model IDs and per-model prompt variants
-  2. `daily_limits` for Cerebras (350) and Groq (170) are set in config
-  3. Setting `daily_limits.cerebras: 2` and triggering scoring causes the second job to be scored by Groq (verifiable via `scoring_provider` column)
-  4. All 1786+ tests continue to pass after config wiring
-**Plans**: 1 plan
-Plans:
-- [x] 32-01-PLAN.md -- Wire cascade config in config.yaml + test suite verification + smoke test
+</details>
 
 ## Progress
 
@@ -178,4 +121,4 @@ Plans:
 | 29. Cascade Config & Rate Limiting | v2.0 | 2/2 | Complete    | 2026-03-29 |
 | 30. Cascade Execution | v2.0 | 1/1 | Complete    | 2026-03-29 |
 | 31. Prompts & Attribution | v2.0 | 3/3 | Complete    | 2026-03-30 |
-| 32. Integration & Config Wiring | v2.0 | 1/1 | Complete   | 2026-03-30 |
+| 32. Integration & Config Wiring | v2.0 | 1/1 | Complete    | 2026-03-30 |

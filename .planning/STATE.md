@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Cascading Free Provider Routing
 status: verifying
 stopped_at: Completed 32-integration-config-wiring/32-01-PLAN.md
-last_updated: "2026-03-30T01:20:27.525Z"
+last_updated: "2026-03-30T01:30:45.264Z"
 last_activity: 2026-03-30
 progress:
   total_phases: 4
@@ -17,8 +17,8 @@ progress:
 
 ## Current Position
 
-Phase: 32 (Integration & Config Wiring) — EXECUTING
-Plan: 1 of 1
+Phase: 32
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-03-30
 
@@ -82,6 +82,10 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - OllamaProvider uses requests library — stream=False hardcoded, format=json guarantees parseable output
 - AnthropicProvider stores job_id and purpose at init, forwards to call_claude for correct cost attribution
 - scoring_costs table already has `provider` column
+
+### Pending Todos
+
+10 todos in `.planning/todos/pending/` — run `/gsd:check-todos` to review.
 
 ### Blockers/Concerns
 
