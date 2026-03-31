@@ -116,9 +116,10 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
                 if serpapi_key:
                     try:
                         from job_finder.web.data_enricher import run_enrichment_backfill
-                        count = run_enrichment_backfill(db_path, serpapi_key, config=config, limit=100)
-                        if count:
-                            logger.info("Enrichment backfill: %d jobs enriched", count)
+                        result = run_enrichment_backfill(db_path, serpapi_key, config=config, limit=100)
+                        enriched = result.get("enriched", 0) if isinstance(result, dict) else result
+                        if enriched:
+                            logger.info("Enrichment backfill: %d jobs enriched", enriched)
                     except Exception as e:
                         logger.warning("Enrichment backfill failed (non-fatal): %s", e)
                 else:

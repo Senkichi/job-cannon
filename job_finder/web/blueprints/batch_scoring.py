@@ -255,9 +255,9 @@ def batch_score_cancel(session_id):
 def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     """Background thread: run Haiku scoring for all unscored jobs.
 
-    Delegates per-job scoring + persistence to scoring_orchestrator.score_and_persist_haiku.
-    This function handles thread-own DB connection, cancellation checks, exclusion filtering,
-    session progress tracking, and activity logging.
+    Enriches each job before scoring (matching the run_haiku_scoring pipeline
+    behavior). Delegates per-job scoring + persistence to
+    scoring_orchestrator.score_and_persist_haiku.
 
     Args:
         db_path: Absolute path to the SQLite database.
@@ -274,6 +274,13 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
+
+    # Lazy import enrichment (matches scoring_runner pattern)
+    try:
+        from job_finder.web.data_enricher import enrich_job, is_stub_jd
+    except ImportError:
+        enrich_job = None
+        is_stub_jd = None
 
     try:
         with standalone_connection(db_path) as conn:
@@ -298,6 +305,29 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     return
 
                 job_row = dict(row)
+
+                # --- Enrichment FIRST (before scoring) ---
+                # Matches run_haiku_scoring behavior: enrich sparse jobs before Haiku
+                if enrich_job is not None and is_stub_jd is not None and (
+                    is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", ""))
+                    or job_row.get("salary_min") is None
+                ):
+                    try:
+                        serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+                        enriched = enrich_job(
+                            job_row,
+                            serpapi_key=serpapi_key,
+                            anthropic_client=client,
+                            conn=conn,
+                            config=config,
+                        )
+                        if enriched:
+                            job_row.update(enriched)
+                    except Exception as enrich_err:
+                        logger.debug(
+                            "Batch Haiku: enrichment failed for '%s' (non-fatal): %s",
+                            job_row.get("dedup_key"), enrich_err,
+                        )
 
                 # Pre-Haiku exclusion filter
                 exclusions = config.get("profile", {}).get("exclusions", {})

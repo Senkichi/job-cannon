@@ -394,6 +394,35 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Enrichment backfill (every 6 hours) ---------------------------
+
+        def _run_enrichment_backfill():
+            """Backfill enrichment for jobs that were missed or prematurely exhausted."""
+            with app.app_context():
+                config = get_config_snapshot(app)
+                db_path = app.config.get("DB_PATH", "jobs.db")
+                try:
+                    from job_finder.web.data_enricher import run_enrichment_backfill
+                    serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+                    result = run_enrichment_backfill(
+                        db_path,
+                        serpapi_key=serpapi_key,
+                        config=config,
+                        limit=200,
+                    )
+                    logger.info("Enrichment backfill: %s", result)
+                except Exception as e:
+                    logger.error("Enrichment backfill failed: %s", e)
+
+        scheduler.add_job(
+            _run_enrichment_backfill,
+            trigger=IntervalTrigger(hours=6),
+            id="enrichment_backfill",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         scheduler.start()
         _scheduler = scheduler
         logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
