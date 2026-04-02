@@ -21,6 +21,10 @@ from typing import Optional
 import requests
 
 from job_finder.web.db_helpers import standalone_connection
+# _HEADERS and _TIMEOUT imported from enrichment_tiers — eliminates copy-paste
+# duplication across careers_scraper.py and homepage_discoverer.py.
+# Intentional pragmatic underscore-prefixed import for a single-codebase local app.
+from job_finder.web.enrichment_tiers import _HEADERS, _TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +32,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobFinder/1.0)"}
-_TIMEOUT = 10
+# _HEADERS and _TIMEOUT removed — now imported from enrichment_tiers above.
 
 _PARKED_DOMAIN_SIGNATURES = [
     "domain is for sale",

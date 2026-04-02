@@ -40,6 +40,7 @@ ACTION_EXTRACT_STYLE = "extract_style"
 ACTION_SCHEDULED_EXPIRY_CHECK = "scheduled_expiry_check"
 ACTION_SAVE_JD = "save_jd"
 ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
+ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
 
 
 # ---------------------------------------------------------------------------
