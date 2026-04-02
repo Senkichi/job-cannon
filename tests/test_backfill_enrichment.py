@@ -482,3 +482,39 @@ def test_sonnet_backfill_writes_fit_analysis(migrated_db):
     assert row_dict["sonnet_score"] == 78
     parsed_fit = json.loads(row_dict["fit_analysis"])
     assert parsed_fit["strengths"] == ["Python", "ML"]
+
+
+# ---------------------------------------------------------------------------
+# test_agentic_tier_excluded_from_eligible_tiers_query
+# ---------------------------------------------------------------------------
+
+
+def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
+    """_ELIGIBLE_TIERS_QUERY excludes 'agentic' and 'agentic_exhausted' jobs."""
+    path, conn = migrated_db
+
+    # Insert jobs at each tier that SHOULD be excluded
+    insert_job(conn, "job_agentic", enrichment_tier="agentic")
+    insert_job(conn, "job_agentic_exhausted", enrichment_tier="agentic_exhausted")
+    insert_job(conn, "job_exhausted", enrichment_tier="exhausted")
+    insert_job(conn, "job_serpapi", enrichment_tier="serpapi")
+    insert_job(conn, "job_sonnet", enrichment_tier="sonnet")
+    # This one should be ELIGIBLE
+    insert_job(conn, "job_null_tier", enrichment_tier=None)
+
+    from job_finder.web.backfill_enrichment import _ELIGIBLE_TIERS_QUERY
+
+    rows = conn.execute(
+        f"SELECT dedup_key FROM jobs WHERE {_ELIGIBLE_TIERS_QUERY}"
+    ).fetchall()
+    eligible_keys = {dict(r)["dedup_key"] for r in rows}
+
+    # agentic and agentic_exhausted must NOT appear
+    assert "job_agentic" not in eligible_keys, "'agentic' tier must be excluded from backfill"
+    assert "job_agentic_exhausted" not in eligible_keys, "'agentic_exhausted' tier must be excluded"
+    # exhausted, serpapi, sonnet must also be excluded
+    assert "job_exhausted" not in eligible_keys
+    assert "job_serpapi" not in eligible_keys
+    assert "job_sonnet" not in eligible_keys
+    # NULL tier (unenriched) must be eligible
+    assert "job_null_tier" in eligible_keys

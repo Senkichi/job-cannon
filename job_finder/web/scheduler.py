@@ -423,9 +423,53 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Agentic backfill (nightly 3:30 AM, paused until manual resume) -----
+        # Uses lambda-wrapper pattern matching _import_stale (lines above) to prevent
+        # signature drift if run_agentic_backfill gains new required parameters.
+        # OllamaProvider is instantiated INSIDE run_agentic_backfill, NOT here —
+        # the scheduler closure only defers the import.
+
+        def _import_agentic_backfill():
+            from job_finder.web.agentic_enricher import run_agentic_backfill
+            # Lambda wrapper matches the _import_stale pattern exactly:
+            # returns a callable(db_path, config) rather than the raw function.
+            return lambda db_path, config: run_agentic_backfill(db_path, config)
+
+        def _import_agentic_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_AGENTIC_BACKFILL
+            return ACTION_SCHEDULED_AGENTIC_BACKFILL
+
+        scheduler.add_job(
+            _make_tracked_job(
+                app, "Agentic backfill",
+                import_func=_import_agentic_backfill,
+                import_action=_import_agentic_action,
+                # "jobs_enriched" matches naming convention used by other tracked jobs
+                # (jobs_found, jobs_new, jobs_scanned) for consistent dashboard display.
+                extract_metadata=lambda r: {"jobs_enriched": r if isinstance(r, int) else 0},
+            ),
+            trigger=CronTrigger(hour=3, minute=30),
+            id="agentic_backfill",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            # next_run_time=None defers the initial trigger, eliminating any race
+            # window between add_job() and the pause_job() call below.
+            next_run_time=None,
+        )
+
         scheduler.start()
         _scheduler = scheduler
         logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
+
+        # pause_job() requires a RUNNING scheduler — must be called AFTER start().
+        # All add_job() calls occur before start(); this comment and the pause call
+        # must remain at the end of init_scheduler() after scheduler.start().
+        # Resume manually via: get_scheduler().resume_job("agentic_backfill")
+        scheduler.pause_job("agentic_backfill")
+        logger.info(
+            "agentic_backfill registered and paused — manual resume required before first run"
+        )
 
 
 def run_sync_now(app) -> dict:

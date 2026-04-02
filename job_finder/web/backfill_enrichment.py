@@ -1,8 +1,9 @@
 """Enrichment backfill script for job-finder.
 
-Runs the 7-tier enrichment pipeline on all non-exhausted jobs in a convergence
-loop. Estimates and confirms AI costs before any API calls. Queues newly-enriched
-jobs for Sonnet evaluation. Re-scores borderline Haiku jobs whose enrichment tier
+Runs the multi-tier enrichment pipeline (free → DDG → Haiku → SerpAPI → Sonnet
+→ agentic → agentic_exhausted) on all non-exhausted jobs in a convergence loop.
+Estimates and confirms AI costs before any API calls. Queues newly-enriched jobs
+for Sonnet evaluation. Re-scores borderline Haiku jobs whose enrichment tier
 advanced.
 
 Usage:
@@ -52,9 +53,14 @@ _HAIKU_OUTPUT_TOKENS = 200
 _SONNET_INPUT_TOKENS = 2000
 _SONNET_OUTPUT_TOKENS = 500
 
-# Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
+# Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers).
+# PRIMARY GATE: 'agentic' and 'agentic_exhausted' are excluded here so that
+# run_enrichment_pass() never fetches those rows, and enrich_job() is never
+# called for them from this path. The secondary defense is the guard inside
+# enrich_job() itself (for direct callers that bypass this query gate).
 _ELIGIBLE_TIERS_QUERY = (
-    "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')"
+    "enrichment_tier IS NULL OR enrichment_tier NOT IN "
+    "('exhausted', 'agentic', 'agentic_exhausted', 'serpapi', 'sonnet')"
 )
 
 # Borderline score range for re-scoring after tier advancement

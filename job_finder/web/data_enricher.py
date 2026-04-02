@@ -36,10 +36,12 @@ import logging
 from typing import Optional, Any
 
 from job_finder.web.claude_client import cost_gate
+from job_finder.web.domain_policy import is_blocked_domain
 from job_finder.web.enrichment_tiers import (
     TransientEnrichmentError,
-    fetch_direct_jd, query_ats_api, scrape_careers,
-    extract_with_sonnet, search_serpapi, search_duckduckgo, extract_with_haiku,
+    fetch_direct_jd, fetch_linkedin_jd, query_ats_api, scrape_careers,
+    extract_with_sonnet, search_serpapi, extract_with_haiku,
+    search_ddg_web, fetch_ddg_jds,
 )
 from job_finder.web.company_enricher import enrich_company_info  # noqa: F401 (re-exported for callers)
 
@@ -139,6 +141,14 @@ def enrich_job(
         if current_tier == "exhausted":
             return {}
 
+        # Secondary defense-in-depth guard for agentic tiers.
+        # Primary gate is _ELIGIBLE_TIERS_QUERY in backfill_enrichment.py which
+        # prevents the batch pipeline from ever fetching these rows. This guard
+        # protects all DIRECT callers of enrich_job() that bypass the query gate
+        # entirely (e.g., ad-hoc scripts, future callers with pre-fetched rows).
+        if current_tier in ("agentic", "agentic_exhausted"):
+            return {}
+
         # Auto-promote long descriptions to jd_full (DQ-02)
         if not job_row.get("jd_full") and job_row.get("description") and len(job_row["description"]) > 200:
             job_row["jd_full"] = job_row["description"]
@@ -174,7 +184,18 @@ def enrich_job(
                 # Sub-tier A: Direct URL fetch
                 source_urls = _parse_source_urls(job_row.get("source_urls"))
                 for url in source_urls:
-                    jd_text = fetch_direct_jd(url)
+                    # LinkedIn guest pages need targeted extraction — the
+                    # generic fetcher rejects them due to auth-wall chrome.
+                    if "linkedin.com/jobs/" in url:
+                        jd_text = fetch_linkedin_jd(url)
+                    # Blocked domains (glassdoor, indeed, etc.) return 403 or
+                    # Cloudflare challenges. Skip via centralized domain policy
+                    # rather than the previous inline "glassdoor.com/" string check.
+                    elif is_blocked_domain(url):
+                        logger.debug("Skipping blocked domain URL: %s", url)
+                        continue
+                    else:
+                        jd_text = fetch_direct_jd(url)
                     if jd_text:
                         fragments["url_jd"] = jd_text
                         break
@@ -216,14 +237,28 @@ def enrich_job(
 
         if start_idx <= TIER_ORDER.index("ddg"):
             try:
-                query = f"{title} {company} job description"
-                ddg_text = search_duckduckgo(query)
-                if ddg_text:
-                    fragments["ddg"] = ddg_text
+                ddg_result = search_ddg_web(title, company)
 
-                # Resolve what DDG tier found (via Haiku extraction later if needed)
-                # DDG doesn't directly provide structured data; it feeds the Haiku tier.
-                # If DDG returned nothing, we still continue to Haiku with empty ddg fragment.
+                # Sub-tier A: Try fetching JDs from DDG URLs
+                if ddg_result.get("ddg_urls"):
+                    jd_text, source_url = fetch_ddg_jds(
+                        ddg_result["ddg_urls"], title=title, company=company,
+                    )
+                    if jd_text:
+                        fragments["url_jd"] = jd_text
+                        # Persist discovered URL to source_urls
+                        if conn is not None and job_row.get("dedup_key") and source_url:
+                            _merge_apply_urls(conn, job_row["dedup_key"], [source_url])
+
+                # Sub-tier B: Save snippets for Haiku extraction
+                if ddg_result.get("ddg_snippet"):
+                    fragments["ddg"] = ddg_result["ddg_snippet"]
+
+                # If DDG URL fetch found a real JD, resolve and return
+                enriched = _resolve_from_fragments(fragments, missing, job_row)
+                if enriched and not is_stub_jd(enriched.get("jd_full"), title, company):
+                    _persist(conn, job_row, enriched, "ddg")
+                    return enriched
 
             except Exception as e:
                 logger.debug("DDG tier failed for '%s': %s", title, e)
@@ -289,25 +324,62 @@ def enrich_job(
             and is_stub_jd(fragments.get("jd_full"), title, company)
         )
 
-        if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
+        # SerpAPI conservation: only use paid credits for jobs with haiku_score >= 40
+        # or jobs that have never been scored (haiku_score IS NULL).
+        haiku_score = job_row.get("haiku_score")
+        serpapi_worth_it = haiku_score is None or (isinstance(haiku_score, (int, float)) and haiku_score >= 40)
+
+        if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing and serpapi_worth_it:
+            # Initialize apply_urls BEFORE the call so the variable is always
+            # defined even if TransientEnrichmentError is raised (which bypasses
+            # the tuple assignment below, leaving apply_urls unbound otherwise).
+            apply_urls: list[str] = []
             try:
                 query = f"{title} {company}"
-                serpapi_result = search_serpapi(query, serpapi_key)
-                if serpapi_result:
+                # search_serpapi returns (result_dict, apply_option_urls).
+                serpapi_result, apply_urls = search_serpapi(query, serpapi_key)
+
+                if serpapi_result is not None:
+                    # DEFECT 009 FIX: merge serpapi_result into fragments with existing
+                    # data taking priority (fragments[k] wins if key already present),
+                    # then call _resolve_from_fragments(fragments, ...) directly.
+                    # DO NOT pass {**fragments, **serpapi_result} — that lets serpapi_result
+                    # silently overwrite fragments entries (priority inversion).
                     for k, v in serpapi_result.items():
                         if k not in fragments:
                             fragments[k] = v
 
-                    enriched = _resolve_from_fragments(
-                        {**fragments, **serpapi_result}, missing, job_row
-                    )
+                    enriched = _resolve_from_fragments(fragments, missing, job_row)
+
                     if enriched:
                         _persist(conn, job_row, enriched, "serpapi")
+                        # DEFECT 016 FIX: persist source_urls AFTER _persist() succeeds so
+                        # both writes succeed or both fail together (best-effort atomicity).
+                        # If _persist() raises, apply_urls are not committed, preventing
+                        # a partial state where source_urls updated but tier not advanced.
+                        # Fall through to the unconditional apply_urls write below when
+                        # no enriched fields were found (serpapi_result present but resolved
+                        # nothing new) — those ATS URLs are still worth saving for retries.
+                        if apply_urls and conn is not None and job_row.get("dedup_key"):
+                            _merge_apply_urls(conn, job_row["dedup_key"], apply_urls)
                         return enriched
+
+                # DEFECT 010 FIX: persist apply_urls to source_urls UNCONDITIONALLY
+                # whenever apply_urls is non-empty — even when serpapi_result is None
+                # (e.g., apply_options existed but no job description was present).
+                # ATS URLs from Google Jobs apply_options are valuable regardless of
+                # whether the main result dict is populated; they give a direct path
+                # to the full JD for future retry runs.
+                # Persist via direct SQL UPDATE, bypassing _persist() because
+                # source_urls is a JSON array column intentionally excluded from
+                # _ENRICHABLE_COLUMNS.  Read-merge-write avoids overwriting existing URLs.
+                if apply_urls and conn is not None and job_row.get("dedup_key"):
+                    _merge_apply_urls(conn, job_row["dedup_key"], apply_urls)
 
             except TransientEnrichmentError as e:
                 # Transient error (429/5xx/timeout): do NOT advance past serpapi.
                 # Persist tier as "haiku" so next call retries serpapi.
+                # apply_urls remains [] in this path (initialized before the call).
                 logger.info(
                     "SerpAPI transient error for '%s' @ '%s': %s — will retry",
                     title, company, e,
@@ -405,11 +477,14 @@ def run_enrichment_backfill(
     result = {"enriched": 0, "reset": 0, "processed": 0}
 
     with standalone_connection(db_path) as conn:
-        # Phase 1: Reset prematurely-exhausted jobs (exhausted but no jd_full).
+        # Phase 1: Reset prematurely-exhausted jobs (exhausted but short/missing jd_full).
         # These were marked exhausted when SerpAPI/Sonnet failed transiently.
+        # CRITICAL: 'agentic_exhausted' rows are INTENTIONALLY excluded — they had
+        # Playwright + Ollama attempts fail and must remain stranded. Re-queuing them
+        # into the standard pipeline would waste API quota and overwrite valid state.
         reset_count = conn.execute(
             """UPDATE jobs SET enrichment_tier = NULL
-               WHERE enrichment_tier IN ('exhausted', 'agentic_exhausted')
+               WHERE enrichment_tier = 'exhausted'
                  AND (jd_full IS NULL OR TRIM(jd_full) = '' OR LENGTH(TRIM(jd_full)) < 200)""",
         ).rowcount
         conn.commit()
@@ -417,11 +492,27 @@ def run_enrichment_backfill(
         if reset_count:
             logger.info("Enrichment backfill: reset %d prematurely-exhausted jobs", reset_count)
 
-        # Phase 2: Enrich jobs needing enrichment
+        # Phase 1b: Reset agentic_exhausted jobs older than 7 days (TTL recovery).
+        # Most job postings expire within 2-4 weeks, so 30 days is too late.
+        # 7 days balances retry opportunity against wasting cycles on dead listings.
+        aged_reset = conn.execute(
+            """UPDATE jobs SET enrichment_tier = 'exhausted'
+               WHERE enrichment_tier = 'agentic_exhausted'
+                 AND jd_full IS NULL
+                 AND last_seen < datetime('now', '-7 days')""",
+        ).rowcount
+        conn.commit()
+        if aged_reset:
+            logger.info("Reset %d agentic_exhausted jobs (>7 days old) for retry", aged_reset)
+            result["reset"] += aged_reset
+
+        # Phase 2: Enrich jobs needing enrichment.
+        # 'agentic' is excluded to prevent the 6-hourly backfill from re-enqueueing
+        # agentic-enriched jobs through enrich_job() which would overwrite valid data.
         rows = conn.execute(
             """SELECT * FROM jobs
                WHERE enrichment_tier IS NULL
-                  OR enrichment_tier NOT IN ('exhausted', 'agentic_exhausted', 'serpapi', 'sonnet')
+                  OR enrichment_tier NOT IN ('exhausted', 'agentic', 'agentic_exhausted', 'serpapi', 'sonnet')
                ORDER BY first_seen DESC
                LIMIT ?""",
             (limit,),
@@ -575,6 +666,52 @@ def _resolve_from_fragments(
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)
+
+
+def _merge_apply_urls(conn: Any, dedup_key: str, apply_urls: list) -> None:
+    """Read-merge-write source_urls JSON column with new ATS URLs from SerpAPI apply_options.
+
+    Designed to be called AFTER _persist() succeeds so both writes succeed or
+    both fail together (best-effort atomicity — SQLite has no multi-statement
+    rollback across these two UPDATE calls, but failure of the second is non-critical).
+
+    Args:
+        conn: Open SQLite connection.
+        dedup_key: Job dedup key to update.
+        apply_urls: New URL strings to merge in (deduplicated against existing list).
+    """
+    if not conn or not dedup_key or not apply_urls:
+        return
+    try:
+        existing_row = conn.execute(
+            "SELECT source_urls FROM jobs WHERE dedup_key = ?", (dedup_key,)
+        ).fetchone()
+        existing_json = existing_row["source_urls"] if existing_row else None
+        try:
+            existing_list = json.loads(existing_json) if existing_json else []
+            if not isinstance(existing_list, list):
+                existing_list = []
+        except (json.JSONDecodeError, TypeError):
+            existing_list = []
+        merged = existing_list + [u for u in apply_urls if u not in existing_list]
+        url_cursor = conn.execute(
+            "UPDATE jobs SET source_urls = ? WHERE dedup_key = ?",
+            (json.dumps(merged), dedup_key),
+        )
+        if url_cursor.rowcount == 0:
+            logger.warning(
+                "source_urls UPDATE matched 0 rows for dedup_key=%s "
+                "(job deleted between enrich_job start and write?)",
+                dedup_key,
+            )
+        conn.commit()
+        logger.debug(
+            "source_urls: merged %d new ATS URL(s) for dedup_key=%s",
+            len(merged) - len(existing_list),
+            dedup_key,
+        )
+    except Exception as exc:
+        logger.debug("_merge_apply_urls failed for dedup_key=%s: %s", dedup_key, exc)
 
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:

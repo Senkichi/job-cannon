@@ -457,3 +457,122 @@ class TestSchedulerArgOrder:
 
         # Verify _import_detection was registered
         assert len(captured_import_funcs) >= 1, "pipeline_detection job was not registered"
+
+
+# ---------------------------------------------------------------------------
+# Test: agentic_backfill job registered and paused (Glassdoor enrichment spec)
+# ---------------------------------------------------------------------------
+
+
+class TestSchedulerAgenticBackfill:
+    """Verify agentic_backfill job is registered and immediately paused."""
+
+    def test_agentic_backfill_job_registered(self):
+        """init_scheduler registers 'agentic_backfill' CronTrigger job (hour=3, minute=30)."""
+        from job_finder.web.scheduler import reset_scheduler, init_scheduler
+        from unittest.mock import MagicMock, patch
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                init_scheduler(mock_app)
+
+        job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
+        assert "agentic_backfill" in job_ids_kw, (
+            "agentic_backfill job must be registered via scheduler.add_job()"
+        )
+
+    def test_agentic_backfill_next_run_time_is_none(self):
+        """agentic_backfill is registered with next_run_time=None to defer first execution."""
+        from job_finder.web.scheduler import reset_scheduler, init_scheduler
+        from unittest.mock import MagicMock, patch
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                init_scheduler(mock_app)
+
+        # Find the add_job call for agentic_backfill
+        agentic_call = None
+        for call in mock_sched.add_job.call_args_list:
+            if call[1].get("id") == "agentic_backfill":
+                agentic_call = call
+                break
+
+        assert agentic_call is not None, "agentic_backfill add_job call not found"
+        assert agentic_call[1].get("next_run_time") is None, (
+            "next_run_time must be None to prevent immediate execution"
+        )
+
+    def test_agentic_backfill_is_paused_after_start(self):
+        """After scheduler.start(), pause_job('agentic_backfill') must be called."""
+        from job_finder.web.scheduler import reset_scheduler, init_scheduler
+        from unittest.mock import MagicMock, patch, call
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                init_scheduler(mock_app)
+
+        mock_sched.pause_job.assert_called_with("agentic_backfill")
+
+    def test_agentic_backfill_paused_after_start_not_before(self):
+        """pause_job() must be called AFTER scheduler.start() — not before."""
+        from job_finder.web.scheduler import reset_scheduler, init_scheduler
+        from unittest.mock import MagicMock, patch, call as mock_call
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        call_order: list[str] = []
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                mock_sched.start.side_effect = lambda: call_order.append("start")
+                mock_sched.pause_job.side_effect = lambda job_id: call_order.append(f"pause:{job_id}")
+
+                init_scheduler(mock_app)
+
+        # start() must appear before pause_job("agentic_backfill")
+        assert "start" in call_order, "scheduler.start() was not called"
+        assert "pause:agentic_backfill" in call_order, "pause_job('agentic_backfill') was not called"
+        start_idx = call_order.index("start")
+        pause_idx = call_order.index("pause:agentic_backfill")
+        assert start_idx < pause_idx, (
+            f"pause_job must be called AFTER start(), but start was at {start_idx}, "
+            f"pause was at {pause_idx}"
+        )

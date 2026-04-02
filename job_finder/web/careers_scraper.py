@@ -25,6 +25,20 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+# _HEADERS, _TIMEOUT, _NOISE_TAGS imported from enrichment_tiers — these are
+# genuinely shared infrastructure constants. Importing underscore-prefixed names
+# from a sibling module is an intentional pragmatic choice for this single-codebase
+# local app, consistent with the existing pattern in agentic_enricher.py.
+# Auth-wall detection delegates to the canonical helpers in enrichment_tiers.
+from job_finder.web.enrichment_tiers import (
+    _HEADERS,
+    _TIMEOUT,
+    _NOISE_TAGS,
+    _FULL_TEXT_AUTH_SIGNATURES,
+    is_short_auth_page,
+    is_chrome_or_login_page,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -35,21 +49,14 @@ _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", 
 
 _HAIKU_HTML_CHARS = 3000  # Truncate HTML sent to Haiku (~1000 tokens)
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobFinder/1.0)"}
-
-_TIMEOUT = 10
+# _HEADERS, _TIMEOUT, _NOISE_TAGS are imported from enrichment_tiers above.
+# Definitions removed to eliminate duplication (was copy-pasted across 3 modules).
 
 _JD_DELAY = 1.0  # seconds between job page fetches (rate limiting)
 _MAX_JD_CHARS = 8000  # cap extracted JD text
 
-_NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
-
-_AUTH_WALL_SIGNATURES = [
-    "we're signing you in",
-    "sign in or join",
-    "please verify you are a human",
-    "access denied",
-]
+# _AUTH_WALL_SIGNATURES removed — auth detection now uses is_short_auth_page()
+# and is_chrome_or_login_page() from enrichment_tiers (the canonical source).
 
 # ATS domain patterns to detect redirects (Research Pitfall 6)
 _ATS_DOMAINS = [
@@ -153,9 +160,16 @@ def _fetch_job_description(url: str) -> str:
         for tag in soup.find_all(_NOISE_TAGS):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        text_lower = text.lower()
-        if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
-            logger.debug("Auth-wall detected for job page '%s'", url)
+        # Delegate auth-wall detection to canonical helpers from enrichment_tiers.
+        # is_short_auth_page covers short login/CAPTCHA pages; is_chrome_or_login_page
+        # covers cookie banners, LinkedIn walls, and wrong page types.
+        # _FULL_TEXT_AUTH_SIGNATURES covers specific multi-word auth phrases
+        # (e.g. "access denied") safe for full-text scan on any page length.
+        if is_short_auth_page(text) or is_chrome_or_login_page(text):
+            logger.debug("Auth-wall or chrome page detected for job page '%s'", url)
+            return ""
+        if any(sig in text.lower() for sig in _FULL_TEXT_AUTH_SIGNATURES):
+            logger.debug("Auth-wall signature detected for job page '%s'", url)
             return ""
         return text[:_MAX_JD_CHARS] if text.strip() else ""
     except Exception as e:

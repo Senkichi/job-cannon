@@ -17,7 +17,6 @@ Usage:
     count = run_agentic_backfill("jobs.db", config, limit=50)
 """
 
-import json
 import logging
 import re
 import time
@@ -37,24 +36,11 @@ _MAX_URLS_PER_QUERY = 3
 _MAX_FETCH_ATTEMPTS = 6  # Total URLs to try before giving up
 _PAGE_LOAD_WAIT_MS = 3000
 _SEARCH_DELAY_S = 1.5  # Between DDG searches to avoid rate limits
+# Ollama context window limit for validation. Intentionally less than _MAX_JD_CHARS
+# (8000) because the validator prompt already consumes tokens and we want to leave
+# room for the model's JSON response without truncating mid-reasoning.
+_VALIDATE_MAX_CHARS = 6000
 
-# Sites that are known to block scraping or require login
-_BLOCKED_DOMAINS = frozenset({
-    "glassdoor.com", "glassdoor.co.uk",
-    "indeed.com",  # Often shows interstitial
-    "ziprecruiter.com",
-    "dice.com",
-})
-
-# Sites that reliably have full JDs when you can fetch them
-_PRIORITY_DOMAINS = [
-    "greenhouse.io", "lever.co", "ashbyhq.com",  # ATS platforms
-    "myworkdayjobs.com", "jobs.smartrecruiters.com",  # More ATS
-    "linkedin.com/jobs",  # Public job pages (no login for viewing)
-    "builtin.com",
-    "workingnomads.com",
-    "ycombinator.com/companies",
-]
 
 # System prompt for query generation
 _QUERY_GEN_PROMPT = """\
@@ -108,34 +94,27 @@ def _search_ddg(query: str, max_results: int = 5) -> list[dict]:
         return []
 
 
-def _is_blocked_domain(url: str) -> bool:
-    """Check if URL is from a domain known to block scraping."""
-    url_lower = url.lower()
-    return any(domain in url_lower for domain in _BLOCKED_DOMAINS)
-
-
-def _domain_priority(url: str) -> int:
-    """Lower = higher priority. ATS platforms and known job boards first."""
-    url_lower = url.lower()
-    for i, domain in enumerate(_PRIORITY_DOMAINS):
-        if domain in url_lower:
-            return i
-    return 100
-
-
 def _rank_urls(search_results: list[dict]) -> list[str]:
-    """Extract, deduplicate, filter, and rank URLs from search results."""
+    """Extract, deduplicate, filter, and rank URLs from search results.
+
+    Uses is_blocked_domain and domain_priority from the centralized domain_policy
+    module rather than the previously duplicated local _BLOCKED_DOMAINS /
+    _PRIORITY_DOMAINS constants. This ensures all callers share the same policy.
+    """
+    # Imported here to keep module-level imports clean and avoid circular refs
+    from job_finder.web.domain_policy import is_blocked_domain, domain_priority
+
     seen = set()
     urls = []
     for r in search_results:
         href = r.get("href", "")
-        if not href or href in seen or _is_blocked_domain(href):
+        if not href or href in seen or is_blocked_domain(href):
             continue
         seen.add(href)
         urls.append(href)
 
-    # Sort by domain priority (ATS platforms first)
-    urls.sort(key=_domain_priority)
+    # Sort by domain priority: lower index = higher priority (ATS platforms first)
+    urls.sort(key=domain_priority)
     return urls
 
 
@@ -166,7 +145,27 @@ def _create_browser(playwright):
 
 
 def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
-    """Fetch a URL with Playwright and return cleaned text content."""
+    """Fetch a URL with Playwright and return cleaned text content.
+
+    Auth-wall detection delegates to the canonical helpers from enrichment_tiers:
+    - is_short_auth_page() replaces the previous inline auth_signals list + len check
+    - is_chrome_or_login_page() remains for broader page-type detection
+    This eliminates the previously duplicated auth_signals list.
+
+    LinkedIn URLs are tried with the lightweight BeautifulSoup extractor first
+    (no Playwright needed). Falls through to Playwright if that fails.
+    """
+    # LinkedIn shortcut: try lightweight extractor first (no Playwright needed)
+    if "linkedin.com/jobs/" in url:
+        try:
+            from job_finder.web.enrichment_tiers import fetch_linkedin_jd
+            li_text = fetch_linkedin_jd(url)
+            if li_text and len(li_text) >= 300:
+                return li_text[:_MAX_JD_CHARS * 2]
+        except Exception as exc:
+            logger.debug("LinkedIn lightweight extractor failed for %s: %s", url[:80], exc)
+        # Fall through to Playwright if LinkedIn extractor fails
+
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
         page.wait_for_timeout(_PAGE_LOAD_WAIT_MS)
@@ -174,26 +173,22 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
 
-        # Remove noise
-        for tag in soup.find_all(
-            ["script", "style", "nav", "footer", "header", "noscript", "aside"]
-        ):
+        # Remove noise using the canonical tag list from enrichment_tiers
+        from job_finder.web.enrichment_tiers import _NOISE_TAGS
+        for tag in soup.find_all(_NOISE_TAGS):
             tag.decompose()
 
         text = soup.get_text(separator="\n", strip=True)
 
-        # Auth-wall detection (same as fetch_direct_jd)
-        text_lower = text[:500].lower()
-        auth_signals = [
-            "sign in", "log in", "create account", "verify you are a human",
-            "access denied", "captcha", "please verify", "just a moment",
-        ]
-        if any(sig in text_lower for sig in auth_signals) and len(text) < 2000:
-            logger.debug("Auth wall detected on %s", url[:80])
+        # Delegate short auth-wall detection to the canonical helper from
+        # enrichment_tiers. Replaces the previously duplicated inline list:
+        #   auth_signals = ["sign in", "log in", ...] + len(text) < 2000 check
+        from job_finder.web.enrichment_tiers import is_short_auth_page, is_chrome_or_login_page
+        if is_short_auth_page(text):
+            logger.debug("Short auth-wall detected on %s", url[:80])
             return None
 
         # Reject website chrome, login pages, and wrong page types
-        from job_finder.web.enrichment_tiers import is_chrome_or_login_page
         if is_chrome_or_login_page(text):
             logger.debug("Chrome/login page detected on %s", url[:80])
             return None
@@ -210,62 +205,64 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Ollama calls
+# OllamaProvider-backed LLM calls
+# _call_ollama() deleted — all LLM calls now go through OllamaProvider which
+# is instantiated once in run_agentic_backfill() and passed down. This ensures:
+# 1. Consistent routing through the multi-provider infrastructure
+# 2. ModelResult.data is already parsed JSON (no redundant json.loads())
+# 3. Health check happens exactly once at startup (not per-job)
 # ---------------------------------------------------------------------------
 
 
-def _call_ollama(
-    system: str,
-    user_msg: str,
+def _generate_queries(
+    title: str,
+    company: str,
+    n: int,
+    provider,  # OllamaProvider — typed as Any to avoid import at module level
     model: str = "qwen2.5:14b",
-    max_tokens: int = 512,
-) -> Optional[str]:
-    """Call Ollama chat API and return the response text."""
-    import requests as req
+) -> list[str]:
+    """Ask OllamaProvider to generate search queries for a job posting.
 
-    try:
-        resp = req.post(
-            "http://localhost:11434/api/chat",
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_msg},
-                ],
-                "format": "json",
-                "stream": False,
-                "options": {"num_predict": max_tokens},
-            },
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["message"]["content"]
-    except Exception as exc:
-        logger.warning("Ollama call failed: %s", exc)
-        return None
+    Args:
+        title: Job title.
+        company: Company name.
+        n: Number of queries to generate.
+        provider: OllamaProvider instance (passed from run_agentic_backfill).
+        model: Ollama model to use.
 
-
-def _generate_queries(title: str, company: str, n: int = _MAX_SEARCH_QUERIES) -> list[str]:
-    """Ask Ollama to generate search queries for a job posting."""
+    Returns:
+        List of search query strings. Falls back to heuristic queries on failure.
+    """
     system = _QUERY_GEN_PROMPT.format(n=n)
     user_msg = f"Job title: {title}\nCompany: {company}"
+    max_tokens = 512
 
-    response = _call_ollama(system, user_msg)
-    if not response:
-        # Fallback: generate basic queries without AI
+    # Inner try/except: handles mid-run transient failures (model timeout,
+    # malformed JSON from a specific query) without crashing the outer loop.
+    try:
+        result = provider.call(
+            model, system, [{"role": "user", "content": user_msg}], max_tokens=max_tokens
+        )
+        # result.data is already parsed as a dict by OllamaProvider.call() —
+        # do NOT call json.loads() on it (would raise TypeError on dict input).
+        data = result.data
+    except Exception as exc:
+        # DEFECT 019 FIX: log at WARNING (not swallowed) so operators can distinguish
+        # transient Ollama failures (503, timeout) from normal parse-failure fallback.
+        logger.warning(
+            "OllamaProvider provider error in _generate_queries for '%s' @ '%s': %s — "
+            "falling back to heuristic queries",
+            title[:40], company[:20], exc,
+        )
         return _fallback_queries(title, company)
 
-    try:
-        data = json.loads(response)
-        if isinstance(data, list) and all(isinstance(q, str) for q in data):
-            return data[:n]
-        # Sometimes Ollama wraps in {"queries": [...]}
-        if isinstance(data, dict):
-            for key in ("queries", "search_queries", "results"):
-                if key in data and isinstance(data[key], list):
-                    return [str(q) for q in data[key][:n]]
-    except (json.JSONDecodeError, TypeError):
-        pass
+    # Handle both list and dict response shapes from Ollama
+    if isinstance(data, list) and all(isinstance(q, str) for q in data):
+        return data[:n]
+    if isinstance(data, dict):
+        for key in ("queries", "search_queries", "results"):
+            if key in data and isinstance(data[key], list):
+                return [str(q) for q in data[key][:n]]
 
     return _fallback_queries(title, company)
 
@@ -283,26 +280,48 @@ def _fallback_queries(title: str, company: str) -> list[str]:
 
 
 def _validate_page(
-    text: str, title: str, company: str, model: str = "qwen2.5:14b"
+    text: str,
+    title: str,
+    company: str,
+    model: str,
+    provider,  # OllamaProvider
 ) -> tuple[bool, float]:
-    """Ask Ollama if page content matches the target job. Returns (is_match, confidence)."""
-    system = _VALIDATE_PROMPT.format(title=title, company=company)
-    # Truncate page text to keep Ollama context reasonable
-    user_msg = text[:4000]
+    """Ask OllamaProvider if page content matches the target job.
 
-    response = _call_ollama(system, user_msg, model=model, max_tokens=256)
-    if not response:
+    Args:
+        text: Page text to validate (will be truncated to keep context reasonable).
+        title: Target job title.
+        company: Target company name.
+        model: Ollama model tag.
+        provider: OllamaProvider instance passed from enrich_single_job.
+
+    Returns:
+        Tuple of (is_match, confidence). Returns (False, 0.0) on any failure.
+    """
+    system = _VALIDATE_PROMPT.format(title=title, company=company)
+    # Truncate page text to _VALIDATE_MAX_CHARS (not _MAX_JD_CHARS) to leave
+    # token budget for the model's JSON response without truncating mid-reasoning.
+    user_msg = text[:_VALIDATE_MAX_CHARS]
+
+    # Inner try/except: handles mid-run transient failures per-URL
+    try:
+        result = provider.call(
+            model, system, [{"role": "user", "content": user_msg}], max_tokens=256
+        )
+        # result.data is already a parsed dict — no json.loads() needed
+        data = result.data
+    except Exception as exc:
+        logger.warning("OllamaProvider call failed in _validate_page: %s", exc)
         return False, 0.0
 
     try:
-        data = json.loads(response)
         is_match = bool(data.get("is_match", False))
         confidence = float(data.get("confidence", 0.0))
         reason = data.get("reason", "")
         if reason:
             logger.debug("Validation: match=%s conf=%.2f reason=%s", is_match, confidence, reason)
         return is_match, confidence
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError):
         return False, 0.0
 
 
@@ -314,7 +333,8 @@ def _validate_page(
 def enrich_single_job(
     job_row: dict,
     page,
-    model: str = "qwen2.5:14b",
+    model: str,
+    provider,  # OllamaProvider — passed from run_agentic_backfill
 ) -> Optional[str]:
     """Run the agentic enrichment loop for a single job.
 
@@ -322,6 +342,9 @@ def enrich_single_job(
         job_row: Job dict with title, company fields.
         page: Playwright page object (reused across jobs).
         model: Ollama model to use for query gen + validation.
+        provider: OllamaProvider instance instantiated once in run_agentic_backfill.
+            Passed down to _generate_queries() and _validate_page() so each
+            function can call provider.call() without needing its own LLM setup.
 
     Returns:
         The job description text if found, None otherwise.
@@ -332,8 +355,8 @@ def enrich_single_job(
     if not title or not company:
         return None
 
-    # Step 1: Generate search queries
-    queries = _generate_queries(title, company)
+    # Step 1: Generate search queries via OllamaProvider
+    queries = _generate_queries(title, company, n=_MAX_SEARCH_QUERIES, provider=provider, model=model)
     logger.info("Agentic: %d queries for '%s' @ '%s'", len(queries), title[:40], company[:20])
 
     # Step 2: Search and collect candidate URLs
@@ -354,20 +377,46 @@ def enrich_single_job(
     best_text: Optional[str] = None
     best_confidence: float = 0.0
 
+    # Failure reason counters for observability
+    fetch_ok = 0
+    company_miss = 0
+    low_conf = 0
+    auth_walls = 0
+
     for i, url in enumerate(all_urls[:_MAX_FETCH_ATTEMPTS]):
         text = _fetch_page_text(page, url)
         if not text:
+            auth_walls += 1
             continue
 
-        # Quick heuristic check before calling Ollama
-        text_lower = text.lower()
-        company_lower = company.lower().split()[0]  # First word of company name
-        if company_lower not in text_lower:
-            logger.debug("Agentic: skipping %s (company name not found)", url[:60])
-            continue
+        fetch_ok += 1
 
-        # Validate with Ollama
-        is_match, confidence = _validate_page(text, title, company, model=model)
+        # Quick heuristic: verify at least one meaningful company token appears in
+        # the page before paying Ollama inference cost.
+        # Uses shared company_tokens() + company_name_in_text() from enrichment_tiers
+        # (same logic used by fetch_ddg_jds for DDG tier validation).
+        from job_finder.web.enrichment_tiers import company_tokens as _company_tokens, company_name_in_text
+        tokens = _company_tokens(company)
+        if not tokens:
+            # DEFECT 015 FIX: fail CLOSED — degenerate company name (all stop-words).
+            # Skip rather than burn inference budget on a heuristic that cannot operate.
+            logger.debug(
+                "Agentic: skipping %s (company '%s' yields no meaningful tokens)",
+                url[:60], company[:30],
+            )
+            company_miss += 1
+            continue
+        if not company_name_in_text(company, text):
+            # Bypass for long pages with short company names — worth the Ollama cost
+            if len(tokens) <= 2 and len(text) > 2000:
+                logger.debug("Agentic: bypassing company check for long page %s", url[:60])
+            else:
+                logger.debug("Agentic: skipping %s (company name not found)", url[:60])
+                company_miss += 1
+                continue
+
+        # Validate with OllamaProvider — provider passed through from caller
+        is_match, confidence = _validate_page(text, title, company, model=model, provider=provider)
 
         if is_match and confidence > best_confidence:
             best_text = text
@@ -375,15 +424,21 @@ def enrich_single_job(
             if confidence >= 0.8:
                 logger.info("Agentic: high-confidence match at %s (%.2f)", url[:60], confidence)
                 break
+        elif not is_match:
+            low_conf += 1
+
+    # Log failure breakdown at INFO level for observability
+    logger.info(
+        "Agentic: '%s' @ '%s' — urls=%d, fetched=%d, company_mismatch=%d, "
+        "low_confidence=%d, auth_wall=%d",
+        title[:40], company[:20], len(all_urls), fetch_ok, company_miss,
+        low_conf, auth_walls,
+    )
 
     if best_text and best_confidence >= 0.5:
         # Trim to JD limit
         return best_text[:_MAX_JD_CHARS]
 
-    logger.info(
-        "Agentic: no valid match for '%s' @ '%s' (best_conf=%.2f)",
-        title[:40], company[:20], best_confidence,
-    )
     return None
 
 
@@ -400,19 +455,43 @@ def run_agentic_backfill(
 ) -> int:
     """Run agentic enrichment on exhausted jobs missing jd_full.
 
+    Architecture notes:
+    - OllamaProvider is instantiated ONCE here at the top, guarded by
+      try/except (ImportError, RuntimeError). If Ollama is unreachable,
+      returns 0 cleanly without crashing — callers (_make_tracked_job) see
+      a successful return with no side effects.
+    - DB connections are scoped per-operation (short SELECT + per-job UPDATE)
+      rather than held open across minutes of Playwright network I/O. This
+      prevents SQLite lock contention with the Flask request thread.
+    - Optimistic concurrency UPDATE prevents overwriting state changed by
+      another process between SELECT and write (checks enrichment_tier = 'exhausted').
+
     Args:
         db_path: Path to SQLite database.
-        config: Application config dict.
+        config: Application config dict. OllamaProvider reads
+            config['providers']['ollama']['base_url'] (default: localhost:11434).
         limit: Maximum jobs to process.
         model: Ollama model for query gen + validation.
 
     Returns:
-        Number of jobs successfully enriched.
+        Number of jobs successfully enriched. Always returns 0 when
+        prerequisites (Ollama, Playwright) are unavailable.
     """
-    from playwright.sync_api import sync_playwright
+    # Guard: instantiate OllamaProvider and import Playwright before any DB or
+    # network work. ImportError covers missing playwright/ollama packages;
+    # RuntimeError covers Ollama service unreachable (OllamaProvider._check_health).
+    try:
+        from job_finder.web.providers.ollama_provider import OllamaProvider
+        from playwright.sync_api import sync_playwright
+        from job_finder.web.db_helpers import standalone_connection
+        provider = OllamaProvider(config=config)
+    except (ImportError, RuntimeError) as exc:
+        logger.warning("Agentic backfill unavailable: %s", exc)
+        return 0
 
-    from job_finder.web.db_helpers import standalone_connection
-
+    # Short-lived SELECT: open connection, fetch rows, close before Playwright work.
+    # Holding the connection open across minutes of network I/O is unsafe for
+    # concurrent SQLite (WAL mode helps but doesn't eliminate lock contention).
     with standalone_connection(db_path) as conn:
         rows = conn.execute(
             """SELECT * FROM jobs
@@ -423,55 +502,85 @@ def run_agentic_backfill(
             (limit,),
         ).fetchall()
 
-        if not rows:
-            print("No exhausted jobs to enrich.")
-            return 0
+    if not rows:
+        # DEFECT 018 FIX: emit same structured summary as normal exit so monitoring
+        # rules have a single log pattern to match ("Agentic enrichment complete").
+        logger.info("Agentic enrichment complete: 0/0 jobs enriched (no exhausted jobs)")
+        return 0
 
-        total = len(rows)
-        print(f"Agentic enrichment: {total} jobs to process")
-        print()
+    total = len(rows)
+    logger.info("Agentic enrichment: %d jobs to process", total)
 
-        enriched_count = 0
+    enriched_count = 0
 
-        with sync_playwright() as pw:
-            browser, page = _create_browser(pw)
+    with sync_playwright() as pw:
+        browser, page = _create_browser(pw)
 
-            try:
-                for i, row in enumerate(rows, 1):
-                    job = dict(row)
-                    title = job.get("title", "?")[:55]
-                    company = job.get("company", "?")[:25]
+        try:
+            for i, row in enumerate(rows, 1):
+                job = dict(row)
+                title = job.get("title", "?")[:55]
+                company = job.get("company", "?")[:25]
+                dedup_key = job.get("dedup_key")
 
-                    print(f"[{i}/{total}] {title} @ {company}")
+                logger.info("[%d/%d] %s @ %s", i, total, title, company)
 
-                    t0 = time.time()
-                    jd = enrich_single_job(job, page, model=model)
-                    elapsed = time.time() - t0
+                t0 = time.time()
+                # Provider passed through: run_agentic_backfill -> enrich_single_job
+                # -> _generate_queries / _validate_page. Single instantiation of
+                # OllamaProvider shared across all jobs in this batch run.
+                jd = enrich_single_job(job, page, model=model, provider=provider)
+                elapsed = time.time() - t0
 
-                    if jd:
-                        # Persist to DB
-                        conn.execute(
+                if jd:
+                    # Per-job write connection: open, UPDATE with optimistic concurrency
+                    # check, close. The WHERE clause prevents overwriting state changed
+                    # by another process between our initial SELECT and this write.
+                    # DEFECT 001 FIX: capture rowcount INSIDE the `with` block as a plain
+                    # int before the connection closes. Reading cursor.rowcount after
+                    # standalone_connection.__exit__() is implementation-defined behaviour.
+                    with standalone_connection(db_path) as write_conn:
+                        cursor = write_conn.execute(
                             "UPDATE jobs SET jd_full = ?, enrichment_tier = 'agentic' "
-                            "WHERE dedup_key = ?",
-                            (jd, job["dedup_key"]),
+                            "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
+                            (jd, dedup_key),
                         )
-                        conn.commit()
-                        enriched_count += 1
-                        print(f"  -> FOUND {len(jd)} chars ({elapsed:.1f}s)")
+                        write_conn.commit()
+                        rows_updated = cursor.rowcount  # read while connection is open
+
+                    if rows_updated == 0:
+                        # Another process advanced enrichment_tier between our SELECT
+                        # and this UPDATE. Log WARNING so the operator can manually
+                        # persist the JD if needed (we have it in memory here).
+                        logger.warning(
+                            "Agentic: optimistic concurrency miss for dedup_key=%s "
+                            "(JD found, %d chars, but tier changed — not persisted)",
+                            dedup_key,
+                            len(jd),
+                        )
                     else:
-                        # Mark as agentic-exhausted so we don't retry
-                        conn.execute(
+                        enriched_count += 1
+                        logger.info("  -> FOUND %d chars (%.1fs)", len(jd), elapsed)
+                else:
+                    # Mark as agentic-exhausted so we don't retry.
+                    # If rowcount == 0 here, another process already advanced the tier
+                    # — skip silently (no data was found anyway, so no recovery needed).
+                    with standalone_connection(db_path) as write_conn:
+                        write_conn.execute(
                             "UPDATE jobs SET enrichment_tier = 'agentic_exhausted' "
-                            "WHERE dedup_key = ?",
-                            (job["dedup_key"],),
+                            "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
+                            (dedup_key,),
                         )
-                        conn.commit()
-                        print(f"  -> NOT FOUND ({elapsed:.1f}s)")
+                        write_conn.commit()
+                    logger.info("  -> NOT FOUND (%.1fs)", elapsed)
 
-                    print()
+        finally:
+            browser.close()
 
-            finally:
-                browser.close()
-
-        print(f"Enriched {enriched_count}/{total} jobs ({100*enriched_count/total:.0f}%)")
-        return enriched_count
+    # DEFECT 008 FIX: guard division with `total or 1` so a future refactor that
+    # removes the early-exit guard cannot cause ZeroDivisionError here.
+    logger.info(
+        "Agentic enrichment complete: %d/%d jobs enriched (%.0f%%)",
+        enriched_count, total, 100 * enriched_count / (total or 1),
+    )
+    return enriched_count
