@@ -11,7 +11,7 @@
       {% if cancelling %}
         Cancelling {{ label }}...
       {% else %}
-        Scoring {{ scored }}/{{ total }}... ({{ label }})
+        {{ label }}: {{ scored }} scored, {{ scored + skipped }}/{{ total }} processed
       {% endif %}
     </span>
     {% if not cancelling %}
@@ -24,6 +24,6 @@
   </div>
   <div class="w-full bg-slate-700 rounded-full h-2">
     <div class="bg-emerald-500 h-2 rounded-full transition-all"
-         style="width: {{ (scored / total * 100) | int if total > 0 else 0 }}%"></div>
+         style="width: {{ ((scored + skipped) / total * 100) | int if total > 0 else 0 }}%"></div>
   </div>
 </div>
