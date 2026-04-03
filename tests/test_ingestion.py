@@ -199,6 +199,75 @@ class TestSourceErrorIsolation:
 
 
 # ---------------------------------------------------------------------------
+# Test: Thordata error isolation
+# ---------------------------------------------------------------------------
+
+class TestThordataErrorIsolation:
+    def test_thordata_failure_does_not_stop_other_sources(self, minimal_config, migrated_db_path):
+        """If Thordata throws, Gmail and SerpAPI still run."""
+        minimal_config["sources"]["thordata"] = {
+            "enabled": True,
+            "api_key": "test-key",
+            "queries": [{"query": "DS", "location": "Remote"}],
+            "max_age_days": 3,
+        }
+        gmail_jobs = [_make_job(title="Senior DS", company="GmailCo")]
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = gmail_jobs
+            # SerpAPI is not patched: minimal_config leaves it disabled, so
+            # _fetch_serpapi returns [] before ever instantiating SerpAPISource.
+            MockThordata.side_effect = Exception("Thordata API down")
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        assert len(summary["thordata_errors"]) >= 1
+        assert summary["gmail_fetched"] == 1
+        assert summary["serpapi_fetched"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: Cross-source dedup
+# ---------------------------------------------------------------------------
+
+class TestCrossSourceDedup:
+    def test_same_job_from_serpapi_and_thordata_persisted_once(
+        self, minimal_config, migrated_db_path
+    ):
+        """When SerpAPI and Thordata return the same job (same title/company/location),
+        upsert_job's dedup key ensures only 1 DB row is created, not 2."""
+        minimal_config["sources"]["thordata"] = {
+            "enabled": True,
+            "api_key": "test-key",
+            "queries": [{"query": "DS", "location": "Remote"}],
+            "max_age_days": 3,
+        }
+        # Identical title/company/location → same dedup_key
+        shared_job = _make_job(title="Staff Data Scientist", company="DupCo", location="Remote")
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = []
+            MockSerpAPI.return_value.fetch_jobs.return_value = [shared_job]
+            MockThordata.return_value.fetch_jobs.return_value = [shared_job]
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        # Two sources returned the same job; DB should have exactly 1 new row
+        assert summary["jobs_new"] == 1
+        assert summary["serpapi_fetched"] == 1
+        assert summary["thordata_fetched"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Test: Per-job error isolation
 # ---------------------------------------------------------------------------
 
@@ -260,6 +329,8 @@ class TestSummaryDict:
             "gmail_errors",
             "serpapi_fetched",
             "serpapi_errors",
+            "thordata_fetched",
+            "thordata_errors",
             "jobs_new",
             "jobs_updated",
             "jobs_scored",

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter) and SerpAPI, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), tracks application pipeline status, and generates tailored resumes via Google Docs.
+Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, and Thordata, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), tracks application pipeline status, and generates tailored resumes via Google Docs.
 
 **Single-user, local-only app. No deployment, no Docker, no CI/CD.**
 
@@ -13,7 +13,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
 - **AI**: Anthropic API — Haiku for fast scoring, Sonnet for deep evaluation, Opus for profile extraction
-- **APIs**: Gmail API v1 (OAuth 2.0), Google Drive/Docs API, SerpAPI (optional)
+- **APIs**: Gmail API v1 (OAuth 2.0), Google Drive/Docs API, SerpAPI (optional), Thordata SERP API (optional)
 
 ## Key Commands
 
@@ -53,7 +53,7 @@ job_finder/
 │   ├── db_migrate.py            # Schema migrations (list of SQL strings)
 │   └── stale_detector.py        # Nightly stale job detection (own DB connection)
 ├── parsers/                     # Email parsers: linkedin, glassdoor, indeed (stub), ziprecruiter
-├── sources/                     # gmail_source.py, serpapi_source.py
+├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py
 ├── models.py                    # Job dataclass with dedup_key
 ├── db.py                        # Original CLI-era DB module (module-level functions take Connection)
 └── config.py                    # YAML config loader (fail-fast, no defaults)

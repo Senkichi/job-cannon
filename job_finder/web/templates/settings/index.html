@@ -184,6 +184,63 @@
                     class="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors">+ Add Query</button>
           </div>
         </div>
+
+        <hr class="border-slate-700">
+
+        <!-- Thordata -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
+            Thordata (Google Jobs SERP)
+          </h3>
+          <div class="grid grid-cols-3 gap-4 mb-3">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="thordata_enabled" value="">
+                <input type="checkbox" name="thordata_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('thordata', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
+              <input type="password" name="thordata_api_key"
+                     value="{{ config.get('sources', {}).get('thordata', {}).get('api_key', '') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Max Age (days)</label>
+              <input type="number" name="thordata_max_age_days" min="1" max="30"
+                     value="{{ config.get('sources', {}).get('thordata', {}).get('max_age_days', 3) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-2">Search Queries</label>
+            <input type="hidden" name="_thordata_queries_present" value="1">
+            <div id="thordata-queries" class="space-y-2">
+              {% for q in config.get('sources', {}).get('thordata', {}).get('queries', []) %}
+              <div class="flex gap-2 items-center thordata-query-row">
+                <input type="text" name="thordata_query_{{ loop.index0 }}" value="{{ q.get('query', '') }}"
+                       placeholder="Query (e.g. Staff Data Scientist)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <input type="text" name="thordata_location_{{ loop.index0 }}" value="{{ q.get('location', '') }}"
+                       placeholder="Location (e.g. San Francisco Bay Area)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <button type="button" onclick="removeThordataRow(this)"
+                        class="text-slate-600 hover:text-red-400 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" onclick="addThordataRow()"
+                    class="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors">+ Add Query</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -709,6 +766,40 @@ function removeSerpApiRow(btn) {
     const inputs = row.querySelectorAll('input[type="text"]');
     if (inputs[0]) inputs[0].name = 'serpapi_query_' + i;
     if (inputs[1]) inputs[1].name = 'serpapi_location_' + i;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Thordata dynamic query rows
+// ---------------------------------------------------------------------------
+function addThordataRow() {
+  const container = document.getElementById('thordata-queries');
+  const idx = container.querySelectorAll('.thordata-query-row').length;
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 items-center thordata-query-row';
+  row.innerHTML = `
+    <input type="text" name="thordata_query_${idx}" placeholder="Query (e.g. Staff Data Scientist)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <input type="text" name="thordata_location_${idx}" placeholder="Location (e.g. San Francisco Bay Area)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <button type="button" onclick="removeThordataRow(this)"
+            class="text-slate-600 hover:text-red-400 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  `;
+  container.appendChild(row);
+}
+
+function removeThordataRow(btn) {
+  btn.closest('.thordata-query-row').remove();
+  // Re-index remaining rows so names stay sequential
+  const container = document.getElementById('thordata-queries');
+  container.querySelectorAll('.thordata-query-row').forEach(function(row, i) {
+    const inputs = row.querySelectorAll('input[type="text"]');
+    if (inputs[0]) inputs[0].name = 'thordata_query_' + i;
+    if (inputs[1]) inputs[1].name = 'thordata_location_' + i;
   });
 }
 </script>

@@ -1,6 +1,6 @@
 """Ingestion pipeline runner for the Flask web app.
 
-Orchestrates Gmail + SerpAPI ingestion with:
+Orchestrates Gmail + SerpAPI + Thordata ingestion with:
 - Run-level tracking via email_parse_log (prevents redundant log entries)
 - Per-source error isolation (Gmail failure does not stop SerpAPI)
 - Per-job error isolation (one bad job does not halt persistence)
@@ -67,6 +67,8 @@ def run_ingestion(db_path: str, config: dict) -> dict:
             - gmail_errors: list[str]
             - serpapi_fetched: int
             - serpapi_errors: list[str]
+            - thordata_fetched: int
+            - thordata_errors: list[str]
             - jobs_new: int
             - jobs_updated: int
             - jobs_scored: int
@@ -83,6 +85,8 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         "gmail_errors": [],
         "serpapi_fetched": 0,
         "serpapi_errors": [],
+        "thordata_fetched": 0,
+        "thordata_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
         "jobs_scored": 0,
@@ -105,8 +109,11 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         # --- SerpAPI ingestion ---
         serpapi_jobs = _fetch_serpapi(config, summary)
 
+        # --- Thordata ingestion ---
+        thordata_jobs = _fetch_thordata(config, summary)
+
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs
+        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -127,6 +134,12 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 log_run(runner_conn, "serpapi", summary["serpapi_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log SerpAPI run: %s", e)
+
+        if summary["thordata_fetched"] > 0 or summary["thordata_errors"]:
+            try:
+                log_run(runner_conn, "thordata", summary["thordata_fetched"], jobs_new, jobs_scored)
+            except Exception as e:
+                logger.warning("Failed to log Thordata run: %s", e)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
@@ -157,7 +170,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
 
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
-    total_fetched = summary["gmail_fetched"] + summary["serpapi_fetched"]
+    total_fetched = summary["gmail_fetched"] + summary["serpapi_fetched"] + summary["thordata_fetched"]
     logger.info(
         "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
         total_fetched,
@@ -276,6 +289,52 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
         error_msg = str(e)
         summary["serpapi_errors"].append(error_msg)
         logger.warning("SerpAPI ingestion failed: %s", error_msg)
+        return []
+
+
+def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
+    """Fetch jobs from Thordata Google Jobs SERP API with error isolation.
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects from Thordata.
+    """
+    thordata_config = config.get("sources", {}).get("thordata", {})
+    if not thordata_config.get("enabled", False):
+        logger.debug("Thordata source disabled in config.")
+        return []
+
+    api_key = thordata_config.get("api_key", "")
+    if not api_key:
+        msg = "Thordata API key not configured"
+        summary["thordata_errors"].append(msg)
+        logger.warning(msg)
+        return []
+
+    queries = thordata_config.get("queries", [])
+    if not queries:
+        logger.debug("No Thordata queries configured.")
+        return []
+
+    max_age_days = thordata_config.get("max_age_days", 3)
+
+    try:
+        from job_finder.sources.thordata_source import ThordataSource
+
+        source = ThordataSource(api_key, max_age_days=max_age_days)
+        jobs = source.fetch_jobs(queries)
+        summary["thordata_fetched"] = len(jobs)
+
+        logger.info("Thordata: fetched %d jobs", len(jobs))
+        return jobs
+
+    except Exception as e:
+        error_msg = str(e)
+        summary["thordata_errors"].append(error_msg)
+        logger.warning("Thordata ingestion failed: %s", error_msg)
         return []
 
 

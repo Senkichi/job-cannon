@@ -55,6 +55,16 @@ sources:
     # Optional: JSearch via RapidAPI (alternative job search)
     enabled: false
     rapidapi_key: ""
+  thordata:
+    # Optional: Thordata Google Jobs SERP API (cheaper alternative to SerpAPI)
+    enabled: false
+    # Get your key at: https://www.thordata.com/
+    api_key: ""
+    # Only ingest jobs posted within this many days
+    max_age_days: 3
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
 
 # --- AI scoring configuration ---
 scoring:

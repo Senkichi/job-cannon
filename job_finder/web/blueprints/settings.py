@@ -270,6 +270,19 @@ def _parse_form_to_config(form) -> dict:
     if jsearch:
         config.setdefault("sources", {})["jsearch"] = jsearch
 
+    # --- Sources: Thordata ---
+    thordata = {}
+    if _has("thordata_enabled"):
+        thordata["enabled"] = form["thordata_enabled"] == "on"
+    if _has("thordata_api_key"):
+        thordata["api_key"] = form["thordata_api_key"]
+    if _has("thordata_max_age_days"):
+        thordata["max_age_days"] = safe_int(form["thordata_max_age_days"], 3)
+    if _has("_thordata_queries_present"):
+        thordata["queries"] = _parse_thordata_queries(form)
+    if thordata:
+        config.setdefault("sources", {})["thordata"] = thordata
+
     # --- Scoring ---
     scoring = {}
     weights = {}
@@ -354,6 +367,23 @@ def _parse_serpapi_queries(form) -> list:
     while True:
         query = form.get(f"serpapi_query_{i}", "").strip()
         location = form.get(f"serpapi_location_{i}", "").strip()
+        if not query and not location:
+            break
+        if query or location:
+            queries.append({"query": query, "location": location})
+        i += 1
+        if i > 50:  # safety limit
+            break
+    return queries
+
+
+def _parse_thordata_queries(form) -> list:
+    """Extract Thordata queries from form fields (variable number of rows)."""
+    queries = []
+    i = 0
+    while True:
+        query = form.get(f"thordata_query_{i}", "").strip()
+        location = form.get(f"thordata_location_{i}", "").strip()
         if not query and not location:
             break
         if query or location:
