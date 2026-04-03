@@ -1,6 +1,6 @@
 """APScheduler background scheduler for automatic job ingestion.
 
-Polls Gmail and SerpAPI every 30 minutes in a background thread.
+Runs Gmail, SerpAPI, and Thordata ingestion 3x/day (midnight, 8am, 4pm Pacific).
 The scheduler is started once per process via init_scheduler(app).
 
 Guards:
@@ -156,10 +156,11 @@ def init_scheduler(app) -> None:
                 try:
                     summary = run_ingestion(db_path, config)
                     logger.info(
-                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d)",
+                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d)",
                         summary["jobs_new"],
                         summary["gmail_fetched"],
                         summary["serpapi_fetched"],
+                        summary.get("thordata_fetched", 0),
                     )
                     log_activity(
                         db_path,
@@ -168,6 +169,7 @@ def init_scheduler(app) -> None:
                             "jobs_new": summary.get("jobs_new", 0),
                             "gmail_fetched": summary.get("gmail_fetched", 0),
                             "serpapi_fetched": summary.get("serpapi_fetched", 0),
+                            "thordata_fetched": summary.get("thordata_fetched", 0),
                             "duration_seconds": round(_time.time() - t0, 2),
                             "status": "success",
                         },
@@ -186,10 +188,10 @@ def init_scheduler(app) -> None:
 
         scheduler.add_job(
             run_pipeline,
-            trigger=IntervalTrigger(minutes=30),
+            trigger=CronTrigger(hour="0,8,16", timezone="US/Pacific"),
             id="ingestion_poll",
             replace_existing=True,
-            max_instances=1,   # prevents overlap if a run takes >30 min
+            max_instances=1,   # prevents overlap on long runs
             coalesce=True,     # skip missed runs if app was down
         )
 
@@ -460,7 +462,7 @@ def init_scheduler(app) -> None:
 
         scheduler.start()
         _scheduler = scheduler
-        logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
+        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 Pacific)")
 
         # pause_job() requires a RUNNING scheduler — must be called AFTER start().
         # All add_job() calls occur before start(); this comment and the pause call
@@ -498,6 +500,8 @@ def run_sync_now(app) -> dict:
             "gmail_errors": [str(e)],
             "serpapi_fetched": 0,
             "serpapi_errors": [],
+            "thordata_fetched": 0,
+            "thordata_errors": [],
             "jobs_new": 0,
             "jobs_updated": 0,
             "jobs_scored": 0,

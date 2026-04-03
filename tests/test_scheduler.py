@@ -165,26 +165,25 @@ class TestDoubleInitGuard:
 # ---------------------------------------------------------------------------
 
 class TestSchedulerJobConfig:
-    def test_ingestion_job_registered_with_30min_interval(self):
-        """The scheduler registers an ingestion job with a 30-minute interval."""
+    def test_ingestion_job_registered_with_cron_3x_daily(self):
+        """The scheduler registers an ingestion job with CronTrigger at 0,8,16 Pacific."""
         from job_finder.web.scheduler import init_scheduler
 
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
 
         with patch("job_finder.web.scheduler.BackgroundScheduler") as MockScheduler, \
-             patch("job_finder.web.scheduler.IntervalTrigger") as MockTrigger:
+             patch("job_finder.web.scheduler.CronTrigger") as MockCronTrigger:
 
             mock_sched = MagicMock()
             MockScheduler.return_value = mock_sched
             mock_trigger = MagicMock()
-            MockTrigger.return_value = mock_trigger
+            MockCronTrigger.return_value = mock_trigger
 
             init_scheduler(app)
 
-            # Verify IntervalTrigger was created with minutes=30 (at least once;
-            # pipeline_detection also uses IntervalTrigger(minutes=30))
-            MockTrigger.assert_any_call(minutes=30)
+            # Verify CronTrigger was created with hour="0,8,16" and Pacific timezone
+            MockCronTrigger.assert_any_call(hour="0,8,16", timezone="US/Pacific")
 
             # Verify add_job was called at least 3 times (ingestion + stale + pipeline_detection)
             assert mock_sched.add_job.call_count >= 3
@@ -260,6 +259,8 @@ class TestRunSyncNow:
         assert "error" in result
         assert "Database locked" in result["error"]
         assert result["jobs_new"] == 0
+        assert result["thordata_fetched"] == 0
+        assert result["thordata_errors"] == []
 
 
 # ---------------------------------------------------------------------------

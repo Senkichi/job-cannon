@@ -184,8 +184,8 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
 
         # Store results: scored=jobs_new, total=total_fetched, skipped=error_count
         jobs_new = summary.get("jobs_new", 0)
-        total_fetched = summary.get("gmail_fetched", 0) + summary.get("serpapi_fetched", 0)
-        error_count = len(summary.get("gmail_errors", [])) + len(summary.get("serpapi_errors", []))
+        total_fetched = summary.get("gmail_fetched", 0) + summary.get("serpapi_fetched", 0) + summary.get("thordata_fetched", 0)
+        error_count = len(summary.get("gmail_errors", [])) + len(summary.get("serpapi_errors", [])) + len(summary.get("thordata_errors", []))
 
         with standalone_connection(db_path) as conn:
             conn.execute(
@@ -203,6 +203,7 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
                     "jobs_new": jobs_new,
                     "gmail_fetched": summary.get("gmail_fetched", 0),
                     "serpapi_fetched": summary.get("serpapi_fetched", 0),
+                    "thordata_fetched": summary.get("thordata_fetched", 0),
                     "duration_seconds": summary.get("duration_seconds", 0.0),
                     "status": "success",
                 },
@@ -243,8 +244,9 @@ def sync():
         jobs_new = summary.get("jobs_new", 0)
         gmail_fetched = summary.get("gmail_fetched", 0)
         serpapi_fetched = summary.get("serpapi_fetched", 0)
-        total_fetched = gmail_fetched + serpapi_fetched
-        errors = summary.get("gmail_errors", []) + summary.get("serpapi_errors", [])
+        thordata_fetched = summary.get("thordata_fetched", 0)
+        total_fetched = gmail_fetched + serpapi_fetched + thordata_fetched
+        errors = summary.get("gmail_errors", []) + summary.get("serpapi_errors", []) + summary.get("thordata_errors", [])
 
         detection_auto_updated = summary.get("detection_auto_updated", 0)
         detection_queued = summary.get("detection_queued", 0)
@@ -260,6 +262,7 @@ def sync():
                     "jobs_new": jobs_new,
                     "gmail_fetched": gmail_fetched,
                     "serpapi_fetched": serpapi_fetched,
+                    "thordata_fetched": thordata_fetched,
                     "duration_seconds": summary.get("duration_seconds", 0.0),
                     "status": "success",
                 },
@@ -277,7 +280,7 @@ def sync():
         else:
             flash(
                 f"Sync complete: fetched {total_fetched} jobs "
-                f"({gmail_fetched} Gmail, {serpapi_fetched} SerpAPI), {jobs_new} new."
+                f"({gmail_fetched} Gmail, {serpapi_fetched} SerpAPI, {thordata_fetched} Thordata), {jobs_new} new."
                 f"{pipeline_msg}",
                 "success",
             )
