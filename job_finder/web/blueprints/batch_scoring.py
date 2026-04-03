@@ -30,11 +30,11 @@ def batch_score_haiku_start():
     testing = current_app.config.get("TESTING", False)
 
     with standalone_connection(db_path) as conn:
-        total = conn.execute(
+        total_unscored = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL"
         ).fetchone()[0]
 
-        if total == 0:
+        if total_unscored == 0:
             return render_template(
                 "dashboard/_batch_score_done.html",
                 label="Haiku",
@@ -45,11 +45,35 @@ def batch_score_haiku_start():
                 error_msg=None,
             )
 
+        # Pre-filter estimate: the background thread will compute the exact
+        # scorable count after enrichment, but give a quick initial estimate
+        # so the progress UI starts with a reasonable total.
+        exclusions = config.get("profile", {}).get("exclusions", {})
+        profile_min_salary = config.get("profile", {}).get("min_salary")
+        rows = conn.execute(
+            f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL"
+        ).fetchall()
+        scorable = sum(
+            1 for r in rows
+            if not should_exclude(dict(r), exclusions, profile_min_salary, config=config)[0]
+        )
+
+        if scorable == 0:
+            return render_template(
+                "dashboard/_batch_score_done.html",
+                label="Haiku",
+                scored=0,
+                skipped=0,
+                status="done",
+                message=f"All {total_unscored} unscored jobs are excluded by filters — nothing to score.",
+                error_msg=None,
+            )
+
         now = utc_now_iso()
         cursor = conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('haiku', 'running', ?, 0, ?)",
-            (total, now),
+            (scorable, now),
         )
         conn.commit()
         session_id = cursor.lastrowid
@@ -66,8 +90,9 @@ def batch_score_haiku_start():
         "dashboard/_batch_score_progress.html",
         label="Haiku",
         session_id=session_id,
-        total=total,
+        total=scorable,
         scored=0,
+        skipped=0,
         cancelling=False,
     )
 
@@ -125,6 +150,7 @@ def batch_score_sonnet_start():
         session_id=session_id,
         total=total,
         scored=0,
+        skipped=0,
         cancelling=False,
     )
 
@@ -203,6 +229,7 @@ def batch_score_status(session_id):
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
+        skipped=session["skipped"],
         cancelling=(status == "cancelling"),
     )
 
@@ -248,6 +275,7 @@ def batch_score_cancel(session_id):
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
+        skipped=session["skipped"],
         cancelling=True,
     )
 
@@ -288,10 +316,39 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
             ).fetchall()
 
+            # --- Pre-filter: remove jobs that fail the exclusion filter ---
+            # Excluded jobs are not scorable — they should never count toward
+            # the batch total or appear as "skipped" in the progress UI.
+            exclusions = config.get("profile", {}).get("exclusions", {})
+            profile_min_salary = config.get("profile", {}).get("min_salary")
+            scorable_rows = []
+            excluded_count = 0
+            for row in rows:
+                job_row = dict(row)
+                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
+                if excluded:
+                    excluded_count += 1
+                else:
+                    scorable_rows.append(job_row)
+
+            if excluded_count > 0:
+                logger.info("Batch Haiku: %d/%d jobs excluded by filter", excluded_count, len(rows))
+
+            # Update session total to reflect only scorable jobs
+            conn.execute(
+                "UPDATE batch_score_sessions SET total = ? WHERE id = ?",
+                (len(scorable_rows), session_id),
+            )
+            conn.commit()
+
+            if not scorable_rows:
+                _finish_session(conn, db_path, session_id, "done", "haiku")
+                return
+
             scored_count = 0
             skipped_count = 0
 
-            for row in rows:
+            for job_row in scorable_rows:
                 # Per-job cancellation check
                 status_row = conn.execute(
                     "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
@@ -303,8 +360,6 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     )
                     conn.commit()
                     return
-
-                job_row = dict(row)
 
                 # --- Enrichment FIRST (before scoring) ---
                 # Matches run_haiku_scoring behavior: enrich sparse jobs before Haiku
@@ -328,15 +383,6 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                             "Batch Haiku: enrichment failed for '%s' (non-fatal): %s",
                             job_row.get("dedup_key"), enrich_err,
                         )
-
-                # Pre-Haiku exclusion filter
-                exclusions = config.get("profile", {}).get("exclusions", {})
-                profile_min_salary = config.get("profile", {}).get("min_salary")
-                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
-                if excluded:
-                    logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
-                    skipped_count += 1
-                    continue
 
                 try:
                     result = score_and_persist_haiku(conn, job_row, config, client, profile)
