@@ -833,7 +833,7 @@ class TestParseFailureActivityFeed:
         config = {"sources": {"gmail": {"enabled": True, "lookback_days": 7}}}
 
         mock_source = MagicMock()
-        mock_source.fetch_jobs.return_value = []
+        mock_source.fetch_jobs.return_value = ([], [])
         mock_source.parse_failures = [{"sender": "alert@indeed.com"}]
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}
@@ -863,7 +863,7 @@ class TestParseFailureActivityFeed:
         config = {"sources": {"gmail": {"enabled": True, "lookback_days": 7}}}
 
         mock_source = MagicMock()
-        mock_source.fetch_jobs.return_value = []
+        mock_source.fetch_jobs.return_value = ([], [])
         mock_source.parse_failures = []
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}

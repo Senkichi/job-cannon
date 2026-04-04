@@ -163,6 +163,12 @@ def run_ingestion(db_path: str, config: dict) -> dict:
             except Exception as e:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
+        # --- Prune stale data (TTL housekeeping) ---
+        gmail_lookback = config.get("sources", {}).get("gmail", {}).get(
+            "lookback_days", DEFAULT_LOOKBACK_DAYS
+        )
+        _prune_stale_data(runner_conn, gmail_lookback)
+
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
         try:
@@ -210,10 +216,12 @@ def run_ingestion(db_path: str, config: dict) -> dict:
 
 
 def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[Job]:
-    """Fetch jobs from Gmail with run-level email_parse_log tracking.
+    """Fetch jobs from Gmail with per-message deduplication via email_parse_log.
 
-    Uses a run-level log entry (not per-message) to track that Gmail was polled.
-    Per-message dedup is handled by upsert_job's dedup_key logic.
+    Before fetching, queries email_parse_log for message IDs already processed
+    within the lookback window and passes them to GmailSource.fetch_jobs() so
+    those messages are skipped entirely. After fetching, bulk-inserts the newly
+    processed IDs so they are skipped on the next sync.
 
     Args:
         config: Full config dict.
@@ -231,14 +239,61 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
     run_id = f"gmail_run_{datetime.now().isoformat()}"
     lookback_days = gmail_config.get("lookback_days", DEFAULT_LOOKBACK_DAYS)
 
+    # --- Query known message IDs from email_parse_log ---
+    known_ids: set[str] = set()
+    try:
+        rows = conn.execute(
+            "SELECT message_id FROM email_parse_log"
+            " WHERE sender = 'gmail'"
+            " AND processed_at >= datetime('now', ?)"
+            " AND message_id NOT LIKE 'gmail_run_%'",
+            (f"-{lookback_days} days",),
+        ).fetchall()
+        known_ids = {row[0] for row in rows}
+        logger.debug("Gmail dedup: %d known message IDs in email_parse_log", len(known_ids))
+    except Exception as e:
+        logger.warning("Failed to query email_parse_log for dedup (proceeding without): %s", e)
+
     try:
         source = GmailSource()
-        jobs = source.fetch_jobs(lookback_days=lookback_days)
+        jobs, new_ids = source.fetch_jobs(
+            lookback_days=lookback_days,
+            processed_message_ids=known_ids,
+        )
         summary["gmail_fetched"] = len(jobs)
 
-        # Log parse failure activity feed entries
+        logger.info(
+            "Gmail dedup: %d known, %d newly processed",
+            len(known_ids),
+            len(new_ids),
+        )
+
+        # --- Bulk-insert newly processed message IDs into email_parse_log ---
+        # jobs_found=0 is a dedup-only placeholder for job-alert rows.  It does
+        # NOT mean "this email had zero jobs" — it simply marks the message as
+        # seen so the next sync can skip it.  This value must never be used for
+        # analytics; use the jobs table directly for per-source job counts.
+        if new_ids:
+            try:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO email_parse_log"
+                    " (message_id, sender, processed_at, jobs_found)"
+                    " VALUES (?, 'gmail', datetime('now'), 0)",
+                    [(mid,) for mid in new_ids],
+                )
+                conn.commit()
+                logger.debug(
+                    "Gmail dedup: inserted %d message IDs into email_parse_log", len(new_ids)
+                )
+            except Exception as e:
+                logger.warning("Failed to bulk-insert message IDs into email_parse_log: %s", e)
+
+        # --- Log parse failure activity feed entries ---
         # (per locked decision: "Non-meta emails that parse to zero jobs create
         # an activity feed entry")
+        # Duplicate-failure protection is implicit: messages already in
+        # email_parse_log are filtered out by the dedup query above, so
+        # parse_failures only contains newly processed messages.
         for failure in getattr(source, "parse_failures", []):
             try:
                 fail_sender = failure.get("sender", "unknown")
@@ -257,7 +312,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
             except Exception as e:
                 logger.warning("Failed to log parse failure to runs: %s", e)
 
-        # Log the run to email_parse_log
+        # --- Log the run-level summary to email_parse_log ---
         _log_to_email_parse_log(conn, run_id, "gmail", len(jobs), None)
 
         logger.info("Gmail: fetched %d jobs", len(jobs))
@@ -550,6 +605,60 @@ def _upsert_job_company(conn, job: Job) -> None:
             job.company,
             company_err,
         )
+
+
+def _prune_stale_data(conn: sqlite3.Connection, lookback_days: int = 7) -> None:
+    """Prune stale entries from both the runs and email_parse_log tables.
+
+    Covers two tables:
+
+    **runs table** — accumulates ~1,000 rows/day from parse_failure entries:
+    - parse_failure rows older than 30 days are deleted
+    - All rows older than 90 days are deleted
+
+    **email_parse_log table** — stores per-message Gmail dedup rows and
+    run-level summary rows (sender='gmail', message_id='gmail_run_...');
+    both are pruned at the same TTL:
+    - Rows with sender='gmail' older than ``max(lookback_days * 2, 14)`` days
+      are deleted. The TTL is at least 14 days and scales with lookback_days
+      so that dedup records are never pruned while Gmail still returns those
+      emails on the next sync.
+
+    Non-fatal: any error is logged at WARNING level and does not interrupt
+    ingestion.
+
+    Args:
+        conn: Active SQLite connection.
+        lookback_days: Gmail lookback window (from config). Used to compute
+            the email_parse_log TTL as max(lookback_days * 2, 14).
+    """
+    email_parse_log_ttl = max(lookback_days * 2, 14)
+    try:
+        conn.execute(
+            "DELETE FROM runs"
+            " WHERE timestamp < datetime('now', '-30 days')"
+            " AND source LIKE '%parse_failure%'"
+        )
+        conn.execute(
+            "DELETE FROM runs WHERE timestamp < datetime('now', '-90 days')"
+        )
+        # Trim email_parse_log rows (both per-message dedup rows and run-level
+        # summary rows with sender='gmail').  TTL scales with lookback_days so
+        # dedup records are never expired while Gmail still returns those emails.
+        # At ~300 rows/run × 3 runs/day that's ~109K rows/year without pruning.
+        conn.execute(
+            "DELETE FROM email_parse_log"
+            " WHERE processed_at < datetime('now', ?)"
+            " AND sender = 'gmail'",
+            (f"-{email_parse_log_ttl} days",),
+        )
+        conn.commit()
+        logger.debug(
+            "Pruned stale runs and email_parse_log rows (email_parse_log TTL: %d days)",
+            email_parse_log_ttl,
+        )
+    except Exception as e:
+        logger.warning("Failed to prune stale data: %s", e)
 
 
 def _log_to_email_parse_log(

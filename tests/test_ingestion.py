@@ -101,7 +101,7 @@ class TestEmailParseLog:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = fake_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (fake_jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -182,7 +182,7 @@ class TestSourceErrorIsolation:
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
             mock_gmail_instance = MockGmail.return_value
-            mock_gmail_instance.fetch_jobs.return_value = gmail_jobs
+            mock_gmail_instance.fetch_jobs.return_value = (gmail_jobs, [])
             MockSerpAPI.side_effect = Exception("SerpAPI quota exceeded")
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -217,7 +217,7 @@ class TestThordataErrorIsolation:
              patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = gmail_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, [])
             # SerpAPI is not patched: minimal_config leaves it disabled, so
             # _fetch_serpapi returns [] before ever instantiating SerpAPISource.
             MockThordata.side_effect = Exception("Thordata API down")
@@ -254,7 +254,7 @@ class TestCrossSourceDedup:
              patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = []
+            MockGmail.return_value.fetch_jobs.return_value = ([], [])
             MockSerpAPI.return_value.fetch_jobs.return_value = [shared_job]
             MockThordata.return_value.fetch_jobs.return_value = [shared_job]
 
@@ -295,7 +295,7 @@ class TestJobErrorIsolation:
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
             mock_gmail_instance = MockGmail.return_value
-            mock_gmail_instance.fetch_jobs.return_value = jobs
+            mock_gmail_instance.fetch_jobs.return_value = (jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -318,7 +318,7 @@ class TestSummaryDict:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = []
+            MockGmail.return_value.fetch_jobs.return_value = ([], [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -348,7 +348,7 @@ class TestSummaryDict:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = gmail_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, [])
             # SerpAPISource is instantiated with an api_key, so mock the class
             MockSerpAPI.return_value.fetch_jobs.return_value = serp_jobs
 
@@ -366,7 +366,7 @@ class TestSummaryDict:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = []
+            MockGmail.return_value.fetch_jobs.return_value = ([], [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -842,7 +842,7 @@ class TestCompanyAutoPopulation:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = lever_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (lever_jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -878,7 +878,7 @@ class TestCompanyAutoPopulation:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = non_ats_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (non_ats_jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -917,7 +917,7 @@ class TestCompanyAutoPopulation:
              ), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockGmail.return_value.fetch_jobs.return_value = (jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -943,7 +943,7 @@ class TestCompanyAutoPopulation:
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
-            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockGmail.return_value.fetch_jobs.return_value = (jobs, [])
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -1095,6 +1095,256 @@ class TestScoringResultUnwrap:
 
         assert row is not None
         assert row[0] == 82, f"Expected sonnet_score=82, got {row[0]}"
+
+
+# ---------------------------------------------------------------------------
+# Test: Gmail message-level dedup (Priority 1 integration path)
+# ---------------------------------------------------------------------------
+
+
+class TestGmailMessageDedup:
+    """Integration tests for the second-sync dedup path in _fetch_gmail."""
+
+    def test_second_run_skips_previously_processed_gmail_ids(
+        self, minimal_config, migrated_db_path
+    ):
+        """Pre-seeded message IDs in email_parse_log are NOT re-fetched on a
+        subsequent run — this is the core correctness claim of the dedup feature."""
+        import sqlite3 as _sqlite3
+        from unittest.mock import MagicMock, patch
+
+        known_id = "msg_already_seen_001"
+
+        # Pre-seed email_parse_log so the next run treats this ID as known
+        setup_conn = _sqlite3.connect(migrated_db_path)
+        setup_conn.execute(
+            "INSERT OR IGNORE INTO email_parse_log"
+            " (message_id, sender, processed_at, jobs_found)"
+            " VALUES (?, 'gmail', datetime('now'), 0)",
+            (known_id,),
+        )
+        setup_conn.commit()
+        setup_conn.close()
+
+        mock_source = MagicMock()
+        # Simulate GmailSource.fetch_jobs returning no jobs and no new IDs
+        # (because the only candidate was already known and filtered out)
+        mock_source.fetch_jobs.return_value = ([], [])
+        mock_source.parse_failures = []
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value = mock_source
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, minimal_config)
+
+        # Verify fetch_jobs was called with the known_id in processed_message_ids
+        assert mock_source.fetch_jobs.called
+        call_kwargs = mock_source.fetch_jobs.call_args
+        passed_ids = call_kwargs.kwargs.get(
+            "processed_message_ids", call_kwargs.args[1] if len(call_kwargs.args) > 1 else set()
+        )
+        assert known_id in passed_ids, (
+            f"Expected known_id '{known_id}' to be in processed_message_ids passed to "
+            f"fetch_jobs, got: {passed_ids}"
+        )
+
+    def test_new_ids_bulk_inserted_into_email_parse_log(
+        self, minimal_config, migrated_db_path
+    ):
+        """Message IDs returned by fetch_jobs are persisted to email_parse_log
+        so the next sync can skip them."""
+        import sqlite3 as _sqlite3
+        from unittest.mock import MagicMock, patch
+
+        new_msg_ids = ["msg_new_001", "msg_new_002"]
+
+        mock_source = MagicMock()
+        mock_source.fetch_jobs.return_value = ([], new_msg_ids)
+        mock_source.parse_failures = []
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value = mock_source
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, minimal_config)
+
+        conn = _sqlite3.connect(migrated_db_path)
+        rows = conn.execute(
+            "SELECT message_id FROM email_parse_log WHERE sender = 'gmail'"
+        ).fetchall()
+        conn.close()
+
+        stored_ids = {row[0] for row in rows}
+        for mid in new_msg_ids:
+            assert mid in stored_ids, (
+                f"Expected message_id '{mid}' to be inserted into email_parse_log"
+            )
+
+    def test_non_gmail_sender_rows_excluded_from_known_ids(
+        self, minimal_config, migrated_db_path
+    ):
+        """Rows with a non-'gmail' sender in email_parse_log (e.g. pipeline detection
+        entries) must NOT be passed to fetch_jobs as known IDs — the dedup query
+        must be scoped to sender='gmail'."""
+        import sqlite3 as _sqlite3
+        from unittest.mock import MagicMock, patch
+
+        pipeline_detection_id = "pipeline_detection_row_001"
+
+        # Pre-seed a row with a non-gmail sender (simulates a pipeline_detector entry
+        # that happened to land in email_parse_log with a different sender)
+        setup_conn = _sqlite3.connect(migrated_db_path)
+        setup_conn.execute(
+            "INSERT OR IGNORE INTO email_parse_log"
+            " (message_id, sender, processed_at, jobs_found)"
+            " VALUES (?, 'pipeline_detector', datetime('now'), 0)",
+            (pipeline_detection_id,),
+        )
+        setup_conn.commit()
+        setup_conn.close()
+
+        mock_source = MagicMock()
+        mock_source.fetch_jobs.return_value = ([], [])
+        mock_source.parse_failures = []
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value = mock_source
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, minimal_config)
+
+        assert mock_source.fetch_jobs.called
+        call_kwargs = mock_source.fetch_jobs.call_args
+        passed_ids = call_kwargs.kwargs.get(
+            "processed_message_ids", call_kwargs.args[1] if len(call_kwargs.args) > 1 else set()
+        )
+        assert pipeline_detection_id not in passed_ids, (
+            f"Non-gmail sender row '{pipeline_detection_id}' must not appear in "
+            f"processed_message_ids passed to fetch_jobs; got: {passed_ids}"
+        )
+
+
+class TestPruneStaleData:
+    """Tests for _prune_stale_data TTL cleanup."""
+
+    def test_prune_stale_data_removes_old_parse_failure_entries(
+        self, migrated_db_path
+    ):
+        """parse_failure rows older than 30 days are deleted; recent rows survive."""
+        import sqlite3 as _sqlite3
+        from job_finder.web.pipeline_runner import _prune_stale_data
+
+        conn = _sqlite3.connect(migrated_db_path)
+
+        # Insert an old parse_failure row (35 days ago)
+        conn.execute(
+            "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)"
+            " VALUES (datetime('now', '-35 days'), 'example_parse_failure', 0, 0, 0)"
+        )
+        # Insert a recent parse_failure row (5 days ago — should survive)
+        conn.execute(
+            "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)"
+            " VALUES (datetime('now', '-5 days'), 'example_parse_failure', 0, 0, 0)"
+        )
+        # Insert a regular row older than 90 days (should be deleted)
+        conn.execute(
+            "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)"
+            " VALUES (datetime('now', '-95 days'), 'gmail', 0, 0, 0)"
+        )
+        conn.commit()
+
+        _prune_stale_data(conn)
+
+        rows = conn.execute(
+            "SELECT source, timestamp FROM runs ORDER BY timestamp"
+        ).fetchall()
+        conn.close()
+
+        sources = [r[0] for r in rows]
+        # Old parse_failure row gone
+        assert sources.count("example_parse_failure") == 1, (
+            "Expected only the recent parse_failure row to survive"
+        )
+        # Ancient regular row gone
+        assert "gmail" not in sources, (
+            "Expected 90-day-old gmail row to be pruned"
+        )
+
+    def test_prune_stale_data_removes_old_email_parse_log_rows(
+        self, migrated_db_path
+    ):
+        """email_parse_log rows older than 14 days with sender='gmail' are deleted."""
+        import sqlite3 as _sqlite3
+        from job_finder.web.pipeline_runner import _prune_stale_data
+
+        conn = _sqlite3.connect(migrated_db_path)
+
+        # Old row (20 days ago) — should be pruned (TTL=14 with default lookback=7)
+        conn.execute(
+            "INSERT OR IGNORE INTO email_parse_log"
+            " (message_id, sender, processed_at, jobs_found)"
+            " VALUES ('old_msg_001', 'gmail', datetime('now', '-20 days'), 0)"
+        )
+        # Recent row (3 days ago) — should survive
+        conn.execute(
+            "INSERT OR IGNORE INTO email_parse_log"
+            " (message_id, sender, processed_at, jobs_found)"
+            " VALUES ('recent_msg_001', 'gmail', datetime('now', '-3 days'), 0)"
+        )
+        conn.commit()
+
+        _prune_stale_data(conn)  # lookback_days=7 → TTL=14
+
+        rows = conn.execute(
+            "SELECT message_id FROM email_parse_log WHERE sender = 'gmail'"
+        ).fetchall()
+        conn.close()
+
+        ids = {r[0] for r in rows}
+        assert "old_msg_001" not in ids, "Old email_parse_log row should have been pruned"
+        assert "recent_msg_001" in ids, "Recent email_parse_log row should have survived"
+
+    def test_prune_stale_data_ttl_scales_with_lookback_days(
+        self, migrated_db_path
+    ):
+        """TTL is max(lookback_days * 2, 14); a 20-day row survives when lookback=30."""
+        import sqlite3 as _sqlite3
+        from job_finder.web.pipeline_runner import _prune_stale_data
+
+        conn = _sqlite3.connect(migrated_db_path)
+
+        # 20-day-old row: pruned at default TTL=14, but should survive TTL=60 (lookback=30)
+        conn.execute(
+            "INSERT OR IGNORE INTO email_parse_log"
+            " (message_id, sender, processed_at, jobs_found)"
+            " VALUES ('msg_20d', 'gmail', datetime('now', '-20 days'), 0)"
+        )
+        conn.commit()
+
+        _prune_stale_data(conn, lookback_days=30)  # TTL = max(60, 14) = 60
+
+        rows = conn.execute(
+            "SELECT message_id FROM email_parse_log WHERE sender = 'gmail'"
+        ).fetchall()
+        conn.close()
+
+        ids = {r[0] for r in rows}
+        assert "msg_20d" in ids, (
+            "Row 20 days old should survive with lookback_days=30 (TTL=60)"
+        )
 
 
 # ---------------------------------------------------------------------------

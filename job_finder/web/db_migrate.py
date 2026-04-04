@@ -495,6 +495,16 @@ MIGRATIONS = [
         )""",
         "ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER DEFAULT NULL",
     ],
+
+    # Migration 24: Add composite index on email_parse_log(sender, processed_at)
+    # to support the per-message Gmail dedup query:
+    #   WHERE sender = 'gmail' AND processed_at >= datetime('now', ?)
+    # The composite covers both filter columns; single-column (processed_at)
+    # would scan all senders unnecessarily as the table grows.
+    [
+        "CREATE INDEX IF NOT EXISTS idx_email_parse_log_sender_processed_at"
+        " ON email_parse_log(sender, processed_at)",
+    ],
 ]
 
 

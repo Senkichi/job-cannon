@@ -412,10 +412,11 @@ def test_migration_count_is_thirteen():
     Migration 19 adds opus_score column for Opus baseline evaluation.
     Migration 20 adds scoring_provider column for provider attribution (ATTR-01).
     Migration 23 recalibrates jobs_found_total and adds jobs_matched column.
+    Migration 24 adds index on email_parse_log.processed_at for dedup query.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 23
+    assert len(MIGRATIONS) == 24
 
 
 class TestMigration13:
@@ -1121,5 +1122,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 23 entries (updated for Migration 23 jobs_found_total recalibration)."""
-        assert len(MIGRATIONS) == 23
+        """MIGRATIONS list has exactly 24 entries (updated for Migration 24 email_parse_log index)."""
+        assert len(MIGRATIONS) == 24
