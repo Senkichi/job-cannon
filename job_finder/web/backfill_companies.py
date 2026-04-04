@@ -601,6 +601,66 @@ def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
     return {"checked": len(company_ids), "enriched": enriched}
 
 
+def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
+    """Delete orphan companies and recalibrate jobs_found_total.
+
+    Orphan = no linked jobs AND no scan log entries. Safe to delete because
+    they have zero production value and no historical data.
+
+    Also recalibrates jobs_found_total for all remaining companies from
+    actual linked job counts (fixes any drift from earlier scans).
+
+    Args:
+        conn: Open SQLite connection with row_factory set.
+
+    Returns:
+        Dict with orphans_deleted and recalibrated_total (number of company
+        rows touched by the recalibration UPDATE, including rows whose value
+        did not change).
+    """
+    orphan_rows = conn.execute(
+        """SELECT c.id FROM companies c
+           WHERE c.id NOT IN (
+               SELECT DISTINCT company_id FROM jobs WHERE company_id IS NOT NULL
+           )
+           AND c.id NOT IN (
+               SELECT DISTINCT company_id FROM company_scan_log
+           )"""
+    ).fetchall()
+    orphan_ids = [row[0] for row in orphan_rows]
+    orphan_count = len(orphan_ids)
+
+    if orphan_ids:
+        placeholders = ",".join("?" * len(orphan_ids))
+        conn.execute(
+            f"DELETE FROM companies WHERE id IN ({placeholders})",
+            orphan_ids,
+        )
+
+    recalibrated_total = conn.execute(
+        """UPDATE companies SET jobs_found_total = (
+            SELECT COUNT(*) FROM jobs WHERE company_id = companies.id
+        )"""
+    ).rowcount
+
+    conn.commit()
+    return {"orphans_deleted": orphan_count, "recalibrated_total": recalibrated_total}
+
+
+def run_orphan_cleanup(db_path: str, config: dict) -> dict:
+    """Scheduler-compatible wrapper for cleanup_orphan_companies().
+
+    Args:
+        db_path: Absolute path to the SQLite database file.
+        config: Application config dict (unused, kept for scheduler signature).
+
+    Returns:
+        Dict with orphans_deleted and recalibrated_total counts.
+    """
+    with standalone_connection(db_path) as conn:
+        return cleanup_orphan_companies(conn)
+
+
 def main() -> None:
     """CLI entry point for company backfill.
 

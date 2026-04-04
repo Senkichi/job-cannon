@@ -717,6 +717,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     job_dicts = []
 
                 company_jobs_found = len(job_dicts)
+                company_jobs_new = 0  # post-dedup: truly new insertions this scan
                 summary["jobs_discovered"] += company_jobs_found
 
                 # Upsert each matched job
@@ -768,6 +769,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
                             if is_new:
                                 summary["jobs_new"] += 1
+                                company_jobs_new += 1
                                 all_new_job_keys.append(job.dedup_key)
 
                                 # Store comp_json for new jobs only (first-seen wins)
@@ -787,20 +789,23 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             summary["errors"].append(error_msg)
                             logger.warning("ATS scan job error: %s", error_msg)
 
-                # Log company scan
+                # Log company scan (jobs_found=new insertions, jobs_matched=API matches pre-dedup)
                 conn.execute(
                     """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched)
                        VALUES (?, ?, ?, ?)""",
-                    (company_id, now, company_jobs_found, company_jobs_found),
+                    (company_id, now, company_jobs_new, company_jobs_found),
                 )
 
-                # Update company last_scanned_at and jobs_found_total
+                # Update company last_scanned_at and jobs_found_total.
+                # Subquery counts currently linked jobs — self-heals after backfill links new ones.
                 conn.execute(
                     """UPDATE companies
                        SET last_scanned_at = ?,
-                           jobs_found_total = ?
+                           jobs_found_total = (
+                               SELECT COUNT(*) FROM jobs WHERE company_id = ?
+                           )
                        WHERE id = ?""",
-                    (now, company_jobs_found, company_id),
+                    (now, company_id, company_id),
                 )
                 conn.commit()
                 summary["companies_scanned"] += 1
@@ -895,6 +900,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     )
 
                     company_html_found = len(scraped_jobs)
+                    company_html_new = 0  # post-dedup: truly new insertions this scan
 
                     # Step 3: Create Job objects and upsert
                     from job_finder.db import upsert_job
@@ -916,6 +922,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 is_new = upsert_job(html_conn, job)
                                 if is_new:
                                     summary["jobs_new"] += 1
+                                    company_html_new += 1
                                     all_new_job_keys.append(job.dedup_key)
                                 summary["html_scraped"] += 1
                             except Exception as job_err:
@@ -923,20 +930,23 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 summary["errors"].append(error_msg)
                                 logger.warning("ATS HTML fallback job error: %s", error_msg)
 
-                    # Step 4: Log company scan
+                    # Step 4: Log company scan (jobs_found=new insertions, jobs_matched=scraped pre-dedup)
                     conn.execute(
                         """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched)
                            VALUES (?, ?, ?, ?)""",
-                        (miss_company_id, now, company_html_found, company_html_found),
+                        (miss_company_id, now, company_html_new, company_html_found),
                     )
 
-                    # Step 5: Update company last_scanned_at and jobs_found_total
+                    # Step 5: Update company last_scanned_at and jobs_found_total.
+                    # Subquery counts currently linked jobs — self-heals after backfill links new ones.
                     conn.execute(
                         """UPDATE companies
                            SET last_scanned_at = ?,
-                               jobs_found_total = ?
+                               jobs_found_total = (
+                                   SELECT COUNT(*) FROM jobs WHERE company_id = ?
+                               )
                            WHERE id = ?""",
-                        (now, company_html_found, miss_company_id),
+                        (now, miss_company_id, miss_company_id),
                     )
                     conn.commit()
 

@@ -42,7 +42,8 @@ def _setup_file_logging() -> None:
     """
     root_logger = logging.getLogger()
 
-    # Guard: skip if a RotatingFileHandler is already attached
+    # Guard: skip if already configured (RotatingFileHandler presence means full
+    # setup was done in a previous call — don't add any duplicate handlers).
     if any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
         return
 
@@ -66,6 +67,17 @@ def _setup_file_logging() -> None:
     )
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
+
+    # Only add a StreamHandler if one isn't already attached (e.g., by pytest
+    # or a previous partial setup).  RotatingFileHandler IS a StreamHandler
+    # subclass, so exclude it explicitly when checking.
+    if not any(
+        type(h) is logging.StreamHandler for h in root_logger.handlers
+    ):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
 
 
 logger = logging.getLogger(__name__)

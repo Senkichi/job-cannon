@@ -399,6 +399,21 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Orphan cleanup (1st of month, 3:00 AM) ------------------------
+
+        def _import_orphan_cleanup():
+            from job_finder.web.backfill_companies import run_orphan_cleanup
+            return run_orphan_cleanup
+
+        scheduler.add_job(
+            _make_simple_job(app, "Orphan cleanup", _import_orphan_cleanup),
+            trigger=CronTrigger(day=1, hour=3, minute=0),
+            id="orphan_cleanup",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # -- Homepage discovery (daily 6:30 AM) ----------------------------
 
         def _import_homepage_discovery():

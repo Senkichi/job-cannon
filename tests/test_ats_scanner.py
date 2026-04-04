@@ -2684,3 +2684,216 @@ class TestFindOrCreateCompany:
         assert result_id is not None
         row = conn.execute("SELECT name_raw FROM companies WHERE id = ?", (result_id,)).fetchone()
         assert row["name_raw"] == "Stripe"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Scan log differentiation — Fix 10
+# ---------------------------------------------------------------------------
+
+class TestScanLogDifferentiation:
+    """Tests that company_scan_log.jobs_found tracks new insertions and
+    jobs_matched tracks pre-dedup API matches."""
+
+    def test_scan_log_records_new_vs_matched(self, db_conn):
+        """API returns 5 jobs; 2 are new, 3 are duplicates.
+
+        Expects: jobs_found=2, jobs_matched=5 in company_scan_log.
+        """
+        db_path, conn = db_conn
+
+        company_id = _insert_hit_company(conn, "LogCo", "lever", "logco")
+
+        # Pre-insert 3 jobs so they appear as duplicates (use canonical dedup_key)
+        from datetime import datetime
+        from job_finder.models import Job as _Job
+        now_ts = datetime.now().isoformat()
+        for i in range(3):
+            conn.execute(
+                """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
+                   VALUES (?, ?, 'LogCo', 'Remote', ?, ?)""",
+                (_Job.normalized_dedup_key("LogCo", f"Data Analyst {i}"), f"Data Analyst {i}", now_ts, now_ts),
+            )
+        conn.commit()
+
+        job_dicts = [
+            {"title": f"Data Analyst {i}", "location": "Remote",
+             "company_source": "Lever", "source_url": f"https://jobs.lever.co/logco/{i}",
+             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
+            for i in range(5)  # 0-2 are pre-existing dupes, 3-4 are new
+        ]
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data analyst"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
+             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
+             patch("job_finder.web.ats_scanner.time.sleep"):
+            from job_finder.web.ats_scanner import run_ats_scan
+            run_ats_scan(db_path, config=config)
+
+        log = conn.execute(
+            "SELECT jobs_found, jobs_matched FROM company_scan_log WHERE company_id = ?",
+            (company_id,),
+        ).fetchone()
+        assert log is not None
+        assert log["jobs_matched"] == 5
+        # jobs_found = newly inserted (0, 1, 2 are dupes; 3, 4 are new → 2 new)
+        assert log["jobs_found"] == 2
+
+    def test_html_scan_log_records_new_vs_matched(self, db_conn):
+        """HTML fallback: scrapes 3 jobs; 1 is already in DB (dupe), 2 are new.
+
+        Expects: jobs_found=2, jobs_matched=3 in company_scan_log.
+        """
+        db_path, conn = db_conn
+
+        from datetime import datetime
+        now_ts = datetime.now().isoformat()
+
+        company_id = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, homepage_url, ats_probe_status, scan_enabled, created_at, updated_at)
+               VALUES ('htmlco', 'HtmlCo', 'https://htmlco.com', 'miss', 1, ?, ?)""",
+            (now_ts, now_ts),
+        ).lastrowid
+        conn.commit()
+
+        # Pre-insert 1 job as existing (use canonical dedup_key so it de-dupes correctly)
+        from job_finder.models import Job as _Job
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
+               VALUES (?, 'Engineer 0', 'HtmlCo', 'Remote', ?, ?)""",
+            (_Job.normalized_dedup_key("HtmlCo", "Engineer 0"), now_ts, now_ts),
+        )
+        conn.commit()
+
+        scraped_jobs = [
+            {"title": f"Engineer {i}", "url": f"https://htmlco.com/jobs/{i}", "description": ""}
+            for i in range(3)  # 0 is dupe, 1 and 2 are new
+        ]
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://htmlco.com/careers"), \
+             patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs), \
+             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
+             patch("job_finder.web.ats_scanner.time.sleep"):
+            from job_finder.web.ats_scanner import run_ats_scan
+            run_ats_scan(db_path, config=config)
+
+        log = conn.execute(
+            "SELECT jobs_found, jobs_matched FROM company_scan_log WHERE company_id = ?",
+            (company_id,),
+        ).fetchone()
+        assert log is not None
+        assert log["jobs_matched"] == 3
+        assert log["jobs_found"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: jobs_found_total accuracy — Fix 9
+# ---------------------------------------------------------------------------
+
+class TestJobsFoundTotalAccuracy:
+    """Tests that jobs_found_total is set via subquery (actual linked jobs),
+    not inflated by pre-dedup API match counts."""
+
+    def test_jobs_found_total_reflects_linked_count(self, db_conn):
+        """After scan, jobs_found_total equals the count of jobs already linked
+        to the company (via company_id), not the raw API match count."""
+        db_path, conn = db_conn
+
+        company_id = _insert_hit_company(conn, "SubqCo", "lever", "subqco")
+
+        # Pre-link 4 jobs to the company so the subquery returns 4
+        from datetime import datetime
+        now_ts = datetime.now().isoformat()
+        for i in range(4):
+            conn.execute(
+                """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
+                   VALUES (?, ?, 'SubqCo', ?, 'Remote', ?, ?)""",
+                (f"subqco-pre-{i}", f"Analyst {i}", company_id, now_ts, now_ts),
+            )
+        conn.commit()
+
+        # API returns 7 jobs (duplicates of the 4 pre-existing + 3 truly new)
+        job_dicts = [
+            {"title": f"Analyst {i}", "location": "Remote",
+             "company_source": "Lever", "source_url": f"https://jobs.lever.co/subqco/{i}",
+             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
+            for i in range(7)
+        ]
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["analyst"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
+             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
+             patch("job_finder.web.ats_scanner.time.sleep"):
+            from job_finder.web.ats_scanner import run_ats_scan
+            run_ats_scan(db_path, config=config)
+
+        row = conn.execute(
+            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        # Subquery counts only company_id-linked jobs: 4 pre-linked ones
+        # (the 3 new jobs from this scan are not yet linked via company_id)
+        assert row["jobs_found_total"] == 4
+
+    def test_jobs_found_total_does_not_inflate_on_rescan(self, db_conn):
+        """Scanning the same jobs twice doesn't double the total."""
+        db_path, conn = db_conn
+
+        company_id = _insert_hit_company(conn, "RescanCo", "lever", "rescanco")
+
+        from datetime import datetime
+        now_ts = datetime.now().isoformat()
+        # Pre-link 2 jobs
+        for i in range(2):
+            conn.execute(
+                """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
+                   VALUES (?, ?, 'RescanCo', ?, 'Remote', ?, ?)""",
+                (f"rescanco-job-{i}", f"PM {i}", company_id, now_ts, now_ts),
+            )
+        conn.commit()
+
+        # API returns those same 2 jobs
+        job_dicts = [
+            {"title": f"PM {i}", "location": "Remote",
+             "company_source": "Lever", "source_url": f"https://jobs.lever.co/rescanco/{i}",
+             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
+            for i in range(2)
+        ]
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["pm"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
+             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
+             patch("job_finder.web.ats_scanner.time.sleep"):
+            from job_finder.web.ats_scanner import run_ats_scan
+            run_ats_scan(db_path, config=config)
+
+        first_total = conn.execute(
+            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()["jobs_found_total"]
+
+        # Scan again with same jobs — total must not change
+        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
+             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
+             patch("job_finder.web.ats_scanner.time.sleep"):
+            run_ats_scan(db_path, config=config)
+
+        second_total = conn.execute(
+            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()["jobs_found_total"]
+
+        assert second_total == first_total

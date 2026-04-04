@@ -61,8 +61,10 @@
       <div class="text-xs text-slate-400 mt-1">Unlinked Jobs</div>
     </div>
     <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold text-slate-200 text-xs">{{ health.last_scan|default('Never', true) }}</div>
-      <div class="text-xs text-slate-400 mt-1">Last Scan</div>
+      <div class="text-2xl font-bold {% if health.last_scan_age_days is not none and health.last_scan_age_days > 7 %}text-red-400{% elif health.last_scan_at %}text-emerald-400{% else %}text-slate-500{% endif %}">
+        {% if health.last_scan_age_days is not none %}{{ health.last_scan_age_days }}d{% else %}—{% endif %}
+      </div>
+      <div class="text-xs text-slate-400 mt-1">Since Last Scan</div>
     </div>
   </div>
   {% endif %}

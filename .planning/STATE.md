@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: Cascading Free Provider Routing
 status: verifying
 stopped_at: Completed 32-integration-config-wiring/32-01-PLAN.md
-last_updated: "2026-03-30T01:30:45.264Z"
-last_activity: 2026-03-30
+last_updated: "2026-04-03T20:30:00.000Z"
+last_activity: 2026-04-03
 progress:
   total_phases: 4
   completed_phases: 4
@@ -83,6 +83,19 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 - AnthropicProvider stores job_id and purpose at init, forwards to call_claude for correct cost attribution
 - scoring_costs table already has `provider` column
 
+### Key Design Decisions (out-of-band, 2026-04-03)
+
+**DataForSEO source added** (`job_finder/sources/dataforseo_source.py`):
+- Task-queue API (no live endpoint) — POST task_post → poll tasks_ready every 30s → GET task_get/advanced/{id}
+- Auth: pre-encoded base64 `login:password` string passed directly to `Authorization: Basic` header
+- Age filter on `timestamp` field (ISO-8601 UTC), not `time_ago` string
+- Within-run dedup by `job_id` in `_collect_results` before returning (DB upsert handles cross-run dedup)
+- K-suffix salary detection is per-group (groups 2 and 4 of `_SALARY_RE`) — handles mixed `$160K–$200,000` formats
+- Default: depth=20, priority=1 (normal, ~5 min), poll_timeout=360s — blocks scheduler thread intentionally (8hr window)
+- 44 tests, all passing. Full suite: 2071 tests after addition.
+- `_fetch_dataforseo` wired into `pipeline_runner.run_ingestion` alongside existing sources
+- INFO logs now stream to terminal (StreamHandler added to root logger in `__init__.py`) in addition to `logs/app.log`
+
 ### Pending Todos
 
 11 todos in `.planning/todos/pending/` — run `/gsd:check-todos` to review.
@@ -96,9 +109,10 @@ None.
 - Implementation plan: `.planning/IMPLEMENTATION_PLAN_V2.md`
 - Eval results: `eval_results/` (72+ runs from benchmarking session)
 - Provider eval session notes: `.claude/projects/C--Users-senki-repos-job-cannon/memory/project_provider_eval_session.md`
+- DataForSEO plan: `.planning/DATAFORSEO_SOURCE_PLAN.md`
 
 ## Session Continuity
 
-Last session: 2026-03-30T01:20:27.522Z
-Stopped at: Completed 32-integration-config-wiring/32-01-PLAN.md
+Last session: 2026-04-03T20:30:00.000Z
+Stopped at: DataForSEO source implementation, validated, config wired, terminal logging enabled
 Resume file: None

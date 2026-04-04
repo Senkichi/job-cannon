@@ -36,32 +36,58 @@ _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
 
 def _companies_health(conn) -> dict:
-    """Compute companies pipeline health metrics for dashboard card."""
-    total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
-    pending = conn.execute(
-        "SELECT COUNT(*) FROM companies WHERE ats_probe_status = 'pending'"
-    ).fetchone()[0]
-    with_homepage = conn.execute(
-        "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL"
-    ).fetchone()[0]
-    with_enrichment = conn.execute(
-        "SELECT COUNT(*) FROM companies"
-        " WHERE company_size IS NOT NULL OR industry IS NOT NULL"
-    ).fetchone()[0]
-    unlinked_jobs = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
-    ).fetchone()[0]
-    last_scan_row = conn.execute(
-        "SELECT MAX(scanned_at) FROM company_scan_log"
+    """Compute companies pipeline health metrics for dashboard card.
+
+    Uses a single CTE query to avoid 6 serial round-trips to SQLite.
+    """
+    from datetime import datetime as _dt
+
+    row = conn.execute(
+        """WITH
+             c_totals AS (
+               SELECT
+                 COUNT(*)                                                     AS total,
+                 COUNT(*) FILTER (WHERE ats_probe_status = 'pending')         AS pending,
+                 COUNT(*) FILTER (WHERE homepage_url IS NOT NULL)             AS with_homepage,
+                 COUNT(*) FILTER (WHERE company_size IS NOT NULL
+                                     OR industry IS NOT NULL)                 AS with_enrichment
+               FROM companies
+             ),
+             j_unlinked AS (
+               SELECT COUNT(*) AS cnt FROM jobs WHERE company_id IS NULL
+             ),
+             last_scan AS (
+               SELECT MAX(scanned_at) AS ts FROM company_scan_log
+             )
+           SELECT
+             c_totals.total,
+             c_totals.pending,
+             c_totals.with_homepage,
+             c_totals.with_enrichment,
+             j_unlinked.cnt      AS unlinked_jobs,
+             last_scan.ts        AS last_scan_at
+           FROM c_totals, j_unlinked, last_scan"""
     ).fetchone()
-    last_scan = last_scan_row[0] if last_scan_row else None
+
+    total = row["total"] or 0
+    last_scan_at = row["last_scan_at"]
+
+    last_scan_age_days = None
+    if last_scan_at:
+        try:
+            scan_dt = _dt.fromisoformat(last_scan_at)
+            last_scan_age_days = (_dt.now() - scan_dt).days
+        except (ValueError, TypeError):
+            pass
+
     return {
         "total": total,
-        "pending_probe": pending,
-        "homepage_pct": round(with_homepage / max(total, 1) * 100, 1),
-        "enrichment_pct": round(with_enrichment / max(total, 1) * 100, 1),
-        "unlinked_jobs": unlinked_jobs,
-        "last_scan": last_scan,
+        "pending_probe": row["pending"],
+        "homepage_pct": round(row["with_homepage"] / max(total, 1) * 100, 1),
+        "enrichment_pct": round(row["with_enrichment"] / max(total, 1) * 100, 1),
+        "unlinked_jobs": row["unlinked_jobs"],
+        "last_scan_at": last_scan_at,
+        "last_scan_age_days": last_scan_age_days,
     }
 
 
@@ -73,7 +99,10 @@ def index():
 
     search = request.args.get("search", "").strip()
     page = request.args.get("page", 1, type=int)
+    if page < 1:
+        page = 1
     per_page = 50
+    offset = (page - 1) * per_page
     ats_platform = request.args.get("ats_platform", "").strip().lower()
     sort_by = request.args.get("sort_by", "name")
 
@@ -102,6 +131,8 @@ def index():
         params,
     ).fetchone()[0]
 
+    # Fetch per_page+1 rows to detect whether a next page exists (avoids false
+    # positive when total is exactly divisible by per_page).
     companies = conn.execute(
         f"""SELECT c.*,
                COUNT(j.dedup_key) as job_count_live
@@ -110,16 +141,25 @@ def index():
             {where_sql}
             GROUP BY c.id
             ORDER BY c.{sort_by} ASC NULLS LAST
-            LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
-        params,
+            LIMIT ? OFFSET ?""",
+        params + [per_page + 1, offset],
     ).fetchall()
 
-    has_more = len(companies) == per_page
+    has_more = len(companies) > per_page
+    if has_more:
+        companies = companies[:per_page]
 
     is_htmx = request.headers.get("HX-Request")
     if is_htmx:
+        # page > 1 means the sentinel fired — return rows-only partial so the
+        # response doesn't nest an outer container + duplicate header inside the
+        # existing page-1 container.  Sentinel uses hx-swap="outerHTML" so it
+        # replaces itself with the new rows + next-page sentinel.
+        template = (
+            "companies/_rows_partial.html" if page > 1 else "companies/_table.html"
+        )
         return render_template(
-            "companies/_table.html",
+            template,
             companies=companies,
             search=search,
             ats_platform=ats_platform,

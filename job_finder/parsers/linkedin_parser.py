@@ -33,12 +33,22 @@ _LINKEDIN_EXTRA_PATTERNS = [
     re.compile(r"you.ll receive notifications", re.IGNORECASE),
 ]
 
+# Detects actual job listing URLs in a LinkedIn email body.
+_VIEW_JOB_RE = re.compile(r"View job:\s*https://", re.IGNORECASE)
+
 
 def _is_meta_email(body: str) -> bool:
     """Return True if the email preamble matches known meta-email patterns.
 
+    LinkedIn's newer digest format starts with a count line ("30+ new jobs
+    match your preferences.") that would normally match BASE_META_PATTERNS,
+    but the email body also contains actual job listings.  If "View job:" URLs
+    are present the email is a real alert regardless of the preamble count.
+
     Delegates to the shared ``is_meta_email`` with LinkedIn's extra pattern.
     """
+    if _VIEW_JOB_RE.search(body):
+        return False
     return is_meta_email(body, extra_patterns=_LINKEDIN_EXTRA_PATTERNS)
 
 
@@ -100,16 +110,26 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
         return None
 
     # Filter out metadata lines (alumni counts, "actively hiring", salary snippets)
+    # and preamble lines from the new LinkedIn digest format (count line, section headers).
     content_lines = []
     for line in lines:
-        # Skip common metadata patterns
+        # Legacy metadata
         if re.match(r"^\d+ school alum", line, re.IGNORECASE):
             continue
         if "actively hiring" in line.lower():
             continue
+        # Preamble: "Your job alert for …"
         if re.match(r"^Your job alert", line, re.IGNORECASE):
             continue
-        if re.match(r"^New jobs match", line, re.IGNORECASE):
+        # Count lines: "30+ new jobs match…" / "New jobs match…"
+        if re.match(r"^\d+\+?\s+new\s+jobs?", line, re.IGNORECASE):
+            continue
+        if re.match(r"^New jobs", line, re.IGNORECASE):
+            continue
+        # New digest format section headers and navigation links
+        if re.match(r"^Manage\b", line, re.IGNORECASE):
+            continue
+        if re.match(r"^Results from\b", line, re.IGNORECASE):
             continue
         content_lines.append(line)
 
