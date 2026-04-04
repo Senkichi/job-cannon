@@ -1400,3 +1400,199 @@ class TestGmailPaginationCap:
         assert page_call_count <= 6, (
             f"Expected at most 6 API pages fetched, got {page_call_count}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: Batch pre-ingestion dedup
+# ---------------------------------------------------------------------------
+
+class TestBatchDedup:
+    """Tests for the batch pre-check that routes known jobs to _touch_existing_job
+    and routes new (or salary-carrying) jobs to the full _score_and_persist path."""
+
+    def test_known_job_skips_scorer(self, minimal_config, migrated_db_path):
+        """A job already in the DB routes to _touch_existing_job, not _score_and_persist."""
+        job = _make_job()
+
+        # Pre-insert so the batch pre-check finds it
+        conn = sqlite3.connect(migrated_db_path)
+        upsert_job(conn, job)
+        conn.close()
+
+        mock_score_and_persist = MagicMock()
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = ([job], [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        mock_score_and_persist.assert_not_called()
+        assert summary["jobs_touch_only"] == 1
+
+    def test_new_job_uses_full_scoring(self, minimal_config, migrated_db_path):
+        """A job not in the DB routes to _score_and_persist."""
+        job = _make_job()
+        mock_score_and_persist = MagicMock()
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = ([job], [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        mock_score_and_persist.assert_called_once()
+        assert summary["jobs_touch_only"] == 0
+
+    def test_known_job_with_salary_uses_full_scoring(self, minimal_config, migrated_db_path):
+        """Known job with new salary data bypasses touch-only path (salary guard)."""
+        base_job = _make_job()
+
+        # Pre-insert base job (no salary)
+        conn = sqlite3.connect(migrated_db_path)
+        upsert_job(conn, base_job)
+        conn.commit()
+        conn.close()
+
+        # Incoming job: same dedup_key, but carries salary data
+        salary_job = _make_job()
+        salary_job.salary_min = 200000
+
+        mock_score_and_persist = MagicMock()
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = ([salary_job], [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, minimal_config)
+
+        mock_score_and_persist.assert_called_once()
+
+    def test_touch_updates_last_seen_and_merges_source(self, migrated_db_path):
+        """_touch_existing_job updates last_seen and merges new source/source_url into JSON columns."""
+        import json
+
+        conn = sqlite3.connect(migrated_db_path)
+        job = _make_job()
+        dedup_key = job.dedup_key
+        old_url = "https://old.example.com/job"
+
+        # Insert with explicit old last_seen, single-source list, and one source_url
+        conn.execute(
+            """INSERT INTO jobs
+               (dedup_key, title, company, location, sources, source_urls, first_seen, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (dedup_key, job.title, job.company, job.location,
+             '["gmail"]', json.dumps([old_url]), "2026-01-01", "2026-01-01"),
+        )
+        conn.commit()
+
+        # Incoming job arrives from a different source with a new URL
+        incoming = _make_job()
+        incoming.source = "serpapi"
+        incoming.source_url = "https://new.example.com/job"
+
+        summary: dict = {"jobs_touch_only": 0}
+
+        from job_finder.web.pipeline_runner import _touch_existing_job
+        _touch_existing_job(incoming, conn, summary)
+
+        row = conn.execute(
+            "SELECT last_seen, sources, source_urls FROM jobs WHERE dedup_key = ?",
+            (dedup_key,),
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        last_seen, sources_json, source_urls_json = row
+        assert last_seen > "2026-01-01", f"last_seen not updated: {last_seen}"
+        sources = json.loads(sources_json)
+        assert "gmail" in sources, f"gmail missing from merged sources: {sources}"
+        assert "serpapi" in sources, f"serpapi missing from merged sources: {sources}"
+        source_urls = json.loads(source_urls_json)
+        assert old_url in source_urls, f"old URL missing from merged source_urls: {source_urls}"
+        assert "https://new.example.com/job" in source_urls, f"new URL missing from merged source_urls: {source_urls}"
+        assert summary["jobs_touch_only"] == 1
+
+    def test_touch_failure_falls_back_to_full_scoring(
+        self, minimal_config, migrated_db_path, caplog
+    ):
+        """When _touch_existing_job raises, the fallback path calls _score_and_persist
+        and emits a WARNING log. jobs_touch_only stays at 0."""
+        import logging
+
+        job = _make_job()
+
+        # Pre-insert so the batch pre-check routes to the touch path
+        conn = sqlite3.connect(migrated_db_path)
+        upsert_job(conn, job)
+        conn.close()
+
+        mock_score_and_persist = MagicMock()
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner._touch_existing_job",
+                   side_effect=Exception("DB locked")), \
+             patch("job_finder.web.pipeline_runner._score_and_persist",
+                   mock_score_and_persist), \
+             patch("job_finder.web.pipeline_runner.anthropic", None), \
+             caplog.at_level(logging.WARNING, logger="job_finder.web.pipeline_runner"):
+
+            MockGmail.return_value.fetch_jobs.return_value = ([job], [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        mock_score_and_persist.assert_called_once()
+        assert summary["jobs_touch_only"] == 0
+        assert any("Touch-update failed" in r.message for r in caplog.records), (
+            f"Expected WARNING about touch failure, got: {[r.message for r in caplog.records]}"
+        )
+
+    def test_archived_job_uses_full_scoring(self, minimal_config, migrated_db_path):
+        """An archived job re-appearing in ingestion routes to _score_and_persist,
+        not touch-only, so upsert_job() can auto-reopen it to 'discovered'."""
+        job = _make_job()
+
+        # Pre-insert and mark as archived
+        conn = sqlite3.connect(migrated_db_path)
+        upsert_job(conn, job)
+        conn.execute(
+            "UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key = ?",
+            (job.dedup_key,),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_score_and_persist = MagicMock()
+
+        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = ([job], [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        mock_score_and_persist.assert_called_once()
+        assert summary["jobs_touch_only"] == 0
