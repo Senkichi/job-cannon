@@ -502,23 +502,11 @@ def init_scheduler(app) -> None:
             replace_existing=True,
             max_instances=1,
             coalesce=True,
-            # next_run_time=None defers the initial trigger, eliminating any race
-            # window between add_job() and the pause_job() call below.
-            next_run_time=None,
         )
 
         scheduler.start()
         _scheduler = scheduler
         logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 Pacific)")
-
-        # pause_job() requires a RUNNING scheduler — must be called AFTER start().
-        # All add_job() calls occur before start(); this comment and the pause call
-        # must remain at the end of init_scheduler() after scheduler.start().
-        # Resume manually via: get_scheduler().resume_job("agentic_backfill")
-        scheduler.pause_job("agentic_backfill")
-        logger.info(
-            "agentic_backfill registered and paused — manual resume required before first run"
-        )
 
 
 def run_sync_now(app) -> dict:
