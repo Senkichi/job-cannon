@@ -1,0 +1,18 @@
+{# Rows-only partial for infinite-scroll append pages (page > 1 + HX-Request).
+   Contains ONLY company row divs and a new sentinel — no outer container or
+   column header.  The sentinel uses hx-swap="outerHTML" so it replaces itself
+   with this fragment, keeping new rows inside the page-1 container. #}
+
+{% for company in companies %}
+<div id="company-{{ company.id }}">
+  {% include "companies/_row.html" %}
+</div>
+{% endfor %}
+{% if has_more %}
+<div hx-get="/companies/?page={{ page + 1 }}{% if search %}&search={{ search | urlencode }}{% endif %}{% if ats_platform %}&ats_platform={{ ats_platform | urlencode }}{% endif %}&sort_by={{ sort_by | urlencode }}"
+     hx-trigger="revealed"
+     hx-swap="outerHTML"
+     class="py-4 text-center text-slate-500 text-sm">
+  Loading more...
+</div>
+{% endif %}
