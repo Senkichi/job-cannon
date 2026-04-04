@@ -861,3 +861,127 @@ class TestRunCompanyLinkage:
 
         result2 = run_company_linkage(db_path, {})
         assert result2["linked"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: Orphan cleanup — Fix 13
+# ---------------------------------------------------------------------------
+
+class TestOrphanCleanup:
+    """Tests for cleanup_orphan_companies() and run_orphan_cleanup()."""
+
+    def _insert_company(self, conn, name):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+               VALUES (?, ?, 'pending', ?, ?)""",
+            (name.lower(), name, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def _insert_job(self, conn, key, company_name, company_id=None):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
+               VALUES (?, 'Engineer', ?, ?, 'Remote', ?, ?)""",
+            (key, company_name, company_id, now, now),
+        )
+        conn.commit()
+
+    def _insert_scan_log(self, conn, company_id):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        conn.execute(
+            """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found)
+               VALUES (?, ?, 0)""",
+            (company_id, now),
+        )
+        conn.commit()
+
+    def test_deletes_orphan_companies(self, migrated_db):
+        """Companies with no linked jobs and no scan history are deleted."""
+        db_path, conn = migrated_db
+
+        id_a = self._insert_company(conn, "WithJobs Co")
+        id_b = self._insert_company(conn, "WithScan Co")
+        id_c = self._insert_company(conn, "Orphan Co")
+
+        # Link a job to company A
+        self._insert_job(conn, "key-a", "WithJobs Co", company_id=id_a)
+        # Give company B a scan log entry
+        self._insert_scan_log(conn, id_b)
+        # Company C has neither — it is the orphan
+
+        from job_finder.web.backfill_companies import cleanup_orphan_companies
+        result = cleanup_orphan_companies(conn)
+
+        assert result["orphans_deleted"] == 1
+        remaining_ids = [r[0] for r in conn.execute("SELECT id FROM companies").fetchall()]
+        assert id_a in remaining_ids
+        assert id_b in remaining_ids
+        assert id_c not in remaining_ids
+
+    def test_preserves_company_with_scan_history(self, migrated_db):
+        """A company with scan history but no linked jobs is NOT deleted."""
+        db_path, conn = migrated_db
+
+        company_id = self._insert_company(conn, "ScannedNoJobs Co")
+        self._insert_scan_log(conn, company_id)
+
+        from job_finder.web.backfill_companies import cleanup_orphan_companies
+        result = cleanup_orphan_companies(conn)
+
+        assert result["orphans_deleted"] == 0
+        row = conn.execute("SELECT id FROM companies WHERE id = ?", (company_id,)).fetchone()
+        assert row is not None
+
+    def test_recalibrates_jobs_found_total(self, migrated_db):
+        """jobs_found_total is reset to actual linked job count for all companies."""
+        db_path, conn = migrated_db
+
+        company_id = self._insert_company(conn, "Recalib Co")
+        # Manually set a stale total
+        conn.execute(
+            "UPDATE companies SET jobs_found_total = 99 WHERE id = ?", (company_id,)
+        )
+        conn.commit()
+        # Link 3 real jobs
+        for i in range(3):
+            self._insert_job(conn, f"recalib-{i}", "Recalib Co", company_id=company_id)
+
+        from job_finder.web.backfill_companies import cleanup_orphan_companies
+        cleanup_orphan_companies(conn)
+
+        row = conn.execute(
+            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        assert row["jobs_found_total"] == 3
+
+    def test_idempotent_second_call(self, migrated_db):
+        """Running cleanup twice: second call returns orphans_deleted=0."""
+        db_path, conn = migrated_db
+
+        self._insert_company(conn, "Orphan Again")
+
+        from job_finder.web.backfill_companies import cleanup_orphan_companies
+        result1 = cleanup_orphan_companies(conn)
+        assert result1["orphans_deleted"] == 1
+
+        result2 = cleanup_orphan_companies(conn)
+        assert result2["orphans_deleted"] == 0
+
+    def test_run_orphan_cleanup_wrapper(self, migrated_db):
+        """run_orphan_cleanup() returns dict with expected keys."""
+        db_path, conn = migrated_db
+        conn.close()  # wrapper opens its own connection
+
+        from job_finder.web.backfill_companies import run_orphan_cleanup
+        result = run_orphan_cleanup(db_path, {})
+
+        assert "orphans_deleted" in result
+        assert "recalibrated_total" in result
+        assert isinstance(result["orphans_deleted"], int)
+        assert isinstance(result["recalibrated_total"], int)

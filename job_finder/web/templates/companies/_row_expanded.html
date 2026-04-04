@@ -118,6 +118,8 @@
             <span class="{% if log.error %}text-red-400{% elif log.jobs_found > 0 %}text-emerald-400{% else %}text-slate-500{% endif %}">
               {% if log.error %}
               Error
+              {% elif log.jobs_matched is not none and log.jobs_matched != log.jobs_found %}
+              {{ log.jobs_found }} new / {{ log.jobs_matched }} matched
               {% else %}
               {{ log.jobs_found }} jobs
               {% endif %}

@@ -453,6 +453,130 @@ class TestIndexPagination:
         row_count = len(_re.findall(r'id="company-\d+"', body))
         assert row_count == 10
 
+    def test_sentinel_present_when_more(self, companies_client):
+        """With 60 companies, HTMX request to page 1 includes infinite-scroll sentinel."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"sentco{i:03d}", f"SentCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'hx-trigger="revealed"' in body
+
+    def test_no_sentinel_when_no_more(self, companies_client):
+        """With 10 companies (< 50), HTMX request has no infinite-scroll sentinel."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(10):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"smallco{i:03d}", f"SmallCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'hx-trigger="revealed"' not in body
+
+    def test_no_false_positive_sentinel_when_exact_multiple(self, companies_client):
+        """Exactly 50 companies produces no sentinel (no phantom next-page request)."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(50):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"exactco{i:03d}", f"ExactCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert 'hx-trigger="revealed"' not in body
+
+    def test_total_count_shows_correct_number(self, companies_client):
+        """total_count in the full-page response matches the actual company count."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"totco{i:03d}", f"TotCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "60 companies" in body
+
+    def test_sentinel_includes_sort_by(self, companies_client):
+        """Infinite scroll sentinel URL includes sort_by param to preserve sort order."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"sortco{i:03d}", f"SortCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get(
+            "/companies/?sort_by=last_scanned_at", headers={"HX-Request": "true"}
+        )
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "sort_by=last_scanned_at" in body
+
+    def test_page2_htmx_response_has_no_outer_container_or_header(self, companies_client):
+        """Sentinel fires page=2 + HX-Request → rows-only partial (no container, no header).
+
+        Validates Fix 8 structural correctness: page 2+ must NOT contain the
+        outer bg-slate-800 container or grid column-header row so that HTMX
+        outerHTML swap doesn't nest containers inside the page-1 wrapper.
+        """
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        import re as _re
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"p2co{i:03d}", f"P2Co {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/?page=2", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.data.decode()
+
+        # Must contain company rows (the 10 remaining from page 2)
+        row_count = len(_re.findall(r'id="company-\d+"', body))
+        assert row_count == 10
+
+        # Must NOT contain the outer container wrapper
+        assert "bg-slate-800 rounded-xl" not in body
+        # Must NOT contain the column header row (unique: uppercase tracking-wider)
+        assert "uppercase tracking-wider" not in body
+
 
 # ---------------------------------------------------------------------------
 # Tests: Health card (Fix 14)
@@ -470,3 +594,49 @@ class TestIndexHealthCard:
         assert "Pending Probe" in body
         assert "Unlinked Jobs" in body
         assert "Have Homepage" in body
+
+    def test_health_shows_scan_age_in_days(self, companies_client):
+        """Health card displays last scan age as '<N>d' not a raw ISO timestamp."""
+        client, db_path, conn = companies_client
+        from datetime import datetime, timedelta
+        company_id = _insert_company(conn, name="ScanAgeCo")
+        recent = (datetime.now() - timedelta(days=2)).isoformat()
+        conn.execute(
+            "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found) VALUES (?, ?, 0)",
+            (company_id, recent),
+        )
+        conn.commit()
+
+        resp = client.get("/companies/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # Should render "2d" (or similar) not the raw ISO string
+        assert "2d" in body
+        assert "Since Last Scan" in body
+
+    def test_health_shows_stale_scan_warning(self, companies_client):
+        """Scan age >7 days renders the red-400 CSS class as staleness warning."""
+        client, db_path, conn = companies_client
+        from datetime import datetime, timedelta
+        company_id = _insert_company(conn, name="StaleScanCo")
+        old_scan = (datetime.now() - timedelta(days=10)).isoformat()
+        conn.execute(
+            "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found) VALUES (?, ?, 0)",
+            (company_id, old_scan),
+        )
+        conn.commit()
+
+        resp = client.get("/companies/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "text-red-400" in body
+
+    def test_health_not_in_htmx_fragment(self, companies_client):
+        """HTMX request returns _table.html fragment only — no health card."""
+        client, db_path, conn = companies_client
+        resp = client.get("/companies/", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # Health card labels are only rendered in the full index.html
+        assert "Since Last Scan" not in body
+        assert "Pending Probe" not in body

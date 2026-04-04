@@ -19,9 +19,9 @@
   </div>
   {% endfor %}
   {% if has_more %}
-  <div hx-get="/companies/?page={{ page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if ats_platform %}&ats_platform={{ ats_platform }}{% endif %}"
+  <div hx-get="/companies/?page={{ page + 1 }}{% if search %}&search={{ search | urlencode }}{% endif %}{% if ats_platform %}&ats_platform={{ ats_platform | urlencode }}{% endif %}&sort_by={{ sort_by | urlencode }}"
        hx-trigger="revealed"
-       hx-swap="afterend"
+       hx-swap="outerHTML"
        class="py-4 text-center text-slate-500 text-sm">
     Loading more...
   </div>

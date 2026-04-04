@@ -335,28 +335,43 @@ View job: https://www.linkedin.com/comm/jobs/view/4364166509/?trackingId=test123
 
 
 class TestLinkedInMetaEmailFilter:
-    """Test that LinkedIn parser rejects meta-email digest/count bodies."""
+    """Test LinkedIn parser handling of count-preamble and digest emails.
 
-    def test_meta_body_starts_with_count_plus_new_jobs(self):
-        """LinkedIn parser returns [] when body starts with '30+ new jobs match'."""
+    Emails that contain 'View job:' links are always parsed — the jobs are real
+    data regardless of any count preamble.  Only truly empty count notifications
+    (no 'View job:' links at all) are filtered as meta.
+    """
+
+    def test_count_preamble_email_with_jobs_is_parsed(self):
+        """Count preamble ('30+ new jobs match') + job listings → jobs are returned.
+
+        Previously these were filtered; the filter was wrong because the email
+        contains real job data.  LinkedIn now sends primary alerts in this format.
+        """
         result = parse_linkedin_alert(LINKEDIN_META_BODY_DIGEST)
-        assert result == [], (
-            f"Expected [], got {len(result)} jobs from meta-email starting with '30+ new jobs'"
+        assert len(result) >= 1, (
+            f"Expected jobs from '30+ new jobs match' email with listings, got {len(result)}"
         )
 
-    def test_meta_body_you_have_n_new_jobs(self):
-        """LinkedIn parser returns [] when body starts with 'You have N new jobs'."""
+    def test_you_have_n_new_jobs_email_with_jobs_is_parsed(self):
+        """'You have N new jobs' preamble + job listings → jobs are returned."""
         result = parse_linkedin_alert(LINKEDIN_META_BODY_COUNT)
-        assert result == [], (
-            f"Expected [], got {len(result)} jobs from 'you have N new jobs' meta-email"
+        assert len(result) >= 1, (
+            f"Expected jobs from 'you have N new jobs' email with listings, got {len(result)}"
         )
 
-    def test_meta_body_job_alert_digest(self):
-        """LinkedIn parser returns [] when body contains 'job alert digest' in first 200 chars."""
+    def test_job_alert_digest_email_with_jobs_is_parsed(self):
+        """'job alert digest' preamble + job listings → jobs are returned."""
         result = parse_linkedin_alert(LINKEDIN_META_BODY_WEEKLY_DIGEST)
-        assert result == [], (
-            f"Expected [], got {len(result)} jobs from 'job alert digest' meta-email"
+        assert len(result) >= 1, (
+            f"Expected jobs from 'job alert digest' email with listings, got {len(result)}"
         )
+
+    def test_count_only_notification_no_job_links_filtered(self):
+        """True count-only notification with no 'View job:' links → filtered."""
+        body = "30+ new jobs match your preferences in San Francisco Bay Area\n\nManage alerts: https://linkedin.com/jobs/alerts"
+        result = parse_linkedin_alert(body)
+        assert result == []
 
     def test_normal_alert_not_filtered(self):
         """LinkedIn parser still returns jobs for normal job alert emails (no false positives)."""
@@ -378,11 +393,11 @@ class TestLinkedInMetaEmailFilter:
         """Empty body still returns []."""
         assert parse_linkedin_alert("") == []
 
-    def test_meta_email_with_email_date_still_filtered(self):
-        """Meta-email filter fires even when email_date is provided."""
+    def test_count_preamble_email_with_date_still_parsed(self):
+        """Count preamble + job listings → parsed even when email_date is provided."""
         date = datetime(2026, 3, 9)
         result = parse_linkedin_alert(LINKEDIN_META_BODY_DIGEST, email_date=date)
-        assert result == []
+        assert len(result) >= 1
 
 
 class TestGlassdoorMetaEmailFilter:
