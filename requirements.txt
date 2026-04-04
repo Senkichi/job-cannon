@@ -38,6 +38,9 @@ python-docx~=1.2
 
 # Telemetry — installed separately: uv pip install -e ../anthropic-telemetry
 
+# Content extraction
+trafilatura~=2.0             # Density-based main-content extraction (strips chrome/nav/aggregator boilerplate)
+
 # Dev
 pytest~=8.0
 pytest-playwright~=0.7

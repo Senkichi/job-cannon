@@ -302,6 +302,55 @@ def is_short_auth_page(text: str) -> bool:
     return any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES)
 
 
+# ---------------------------------------------------------------------------
+# HTML content extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_content_from_html(html: str) -> Optional[str]:
+    """Extract main content from HTML, stripping navigation, chrome, and boilerplate.
+
+    Uses trafilatura's density-based extraction as the primary method. trafilatura
+    identifies the main content zone by measuring text density and link density
+    across DOM subtrees — the same principle used by readability algorithms — so
+    it generalises across aggregators, job boards, and ATS platforms without
+    requiring site-specific configuration.
+
+    Falls back to BeautifulSoup noise-tag stripping when trafilatura returns
+    nothing (e.g. very sparse pages, Cloudflare challenge pages that trafilatura
+    can't parse). The fallback preserves existing behaviour for those cases.
+
+    Args:
+        html: Raw HTML string. Works with both static HTML and Playwright-rendered
+              DOM (post-JS-execution).
+
+    Returns:
+        Cleaned text content, or None if both methods fail to produce output.
+    """
+    # Primary: trafilatura density-based extraction
+    try:
+        import trafilatura
+        text = trafilatura.extract(
+            html,
+            include_tables=True,    # Salary/requirements tables are JD content
+            include_comments=False,  # Skip comment sections on job boards
+        )
+        if text and len(text) >= 300:
+            return text
+    except Exception:
+        pass  # ImportError (not installed) or any extraction error → fall through
+
+    # Fallback: strip known-noisy tags, return full page text
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(_NOISE_TAGS):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        return text if text.strip() else None
+    except Exception:
+        return None
+
+
 # Browser-like User-Agent for sites that block bot UAs
 _BROWSER_HEADERS = {
     "User-Agent": (
@@ -375,13 +424,9 @@ def fetch_direct_jd(url: str) -> Optional[str]:
         response = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Strip noisy tags
-        for tag in soup.find_all(_NOISE_TAGS):
-            tag.decompose()
-
-        text = soup.get_text(separator="\n", strip=True)
+        text = extract_content_from_html(response.text)
+        if not text:
+            return None
 
         # DEFECT 006 FIX: is_short_auth_page() catches short Cloudflare/CAPTCHA pages
         # (< 2000 chars) before the heavier full-text checks. Short challenge pages
@@ -407,7 +452,7 @@ def fetch_direct_jd(url: str) -> Optional[str]:
             logger.debug("Chrome/login page detected for '%s', rejecting", url)
             return None
 
-        return text[:_MAX_JD_CHARS] if text.strip() else None
+        return text[:_MAX_JD_CHARS]
 
     except Exception as e:
         logger.debug("Direct fetch failed for '%s': %s", url, e)

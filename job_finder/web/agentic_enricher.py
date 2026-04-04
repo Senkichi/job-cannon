@@ -22,8 +22,6 @@ import re
 import time
 from typing import Optional
 
-from bs4 import BeautifulSoup
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -147,13 +145,12 @@ def _create_browser(playwright):
 def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
     """Fetch a URL with Playwright and return cleaned text content.
 
-    Auth-wall detection delegates to the canonical helpers from enrichment_tiers:
-    - is_short_auth_page() replaces the previous inline auth_signals list + len check
-    - is_chrome_or_login_page() remains for broader page-type detection
-    This eliminates the previously duplicated auth_signals list.
+    Uses extract_content_from_html() from enrichment_tiers for density-based
+    content extraction (trafilatura), falling back to noise-tag stripping.
+    Auth-wall detection via is_short_auth_page() and is_chrome_or_login_page().
 
-    LinkedIn URLs are tried with the lightweight BeautifulSoup extractor first
-    (no Playwright needed). Falls through to Playwright if that fails.
+    LinkedIn URLs are tried with the lightweight fetch_linkedin_jd() extractor
+    first (no Playwright needed). Falls through to Playwright if that fails.
     """
     # LinkedIn shortcut: try lightweight extractor first (no Playwright needed)
     if "linkedin.com/jobs/" in url:
@@ -171,30 +168,22 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
         page.wait_for_timeout(_PAGE_LOAD_WAIT_MS)
 
         html = page.content()
-        soup = BeautifulSoup(html, "html.parser")
 
-        # Remove noise using the canonical tag list from enrichment_tiers
-        from job_finder.web.enrichment_tiers import _NOISE_TAGS
-        for tag in soup.find_all(_NOISE_TAGS):
-            tag.decompose()
+        from job_finder.web.enrichment_tiers import (
+            extract_content_from_html,
+            is_short_auth_page,
+            is_chrome_or_login_page,
+        )
+        text = extract_content_from_html(html)
+        if not text:
+            return None
 
-        text = soup.get_text(separator="\n", strip=True)
-
-        # Delegate short auth-wall detection to the canonical helper from
-        # enrichment_tiers. Replaces the previously duplicated inline list:
-        #   auth_signals = ["sign in", "log in", ...] + len(text) < 2000 check
-        from job_finder.web.enrichment_tiers import is_short_auth_page, is_chrome_or_login_page
         if is_short_auth_page(text):
             logger.debug("Short auth-wall detected on %s", url[:80])
             return None
 
-        # Reject website chrome, login pages, and wrong page types
         if is_chrome_or_login_page(text):
             logger.debug("Chrome/login page detected on %s", url[:80])
-            return None
-
-        # Too short = probably not a job description
-        if len(text) < 300:
             return None
 
         return text[:_MAX_JD_CHARS * 2]  # Keep extra for validation, trim later
