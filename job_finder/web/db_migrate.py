@@ -486,6 +486,15 @@ MIGRATIONS = [
            WHERE jd_full IS NOT NULL
              AND jd_full LIKE '%Past month%Past week%Past 24 hours%'""",
     ],
+
+    # Migration 23: Recalibrate jobs_found_total from cumulative to current count
+    # and add jobs_matched column to company_scan_log.
+    [
+        """UPDATE companies SET jobs_found_total = (
+            SELECT COUNT(*) FROM jobs WHERE company_id = companies.id
+        )""",
+        "ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER DEFAULT NULL",
+    ],
 ]
 
 
@@ -522,6 +531,23 @@ def run_migrations(db_path: str) -> None:
         if final_version >= 7:
             try:
                 conn.execute("ALTER TABLE jobs ADD COLUMN comp_data_json TEXT DEFAULT NULL")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists — expected on fresh DBs
+
+        # Fixup: ensure homepage_probe_attempted_at column exists on companies table.
+        # Migration 17 added this column, but DBs that reached user_version=23 via a
+        # path where Migration 17 was inserted after the fact never had it applied —
+        # the migration loop skips entries at indices below current_version.
+        if final_version >= 17:
+            try:
+                conn.execute(
+                    "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_companies_homepage_probe_attempted_at"
+                    " ON companies(homepage_probe_attempted_at)"
+                )
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # Column already exists — expected on fresh DBs

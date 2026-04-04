@@ -230,6 +230,7 @@ def probe_single_company(
                     "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
                     (company_id,),
                 )
+                conn.commit()
                 _reset_retry_state(conn, company_id, now)
                 try:
                     data = resp.json()
@@ -281,6 +282,7 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
+                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_greenhouse(slug_candidate):
@@ -292,6 +294,7 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
+                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_ashby(slug_candidate):
@@ -303,6 +306,7 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
+                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
@@ -402,3 +406,37 @@ def _probe_ashby(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_ashby('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_greenhouse_with_result(slug: str) -> bool:
+    """Return True if slug is a valid Greenhouse board token.
+
+    Transient exceptions (Timeout, ConnectionError, HTTPError) propagate to
+    the caller for retry handling. Mirrors _probe_lever_with_result pattern.
+
+    Args:
+        slug: Greenhouse board token to probe.
+
+    Returns:
+        True if the slug resolves to a valid Greenhouse job board.
+    """
+    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    return r.status_code == 200
+
+
+def _probe_ashby_with_result(slug: str) -> bool:
+    """Return True if slug is a valid Ashby job board name.
+
+    Transient exceptions (Timeout, ConnectionError, HTTPError) propagate to
+    the caller for retry handling. Mirrors _probe_lever_with_result pattern.
+
+    Args:
+        slug: Ashby job board name to probe.
+
+    Returns:
+        True if the slug resolves to a valid Ashby job board.
+    """
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    return r.status_code == 200

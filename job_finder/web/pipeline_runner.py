@@ -87,6 +87,10 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         "serpapi_errors": [],
         "thordata_fetched": 0,
         "thordata_errors": [],
+        "scaleserp_fetched": 0,
+        "scaleserp_errors": [],
+        "dataforseo_fetched": 0,
+        "dataforseo_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
         "jobs_scored": 0,
@@ -112,8 +116,14 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         # --- Thordata ingestion ---
         thordata_jobs = _fetch_thordata(config, summary)
 
+        # --- ScaleSerp ingestion ---
+        scaleserp_jobs = _fetch_scaleserp(config, summary)
+
+        # --- DataForSEO ingestion ---
+        dataforseo_jobs = _fetch_dataforseo(config, summary)
+
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs
+        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + dataforseo_jobs
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -140,6 +150,18 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 log_run(runner_conn, "thordata", summary["thordata_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log Thordata run: %s", e)
+
+        if summary["scaleserp_fetched"] > 0 or summary["scaleserp_errors"]:
+            try:
+                log_run(runner_conn, "scaleserp", summary["scaleserp_fetched"], jobs_new, jobs_scored)
+            except Exception as e:
+                logger.warning("Failed to log ScaleSerp run: %s", e)
+
+        if summary["dataforseo_fetched"] > 0 or summary["dataforseo_errors"]:
+            try:
+                log_run(runner_conn, "dataforseo", summary["dataforseo_fetched"], jobs_new, jobs_scored)
+            except Exception as e:
+                logger.warning("Failed to log DataForSEO run: %s", e)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if new_job_keys and anthropic is not None:
@@ -170,7 +192,11 @@ def run_ingestion(db_path: str, config: dict) -> dict:
 
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
-    total_fetched = summary["gmail_fetched"] + summary["serpapi_fetched"] + summary["thordata_fetched"]
+    total_fetched = (
+        summary["gmail_fetched"] + summary["serpapi_fetched"]
+        + summary["thordata_fetched"] + summary["scaleserp_fetched"]
+        + summary["dataforseo_fetched"]
+    )
     logger.info(
         "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
         total_fetched,
@@ -335,6 +361,110 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
         error_msg = str(e)
         summary["thordata_errors"].append(error_msg)
         logger.warning("Thordata ingestion failed: %s", error_msg)
+        return []
+
+
+def _fetch_scaleserp(config: dict, summary: dict) -> list[Job]:
+    """Fetch jobs from ScaleSerp Google Jobs API with error isolation.
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects from ScaleSerp.
+    """
+    scaleserp_config = config.get("sources", {}).get("scaleserp", {})
+    if not scaleserp_config.get("enabled", False):
+        logger.debug("ScaleSerp source disabled in config.")
+        return []
+
+    api_key = scaleserp_config.get("api_key", "")
+    if not api_key:
+        msg = "ScaleSerp key not configured"
+        summary["scaleserp_errors"].append(msg)
+        logger.warning(msg)
+        return []
+
+    queries = scaleserp_config.get("queries", [])
+    if not queries:
+        logger.debug("No ScaleSerp queries configured.")
+        return []
+
+    try:
+        from job_finder.sources.scaleserp_source import ScaleSerpSource
+
+        source = ScaleSerpSource(api_key)
+        jobs = source.fetch_jobs(queries)
+        summary["scaleserp_fetched"] = len(jobs)
+
+        logger.info("ScaleSerp: fetched %d jobs", len(jobs))
+        return jobs
+
+    except Exception as e:
+        error_msg = str(e)
+        summary["scaleserp_errors"].append(error_msg)
+        logger.warning("ScaleSerp ingestion failed: %s", error_msg)
+        return []
+
+
+def _fetch_dataforseo(config: dict, summary: dict) -> list[Job]:
+    """Fetch jobs from DataForSEO Google Jobs SERP API with error isolation.
+
+    Uses async task queue (no live endpoint). Submits all queries as a single
+    POST batch, then polls tasks_ready until all complete or timeout is reached.
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects from DataForSEO.
+    """
+    dataforseo_config = config.get("sources", {}).get("dataforseo", {})
+    if not dataforseo_config.get("enabled", False):
+        logger.debug("DataForSEO source disabled in config.")
+        return []
+
+    api_key = dataforseo_config.get("api_key", "")
+    if not api_key:
+        msg = "DataForSEO API key not configured"
+        summary["dataforseo_errors"].append(msg)
+        logger.warning(msg)
+        return []
+
+    queries = dataforseo_config.get("queries", [])
+    if not queries:
+        logger.debug("No DataForSEO queries configured.")
+        return []
+
+    max_age_days = dataforseo_config.get("max_age_days", 7)
+    depth = dataforseo_config.get("depth", 20)
+    priority = dataforseo_config.get("priority", 1)
+    poll_interval = dataforseo_config.get("poll_interval_seconds", 30)
+    poll_timeout = dataforseo_config.get("poll_timeout_seconds", 360)
+
+    try:
+        from job_finder.sources.dataforseo_source import DataForSEOSource
+
+        source = DataForSEOSource(
+            api_key,
+            max_age_days=max_age_days,
+            depth=depth,
+            priority=priority,
+            poll_interval_seconds=poll_interval,
+            poll_timeout_seconds=poll_timeout,
+        )
+        jobs = source.fetch_jobs(queries)
+        summary["dataforseo_fetched"] = len(jobs)
+
+        logger.info("DataForSEO: fetched %d jobs", len(jobs))
+        return jobs
+
+    except Exception as e:
+        error_msg = str(e)
+        summary["dataforseo_errors"].append(error_msg)
+        logger.warning("DataForSEO ingestion failed: %s", error_msg)
         return []
 
 

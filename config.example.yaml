@@ -65,6 +65,34 @@ sources:
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
+  scaleserp:
+    # Optional: ScaleSerp Google Jobs API (~$2/1K, SerpAPI-compatible, full index access)
+    enabled: false
+    # Get your key at: https://www.scaleserp.com/
+    api_key: ""
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
+  dataforseo:
+    # Optional: DataForSEO Google Jobs SERP API — full index, ~$0.87/month at default settings
+    # Task-queue API (async: submits tasks, polls for completion, no live endpoint).
+    enabled: false
+    # Credentials: base64(login:password) — copy from https://app.dataforseo.com/api-access
+    api_key: ""
+    # Results per query (10-200). Each 10 = 1 billing unit ($0.0006 normal / $0.0012 high).
+    # depth=20 recommended: doubles coverage, ~$0.0012/query.
+    depth: 20
+    # Only ingest jobs posted within this many days (uses posting timestamp, not time_ago string)
+    max_age_days: 7
+    # Task priority: 1=normal (~5 min, $0.0006/10 results), 2=high (~1 min, $0.0012/10 results)
+    priority: 1
+    # How often to poll for completed tasks (seconds). Min safe: 3s (20 polls/min rate limit).
+    poll_interval_seconds: 30
+    # Give up waiting after this many seconds. Partial results returned; remainder abandoned.
+    poll_timeout_seconds: 360
+    queries:
+      - query: Data Scientist
+        location: San Francisco Bay Area
 
 # --- AI scoring configuration ---
 scoring:

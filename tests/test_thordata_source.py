@@ -4,7 +4,7 @@ Coverage:
 - Field mapping (_parse_result)
 - Recency filter (max_age_days)
 - Salary extraction from extensions[]
-- htidocid extraction from share_link
+- docid extraction from URL fragment
 - Posting age parsing (all age string formats)
 - fetch_jobs iterates queries and combines results
 - _search: POST request with correct headers; returns [] on HTTP error
@@ -30,20 +30,18 @@ def _result(
     title="Senior Data Scientist",
     company_name="Acme Corp",
     location="San Francisco, CA",
-    share_link="https://www.google.com/search?ibp=htl;jobs&q=DS&htidocid=ABC123%3D%3D&hl=en-US",
+    link="https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer",
     extensions=None,
     via="LinkedIn",
-    rank=1,
 ):
-    """Build a minimal Thordata jobs_results item."""
+    """Build a minimal Thordata job_results.jobs[] item."""
     return {
         "title": title,
         "company_name": company_name,
         "location": location,
-        "share_link": share_link,
+        "link": link,
         "extensions": extensions if extensions is not None else ["1 day ago", "Full-time"],
         "via": via,
-        "rank": rank,
     }
 
 
@@ -78,17 +76,17 @@ class TestParseResult:
         assert job is not None
         assert job.description is None
 
-    def test_source_url_is_share_link(self, source):
-        link = "https://www.google.com/search?ibp=htl;jobs&q=DS&htidocid=XYZ%3D%3D"
-        job = source._parse_result(_result(share_link=link))
+    def test_source_url_is_link(self, source):
+        link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DXYZ%3D%3D&vssid=jobs-detail-viewer"
+        job = source._parse_result(_result(link=link))
         assert job is not None
         assert job.source_url == link
 
-    def test_source_id_extracted_from_share_link(self, source):
-        link = "https://www.google.com/search?ibp=htl;jobs&q=DS&htidocid=ABC123%3D%3D&hl=en-US"
-        job = source._parse_result(_result(share_link=link))
+    def test_source_id_extracted_from_link_fragment(self, source):
+        link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer"
+        job = source._parse_result(_result(link=link))
         assert job is not None
-        # htidocid=ABC123%3D%3D → decoded: "ABC123=="
+        # fragment docid%3DABC123%3D%3D → decoded: "docid=ABC123==" → extracted: "ABC123=="
         assert job.source_id == "ABC123=="
 
     def test_missing_title_returns_none(self, source):
@@ -208,29 +206,28 @@ class TestPostingAgeParsing:
 
 
 # ---------------------------------------------------------------------------
-# Test: htidocid extraction
+# Test: docid extraction from URL fragment
 # ---------------------------------------------------------------------------
 
-class TestExtractHtidocid:
-    def test_extracts_from_standard_share_link(self, source):
-        link = "https://www.google.com/search?ibp=htl;jobs&q=DS&htidocid=ABC123%3D%3D&hl=en-US"
-        assert source._extract_htidocid(link) == "ABC123=="
+class TestExtractDocid:
+    def test_extracts_from_standard_link(self, source):
+        link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer"
+        assert source._extract_docid(link) == "ABC123=="
 
     def test_empty_url_returns_empty_string(self, source):
-        assert source._extract_htidocid("") == ""
+        assert source._extract_docid("") == ""
 
-    def test_url_without_htidocid_returns_empty_string(self, source):
+    def test_url_without_fragment_returns_empty_string(self, source):
         link = "https://www.google.com/search?q=data+scientist"
-        assert source._extract_htidocid(link) == ""
+        assert source._extract_docid(link) == ""
 
-    def test_encoded_htidocid_decoded(self, source):
-        link = "https://www.google.com/search?htidocid=_lTbCUIJ6iKqxDCVAAAAAA%3D%3D"
-        result = source._extract_htidocid(link)
-        assert result == "_lTbCUIJ6iKqxDCVAAAAAA=="
+    def test_encoded_docid_decoded(self, source):
+        link = "https://www.google.com/search?udm=8#vhid=vt%3D20/docid%3D_lTbCUIJ6iKqxDCVAAAAAA%3D%3D&vssid=jobs-detail-viewer"
+        assert source._extract_docid(link) == "_lTbCUIJ6iKqxDCVAAAAAA=="
 
-    def test_simple_htidocid(self, source):
-        link = "https://www.google.com/search?htidocid=SIMPLE_ID_123"
-        assert source._extract_htidocid(link) == "SIMPLE_ID_123"
+    def test_fragment_without_docid_returns_empty_string(self, source):
+        link = "https://www.google.com/search?udm=8#vhid=vt%3D20&vssid=jobs-detail-viewer"
+        assert source._extract_docid(link) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +342,7 @@ class TestSearch:
         """_search sends Authorization: Bearer header."""
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {"jobs_results": []}
+        mock_resp.json.return_value = {"job_results": {"jobs": []}}
 
         with patch("job_finder.sources.thordata_source.requests.post",
                    return_value=mock_resp) as mock_post:
@@ -374,14 +371,14 @@ class TestSearch:
             jobs = source._search("Data Scientist", "Remote")
         assert jobs == []
 
-    def test_parses_jobs_results_key(self, source):
-        """_search extracts jobs from jobs_results[] key."""
+    def test_parses_job_results_key(self, source):
+        """_search extracts jobs from job_results.jobs[] key."""
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
-            "jobs_results": [
-                _result(title="DS Role", extensions=["1 day ago", "Full-time"]),
-            ]
+            "job_results": {
+                "jobs": [_result(title="DS Role", extensions=["1 day ago", "Full-time"])]
+            }
         }
 
         with patch("job_finder.sources.thordata_source.requests.post",
@@ -396,10 +393,12 @@ class TestSearch:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
-            "jobs_results": [
-                _result(title="Old Job", extensions=["30 days ago"]),
-                _result(title="New Job", extensions=["1 day ago"]),
-            ]
+            "job_results": {
+                "jobs": [
+                    _result(title="Old Job", extensions=["30 days ago"]),
+                    _result(title="New Job", extensions=["1 day ago"]),
+                ]
+            }
         }
 
         with patch("job_finder.sources.thordata_source.requests.post",

@@ -2540,3 +2540,147 @@ class TestHtmlFallbackDescriptionPassthrough:
 
         assert job is not None
         assert job["description"] == "Full JD text here"
+
+
+# ---------------------------------------------------------------------------
+# Tests: probe_ats_slugs retry state machine (Fix 1)
+# ---------------------------------------------------------------------------
+
+class TestProbeAtsSlugsRetry:
+    """Tests that probe_ats_slugs() correctly handles transient errors."""
+
+    def _insert_pending_company(self, conn, name="Acme Corp"):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+               VALUES (?, ?, 'pending', ?, ?)""",
+            (name.lower(), name, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def test_probe_ats_slugs_timeout_enters_retry_state(self, db_conn):
+        """Timeout during probe sets ats_probe_status='error' and retry_count=1."""
+        import requests
+        db_path, conn = db_conn
+        company_id = self._insert_pending_company(conn)
+
+        with patch("job_finder.web.ats_scanner._probe_lever_with_result",
+                   side_effect=requests.exceptions.Timeout("timeout")), \
+             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result",
+                   side_effect=requests.exceptions.Timeout("timeout")), \
+             patch("job_finder.web.ats_scanner._probe_ashby_with_result",
+                   side_effect=requests.exceptions.Timeout("timeout")):
+            from job_finder.web.ats_scanner import probe_ats_slugs
+            result = probe_ats_slugs(db_path, {"TESTING": False})
+
+        row = conn.execute(
+            "SELECT ats_probe_status, retry_count FROM companies WHERE id = ?",
+            (company_id,),
+        ).fetchone()
+        assert row["ats_probe_status"] == "error"
+        assert row["retry_count"] == 1
+
+    def test_probe_ats_slugs_all_miss_sets_miss_status(self, db_conn):
+        """When all probes return False, company gets ats_probe_status='miss'."""
+        db_path, conn = db_conn
+        company_id = self._insert_pending_company(conn)
+
+        with patch("job_finder.web.ats_scanner._probe_lever_with_result", return_value=False), \
+             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result", return_value=False), \
+             patch("job_finder.web.ats_scanner._probe_ashby_with_result", return_value=False):
+            from job_finder.web.ats_scanner import probe_ats_slugs
+            result = probe_ats_slugs(db_path, {"TESTING": False})
+
+        row = conn.execute(
+            "SELECT ats_probe_status FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        assert row["ats_probe_status"] == "miss"
+        assert result["misses"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: probe_ats_slugs batch limit (Fix 3)
+# ---------------------------------------------------------------------------
+
+class TestProbeAtsSlugsLimit:
+    """Tests that probe_ats_slugs() respects _PROBE_BATCH_LIMIT."""
+
+    def test_probe_ats_slugs_respects_batch_limit(self, db_conn):
+        """With 100 pending companies, probe processes only _PROBE_BATCH_LIMIT=75."""
+        from datetime import datetime
+        db_path, conn = db_conn
+
+        # Insert 100 pending companies
+        now = datetime.now().isoformat()
+        for i in range(100):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"company{i}", f"Company {i}", now, now),
+            )
+        conn.commit()
+
+        with patch("job_finder.web.ats_scanner._probe_lever_with_result", return_value=False), \
+             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result", return_value=False), \
+             patch("job_finder.web.ats_scanner._probe_ashby_with_result", return_value=False), \
+             patch("job_finder.web.ats_scanner.time") as mock_time:
+            mock_time.sleep = lambda x: None
+            from job_finder.web.ats_scanner import probe_ats_slugs, _PROBE_BATCH_LIMIT
+            result = probe_ats_slugs(db_path, {"TESTING": False})
+
+        assert result["probed"] == _PROBE_BATCH_LIMIT
+
+
+# ---------------------------------------------------------------------------
+# Tests: find_or_create_company (Fix 6)
+# ---------------------------------------------------------------------------
+
+class TestFindOrCreateCompany:
+    """Tests for find_or_create_company() unified creation path."""
+
+    def _insert_company(self, conn, name):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        from job_finder.web.dedup_normalizer import normalize_company
+        cursor = conn.execute(
+            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+               VALUES (?, ?, 'pending', ?, ?)""",
+            (normalize_company(name), name, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def test_find_or_create_exact_match(self, db_conn):
+        """Exact normalized name match returns existing company ID."""
+        db_path, conn = db_conn
+        existing_id = self._insert_company(conn, "Stripe")
+
+        from job_finder.web.ats_scanner import find_or_create_company
+        result_id = find_or_create_company(conn, "Stripe Inc.")
+        assert result_id == existing_id
+
+    def test_find_or_create_fuzzy_match(self, db_conn):
+        """Fuzzy match path returns existing ID via mocked fuzzy_match_company."""
+        db_path, conn = db_conn
+        existing_id = self._insert_company(conn, "Stripe")
+
+        from job_finder.web.ats_scanner import find_or_create_company
+        # Patch fuzzy_match_company to return the existing ID — tests the fuzzy branch
+        # "Stripe Technologies" doesn't normalize-exact-match "stripe" (no suffix stripped)
+        with patch("job_finder.web.backfill_companies.fuzzy_match_company",
+                   return_value=(existing_id, 90)):
+            result_id = find_or_create_company(conn, "Stripe Technologies")
+
+        assert result_id == existing_id
+
+    def test_find_or_create_creates_new(self, db_conn):
+        """No match creates and returns new company ID."""
+        db_path, conn = db_conn
+
+        from job_finder.web.ats_scanner import find_or_create_company
+        result_id = find_or_create_company(conn, "Stripe")
+        assert result_id is not None
+        row = conn.execute("SELECT name_raw FROM companies WHERE id = ?", (result_id,)).fetchone()
+        assert row["name_raw"] == "Stripe"

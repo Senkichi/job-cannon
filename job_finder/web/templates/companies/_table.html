@@ -18,6 +18,14 @@
     {% include "companies/_row.html" %}
   </div>
   {% endfor %}
+  {% if has_more %}
+  <div hx-get="/companies/?page={{ page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if ats_platform %}&ats_platform={{ ats_platform }}{% endif %}"
+       hx-trigger="revealed"
+       hx-swap="afterend"
+       class="py-4 text-center text-slate-500 text-sm">
+    Loading more...
+  </div>
+  {% endif %}
 </div>
 {% else %}
 <div class="bg-slate-800 rounded-xl border border-slate-700 p-12 text-center">

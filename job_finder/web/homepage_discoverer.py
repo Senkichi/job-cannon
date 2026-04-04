@@ -41,7 +41,8 @@ _PARKED_DOMAIN_SIGNATURES = [
     "this domain is available",
 ]
 
-_BATCH_CAP = 10  # Conservative SerpAPI quota (100-250/month depending on plan)
+_BATCH_CAP = 10   # Conservative SerpAPI quota (100-250/month depending on plan)
+_FAST_BATCH_CAP = 50  # Free-tier (Tier 1+2) batch cap — no API cost
 
 # Domains to skip as SerpAPI results (not real company sites)
 _SKIP_DOMAINS = [
@@ -147,16 +148,102 @@ def discover_homepage(
     return None
 
 
-def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
-    """Process up to _BATCH_CAP companies with no homepage_url and no prior probe attempt.
+def _process_homepage_batch(
+    conn,
+    companies: list,
+    api_key: str | None,
+) -> tuple[int, int, list[str]]:
+    """Process a batch of companies for homepage discovery.
 
-    Creates its own sqlite3 connection (thread-safe for APScheduler).
-    Stamps homepage_probe_attempted_at on every company processed (success or failure).
+    Args:
+        conn: Open SQLite connection.
+        companies: List of company rows (id, name_raw, ats_platform, ats_slug).
+        api_key: SerpAPI key. When None, Tier 3 is skipped.
+
+    Returns:
+        Tuple of (companies_checked, homepages_found, errors).
+    """
+    checked = 0
+    found = 0
+    errors: list[str] = []
+
+    for row in companies:
+        company_id, name_raw, ats_platform, ats_slug = row
+        checked += 1
+
+        try:
+            source_url_rows = conn.execute(
+                "SELECT source_urls FROM jobs WHERE company_id = ? AND source_urls IS NOT NULL AND source_urls != '[]'",
+                (company_id,)
+            ).fetchall()
+            source_urls = []
+            for (raw,) in source_url_rows:
+                try:
+                    import json as _json
+                    parsed = _json.loads(raw)
+                    if isinstance(parsed, list):
+                        source_urls.extend(u for u in parsed if u)
+                except (ValueError, TypeError):
+                    pass
+        except Exception as e:
+            logger.debug("Could not fetch source_urls for %s: %s", name_raw, e)
+            source_urls = []
+
+        try:
+            url = discover_homepage(name_raw, ats_platform, ats_slug, source_urls, api_key=api_key)
+        except SerpAPIQuotaError as e:
+            logger.error("SerpAPI quota error -- stopping batch: %s", e)
+            errors.append(f"QUOTA_ERROR: {e}")
+            conn.execute(
+                "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
+                (company_id,)
+            )
+            conn.commit()
+            break
+        except Exception as e:
+            error_msg = f"{name_raw}: {e}"
+            logger.debug("discover_homepage failed for %s: %s", name_raw, e)
+            errors.append(error_msg)
+            conn.execute(
+                "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
+                (company_id,)
+            )
+            conn.commit()
+            continue
+
+        if url:
+            try:
+                conn.execute(
+                    "UPDATE companies SET homepage_url = ?, homepage_probe_attempted_at = datetime('now') WHERE id = ?",
+                    (url, company_id)
+                )
+                conn.commit()
+                found += 1
+                logger.debug("Found homepage for %s: %s", name_raw, url)
+            except Exception as e:
+                error_msg = f"{name_raw} DB update: {e}"
+                logger.debug("DB update failed for %s: %s", name_raw, e)
+                errors.append(error_msg)
+        else:
+            conn.execute(
+                "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
+                (company_id,)
+            )
+            conn.commit()
+
+    return checked, found, errors
+
+
+def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
+    """Process companies with no homepage_url and no prior probe attempt.
+
+    Phase A (free tiers): Up to _FAST_BATCH_CAP companies, no SerpAPI key passed.
+    Phase B (SerpAPI): Up to _BATCH_CAP additional companies, with api_key.
     Short-circuits on SerpAPI quota errors.
 
     Args:
         db_path: Path to the SQLite database file.
-        config: Optional config dict. Uses config['serpapi']['api_key'] for Tier 3.
+        config: Optional config dict. Uses config['serpapi']['api_key'] for Phase B.
 
     Returns:
         Summary dict:
@@ -164,90 +251,41 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
             homepages_found (int): Number of homepage_url values written.
             errors (list): List of error strings encountered.
     """
-    companies_checked = 0
-    homepages_found = 0
-    errors: list[str] = []
-
     api_key = None
     if config:
         api_key = config.get("serpapi", {}).get("api_key")
 
+    companies_checked = 0
+    homepages_found = 0
+    errors: list[str] = []
+
     with standalone_connection(db_path) as conn:
-        companies = conn.execute(
+        # Phase A: free tiers only (no SerpAPI key) — larger batch
+        fast_companies = conn.execute(
             f"SELECT id, name_raw, ats_platform, ats_slug "
             f"FROM companies "
             f"WHERE homepage_url IS NULL AND homepage_probe_attempted_at IS NULL "
-            f"LIMIT {_BATCH_CAP}"
+            f"LIMIT {_FAST_BATCH_CAP}"
         ).fetchall()
 
-        for row in companies:
-            company_id, name_raw, ats_platform, ats_slug = row
-            companies_checked += 1
+        a_checked, a_found, a_errors = _process_homepage_batch(conn, fast_companies, api_key=None)
+        companies_checked += a_checked
+        homepages_found += a_found
+        errors.extend(a_errors)
 
-            # Fetch source_urls for this company from jobs table.
-            # source_urls is a JSON array column (e.g. '["https://..."]') per job row.
-            # Collect and flatten all URL arrays across the company's jobs.
-            try:
-                source_url_rows = conn.execute(
-                    "SELECT source_urls FROM jobs WHERE company = ? AND source_urls IS NOT NULL AND source_urls != '[]'",
-                    (name_raw,)
-                ).fetchall()
-                source_urls = []
-                for (raw,) in source_url_rows:
-                    try:
-                        parsed = json.loads(raw)
-                        if isinstance(parsed, list):
-                            source_urls.extend(u for u in parsed if u)
-                    except (ValueError, TypeError):
-                        pass
-            except Exception as e:
-                logger.debug("Could not fetch source_urls for %s: %s", name_raw, e)
-                source_urls = []
+        # Phase B: SerpAPI for remaining companies (different set — already stamped)
+        if api_key and not any("QUOTA_ERROR" in e for e in a_errors):
+            serp_companies = conn.execute(
+                f"SELECT id, name_raw, ats_platform, ats_slug "
+                f"FROM companies "
+                f"WHERE homepage_url IS NULL AND homepage_probe_attempted_at IS NULL "
+                f"LIMIT {_BATCH_CAP}"
+            ).fetchall()
 
-            try:
-                url = discover_homepage(name_raw, ats_platform, ats_slug, source_urls, api_key=api_key)
-            except SerpAPIQuotaError as e:
-                logger.error("SerpAPI quota error -- stopping batch: %s", e)
-                errors.append(f"QUOTA_ERROR: {e}")
-                # Stamp this company before breaking
-                conn.execute(
-                    "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
-                    (company_id,)
-                )
-                conn.commit()
-                break
-            except Exception as e:
-                error_msg = f"{name_raw}: {e}"
-                logger.debug("discover_homepage failed for %s: %s", name_raw, e)
-                errors.append(error_msg)
-                # Still stamp probe attempted
-                conn.execute(
-                    "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
-                    (company_id,)
-                )
-                conn.commit()
-                continue
-
-            if url:
-                try:
-                    conn.execute(
-                        "UPDATE companies SET homepage_url = ?, homepage_probe_attempted_at = datetime('now') WHERE id = ?",
-                        (url, company_id)
-                    )
-                    conn.commit()
-                    homepages_found += 1
-                    logger.debug("Found homepage for %s: %s", name_raw, url)
-                except Exception as e:
-                    error_msg = f"{name_raw} DB update: {e}"
-                    logger.debug("DB update failed for %s: %s", name_raw, e)
-                    errors.append(error_msg)
-            else:
-                # No homepage found — still stamp probe attempted
-                conn.execute(
-                    "UPDATE companies SET homepage_probe_attempted_at = datetime('now') WHERE id = ?",
-                    (company_id,)
-                )
-                conn.commit()
+            b_checked, b_found, b_errors = _process_homepage_batch(conn, serp_companies, api_key=api_key)
+            companies_checked += b_checked
+            homepages_found += b_found
+            errors.extend(b_errors)
 
     return {
         "companies_checked": companies_checked,
@@ -262,17 +300,22 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
 
 
 def _try_domain_guess(name_raw: str) -> str | None:
-    """Tier 1: single-token companies only (e.g., 'Stripe' -> stripe.com).
+    """Tier 1: domain guess for single- or two-token companies.
 
-    Strips company suffixes, checks if result is a single token.
-    Multi-word names return None immediately (let Tier 2 handle).
+    Strips company suffixes, then:
+    - Single token: try token.com (e.g. 'Stripe' -> stripe.com)
+    - Two tokens: try concatenated.com (e.g. 'Palo Alto' -> paloalto.com)
+    - Three or more tokens: return None (let Tier 2 handle)
+
     Reuses _try_slug_heuristic for HEAD probe + parked-domain guard.
     """
     stripped = _strip_company_suffixes(name_raw)
     tokens = stripped.split()
-    if len(tokens) != 1:
-        return None
-    return _try_slug_heuristic(tokens[0])
+    if len(tokens) == 1:
+        return _try_slug_heuristic(tokens[0])
+    if len(tokens) == 2:
+        return _try_slug_heuristic("".join(tokens))
+    return None
 
 
 def _try_slug_heuristic(ats_slug: str) -> str | None:

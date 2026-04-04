@@ -64,6 +64,8 @@ from job_finder.web.ats_detection import extract_ats_from_urls, derive_slug_cand
 from job_finder.web.ats_prober import (  # noqa: E402
     probe_single_company,
     _probe_lever_with_result,
+    _probe_greenhouse_with_result,
+    _probe_ashby_with_result,
     _probe_lever,
     _probe_greenhouse,
     _probe_ashby,
@@ -80,6 +82,7 @@ from job_finder.web.ats_prober import (  # noqa: E402
 )
 
 
+_PROBE_BATCH_LIMIT = 75  # Max companies probed per scheduled run (~3-4 min wall-clock)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -213,6 +216,62 @@ def upsert_company(
         return None
 
 
+def find_or_create_company(
+    conn: sqlite3.Connection,
+    name: str,
+    ats_platform: Optional[str] = None,
+    ats_slug: Optional[str] = None,
+    homepage_url: Optional[str] = None,
+) -> Optional[int]:
+    """Find existing company by normalized name or fuzzy match, or create new.
+
+    Lookup order:
+    1. Exact normalized name match
+    2. Fuzzy match with threshold=85 (token_set_ratio via backfill_companies)
+    3. INSERT new company via upsert_company
+
+    Prevents duplicate company creation across the three code paths
+    (probe_ats_slugs, backfill UI add route, link_jobs_to_companies).
+
+    Args:
+        conn: Open SQLite connection.
+        name: Raw company name string.
+        ats_platform: Optional ATS platform for new records.
+        ats_slug: Optional ATS slug for new records.
+        homepage_url: Optional homepage URL for new records.
+
+    Returns:
+        company_id integer, or None on error.
+    """
+    normalized_name = normalize_company(name)
+
+    # 1. Exact normalized match
+    existing = conn.execute(
+        "SELECT id FROM companies WHERE name = ?", (normalized_name,)
+    ).fetchone()
+    if existing:
+        return existing[0]
+
+    # 2. Fuzzy match against all existing companies
+    try:
+        from job_finder.web.backfill_companies import fuzzy_match_company
+        all_rows = conn.execute("SELECT id, name FROM companies").fetchall()
+        company_list = [(r["id"], r["name"]) for r in all_rows]
+        matched_id, _score = fuzzy_match_company(name, company_list)
+        if matched_id is not None:
+            return matched_id
+    except Exception as e:
+        logger.debug("find_or_create_company fuzzy match failed: %s", e)
+
+    # 3. Create new company record
+    return upsert_company(
+        conn, name,
+        ats_platform=ats_platform,
+        ats_slug=ats_slug,
+        homepage_url=homepage_url,
+    )
+
+
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
     """Probe ATS APIs speculatively for companies with pending probe status.
 
@@ -241,9 +300,11 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
     summary = {"probed": 0, "hits": 0, "misses": 0}
 
     with standalone_connection(db_path) as conn:
-        # Only probe companies with pending status
+        # Only probe companies with pending status, oldest first, up to batch limit
         pending = conn.execute(
             "SELECT id, name_raw FROM companies WHERE ats_probe_status = 'pending'"
+            " ORDER BY created_at ASC LIMIT ?",
+            (_PROBE_BATCH_LIMIT,),
         ).fetchall()
 
         for company in pending:
@@ -254,54 +315,51 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             candidates = derive_slug_candidates(company_name)
             hit_platform = None
             hit_slug = None
+            transient_error = False
 
             for slug in candidates:
-                # Try Lever first
-                if _probe_lever(slug):
-                    hit_platform = "lever"
-                    hit_slug = slug
+                try:
+                    if _probe_lever_with_result(slug):
+                        hit_platform, hit_slug = "lever", slug
+                        break
+                    if _probe_greenhouse_with_result(slug):
+                        hit_platform, hit_slug = "greenhouse", slug
+                        break
+                    if _probe_ashby_with_result(slug):
+                        hit_platform, hit_slug = "ashby", slug
+                        break
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    transient_error = True
                     break
+                except requests.exceptions.HTTPError as e:
+                    resp = getattr(e, "response", None)
+                    if resp is not None and _is_transient_error(resp.status_code):
+                        _handle_scan_error(conn, company_id, company_name, str(e), now)
+                        transient_error = True
+                        break
+                    # Non-transient HTTP error — try next slug
+                    continue
 
-                # Try Greenhouse
-                if _probe_greenhouse(slug):
-                    hit_platform = "greenhouse"
-                    hit_slug = slug
-                    break
+            if not transient_error:
+                if hit_platform:
+                    conn.execute(
+                        """UPDATE companies SET ats_platform = ?, ats_slug = ?,
+                           ats_probe_status = 'hit', ats_probe_attempted_at = ?,
+                           updated_at = ? WHERE id = ?""",
+                        (hit_platform, hit_slug, now, now, company_id),
+                    )
+                    summary["hits"] += 1
+                else:
+                    conn.execute(
+                        """UPDATE companies SET ats_probe_status = 'miss',
+                           ats_probe_attempted_at = ?, updated_at = ? WHERE id = ?""",
+                        (now, now, company_id),
+                    )
+                    summary["misses"] += 1
+                conn.commit()
 
-                # Try Ashby
-                if _probe_ashby(slug):
-                    hit_platform = "ashby"
-                    hit_slug = slug
-                    break
-
-            # Update company record based on probe result
-            if hit_platform:
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_platform = ?,
-                           ats_slug = ?,
-                           ats_probe_status = 'hit',
-                           ats_probe_attempted_at = ?,
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (hit_platform, hit_slug, now, now, company_id),
-                )
-                summary["hits"] += 1
-            else:
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_probe_status = 'miss',
-                           ats_probe_attempted_at = ?,
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (now, now, company_id),
-                )
-                summary["misses"] += 1
-
-            conn.commit()
             summary["probed"] += 1
-
-            # Polite delay between companies (0.5s per Research Open Question 2)
             time.sleep(0.5)
 
     logger.info(
@@ -731,16 +789,16 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
                 # Log company scan
                 conn.execute(
-                    """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found)
-                       VALUES (?, ?, ?)""",
-                    (company_id, now, company_jobs_found),
+                    """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched)
+                       VALUES (?, ?, ?, ?)""",
+                    (company_id, now, company_jobs_found, company_jobs_found),
                 )
 
                 # Update company last_scanned_at and jobs_found_total
                 conn.execute(
                     """UPDATE companies
                        SET last_scanned_at = ?,
-                           jobs_found_total = jobs_found_total + ?
+                           jobs_found_total = ?
                        WHERE id = ?""",
                     (now, company_jobs_found, company_id),
                 )
@@ -867,16 +925,16 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
                     # Step 4: Log company scan
                     conn.execute(
-                        """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found)
-                           VALUES (?, ?, ?)""",
-                        (miss_company_id, now, company_html_found),
+                        """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched)
+                           VALUES (?, ?, ?, ?)""",
+                        (miss_company_id, now, company_html_found, company_html_found),
                     )
 
                     # Step 5: Update company last_scanned_at and jobs_found_total
                     conn.execute(
                         """UPDATE companies
                            SET last_scanned_at = ?,
-                               jobs_found_total = jobs_found_total + ?
+                               jobs_found_total = ?
                            WHERE id = ?""",
                         (now, company_html_found, miss_company_id),
                     )

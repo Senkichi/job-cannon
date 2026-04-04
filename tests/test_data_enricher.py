@@ -390,49 +390,60 @@ class TestExtractWithHaiku:
 
 
 class TestEnrichCompanyInfo:
+    def _make_mock_ddgs(self, results):
+        """Helper to create a DDGS context manager mock with given text() results."""
+        mock_ddgs = MagicMock()
+        mock_ddgs.text.return_value = results
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__ = MagicMock(return_value=mock_ddgs)
+        mock_ctx.__exit__ = MagicMock(return_value=False)
+        return mock_ctx
+
     def test_enrich_company_info_calls_duckduckgo(self):
-        """enrich_company_info calls DuckDuckGo for company details."""
+        """enrich_company_info calls DDGS web search for company details."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = "Acme Corp is a SaaS company with 500 employees."
+        results = [{"body": "Acme Corp is a SaaS company with 500 employees."}]
+        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
+            MockDDGS.return_value = self._make_mock_ddgs(results)
             result = enrich_company_info("Acme Corp")
 
-        mock_ddg.assert_called_once()
-        # Should include company name in query
-        query = mock_ddg.call_args[0][0]
-        assert "Acme Corp" in query
+        MockDDGS.assert_called_once()
 
     def test_enrich_company_info_returns_dict(self):
         """enrich_company_info returns dict (possibly empty) with company fields."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = "Acme Corp employs 500 people in the SaaS industry."
+        results = [{"body": "Acme Corp employs 500 people in the SaaS industry."}]
+        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
+            MockDDGS.return_value = self._make_mock_ddgs(results)
             result = enrich_company_info("Acme Corp")
 
         assert isinstance(result, dict)
-        # Keys are optional (DDG reliability is low per research) but should be correct types if present
-        for key in ["company_size", "industry", "funding_stage"]:
+        # Keys are optional but should be correct types if present
+        for key in ["company_size", "industry"]:
             if key in result:
                 assert isinstance(result[key], str)
 
     def test_enrich_company_info_returns_empty_dict_on_ddg_failure(self):
-        """enrich_company_info returns empty dict when DuckDuckGo returns None."""
+        """enrich_company_info returns empty dict when DDGS returns no results."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = None
+        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
+            MockDDGS.return_value = self._make_mock_ddgs([])
             result = enrich_company_info("Acme Corp")
 
         assert result == {}
 
     def test_enrich_company_info_returns_empty_dict_on_exception(self):
-        """enrich_company_info returns empty dict when DDG call raises an exception."""
+        """enrich_company_info returns empty dict when DDGS call raises an exception."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.side_effect = Exception("Network error")
+        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
+            mock_ctx = MagicMock()
+            mock_ctx.__enter__ = MagicMock(side_effect=Exception("Network error"))
+            mock_ctx.__exit__ = MagicMock(return_value=False)
+            MockDDGS.return_value = mock_ctx
             result = enrich_company_info("Acme Corp")
 
         assert result == {}

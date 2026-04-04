@@ -35,6 +35,36 @@ _SORT_ALLOWLIST = {"name", "ats_platform", "last_scanned_at", "jobs_found_total"
 _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
 
+def _companies_health(conn) -> dict:
+    """Compute companies pipeline health metrics for dashboard card."""
+    total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+    pending = conn.execute(
+        "SELECT COUNT(*) FROM companies WHERE ats_probe_status = 'pending'"
+    ).fetchone()[0]
+    with_homepage = conn.execute(
+        "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL"
+    ).fetchone()[0]
+    with_enrichment = conn.execute(
+        "SELECT COUNT(*) FROM companies"
+        " WHERE company_size IS NOT NULL OR industry IS NOT NULL"
+    ).fetchone()[0]
+    unlinked_jobs = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
+    ).fetchone()[0]
+    last_scan_row = conn.execute(
+        "SELECT MAX(scanned_at) FROM company_scan_log"
+    ).fetchone()
+    last_scan = last_scan_row[0] if last_scan_row else None
+    return {
+        "total": total,
+        "pending_probe": pending,
+        "homepage_pct": round(with_homepage / max(total, 1) * 100, 1),
+        "enrichment_pct": round(with_enrichment / max(total, 1) * 100, 1),
+        "unlinked_jobs": unlinked_jobs,
+        "last_scan": last_scan,
+    }
+
+
 @companies_bp.route("/", strict_slashes=False)
 def index():
     """Companies list page with sortable table, search, and ATS filter."""
@@ -42,6 +72,8 @@ def index():
     conn = get_db(db_path)
 
     search = request.args.get("search", "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = 50
     ats_platform = request.args.get("ats_platform", "").strip().lower()
     sort_by = request.args.get("sort_by", "name")
 
@@ -65,6 +97,11 @@ def index():
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+    total_count = conn.execute(
+        f"SELECT COUNT(*) FROM companies c {where_sql}",
+        params,
+    ).fetchone()[0]
+
     companies = conn.execute(
         f"""SELECT c.*,
                COUNT(j.dedup_key) as job_count_live
@@ -72,9 +109,12 @@ def index():
             LEFT JOIN jobs j ON j.company_id = c.id
             {where_sql}
             GROUP BY c.id
-            ORDER BY c.{sort_by} ASC NULLS LAST""",
+            ORDER BY c.{sort_by} ASC NULLS LAST
+            LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
         params,
     ).fetchall()
+
+    has_more = len(companies) == per_page
 
     is_htmx = request.headers.get("HX-Request")
     if is_htmx:
@@ -84,6 +124,9 @@ def index():
             search=search,
             ats_platform=ats_platform,
             sort_by=sort_by,
+            page=page,
+            has_more=has_more,
+            total_count=total_count,
         )
 
     return render_template(
@@ -92,6 +135,10 @@ def index():
         search=search,
         ats_platform=ats_platform,
         sort_by=sort_by,
+        page=page,
+        has_more=has_more,
+        total_count=total_count,
+        health=_companies_health(conn),
     )
 
 
@@ -170,12 +217,11 @@ def add():
         return redirect(url_for("companies.index"))
 
     try:
-        from job_finder.web.ats_scanner import upsert_company
-        company_id = upsert_company(
+        from job_finder.web.ats_scanner import find_or_create_company
+        company_id = find_or_create_company(
             conn,
             name=company_name,
             homepage_url=homepage_url,
-            ats_probe_status="pending",
         )
         conn.commit()
 

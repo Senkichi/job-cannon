@@ -46,6 +46,10 @@ def _setup_file_logging() -> None:
     if any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
         return
 
+    # Root logger defaults to WARNING, blocking INFO messages before they reach handlers.
+    # Set to DEBUG so handler-level filtering (INFO) controls what lands in the file.
+    root_logger.setLevel(logging.DEBUG)
+
     os.makedirs("logs", exist_ok=True)
 
     file_handler = RotatingFileHandler(

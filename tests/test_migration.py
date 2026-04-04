@@ -411,10 +411,11 @@ def test_migration_count_is_thirteen():
     Migration 18 (Phase 24) adds provider column to scoring_costs.
     Migration 19 adds opus_score column for Opus baseline evaluation.
     Migration 20 adds scoring_provider column for provider attribution (ATTR-01).
+    Migration 23 recalibrates jobs_found_total and adds jobs_matched column.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 22
+    assert len(MIGRATIONS) == 23
 
 
 class TestMigration13:
@@ -1120,5 +1121,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 20 entries (updated for Migration 20 scoring_provider)."""
-        assert len(MIGRATIONS) == 22
+        """MIGRATIONS list has exactly 23 entries (updated for Migration 23 jobs_found_total recalibration)."""
+        assert len(MIGRATIONS) == 23
