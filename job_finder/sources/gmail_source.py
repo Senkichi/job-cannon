@@ -132,39 +132,69 @@ class GmailSource:
                 f"  python -m job_finder.gmail_auth"
             ) from exc
 
-    def fetch_jobs(self, lookback_days: int = 7) -> list[Job]:
+    def fetch_jobs(
+        self,
+        lookback_days: int = 7,
+        processed_message_ids: set[str] | None = None,
+    ) -> tuple[list[Job], list[str]]:
         """Fetch all job alert emails from the last N days and parse them.
 
         Args:
             lookback_days: How many days back to search.
+            processed_message_ids: Set of Gmail message IDs already processed
+                in a previous sync. Matching messages are skipped to avoid
+                re-fetching and re-parsing. Pass None (default) to process all.
 
         Returns:
-            List of parsed Job objects from all sources.
+            Tuple of (jobs, processed_ids) where:
+            - jobs: List of parsed Job objects from all sources.
+            - processed_ids: List of message IDs that were fetched and attempted
+                (both successful parses and parse failures). Does not include
+                IDs skipped via processed_message_ids or API fetch failures.
         """
-        all_jobs = []
+        all_jobs: list[Job] = []
+        newly_processed: list[str] = []
         after_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y/%m/%d")
 
         for sender, parser_fn in SENDER_PARSERS.items():
             query = f"from:{sender} after:{after_date}"
             messages = self._search_messages(query)
 
+            # Skip messages already processed in a previous sync
+            if processed_message_ids:
+                before = len(messages)
+                messages = [m for m in messages if m["id"] not in processed_message_ids]
+                skipped = before - len(messages)
+                if skipped:
+                    logger.info(
+                        "Gmail: skipping %d already-processed messages from %s",
+                        skipped,
+                        sender,
+                    )
+
             for msg_meta in messages:
-                msg = self._get_message(msg_meta["id"])
+                msg_id = msg_meta["id"]
+                msg = self._get_message(msg_id)
                 if not msg:
+                    # API error -- don't mark processed; allow retry on next sync
                     continue
 
                 body = self._extract_body(msg)
                 email_date = self._extract_date(msg)
 
                 if body:
+                    # Only mark processed when body extraction succeeded.
+                    # body=None means the API response was malformed; allow
+                    # retry on the next sync rather than permanently silencing.
+                    newly_processed.append(msg_id)
                     jobs = parser_fn(body, email_date)
                     all_jobs.extend(jobs)
 
                     if _should_archive_failure(body, jobs, sender):
                         _archive_parse_failure(sender, body)
-                        self.parse_failures.append({"sender": sender})
+                        self.parse_failures.append({"sender": sender, "message_id": msg_id})
 
-        return all_jobs
+        return all_jobs, newly_processed
 
     def _search_messages(self, query: str, max_messages: int = 500) -> list[dict]:
         """Search Gmail and return matching message metadata.
