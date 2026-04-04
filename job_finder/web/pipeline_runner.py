@@ -28,6 +28,7 @@ except ImportError:
 
 from job_finder.config import DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.db import upsert_job, log_run
+from job_finder.json_utils import utc_now_iso
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
@@ -71,6 +72,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
             - thordata_errors: list[str]
             - jobs_new: int
             - jobs_updated: int
+            - jobs_touch_only: int
             - jobs_scored: int
             - job_errors: list[str]
             - haiku_scored: int
@@ -93,6 +95,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         "dataforseo_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
+        "jobs_touch_only": 0,
         "jobs_scored": 0,
         "job_errors": [],
         "haiku_scored": 0,
@@ -125,9 +128,52 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         # --- Combine all jobs ---
         all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + dataforseo_jobs
 
+        # --- Batch pre-check: skip scoring for already-known, non-archived jobs ---
+        existing_statuses: dict[str, str] = {}
+        candidate_keys = [job.dedup_key for job in all_jobs]
+        if candidate_keys:
+            # SQLite SQLITE_MAX_VARIABLE_NUMBER default is 999; chunk for safety
+            for i in range(0, len(candidate_keys), 900):
+                chunk = candidate_keys[i : i + 900]
+                placeholders = ",".join("?" * len(chunk))
+                rows = runner_conn.execute(
+                    f"SELECT dedup_key, pipeline_status FROM jobs WHERE dedup_key IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for r in rows:
+                    existing_statuses[r[0]] = r[1]
+
+        skipped = 0
+        full_scoring_count = 0
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
-            _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
+            if (
+                job.dedup_key in existing_statuses
+                and existing_statuses[job.dedup_key] != "archived"
+                and job.salary_min is None
+                and job.salary_max is None
+            ):
+                # Known, non-archived job with no new salary data — lightweight touch only
+                try:
+                    _touch_existing_job(job, runner_conn, summary)
+                    skipped += 1
+                except Exception as e:
+                    logger.warning(
+                        "Touch-update failed for '%s': %s — falling back to full scoring",
+                        job.dedup_key,
+                        e,
+                    )
+                    _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
+                    full_scoring_count += 1
+            else:
+                _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
+                full_scoring_count += 1
+
+        logger.info(
+            "Pre-dedup: %d known (touch-only), %d routed to full scoring",
+            skipped,
+            full_scoring_count,
+        )
 
         # --- Log run totals to runs table ---
         jobs_new = summary["jobs_new"]
@@ -204,9 +250,10 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         + summary["dataforseo_fetched"]
     )
     logger.info(
-        "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
+        "Ingestion complete: %d fetched, %d new, %d touch-only, %d haiku-scored, %d sonnet-evaluated in %.1fs",
         total_fetched,
         summary["jobs_new"],
+        summary["jobs_touch_only"],
         summary["haiku_scored"],
         summary["sonnet_evaluated"],
         summary["duration_seconds"],
@@ -562,6 +609,49 @@ def _score_and_persist(
         logger.warning(
             "Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e
         )
+
+
+def _touch_existing_job(job: Job, conn: sqlite3.Connection, summary: dict) -> None:
+    """Lightweight update for already-known jobs: touch last_seen and merge source/source_url.
+
+    Skips scoring, full upsert merge logic, and company upsert for jobs whose
+    dedup_key already exists in the DB and whose incoming data carries no new
+    salary information worth merging. Updates last_seen timestamp and merges
+    the incoming job.source and job.source_url into the existing JSON columns
+    without duplicates.
+
+    Args:
+        job: Incoming Job with a dedup_key already present in DB.
+        conn: Open sqlite3 connection.
+        summary: Mutable summary dict — increments ``jobs_touch_only``.
+    """
+    conn.execute(
+        """UPDATE jobs
+           SET last_seen = ?,
+               sources = (
+                   SELECT json_group_array(value)
+                   FROM (
+                       -- UNION (not UNION ALL) provides set-semantics, deduplicating sources
+                       SELECT value FROM json_each(sources)
+                       UNION
+                       SELECT value FROM json_each(json_array(?))
+                   )
+               ),
+               source_urls = (
+                   SELECT json_group_array(value)
+                   FROM (
+                       -- UNION (not UNION ALL) provides set-semantics, deduplicating URLs
+                       -- CASE WHEN handles empty source_url: both ? bind job.source_url
+                       SELECT value FROM json_each(source_urls)
+                       UNION
+                       SELECT value FROM json_each(CASE WHEN ? != '' THEN json_array(?) ELSE '[]' END)
+                   )
+               )
+           WHERE dedup_key = ?""",
+        (utc_now_iso(), job.source, job.source_url, job.source_url, job.dedup_key),
+    )
+    conn.commit()
+    summary["jobs_touch_only"] += 1
 
 
 def _upsert_job_company(conn, job: Job) -> None:
