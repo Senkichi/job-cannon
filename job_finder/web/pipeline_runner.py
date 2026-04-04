@@ -18,8 +18,12 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from job_finder.sources.dataforseo_source import DataForSEOSource
 
 try:
     import anthropic
@@ -110,20 +114,21 @@ def run_ingestion(db_path: str, config: dict) -> dict:
     scorer = JobScorer(config)
 
     with standalone_connection(db_path) as runner_conn:
-        # --- Gmail ingestion ---
+        # --- Phase 1: Submit DataForSEO tasks (non-blocking ~2s) ---
+        # Tasks are submitted first so DataForSEO's 60-120s server-side processing
+        # overlaps with Gmail's ~70s fetch, cutting total ingestion time by ~60s.
+        dataforseo_task_ids, dataforseo_source = _submit_dataforseo_tasks(config, summary)
+
+        # --- Phase 2: Fetch other sources (DataForSEO processes server-side) ---
         gmail_jobs = _fetch_gmail(config, runner_conn, summary)
-
-        # --- SerpAPI ingestion ---
         serpapi_jobs = _fetch_serpapi(config, summary)
-
-        # --- Thordata ingestion ---
         thordata_jobs = _fetch_thordata(config, summary)
-
-        # --- ScaleSerp ingestion ---
         scaleserp_jobs = _fetch_scaleserp(config, summary)
 
-        # --- DataForSEO ingestion ---
-        dataforseo_jobs = _fetch_dataforseo(config, summary)
+        # --- Phase 3: Collect DataForSEO results (tasks likely complete by now) ---
+        dataforseo_jobs = _collect_dataforseo_results(
+            dataforseo_source, dataforseo_task_ids, summary
+        )
 
         # --- Combine all jobs ---
         all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + dataforseo_jobs
@@ -510,63 +515,95 @@ def _fetch_scaleserp(config: dict, summary: dict) -> list[Job]:
         return []
 
 
-def _fetch_dataforseo(config: dict, summary: dict) -> list[Job]:
-    """Fetch jobs from DataForSEO Google Jobs SERP API with error isolation.
+def _submit_dataforseo_tasks(
+    config: dict, summary: dict
+) -> tuple[list[str], Optional["DataForSEOSource"]]:
+    """Submit DataForSEO tasks early (non-blocking ~2s).
 
-    Uses async task queue (no live endpoint). Submits all queries as a single
-    POST batch, then polls tasks_ready until all complete or timeout is reached.
+    Returns (task_ids, source_instance). The source is returned so
+    _collect_dataforseo_results can reuse it without re-extracting config.
+    Returns ([], None) if source is disabled, unconfigured, or submission fails.
 
     Args:
         config: Full config dict.
         summary: Mutable summary dict to update.
 
     Returns:
-        List of Job objects from DataForSEO.
+        Tuple of (list of task ID strings, DataForSEOSource instance or None).
     """
     dataforseo_config = config.get("sources", {}).get("dataforseo", {})
     if not dataforseo_config.get("enabled", False):
         logger.debug("DataForSEO source disabled in config.")
-        return []
+        return [], None
 
     api_key = dataforseo_config.get("api_key", "")
     if not api_key:
         msg = "DataForSEO API key not configured"
         summary["dataforseo_errors"].append(msg)
         logger.warning(msg)
-        return []
+        return [], None
 
     queries = dataforseo_config.get("queries", [])
     if not queries:
         logger.debug("No DataForSEO queries configured.")
-        return []
-
-    max_age_days = dataforseo_config.get("max_age_days", 7)
-    depth = dataforseo_config.get("depth", 20)
-    priority = dataforseo_config.get("priority", 1)
-    poll_interval = dataforseo_config.get("poll_interval_seconds", 30)
-    poll_timeout = dataforseo_config.get("poll_timeout_seconds", 360)
+        return [], None
 
     try:
         from job_finder.sources.dataforseo_source import DataForSEOSource
 
         source = DataForSEOSource(
             api_key,
-            max_age_days=max_age_days,
-            depth=depth,
-            priority=priority,
-            poll_interval_seconds=poll_interval,
-            poll_timeout_seconds=poll_timeout,
+            max_age_days=dataforseo_config.get("max_age_days", 7),
+            depth=dataforseo_config.get("depth", 20),
+            priority=dataforseo_config.get("priority", 1),
+            poll_interval_seconds=dataforseo_config.get("poll_interval_seconds", 30),
+            poll_timeout_seconds=dataforseo_config.get("poll_timeout_seconds", 360),
         )
-        jobs = source.fetch_jobs(queries)
-        summary["dataforseo_fetched"] = len(jobs)
+        task_ids = source.submit_tasks(queries)
+        if not task_ids:
+            msg = f"DataForSEO: submit returned no task IDs for {len(queries)} queries (all tasks rejected)"
+            summary["dataforseo_errors"].append(msg)
+            logger.warning("DataForSEO: submit_tasks returned no task IDs for %d queries", len(queries))
+            return [], None
+        logger.info("DataForSEO: submitted %d tasks (non-blocking)", len(task_ids))
+        return task_ids, source
 
-        logger.info("DataForSEO: fetched %d jobs", len(jobs))
+    except Exception as e:
+        summary["dataforseo_errors"].append(str(e))
+        logger.warning("DataForSEO task submission failed: %s", e)
+        return [], None
+
+
+def _collect_dataforseo_results(
+    source: Optional["DataForSEOSource"],
+    task_ids: list[str],
+    summary: dict,
+) -> list[Job]:
+    """Collect results for previously submitted DataForSEO tasks.
+
+    Args:
+        source: DataForSEOSource instance returned by _submit_dataforseo_tasks,
+                or None if submission was skipped/failed.
+        task_ids: Task UUIDs returned by submit_tasks().
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects. Empty if source is None or task_ids is empty.
+    """
+    if not source or not task_ids:
+        return []
+
+    try:
+        t0 = time.monotonic()
+        jobs = source.collect_results(task_ids)
+        elapsed = time.monotonic() - t0
+        summary["dataforseo_fetched"] = len(jobs)
+        logger.info("DataForSEO collect: %.1fs, %d jobs", elapsed, len(jobs))
         return jobs
 
     except Exception as e:
-        error_msg = str(e)
-        summary["dataforseo_errors"].append(error_msg)
-        logger.warning("DataForSEO ingestion failed: %s", error_msg)
+        summary["dataforseo_errors"].append(str(e))
+        logger.warning("DataForSEO result collection failed: %s", e)
         return []
 
 
