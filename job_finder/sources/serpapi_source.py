@@ -19,8 +19,9 @@ class SerpAPISource:
 
     BASE_URL = "https://serpapi.com/search.json"
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, source_name: str = "serpapi"):
         self.api_key = api_key
+        self.source_name = source_name
 
     def fetch_jobs(self, queries: list[dict]) -> list[Job]:
         """Run multiple search queries and return combined results.
@@ -96,7 +97,7 @@ class SerpAPISource:
             title=title,
             company=company,
             location=location,
-            source="serpapi",
+            source=self.source_name,
             source_url=source_url,
             source_id=result.get("job_id", ""),
             salary_min=salary_min,

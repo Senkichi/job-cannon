@@ -9,7 +9,7 @@ Does NOT return description or job_highlights — enrichment pipeline fills thos
 import logging
 import re
 from typing import Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
@@ -61,12 +61,15 @@ class ThordataSource:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/x-www-form-urlencoded",
         }
+        # Thordata does not support engine=google_jobs or a location parameter.
+        # Embed location in the query string; append "jobs" to trigger Google Jobs results.
+        q = " ".join(filter(None, [query, location, "jobs"]))
         payload = {
-            "engine": "google_jobs",
-            "q": query,
-            "location": location,
+            "engine": "google",
+            "q": q,
             "json": "1",
             "hl": "en",
+            "gl": "us",
         }
 
         try:
@@ -77,12 +80,22 @@ class ThordataSource:
             logger.warning("Thordata search failed for '%s': %s", query, e)
             return []
 
+        raw_results = data.get("job_results", {}).get("jobs", [])
+        logger.info(
+            "Thordata '%s' @ '%s': %d raw results from API",
+            query, location, len(raw_results),
+        )
+
         jobs = []
-        for result in data.get("jobs_results", []):
+        for result in raw_results:
             job = self._parse_result(result)
             if job:
                 jobs.append(job)
 
+        logger.info(
+            "Thordata '%s' @ '%s': %d jobs after age filter (max_age_days=%d)",
+            query, location, len(jobs), self.max_age_days,
+        )
         return jobs
 
     def _parse_result(self, result: dict) -> Optional[Job]:
@@ -100,14 +113,14 @@ class ThordataSource:
         # Recency filter
         age_days = self._parse_posting_age(extensions)
         if age_days is not None and age_days > self.max_age_days:
-            logger.debug(
+            logger.info(
                 "Skipping '%s' @ '%s' — posted %d days ago (max %d)",
                 title, company, age_days, self.max_age_days,
             )
             return None
 
-        share_link = result.get("share_link", "")
-        source_id = self._extract_htidocid(share_link)
+        link = result.get("link", "")
+        source_id = self._extract_docid(link)
         salary_min, salary_max = self._extract_salary_from_extensions(extensions)
 
         return Job(
@@ -115,7 +128,7 @@ class ThordataSource:
             company=company,
             location=result.get("location", ""),
             source="thordata",
-            source_url=share_link,
+            source_url=link,
             source_id=source_id,
             salary_min=salary_min,
             salary_max=salary_max,
@@ -156,15 +169,22 @@ class ThordataSource:
                 return count * 30
         return None
 
-    def _extract_htidocid(self, share_link: str) -> str:
-        """Extract the stable htidocid parameter from a Google Jobs share_link URL."""
-        if not share_link:
+    def _extract_docid(self, link: str) -> str:
+        """Extract the stable docid from the URL fragment of a Thordata Google Jobs link.
+
+        Thordata embeds the job ID in the URL fragment as:
+          #vhid=vt%3D20/docid%3D<ID>%3D%3D&vssid=jobs-detail-viewer
+        After URL-decoding: docid=<ID>==
+        """
+        if not link:
             return ""
         try:
-            parsed = urlparse(share_link)
-            params = parse_qs(parsed.query)
-            htidocid_list = params.get("htidocid", [])
-            return htidocid_list[0] if htidocid_list else ""
+            fragment = urlparse(link).fragment
+            if not fragment:
+                return ""
+            decoded = unquote(fragment)
+            m = re.search(r"docid=([^&/]+)", decoded)
+            return m.group(1) if m else ""
         except Exception:
             return ""
 

@@ -612,7 +612,7 @@ class TestSinglePassGeneration:
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, "2026-03-01T00:00:00Z"),
+            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
         )
         conn.commit()
 

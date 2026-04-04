@@ -210,7 +210,7 @@ class TestCostStats:
         # Insert rows for two different days this month
         today = datetime.now(timezone.utc)
         day1 = today.strftime("%Y-%m-%dT%H:%M:%SZ")
-        day2 = (today - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        day2 = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
         for ts, cost in [(day1, 0.10), (day2, 0.20)]:
             conn.execute(
                 "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "

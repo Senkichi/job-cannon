@@ -156,11 +156,13 @@ def init_scheduler(app) -> None:
                 try:
                     summary = run_ingestion(db_path, config)
                     logger.info(
-                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d)",
+                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d, scaleserp: %d, dataforseo: %d)",
                         summary["jobs_new"],
                         summary["gmail_fetched"],
                         summary["serpapi_fetched"],
                         summary.get("thordata_fetched", 0),
+                        summary.get("scaleserp_fetched", 0),
+                        summary.get("dataforseo_fetched", 0),
                     )
                     log_activity(
                         db_path,
@@ -170,6 +172,8 @@ def init_scheduler(app) -> None:
                             "gmail_fetched": summary.get("gmail_fetched", 0),
                             "serpapi_fetched": summary.get("serpapi_fetched", 0),
                             "thordata_fetched": summary.get("thordata_fetched", 0),
+                            "scaleserp_fetched": summary.get("scaleserp_fetched", 0),
+                            "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
                             "duration_seconds": round(_time.time() - t0, 2),
                             "status": "success",
                         },
@@ -329,7 +333,7 @@ def init_scheduler(app) -> None:
                 },
                 guard=lambda config: config.get("ats", {}).get("scan_enabled", True),
             ),
-            trigger=CronTrigger(day_of_week="mon,wed", hour=7, minute=0),
+            trigger=CronTrigger(hour=7, minute=0),
             id="ats_scan",
             replace_existing=True,
             max_instances=1,
@@ -344,7 +348,7 @@ def init_scheduler(app) -> None:
 
         scheduler.add_job(
             _make_simple_job(app, "ATS slug probe", _import_slug_probe),
-            trigger=CronTrigger(day_of_week="mon,wed", hour=7, minute=30),
+            trigger=CronTrigger(hour=7, minute=30),
             id="ats_slug_probe",
             replace_existing=True,
             max_instances=1,
@@ -381,6 +385,20 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Company linkage backfill (daily 5:00 AM) ----------------------
+        def _import_company_linkage():
+            from job_finder.web.backfill_companies import run_company_linkage
+            return run_company_linkage
+
+        scheduler.add_job(
+            _make_simple_job(app, "Company linkage", _import_company_linkage),
+            trigger=CronTrigger(hour=5, minute=0),
+            id="company_linkage",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # -- Homepage discovery (daily 6:30 AM) ----------------------------
 
         def _import_homepage_discovery():
@@ -391,6 +409,20 @@ def init_scheduler(app) -> None:
             _make_simple_job(app, "Homepage discovery", _import_homepage_discovery),
             trigger=CronTrigger(hour=6, minute=30),
             id="homepage_discovery",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # -- Company enrichment (weekly, Sunday 4:00 AM) -------------------
+        def _import_enrichment():
+            from job_finder.web.backfill_companies import run_scheduled_enrichment
+            return run_scheduled_enrichment
+
+        scheduler.add_job(
+            _make_simple_job(app, "Company enrichment", _import_enrichment),
+            trigger=CronTrigger(day_of_week="sun", hour=4, minute=0),
+            id="company_enrichment",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -502,6 +534,10 @@ def run_sync_now(app) -> dict:
             "serpapi_errors": [],
             "thordata_fetched": 0,
             "thordata_errors": [],
+            "scaleserp_fetched": 0,
+            "scaleserp_errors": [],
+            "dataforseo_fetched": 0,
+            "dataforseo_errors": [],
             "jobs_new": 0,
             "jobs_updated": 0,
             "jobs_scored": 0,

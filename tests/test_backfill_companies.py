@@ -815,3 +815,49 @@ class TestSummaryOutput:
 
         # Summary should mention key metrics
         assert any(word in output.lower() for word in ["linked", "created", "matched", "companies"])
+
+
+# ---------------------------------------------------------------------------
+# Tests: run_company_linkage scheduler wrapper (Fix 2)
+# ---------------------------------------------------------------------------
+
+class TestRunCompanyLinkage:
+    """Tests for the scheduler-compatible run_company_linkage() wrapper."""
+
+    def test_run_company_linkage_returns_summary(self, migrated_db):
+        """With an unlinked job, run_company_linkage links it and returns summary."""
+        db_path, conn = migrated_db
+
+        # Insert a job with no company_id
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
+               VALUES ('test-key-1', 'Engineer', 'Acme Corp', 'Remote', ?, ?)""",
+            (now, now),
+        )
+        conn.commit()
+
+        from job_finder.web.backfill_companies import run_company_linkage
+        result = run_company_linkage(db_path, {})
+        assert result["linked"] >= 1
+
+    def test_run_company_linkage_idempotent(self, migrated_db):
+        """Running linkage twice: second call returns linked=0."""
+        db_path, conn = migrated_db
+
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
+               VALUES ('test-key-2', 'Engineer', 'Idempotent Corp', 'Remote', ?, ?)""",
+            (now, now),
+        )
+        conn.commit()
+
+        from job_finder.web.backfill_companies import run_company_linkage
+        result1 = run_company_linkage(db_path, {})
+        assert result1["linked"] >= 1
+
+        result2 = run_company_linkage(db_path, {})
+        assert result2["linked"] == 0

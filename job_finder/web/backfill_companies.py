@@ -448,6 +448,24 @@ def link_jobs_to_companies(
     return linked_count, new_company_ids, matched_count
 
 
+def run_company_linkage(db_path: str, config: dict) -> dict:
+    """Scheduler-compatible wrapper for link_jobs_to_companies().
+
+    Opens its own connection (thread-safe for APScheduler). Does NOT run ATS
+    probing or DDG enrichment — those are separate scheduled jobs.
+
+    Args:
+        db_path: Absolute path to the SQLite database file.
+        config: Application config dict (unused, kept for scheduler signature compatibility).
+
+    Returns:
+        Dict with linked, new_companies, matched counts.
+    """
+    with standalone_connection(db_path) as conn:
+        linked, new_ids, matched = link_jobs_to_companies(conn)
+    return {"linked": linked, "new_companies": len(new_ids), "matched": matched}
+
+
 def run_ats_probing(db_path: str, config: dict) -> dict:
     """Run ATS probing on companies with pending probe status.
 
@@ -559,6 +577,28 @@ def run_ddg_enrichment(
 
     print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
     return enriched_count
+
+
+def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
+    """Scheduler-compatible wrapper: enrich up to 50 unenriched companies.
+
+    Selects companies with no company_size AND no industry set.
+    Opens its own connection (thread-safe for APScheduler).
+
+    Args:
+        db_path: Absolute path to the SQLite database file.
+        config: Application config dict (unused, kept for scheduler signature).
+
+    Returns:
+        Dict with checked (int) and enriched (int) counts.
+    """
+    with standalone_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id FROM companies WHERE company_size IS NULL AND industry IS NULL LIMIT 50"
+        ).fetchall()
+        company_ids = [r["id"] for r in rows]
+        enriched = run_ddg_enrichment(conn, company_ids)
+    return {"checked": len(company_ids), "enriched": enriched}
 
 
 def main() -> None:

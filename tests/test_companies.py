@@ -403,3 +403,70 @@ class TestRetryRoute:
         client, db_path, conn = companies_client
         response = client.post("/companies/99999/retry")
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pagination (Fix 8)
+# ---------------------------------------------------------------------------
+
+class TestIndexPagination:
+    """Tests for companies index pagination."""
+
+    def test_index_default_page_returns_up_to_50(self, companies_client):
+        """With 60 companies, index returns at most 50 rows."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"company{i:03d}", f"Company {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # Count outer company wrapper divs (id="company-<digit>", not "company-row-")
+        import re as _re
+        row_count = len(_re.findall(r'id="company-\d+"', body))
+        assert row_count == 50
+
+    def test_index_page_2_returns_remaining(self, companies_client):
+        """Page 2 with 60 companies returns the remaining 10 rows."""
+        client, db_path, conn = companies_client
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for i in range(60):
+            conn.execute(
+                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
+                   VALUES (?, ?, 'pending', ?, ?)""",
+                (f"pagco{i:03d}", f"PagCo {i:03d}", now, now),
+            )
+        conn.commit()
+
+        resp = client.get("/companies/?page=2")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        import re as _re
+        row_count = len(_re.findall(r'id="company-\d+"', body))
+        assert row_count == 10
+
+
+# ---------------------------------------------------------------------------
+# Tests: Health card (Fix 14)
+# ---------------------------------------------------------------------------
+
+class TestIndexHealthCard:
+    """Tests for companies index health card visibility."""
+
+    def test_index_shows_health_metrics(self, companies_client):
+        """Companies index page renders health metric labels."""
+        client, db_path, conn = companies_client
+        resp = client.get("/companies/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "Pending Probe" in body
+        assert "Unlinked Jobs" in body
+        assert "Have Homepage" in body
