@@ -40,6 +40,10 @@ _SALARY_RE = re.compile(
     r"\$?(\d[\d,]*)\s*([Kk])?\s*[–\-—]\s*\$?(\d[\d,]*)\s*([Kk])?",
 )
 
+# Poll timing constants — used by _collect_results when poll_interval > 0.
+# Tests set poll_interval_seconds=0 which bypasses sleeping entirely.
+_POLL_INITIAL_DELAY_SECONDS = 45   # wait before first poll (tasks need 60-90s)
+
 
 class DataForSEOSource:
     """Fetch jobs from Google Jobs via DataForSEO SERP API."""
@@ -53,6 +57,22 @@ class DataForSEOSource:
         poll_interval_seconds: int = 30,
         poll_timeout_seconds: int = 360,
     ):
+        """Initialise the DataForSEO source.
+
+        Args:
+            api_key: Pre-encoded base64 "login:password" credential.
+            max_age_days: Skip jobs older than this many days.
+            depth: Number of results to request per query.
+            priority: Task priority (1=normal, 2=high).
+            poll_interval_seconds: Seconds to sleep between poll retries when
+                ``poll_interval_seconds > 0``. Pass ``0`` to disable all
+                sleeping (used in tests). In ``fetch_jobs()``, an additional
+                ``_POLL_INITIAL_DELAY_SECONDS`` (45s) wait fires before the
+                first poll when ``poll_interval_seconds > 0``; this delay does
+                not apply when calling ``collect_results()`` directly.
+            poll_timeout_seconds: Maximum seconds to wait before abandoning
+                tasks that have not appeared in tasks_ready.
+        """
         self._auth = api_key  # pre-encoded base64 "login:password"
         self.max_age_days = max_age_days
         self.depth = depth
@@ -68,8 +88,38 @@ class DataForSEOSource:
             "Content-Type": "application/json",
         }
 
+    def submit_tasks(self, queries: list[dict]) -> list[str]:
+        """Submit search tasks and return task IDs. Non-blocking (~2s).
+
+        Args:
+            queries: List of dicts with 'query' and optional 'location' keys.
+
+        Returns:
+            List of task UUID strings. Empty if no valid queries or submission fails.
+        """
+        if not queries:
+            return []
+        return self._submit_tasks(queries)
+
+    def collect_results(self, task_ids: list[str]) -> list[Job]:
+        """Poll for completed tasks and fetch results. Blocks until ready or timeout.
+
+        Args:
+            task_ids: Task UUIDs returned by submit_tasks().
+
+        Returns:
+            List of Job objects. Empty if task_ids is empty or all tasks time out.
+        """
+        if not task_ids:
+            return []
+        return self._collect_results(task_ids)
+
     def fetch_jobs(self, queries: list[dict]) -> list[Job]:
         """Submit all queries as tasks, poll until complete, return combined jobs.
+
+        Backward-compatible entry point. For overlapped execution, call
+        submit_tasks() and collect_results() separately — the caller is
+        responsible for any initial wait before collect_results().
 
         Args:
             queries: List of dicts with 'query' and optional 'location' keys.
@@ -77,14 +127,16 @@ class DataForSEOSource:
         Returns:
             List of Job objects from DataForSEO.
         """
-        if not queries:
-            return []
-
-        task_ids = self._submit_tasks(queries)
+        task_ids = self.submit_tasks(queries)
         if not task_ids:
             return []
-
-        return self._collect_results(task_ids)
+        # Wait for DataForSEO server-side processing before first poll.
+        # In the overlapped run_ingestion path, collect_results() is called
+        # directly and tasks have already been processing for ~90s, so this
+        # delay only fires in the sequential fetch_jobs() path.
+        if self.poll_interval > 0:
+            time.sleep(_POLL_INITIAL_DELAY_SECONDS)
+        return self.collect_results(task_ids)
 
     def _submit_tasks(self, queries: list[dict]) -> list[str]:
         """POST all queries as a single batch. Returns list of task UUIDs."""
@@ -138,7 +190,6 @@ class DataForSEOSource:
                     task.get("status_message"),
                 )
 
-        logger.info("DataForSEO: submitted %d tasks", len(task_ids))
         return task_ids
 
     def _collect_results(self, task_ids: list[str]) -> list[Job]:
@@ -148,7 +199,8 @@ class DataForSEOSource:
         deadline = time.monotonic() + self.poll_timeout
 
         while pending:
-            time.sleep(self.poll_interval)
+            if self.poll_interval > 0:
+                time.sleep(self.poll_interval)
             ready_ids = self._get_ready_task_ids()
             for task_id in ready_ids:
                 if task_id in pending:

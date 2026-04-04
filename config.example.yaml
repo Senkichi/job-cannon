@@ -86,7 +86,7 @@ sources:
     max_age_days: 7
     # Task priority: 1=normal (~5 min, $0.0006/10 results), 2=high (~1 min, $0.0012/10 results)
     priority: 1
-    # How often to poll for completed tasks (seconds). Min safe: 3s (20 polls/min rate limit).
+    # Seconds between poll retries after the 45s initial wait. 0=disable sleeping (tests only).
     poll_interval_seconds: 30
     # Give up waiting after this many seconds. Partial results returned; remainder abandoned.
     poll_timeout_seconds: 360

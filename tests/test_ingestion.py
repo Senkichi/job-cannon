@@ -1596,3 +1596,133 @@ class TestBatchDedup:
 
         mock_score_and_persist.assert_called_once()
         assert summary["jobs_touch_only"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: DataForSEO orchestration (_submit_dataforseo_tasks / _collect_dataforseo_results)
+# ---------------------------------------------------------------------------
+
+def _dataforseo_config(migrated_db_path: str, enabled: bool = True, api_key: str = "dGVzdDp0ZXN0") -> dict:
+    """Return a config dict with DataForSEO configured."""
+    return {
+        "db": {"path": migrated_db_path},
+        "sources": {
+            "gmail": {"enabled": False},
+            "serpapi": {"enabled": False},
+            "thordata": {"enabled": False},
+            "scaleserp": {"enabled": False},
+            "dataforseo": {
+                "enabled": enabled,
+                "api_key": api_key,
+                "queries": [{"query": "Data Scientist", "location": "Remote"}],
+                "max_age_days": 7,
+                "depth": 20,
+                "priority": 1,
+                "poll_interval_seconds": 0,
+                "poll_timeout_seconds": 5,
+            },
+        },
+        "profile": {
+            "target_titles": ["Senior Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 0,
+            "exclusions": {"title_keywords": [], "companies": []},
+            "industries": [],
+            "skills": [],
+        },
+        "scoring": {
+            "weights": {
+                "title_match": 0.30,
+                "seniority_alignment": 0.20,
+                "location_fit": 0.15,
+                "salary_range": 0.15,
+                "industry_relevance": 0.10,
+                "company_signals": 0.05,
+                "recency": 0.05,
+            },
+            "min_score_threshold": 0,
+        },
+    }
+
+
+class TestDataForSEOOrchestration:
+    """Tests for _submit_dataforseo_tasks and _collect_dataforseo_results helpers."""
+
+    def test_disabled_source_returns_empty_task_ids(self, migrated_db_path):
+        """DataForSEO disabled -> _submit returns ([], None), no errors."""
+        config = _dataforseo_config(migrated_db_path, enabled=False)
+
+        from job_finder.web.pipeline_runner import _submit_dataforseo_tasks
+
+        summary = {"dataforseo_fetched": 0, "dataforseo_errors": []}
+        task_ids, source = _submit_dataforseo_tasks(config, summary)
+
+        assert task_ids == []
+        assert source is None
+        assert summary["dataforseo_errors"] == []
+
+    def test_empty_api_key_returns_empty_and_populates_errors(self, migrated_db_path):
+        """api_key='' -> ([], None) and 'not configured' in dataforseo_errors."""
+        config = _dataforseo_config(migrated_db_path, enabled=True, api_key="")
+
+        from job_finder.web.pipeline_runner import _submit_dataforseo_tasks
+
+        summary = {"dataforseo_fetched": 0, "dataforseo_errors": []}
+        task_ids, source = _submit_dataforseo_tasks(config, summary)
+
+        assert task_ids == []
+        assert source is None
+        assert len(summary["dataforseo_errors"]) == 1
+        assert "not configured" in summary["dataforseo_errors"][0]
+
+    def test_submit_exception_populates_errors(self, migrated_db_path):
+        """If DataForSEOSource.submit_tasks raises, dataforseo_errors is populated and ([], None) returned."""
+        config = _dataforseo_config(migrated_db_path, enabled=True)
+
+        from job_finder.web.pipeline_runner import _submit_dataforseo_tasks
+
+        summary = {"dataforseo_fetched": 0, "dataforseo_errors": []}
+        # Patch DataForSEOSource at the module level so the lazy import inside
+        # _submit_dataforseo_tasks picks up the mock. submit_tasks must raise
+        # (not just return []) to trigger the except branch that writes to errors.
+        with patch("job_finder.sources.dataforseo_source.DataForSEOSource") as MockSrc:
+            MockSrc.return_value.submit_tasks.side_effect = RuntimeError("network timeout")
+            task_ids, source = _submit_dataforseo_tasks(config, summary)
+
+        assert task_ids == []
+        assert source is None
+        assert len(summary["dataforseo_errors"]) == 1
+        assert "network timeout" in summary["dataforseo_errors"][0]
+
+    def test_submit_returns_empty_list_without_exception_populates_errors(self, migrated_db_path):
+        """submit_tasks() returning [] without raising (API-level rejection) populates dataforseo_errors."""
+        config = _dataforseo_config(migrated_db_path, enabled=True)
+
+        from job_finder.web.pipeline_runner import _submit_dataforseo_tasks
+
+        summary = {"dataforseo_fetched": 0, "dataforseo_errors": []}
+        # Patch DataForSEOSource so submit_tasks returns [] without raising —
+        # simulates all tasks being rejected at the DataForSEO API level.
+        with patch("job_finder.sources.dataforseo_source.DataForSEOSource") as MockSrc:
+            MockSrc.return_value.submit_tasks.return_value = []
+            task_ids, source = _submit_dataforseo_tasks(config, summary)
+
+        assert task_ids == []
+        assert source is None
+        assert len(summary["dataforseo_errors"]) == 1
+        assert "all tasks rejected" in summary["dataforseo_errors"][0]
+
+    def test_collect_exception_populates_errors_and_returns_empty(self, migrated_db_path):
+        """If collect_results raises, dataforseo_errors is populated and [] is returned."""
+        from job_finder.web.pipeline_runner import _collect_dataforseo_results
+
+        mock_source = MagicMock()
+        mock_source.collect_results.side_effect = RuntimeError("poll timed out")
+
+        summary = {"dataforseo_fetched": 0, "dataforseo_errors": []}
+        jobs = _collect_dataforseo_results(mock_source, ["id-001"], summary)
+
+        assert jobs == []
+        assert len(summary["dataforseo_errors"]) == 1
+        assert "poll timed out" in summary["dataforseo_errors"][0]
+        assert summary["dataforseo_fetched"] == 0

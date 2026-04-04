@@ -607,3 +607,182 @@ class TestFetchJobs:
 
         assert len(jobs) == 1
         assert jobs[0].source_id == "duplicate-id"
+
+
+# ---------------------------------------------------------------------------
+# Test: public submit_tasks / collect_results split interface
+# ---------------------------------------------------------------------------
+
+class TestSubmitAndCollect:
+    """Tests for the public submit_tasks / collect_results split interface."""
+
+    def test_submit_tasks_returns_task_ids(self, source):
+        """submit_tasks() delegates to _submit_tasks and returns IDs."""
+        mock_resp = _make_mock_response({
+            "tasks": [
+                {"id": "id-001", "status_code": 20100},
+                {"id": "id-002", "status_code": 20100},
+            ],
+        })
+        with patch("job_finder.sources.dataforseo_source.requests.post",
+                   return_value=mock_resp):
+            result = source.submit_tasks([
+                {"query": "DS", "location": "SF"},
+                {"query": "MLE", "location": "NY"},
+            ])
+        assert result == ["id-001", "id-002"]
+
+    def test_submit_tasks_returns_empty_for_empty_queries(self, source):
+        """Empty queries list → [] without any HTTP call."""
+        result = source.submit_tasks([])
+        assert result == []
+
+    def test_collect_results_returns_empty_for_empty_task_ids(self, source):
+        """Empty task_ids → [] without any HTTP call."""
+        result = source.collect_results([])
+        assert result == []
+
+    def test_collect_results_polls_and_returns_jobs(self, source):
+        """collect_results() polls tasks_ready, fetches each task, returns jobs."""
+        tasks_ready_resp = _make_mock_response({
+            "status_code": 20000,
+            "tasks": [{"result": [{"id": "id-001"}, {"id": "id-002"}]}],
+        })
+        task_get_resp_1 = _make_mock_response(
+            _make_task_get_response([_make_item(job_id="job-001")])
+        )
+        task_get_resp_2 = _make_mock_response(
+            _make_task_get_response([_make_item(job_id="job-002")])
+        )
+        get_call = MagicMock(
+            side_effect=[tasks_ready_resp, task_get_resp_1, task_get_resp_2]
+        )
+        with patch("job_finder.sources.dataforseo_source.requests.get", get_call):
+            jobs = source.collect_results(["id-001", "id-002"])
+        assert len(jobs) == 2
+        assert {j.source_id for j in jobs} == {"job-001", "job-002"}
+
+    def test_fetch_jobs_equivalent_to_submit_then_collect(self, source):
+        """fetch_jobs(queries) produces same result as submit_tasks+collect_results."""
+        queries = [{"query": "DS", "location": "SF"}]
+
+        def _make_post_resp():
+            return _make_mock_response({
+                "tasks": [{"id": "id-001", "status_code": 20100}],
+            })
+
+        def _make_get_side_effects():
+            return [
+                _make_mock_response({
+                    "status_code": 20000,
+                    "tasks": [{"result": [{"id": "id-001"}]}],
+                }),
+                _make_mock_response(
+                    _make_task_get_response([_make_item(job_id="job-001")])
+                ),
+            ]
+
+        # Run via fetch_jobs (composed path)
+        with patch("job_finder.sources.dataforseo_source.requests.post",
+                   return_value=_make_post_resp()), \
+             patch("job_finder.sources.dataforseo_source.requests.get",
+                   MagicMock(side_effect=_make_get_side_effects())):
+            combined_jobs = source.fetch_jobs(queries)
+
+        # Run via separate submit + collect
+        with patch("job_finder.sources.dataforseo_source.requests.post",
+                   return_value=_make_post_resp()), \
+             patch("job_finder.sources.dataforseo_source.requests.get",
+                   MagicMock(side_effect=_make_get_side_effects())):
+            task_ids = source.submit_tasks(queries)
+            split_jobs = source.collect_results(task_ids)
+
+        assert len(combined_jobs) == len(split_jobs) == 1
+        assert combined_jobs[0].source_id == split_jobs[0].source_id == "job-001"
+
+    def test_fetch_jobs_sleeps_initial_delay_before_first_poll(self):
+        """fetch_jobs() sleeps _POLL_INITIAL_DELAY_SECONDS once; collect_results uses uniform poll_interval."""
+        # Use poll_interval_seconds=30 (production-like).
+        retry_interval = 30
+        slow_source = DataForSEOSource(
+            api_key="dGVzdDp0ZXN0",
+            max_age_days=7,
+            depth=200,
+            priority=1,
+            poll_interval_seconds=retry_interval,
+            poll_timeout_seconds=300,
+        )
+
+        # POST: one task submitted
+        task_post_resp = _make_mock_response({
+            "tasks": [{"id": "id-001", "status_code": 20100}],
+        })
+        # GET poll: task ready on first attempt
+        tasks_ready_resp = _make_mock_response({
+            "status_code": 20000,
+            "tasks": [{"result": [{"id": "id-001"}]}],
+        })
+        task_get_resp = _make_mock_response(
+            _make_task_get_response([_make_item(job_id="job-001")])
+        )
+
+        from job_finder.sources.dataforseo_source import _POLL_INITIAL_DELAY_SECONDS
+
+        with patch("job_finder.sources.dataforseo_source.time.sleep") as mock_sleep, \
+             patch("job_finder.sources.dataforseo_source.requests.post",
+                   return_value=task_post_resp), \
+             patch("job_finder.sources.dataforseo_source.requests.get",
+                   MagicMock(side_effect=[tasks_ready_resp, task_get_resp])):
+            jobs = slow_source.fetch_jobs([{"query": "DS", "location": "SF"}])
+
+        assert len(jobs) == 1
+        assert jobs[0].source_id == "job-001"
+
+        # Two sleeps: initial delay (from fetch_jobs) + uniform poll_interval (from collect_results)
+        assert mock_sleep.call_count == 2
+        sleep_calls = mock_sleep.call_args_list
+        assert sleep_calls[0] == call(_POLL_INITIAL_DELAY_SECONDS)  # 45s in fetch_jobs
+        assert sleep_calls[1] == call(retry_interval)               # uniform poll in collect_results
+
+    def test_collect_results_uses_uniform_poll_interval(self):
+        """collect_results() directly uses uniform poll_interval — no initial delay."""
+        retry_interval = 30
+        slow_source = DataForSEOSource(
+            api_key="dGVzdDp0ZXN0",
+            max_age_days=7,
+            depth=200,
+            priority=1,
+            poll_interval_seconds=retry_interval,
+            poll_timeout_seconds=300,
+        )
+        # First poll: task not yet ready
+        not_ready_resp = _make_mock_response({
+            "status_code": 20000,
+            "tasks": [{"result": []}],
+        })
+        # Second poll: task ready
+        ready_resp = _make_mock_response({
+            "status_code": 20000,
+            "tasks": [{"result": [{"id": "id-001"}]}],
+        })
+        task_get_resp = _make_mock_response(
+            _make_task_get_response([_make_item(job_id="job-001")])
+        )
+
+        get_call = MagicMock(side_effect=[not_ready_resp, ready_resp, task_get_resp])
+
+        from job_finder.sources.dataforseo_source import _POLL_INITIAL_DELAY_SECONDS
+
+        with patch("job_finder.sources.dataforseo_source.time.sleep") as mock_sleep, \
+             patch("job_finder.sources.dataforseo_source.requests.get", get_call):
+            jobs = slow_source.collect_results(["id-001"])
+
+        assert len(jobs) == 1
+        assert jobs[0].source_id == "job-001"
+
+        # Both sleeps use the uniform poll_interval — no initial delay in collect_results
+        assert mock_sleep.call_count == 2
+        sleep_calls = mock_sleep.call_args_list
+        assert sleep_calls[0] == call(retry_interval)  # uniform interval, not initial delay
+        assert sleep_calls[1] == call(retry_interval)
+        assert all(c != call(_POLL_INITIAL_DELAY_SECONDS) for c in sleep_calls)
