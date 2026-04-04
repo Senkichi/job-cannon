@@ -129,6 +129,7 @@ def record_cost(
         (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider),
     )
     conn.commit()
+    logger.info("record_cost: purpose=%s model=%s cost=%.6f job_id=%s", purpose, model, cost_usd, job_id)
     return cost_usd
 
 
@@ -427,6 +428,13 @@ def call_claude(
     if client is None:
         raise ValueError("call_claude requires an Anthropic client (client is None)")
 
+    import traceback as _tb
+    _caller_frames = ''.join(_tb.format_stack(limit=6)[-5:-1]).strip()
+    logger.info(
+        "call_claude START: purpose=%s model=%s job_id=%s tier=%s\ncaller:\n%s",
+        purpose, model, job_id, tier, _caller_frames,
+    )
+
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
             f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
@@ -460,6 +468,10 @@ def call_claude(
     try:
         response = client.messages.create(**call_kwargs)
     except Exception as exc:
+        logger.warning(
+            "call_claude API error: purpose=%s model=%s job_id=%s error=%s",
+            purpose, model, job_id, exc,
+        )
         if _anthropic is not None and isinstance(exc, _anthropic.APITimeoutError):
             raise TimeoutError(
                 f"Claude API request timed out after {effective_timeout}s "
