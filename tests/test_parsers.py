@@ -400,6 +400,78 @@ class TestLinkedInMetaEmailFilter:
         assert len(result) >= 1
 
 
+# Sample Glassdoor table/span HTML (2026 v2 format)
+# Each job has a logo <a> and a data <a>; parser must handle both and deduplicate.
+SAMPLE_GLASSDOOR_TABLE_SPAN_HTML = """
+<html><body>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&amp;jobListingId=1010085154140">
+  <img alt="Sutter Health" class="logo gd-1nuvpo1" height="32" src="logo.png" width="32"/>
+</a>
+<a class="gd-dgh53j elptbf76" href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&amp;jobListingId=1010085154140">
+  <table class="gd-10qqdaw elptbf77"><tr><td class="gd-10qqdaw elptbf77">Physical Therapist, Home Health</td></tr></table>
+  <span class="gd-forujw elptbf78">Sutter Health\u00b7-\u00b7</span>
+  <span class="gd-56kyx5 elptbf79">Alameda, CA</span>
+  <table class="gd-1af37x6 elptbf710"><tr><td class="gd-1af37x6 elptbf710">$130K - $175K (Employer est.)</td></tr></table>
+</a>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=102&amp;jobListingId=1010083597273">
+  <img alt="Goodwill" class="logo gd-1nuvpo1" height="32" src="logo.png" width="32"/>
+</a>
+<a class="gd-dgh53j elptbf76" href="https://www.glassdoor.com/partner/jobListing.htm?pos=102&amp;jobListingId=1010083597273">
+  <table class="gd-10qqdaw elptbf77"><tr><td class="gd-10qqdaw elptbf77">E-Commerce Collectibles Processor</td></tr></table>
+  <span class="gd-forujw elptbf78">Goodwill Industries\u00b7-\u00b7</span>
+  <span class="gd-56kyx5 elptbf79">South San Francisco, CA</span>
+  <table class="gd-1af37x6 elptbf710"><tr><td class="gd-1af37x6 elptbf710">$38K (Employer est.)</td></tr></table>
+</a>
+</body></html>
+"""
+
+# Company-follow / review digest (Glassdoor brand-views pixel URL present, no job cards)
+SAMPLE_GLASSDOOR_COMPANY_FOLLOW_HTML = """
+<html><body>
+<img src="https://www.glassdoor.com/brand-views?o=brandview-pixel&p=eyJhbGci..."/>
+<p>Since you follow</p>
+<p>apree health</p>
+<p>Check out recent updates from apree health and stay on top of your work game.</p>
+<p>Reviews</p>
+</body></html>
+"""
+
+
+class TestGlassdoorTableSpanParser:
+    """Tests for Glassdoor table/span extraction (2026 v2 classnames)."""
+
+    def test_table_span_job_count(self):
+        """Extracts one job per job card (logo link returns None, data link returns job)."""
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert len(jobs) == 2
+
+    def test_table_span_title(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].title == "Physical Therapist, Home Health"
+
+    def test_table_span_company_separator_stripped(self):
+        """Trailing ·-· separator is stripped from company name."""
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].company == "Sutter Health"
+
+    def test_table_span_location(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].location == "Alameda, CA"
+
+    def test_table_span_salary(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].salary_min == 130000
+        assert jobs[0].salary_max == 175000
+
+    def test_table_span_source_id(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].source_id == "1010085154140"
+
+    def test_table_span_source(self):
+        jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_TABLE_SPAN_HTML)
+        assert jobs[0].source == "glassdoor"
+
+
 class TestGlassdoorMetaEmailFilter:
     """Test that Glassdoor parser handles meta/empty emails correctly."""
 
@@ -422,6 +494,11 @@ class TestGlassdoorMetaEmailFilter:
         """Glassdoor parser still returns jobs for normal job alert emails."""
         result = parse_glassdoor_alert(SAMPLE_GLASSDOOR_HTML)
         assert len(result) == 2, f"Expected 2 jobs, got {len(result)}"
+
+    def test_company_follow_email_returns_empty(self):
+        """Company-follow / review digest email (brand-views pixel, no job cards) → []."""
+        result = parse_glassdoor_alert(SAMPLE_GLASSDOOR_COMPANY_FOLLOW_HTML)
+        assert result == [], f"Expected [], got {len(result)} jobs from company-follow email"
 
 
 class TestZipRecruiterMetaEmailFilter:
