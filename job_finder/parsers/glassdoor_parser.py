@@ -2,9 +2,10 @@
 
 Glassdoor sends HTML emails from noreply@glassdoor.com with job cards.
 
-Two formats are handled:
+Three formats are handled:
 1. CSS-class format (pre-2026): span.gd-* and p.gd-* elements
-2. Positional format (2026+): classless spans and p tags in fixed order
+2. Positional format (2026 v1): classless spans and p tags in fixed order
+3. Table/span format (2026 v2): title in table/td, company/location in spans
 
 Each card is wrapped in an <a> tag linking to glassdoor.com/partner/jobListing.htm
 with a jobListingId URL parameter.
@@ -15,11 +16,18 @@ CSS-class format:
 - Location in p.gd-28d35bae2f (first occurrence per card)
 - Salary in p.gd-28d35bae2f (second occurrence, format: "$XXK - $XXK (Employer est.)")
 
-Positional format:
+Positional format (2026 v1):
 - Company name in inner <span> (sibling of rating span "X.X ★")
 - Job title in first <p> tag
 - Location in second <p> tag (if not salary/age)
 - Salary in <p> tag containing "$"
+
+Table/span format (2026 v2):
+- Title in <table class="gd-10qqdaw..."><tr><td>
+- Company in <span class="gd-forujw..."> (trailing ·-· separator stripped)
+- Location in <span class="gd-56kyx5...">
+- Salary in <table class="gd-1af37x6..."><tr><td>
+- Each job has TWO matching <a> tags (logo link + data link); logo link has no title td
 
 Note: Glassdoor CSS class names may change over time. If parsing breaks,
 inspect a recent email and update the class constants below.
@@ -48,11 +56,20 @@ COMPANY_CLASS = "gd-628b46d9ce"
 TITLE_CLASS = "gd-6c2846d4dc"
 DETAIL_CLASS = "gd-28d35bae2f"  # used for both location and salary
 
+# Table/span format CSS class names (2026 v2)
+_TABLE_TITLE_CLASS = "gd-10qqdaw"
+_TABLE_COMPANY_CLASS = "gd-forujw"
+_TABLE_LOCATION_CLASS = "gd-56kyx5"
+_TABLE_SALARY_CLASS = "gd-1af37x6"
+
 # Positional format: rating pattern (e.g. "3.6 ★" or "4.1 ★")
 _RATING_RE = re.compile(r'^\s*\d+\.\d+\s*\u2605?\s*$')
 
 # Positional format: age/recency pattern (e.g. "Just posted", "17h", "1d", "5d")
 _AGE_RE = re.compile(r'^(Just posted|\d+[hd]?)$', re.IGNORECASE)
+
+# Company-follow / review digest: Glassdoor brand-views pixel URL is unique to these
+_BRAND_VIEWS_RE = re.compile(r"glassdoor\.com/brand-views")
 
 
 def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
@@ -71,11 +88,12 @@ def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> l
     # Each job card is wrapped in an <a> tag linking to glassdoor.com/partner/jobListing.htm
     job_links = soup.find_all("a", href=re.compile(r"glassdoor\.com/partner/jobListing"))
 
-    # If no job cards found AND body matches meta-email patterns, log explicitly.
-    # (The parser already returns [] implicitly when job_links is empty — this adds
-    # auditability so log analysis can distinguish meta-emails from HTML changes.)
-    if not job_links and _is_meta_email(soup.get_text()):
-        logger.debug("Skipping meta-email (pollution filter)")
+    # If no job cards found, identify why before returning [].
+    if not job_links:
+        if _BRAND_VIEWS_RE.search(body):
+            logger.debug("Skipping company-follow / review digest email (no job listings)")
+        elif _is_meta_email(soup.get_text()):
+            logger.debug("Skipping meta-email (pollution filter)")
         return []
 
     for link in job_links:
@@ -118,9 +136,11 @@ def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
     title_el = link_tag.find("p", class_=TITLE_CLASS)
     title = title_el.get_text(strip=True) if title_el else None
 
-    # If CSS-class extraction yielded no title, fall back to positional extraction.
-    # This handles the 2026+ Glassdoor email format where all CSS classes are absent.
     if not title:
+        # Try table/span format (2026 v2) before positional.
+        if link_tag.find("td", class_=_TABLE_TITLE_CLASS):
+            return _parse_job_card_table_span(link_tag, email_date)
+        # Fall back to positional extraction (2026 v1 classless format).
         return _parse_job_card_positional(link_tag, email_date)
 
     # Find location and salary (both use DETAIL_CLASS)
@@ -225,6 +245,59 @@ def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Opti
     # Build clean Glassdoor URL
     clean_url = f"https://www.glassdoor.com/job-listing/j?jl={source_id}" if source_id else href
 
+    return Job(
+        title=title,
+        company=company,
+        location=location,
+        source="glassdoor",
+        source_url=clean_url,
+        source_id=source_id,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        posted_date=email_date,
+    )
+
+
+def _parse_job_card_table_span(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
+    """Parse a single job card using table/span extraction (2026 v2 format).
+
+    In this format each job has two matching <a> tags: a logo link (img only)
+    and a data link. The logo link has no title td and returns None. The data
+    link structure:
+    - Title: <table class="gd-10qqdaw..."><tr><td>title</td></tr></table>
+    - Company: <span class="gd-forujw...">Company·-·</span> (separator stripped)
+    - Location: <span class="gd-56kyx5...">Location</span>
+    - Salary: <table class="gd-1af37x6..."><tr><td>salary</td></tr></table>
+    """
+    href = link_tag.get("href", "")
+    source_id = _extract_listing_id(href)
+
+    title_td = link_tag.find("td", class_=_TABLE_TITLE_CLASS)
+    if not title_td:
+        return None
+    title = title_td.get_text(strip=True)
+    if not title:
+        return None
+
+    company_span = link_tag.find("span", class_=_TABLE_COMPANY_CLASS)
+    company = "Unknown"
+    if company_span:
+        raw = company_span.get_text(strip=True)
+        # Strip trailing visual separator Glassdoor appends (e.g. "·-·" or "–")
+        company = re.sub(r'[\u00b7\u2013\u2014\-\s]+$', '', raw).strip() or "Unknown"
+
+    location_span = link_tag.find("span", class_=_TABLE_LOCATION_CLASS)
+    location = location_span.get_text(strip=True) if location_span else "Unknown"
+
+    salary_min = None
+    salary_max = None
+    salary_td = link_tag.find("td", class_=_TABLE_SALARY_CLASS)
+    if salary_td:
+        salary_text = salary_td.get_text(strip=True)
+        if looks_like_salary_range(salary_text):
+            salary_min, salary_max = _parse_salary(salary_text)
+
+    clean_url = f"https://www.glassdoor.com/job-listing/j?jl={source_id}" if source_id else href
     return Job(
         title=title,
         company=company,
