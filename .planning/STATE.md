@@ -98,7 +98,7 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 
 ### Pending Todos
 
-11 todos in `.planning/todos/pending/` — run `/gsd:check-todos` to review.
+8 todos in `.planning/todos/pending/` — run `/gsd:check-todos` to review.
 
 ### Blockers/Concerns
 
