@@ -21,6 +21,7 @@ from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_ma
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 from job_finder.parsers.trueup_parser import parse_trueup_alert
+from job_finder.parsers.monster_parser import parse_monster_alert
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ SENDER_PARSERS = {
     "no-reply@ziprecruiter.com": parse_ziprecruiter_alert,
     "no-reply@us.greenhouse-jobs.com": parse_greenhouse_alert,
     "hello@trueup.io": parse_trueup_alert,
+    "monster@notifications.monster.com": parse_monster_alert,
 }
 
 TOKEN_PATH = "token.json"
