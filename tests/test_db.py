@@ -297,13 +297,13 @@ class TestProviderAttribution:
         _insert_job(migrated_conn, "acme|data-scientist")
         persist_sonnet_score(
             migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
-            provider="cerebras",
+            provider="ollama",
         )
         row = migrated_conn.execute(
             "SELECT scoring_provider FROM jobs WHERE dedup_key = 'acme|data-scientist'"
         ).fetchone()
         assert row is not None
-        assert row["scoring_provider"] == "cerebras"
+        assert row["scoring_provider"] == "ollama"
 
     def test_persist_sonnet_score_defaults_anthropic_when_no_provider(self, migrated_conn):
         """persist_sonnet_score without provider= preserves column DEFAULT ('anthropic')."""
@@ -324,8 +324,8 @@ class TestProviderAttribution:
         _insert_job(migrated_conn, "acme|data-scientist")
         persist_sonnet_score(
             migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
-            provider="groq",
+            provider="gemini",
         )
         result = get_job(migrated_conn, "acme|data-scientist")
         assert result is not None
-        assert result["scoring_provider"] == "groq"
+        assert result["scoring_provider"] == "gemini"

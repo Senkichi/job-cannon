@@ -241,7 +241,7 @@ def _extract_jobs_with_haiku(
 
         # Apply keyword filter and resolve URLs
         try:
-            from job_finder.web.ats_scanner import _title_matches
+            from job_finder.web.ats_platforms import _title_matches
         except ImportError:
             def _title_matches(title, target_titles, exclusions):
                 title_lower = title.lower()

@@ -335,6 +335,15 @@ class TestRunAgenticBackfill:
 
                 result = run_agentic_backfill(path, {}, limit=10)
 
+                mock_enrich.assert_called_once()
+                enriched_job = mock_enrich.call_args[0][0]
+                assert enriched_job["dedup_key"] == "acme|ds|remote", (
+                    f"Expected to enrich 'acme|ds|remote', but orchestrator passed: {enriched_job.get('dedup_key')!r}"
+                )
+                assert enriched_job.get("enrichment_tier") == "exhausted", (
+                    "Orchestrator must only select jobs with enrichment_tier='exhausted'"
+                )
+
             # Verify DB updated
             verify_conn = sqlite3.connect(path)
             verify_conn.row_factory = sqlite3.Row
@@ -378,6 +387,15 @@ class TestRunAgenticBackfill:
                 mock_enrich.return_value = None
 
                 result = run_agentic_backfill(path, {}, limit=10)
+
+                mock_enrich.assert_called_once()
+                enriched_job = mock_enrich.call_args[0][0]
+                assert enriched_job["dedup_key"] == "acme|ds|remote", (
+                    f"Expected to enrich 'acme|ds|remote', but orchestrator passed: {enriched_job.get('dedup_key')!r}"
+                )
+                assert enriched_job.get("enrichment_tier") == "exhausted", (
+                    "Orchestrator must only select jobs with enrichment_tier='exhausted'"
+                )
 
             verify_conn = sqlite3.connect(path)
             verify_conn.row_factory = sqlite3.Row
@@ -481,6 +499,15 @@ class TestRunAgenticBackfill:
                     with patch("job_finder.web.db_helpers.standalone_connection", patched_sc):
                         run_agentic_backfill(path, {}, limit=10)
 
+                mock_enrich.assert_called_once()
+                enriched_job = mock_enrich.call_args[0][0]
+                assert enriched_job["dedup_key"] == "acme|ds|remote", (
+                    f"Expected to enrich 'acme|ds|remote', but orchestrator passed: {enriched_job.get('dedup_key')!r}"
+                )
+                assert enriched_job.get("enrichment_tier") == "exhausted", (
+                    "Orchestrator must only select jobs with enrichment_tier='exhausted'"
+                )
+
             warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
             assert any("optimistic concurrency miss" in msg or "acme|ds|remote" in msg
                        for msg in warning_messages)
@@ -581,9 +608,10 @@ class TestEnrichSingleJobObservability:
 
             result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
 
-        # With company "Zo" → 0 meaningful tokens (len <= 1), skip path applies
-        # The job should be skipped since no meaningful tokens exist
-        # (the bypass requires company_tokens <= 2, which means tokens must exist)
+        assert result is not None, (
+            "enrich_single_job must return enriched text when long-page bypass fires "
+            "(len(tokens)<=2 and len(text)>2000 bypasses company-name-in-text check)"
+        )
 
     def test_failure_stats_logged(self, caplog):
         """Failure breakdown is logged at INFO level."""

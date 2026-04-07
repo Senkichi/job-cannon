@@ -12,8 +12,8 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
-from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MONTHLY_BUDGET_USD
-from job_finder.web.claude_client import get_cost_stats
+from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD, get_cost_stats
 from job_finder.web.db_helpers import get_db
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def index():
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
     config = current_app.config.get("JF_CONFIG", {})
-    budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
     pending_count = stats.get("pending_detections", 0)
     rejection_ctx = _get_rejection_context(conn)
@@ -136,7 +136,7 @@ def cost_detail():
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     config = current_app.config.get("JF_CONFIG", {})
-    budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
 
     return render_template(

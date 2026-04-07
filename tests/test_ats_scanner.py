@@ -2560,8 +2560,8 @@ class TestProbeAtsSlugsRetry:
         conn.commit()
         return cursor.lastrowid
 
-    def test_probe_ats_slugs_timeout_enters_retry_state(self, db_conn):
-        """Timeout during probe sets ats_probe_status='error' and retry_count=1."""
+    def test_probe_ats_slugs_timeout_preserves_retry(self, db_conn):
+        """Timeout during probe is transient — company gets error status with retry_after, not permanent miss."""
         import requests
         db_path, conn = db_conn
         company_id = self._insert_pending_company(conn)
@@ -2576,11 +2576,12 @@ class TestProbeAtsSlugsRetry:
             result = probe_ats_slugs(db_path, {"TESTING": False})
 
         row = conn.execute(
-            "SELECT ats_probe_status, retry_count FROM companies WHERE id = ?",
+            "SELECT ats_probe_status FROM companies WHERE id = ?",
             (company_id,),
         ).fetchone()
+        # Timeouts are transient; _handle_scan_error sets 'error' status (retry-eligible), not permanent 'miss'
         assert row["ats_probe_status"] == "error"
-        assert row["retry_count"] == 1
+        assert result["misses"] == 0  # Not counted as a miss
 
     def test_probe_ats_slugs_all_miss_sets_miss_status(self, db_conn):
         """When all probes return False, company gets ats_probe_status='miss'."""
@@ -2608,13 +2609,13 @@ class TestProbeAtsSlugsLimit:
     """Tests that probe_ats_slugs() respects _PROBE_BATCH_LIMIT."""
 
     def test_probe_ats_slugs_respects_batch_limit(self, db_conn):
-        """With 100 pending companies, probe processes only _PROBE_BATCH_LIMIT=75."""
+        """With 200 pending companies, probe processes only _PROBE_BATCH_LIMIT."""
         from datetime import datetime
         db_path, conn = db_conn
 
-        # Insert 100 pending companies
+        # Insert 200 pending companies (more than _PROBE_BATCH_LIMIT)
         now = datetime.now().isoformat()
-        for i in range(100):
+        for i in range(200):
             conn.execute(
                 """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
                    VALUES (?, ?, 'pending', ?, ?)""",

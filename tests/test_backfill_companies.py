@@ -138,7 +138,7 @@ class TestDenylistFiltering:
         )
         conn.commit()
 
-        with patch("job_finder.web.backfill_companies.upsert_company") as mock_upsert:
+        with patch("job_finder.web.company_resolver.upsert_company") as mock_upsert:
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         # upsert_company should NOT have been called for denylist names
@@ -170,7 +170,7 @@ class TestCompanyLinkage:
         conn.commit()
 
         new_company_id = 42
-        with patch("job_finder.web.backfill_companies.upsert_company", return_value=new_company_id) as mock_upsert:
+        with patch("job_finder.web.company_resolver.upsert_company", return_value=new_company_id) as mock_upsert:
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         assert linked_count >= 1
@@ -203,7 +203,7 @@ class TestCompanyLinkage:
         )
         conn.commit()
 
-        with patch("job_finder.web.backfill_companies.upsert_company") as mock_upsert:
+        with patch("job_finder.web.company_resolver.upsert_company") as mock_upsert:
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         # Should NOT create a new company
@@ -239,7 +239,7 @@ class TestCompanyLinkage:
             call_count += 1
             return new_company_id
 
-        with patch("job_finder.web.backfill_companies.upsert_company", side_effect=mock_upsert_side_effect):
+        with patch("job_finder.web.company_resolver.upsert_company", side_effect=mock_upsert_side_effect):
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         # upsert_company should be called only ONCE for 3 identical company names
@@ -308,7 +308,7 @@ class TestDdgEnrichment:
         new_company_ids = [acme_id, widgetco_id]
 
         # Use homepage_url which exists in the companies schema as a storable field
-        with patch("job_finder.web.backfill_companies.enrich_company_info") as mock_enrich:
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {"homepage_url": "https://example.com"}
             count = run_ddg_enrichment(conn, new_company_ids)
 
@@ -334,7 +334,7 @@ class TestDdgEnrichment:
 
         company_id = conn.execute("SELECT id FROM companies WHERE name = 'testco'").fetchone()["id"]
 
-        with patch("job_finder.web.backfill_companies.enrich_company_info") as mock_enrich:
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {}  # Empty result — no fields to store
             count = run_ddg_enrichment(conn, [company_id])
 

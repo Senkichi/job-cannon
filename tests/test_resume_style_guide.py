@@ -216,7 +216,7 @@ class TestExtractStyleGuide:
         return {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 50.0,
+                "daily_budget_usd": 50.0,
             }
         }
 
@@ -313,7 +313,7 @@ class TestMigrateStyleGuide:
 
     @pytest.fixture
     def sample_config(self):
-        return {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 50.0}}
+        return {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 50.0}}
 
     def test_migrate_calls_call_claude_with_correct_purpose(self, migrated_conn, sample_config, tmp_path):
         from job_finder.web.resume_style_guide import migrate_style_guide

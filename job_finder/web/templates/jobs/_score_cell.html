@@ -1,12 +1,13 @@
-{# Score cell partial. Renders the score <td> with color tiers and sonnet star indicator.
+{# Score cell partial. Renders the score <td> with color tiers and freshness star indicator.
    Variables expected in scope:
-     job          — job object with sonnet_score, haiku_score, dedup_key
+     job              — job object with sonnet_score, haiku_score, dedup_key, first_seen
    Optional:
-     oob          — when truthy, adds hx-swap-oob="outerHTML" for out-of-band targeting
+     oob              — when truthy, adds hx-swap-oob="outerHTML" for out-of-band targeting
+     freshness_cutoff — ISO date string; jobs with first_seen >= this get a freshness star
 #}
 
 {% set display_score = job.sonnet_score if job.sonnet_score is not none else job.haiku_score %}
-{% set is_sonnet = job.sonnet_score is not none %}
+{% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
 
 {% if display_score is not none %}
   {% if display_score >= 70 %}
@@ -24,5 +25,5 @@
     class="px-1 py-1.5 {{ score_class }} whitespace-nowrap"
     data-sort-score="{{ display_score | int if display_score is not none else '' }}"
     {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
-  {{ display_score | int if display_score is not none else "---" }}{% if is_sonnet %}<span class="text-amber-400 text-xs ml-0.5">*</span>{% endif %}
+  {{ display_score | int if display_score is not none else "---" }}{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
 </td>

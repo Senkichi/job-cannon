@@ -121,11 +121,15 @@ class TestPipelineView:
 
     def test_pipeline_shows_rejected_collapsed(self, client):
         """Rejected column header is present and marked as collapsed."""
+        import re
+
         response = client.get("/pipeline")
         assert b"Rejected" in response.data
-        # Collapsed body uses id="rejected-body" with class="hidden"
-        assert b"rejected-body" in response.data
-        assert b"hidden" in response.data
+        html = response.data.decode()
+        # Verify rejected-body div specifically has "hidden" class
+        match = re.search(r'id="rejected-body"[^>]*class="([^"]*)"', html)
+        assert match, "rejected-body div must exist with a class attribute"
+        assert "hidden" in match.group(1), "rejected-body must have 'hidden' class"
 
     def test_pipeline_shows_seed_job_card(self, client):
         """Seed job card appears in the Discovered column."""

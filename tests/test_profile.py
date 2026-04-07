@@ -544,8 +544,9 @@ class TestProfileEditorRoutes:
                 data=json.dumps(valid_profile),
                 content_type="application/json",
             )
-            # Should redirect (302) or succeed
-            assert response.status_code in (200, 302, 204)
+            assert response.status_code == 302, (
+                f"Expected redirect (302) on successful save, got {response.status_code}"
+            )
         finally:
             profile_mod._PROFILE_PATH = orig_path
 
@@ -572,11 +573,11 @@ class TestProfileEditorRoutes:
                 data=json.dumps(valid_profile),
                 content_type="application/json",
             )
-            assert response.status_code in (200, 302, 204)
+            assert response.status_code == 302
 
-            if os.path.exists(tmp_path):
-                saved = load_profile(tmp_path)
-                assert saved["positions"][0]["company"] == "Acme Corp"
+            assert os.path.exists(tmp_path), "Profile file must be written to disk"
+            saved = load_profile(tmp_path)
+            assert saved["positions"][0]["company"] == "Acme Corp"
 
         finally:
             profile_mod._PROFILE_PATH = original_path
@@ -1214,7 +1215,7 @@ class TestPhase17ActivityInstrumentation:
 
 
 _REC_APP_CONFIG = {
-    "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
+    "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
     "profile": {
         "target_titles": ["Staff Data Scientist"],
         "target_locations": ["Remote"],

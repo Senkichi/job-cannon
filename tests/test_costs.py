@@ -215,7 +215,7 @@ class TestCostsRoute:
         response = client.get("/costs")
         html = response.data.decode("utf-8")
         # Budget progress bar uses bg-slate-700 rounded-full h-2 pattern
-        assert "budget" in html.lower() or "cap" in html.lower()
+        assert 'id="budget-progress-bar"' in html, "Budget progress bar element must be present"
 
     def test_costs_html_contains_chartjs_cdn(self, client):
         """GET /costs HTML contains Chart.js CDN script tag."""
@@ -251,7 +251,7 @@ class TestCostsRoute:
             "db": {"path": tmp_db_path},
             "scoring": {
                 "min_score_threshold": 40,
-                "monthly_budget_usd": 42.0,
+                "daily_budget_usd": 42.0,
             },
             "profile": {
                 "target_titles": ["Staff Data Scientist"],
@@ -338,7 +338,7 @@ class TestProviderBreakdownRendering:
 
         test_config = {
             "db": {"path": tmp_db_path},
-            "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
+            "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
             "profile": {
                 "target_titles": ["Staff Data Scientist"],
                 "target_locations": ["Remote"],

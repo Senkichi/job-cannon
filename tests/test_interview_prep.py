@@ -102,7 +102,7 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
             generate_interview_prep_background(dedup_key, path, config)
@@ -134,7 +134,7 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
             generate_interview_prep_background(dedup_key, path, config)
@@ -158,7 +158,7 @@ class TestInterviewPrepDedup:
         conn.close()
 
         config = {
-            "scoring": {"monthly_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
+            "scoring": {"daily_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
         }
 
         mock_response = MagicMock()
@@ -212,7 +212,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -279,7 +279,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -325,7 +325,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -370,7 +370,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock()]
@@ -410,7 +410,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value.messages.create.side_effect = RuntimeError("API failure")
@@ -437,7 +437,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock()]
@@ -469,6 +469,35 @@ class TestInterviewPrepContent:
 
         os.remove(path)
 
+    def test_generate_handles_malformed_opus_response(self):
+        """call_model raising on schema mismatch → interview_prep status set to 'error'."""
+        from job_finder.web.interview_prep import generate_interview_prep_background
+
+        path, conn = _create_test_db_with_job("acme|malformed|remote")
+        conn.close()
+
+        config = {"scoring": {"daily_budget_usd": 25.0}}
+
+        with patch(
+            "job_finder.web.interview_prep.call_model",
+            side_effect=RuntimeError("Schema validation failed"),
+        ):
+            with patch(
+                "job_finder.web.interview_prep._fetch_company_info", return_value=""
+            ):
+                generate_interview_prep_background("acme|malformed|remote", path, config)
+
+        conn2 = sqlite3.connect(path)
+        row = conn2.execute(
+            "SELECT status FROM interview_preps WHERE job_id = ?",
+            ("acme|malformed|remote",),
+        ).fetchone()
+        conn2.close()
+        os.remove(path)
+
+        assert row is not None
+        assert row[0] == "error"
+
 
 # ---------------------------------------------------------------------------
 # Budget Gating Tests
@@ -485,7 +514,7 @@ class TestInterviewPrepBudget:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 0.0}}  # Budget at zero
+        config = {"scoring": {"daily_budget_usd": 0.0}}  # Daily budget at zero — always blocked
 
         with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
             generate_interview_prep_background(dedup_key, path, config)

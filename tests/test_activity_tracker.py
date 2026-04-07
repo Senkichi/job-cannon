@@ -116,25 +116,37 @@ class TestLogActivity:
         caller_row = conn.execute("SELECT * FROM user_activity WHERE action = 'sync'").fetchone()
         assert caller_row is not None, "Caller's connection should also be able to read the row"
 
-    def test_failure_is_silent_bad_path(self):
-        """log_activity with an invalid db_path does not raise any exception."""
+    def test_failure_is_silent_bad_path(self, caplog):
+        """log_activity with an invalid db_path does not raise; the failure is logged as WARNING."""
+        import logging
         from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
 
-        # Should not raise — even on completely invalid path
-        log_activity("/nonexistent/dir/bad.db", ACTION_SYNC, metadata={"status": "test"})
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.activity_tracker"):
+            log_activity("/nonexistent/dir/bad.db", ACTION_SYNC, metadata={"status": "test"})
 
-    def test_failure_on_missing_table(self, tmp_db_path):
-        """log_activity on a DB without user_activity table does not raise."""
+        assert any("log_activity failed" in r.message for r in caplog.records), (
+            "Expected a WARNING log indicating the failure, but none was emitted. "
+            "Either the DB write unexpectedly succeeded, or the exception was swallowed without logging."
+        )
+
+    def test_failure_on_missing_table(self, tmp_db_path, caplog):
+        """log_activity on a DB without user_activity table does not raise; the failure is logged."""
+        import logging
         from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
 
-        # tmp_db_path is a valid SQLite DB but has no tables
-        log_activity(tmp_db_path, ACTION_SYNC)
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.activity_tracker"):
+            log_activity(tmp_db_path, ACTION_SYNC)
+
+        assert any("log_activity failed" in r.message for r in caplog.records), (
+            "Expected a WARNING log for missing table, but none was emitted. "
+            "Either a table was unexpectedly found, or the exception was swallowed without logging."
+        )
 
     def test_no_app_context_required(self, migrated_db):
         """Calling log_activity outside any Flask app context works without RuntimeError."""
         from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
 
-        db_path, _ = migrated_db
+        db_path, conn = migrated_db  # ← capture conn (was discarded with _)
 
         # No Flask app pushed — must not raise RuntimeError
         try:
@@ -147,6 +159,13 @@ class TestLogActivity:
 
         # Must succeed without Flask context
         log_activity(db_path, ACTION_SYNC, metadata={"context": "none"})
+
+        row = conn.execute(
+            "SELECT action FROM user_activity WHERE action = ?", (ACTION_SYNC,)
+        ).fetchone()
+        assert row is not None, (
+            "log_activity must write a row even when called outside a Flask application context"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +288,7 @@ class TestCallSiteIntegration:
         app = create_app(config={
             "TESTING": True,
             "db": {"path": db_path},
-            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "monthly_budget_usd": 25.0},
+            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
             "polling": {"interval_minutes": 30},
         })
 

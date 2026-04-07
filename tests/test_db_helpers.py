@@ -68,3 +68,16 @@ class TestSafeJsonLoad:
 
         assert len(caplog.records) >= 1
         assert caplog.records[0].levelno == logging.DEBUG
+
+    def test_type_mismatch_valid_json_scalar_returns_scalar_not_default(self):
+        """safe_json_load('"just a string"', default=[]) returns str, not the default list."""
+        result = safe_json_load('"just a string"', default=[])
+        assert result == "just a string"
+        assert not isinstance(result, list)
+
+    def test_type_mismatch_valid_json_number_returns_number_not_default(self):
+        """safe_json_load('42', default={}) returns int 42, not the default dict."""
+        result = safe_json_load("42", default={})
+        assert result == 42
+        assert not isinstance(result, dict)
+

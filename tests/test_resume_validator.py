@@ -48,7 +48,7 @@ def _test_config():
     """Return a minimal config dict for tests."""
     return {
         "scoring": {
-            "monthly_budget_usd": 25.0,
+            "daily_budget_usd": 25.0,
             "models": {
                 "sonnet": "claude-sonnet-4-6",
             },
@@ -369,11 +369,17 @@ class TestFixResumeViolations:
         # The user message should contain error violations but NOT warning violations
         assert len(captured_messages) > 0
         user_content = captured_messages[0]["content"]
-        # Error violation should be in the message
-        assert "dbt" in user_content or "fabricated" in user_content
-        # Warning violations should NOT be the only thing passed — dbt error must appear
-        # The key check: warning-only violations are not what triggered this call
-        # (if only warnings were present, the function returns early without calling Claude)
+        # Error violation must be present in fix prompt
+        assert "dbt" in user_content or "fabricated" in user_content, (
+            "Error violation content must be sent to fix pass"
+        )
+        # Warning-only violations must NOT appear in fix prompt
+        assert "em dash" not in user_content.lower(), (
+            "Warning violations must NOT be sent to fix pass"
+        )
+        assert "consecutive bullets" not in user_content.lower(), (
+            "Warning violations must NOT be sent to fix pass"
+        )
 
     def test_fix_returns_original_if_no_error_violations(self):
         """fix_resume_violations returns original resume if only warnings present."""
@@ -495,7 +501,7 @@ _MOCK_JOB_ROW = {
 _BACKGROUND_CONFIG = {
     "scoring": {
         "models": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
-        "monthly_budget_usd": 25.0,
+        "daily_budget_usd": 25.0,
         "multi_version_threshold": 80,
     },
     "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
@@ -645,9 +651,9 @@ class TestValidatorBackgroundIntegration:
         assert row[0] == "done", f"Generation should still complete on validation failure, got status: {row[0]}"
         # validate_resume is fail-open: returns {"passed": True, "violations": []} even on API errors
         # The background function saves this fail-open result to DB
-        if row[1] is not None:
-            report = json.loads(row[1])
-            assert report.get("passed") is True, "Fail-open report should be passed=True"
+        assert row[1] is not None, "validation_report must be stored even on validator failure"
+        report = json.loads(row[1])
+        assert report.get("passed") is True, "Fail-open report should be passed=True"
 
 
 # ---------------------------------------------------------------------------

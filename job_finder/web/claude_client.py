@@ -3,7 +3,7 @@
 Provides:
 - compute_cost: Calculate USD cost from token counts and model pricing.
 - record_cost: Insert a cost row into scoring_costs and return cost_usd.
-- cost_gate: Check whether a model tier is allowed given the monthly budget.
+- cost_gate: Check whether a model tier is allowed given the daily budget.
 - get_cost_stats: Aggregate cost data by time period and feature/purpose.
 - call_claude: Convenience wrapper for API calls with automatic cost recording.
 - ClaudeContext: Dataclass bundling the (client, conn, config) triple for call_claude.
@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
 
 try:
@@ -45,7 +44,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 
 
 class BudgetExceededError(Exception):
-    """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
+    """Raised when a non-Haiku Claude call is blocked by the daily budget cap."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,15 +144,16 @@ def cost_gate(
     config: dict,
     model_tier: str = "sonnet",
 ) -> bool:
-    """Check whether a model tier call is allowed under daily and monthly budgets.
+    """Check whether a model tier call is allowed under the daily budget.
 
     Haiku calls are always allowed regardless of spend.
-    Sonnet/Opus calls are blocked when daily or monthly spend >= budget cap.
+    Sonnet/Opus calls are blocked when today's spend >= daily budget cap.
+    Monthly spend is tracked for display only; Anthropic's console manages
+    any account-level monthly cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        config: Application config dict (reads scoring.monthly_budget_usd,
-            scoring.daily_budget_usd).
+        config: Application config dict (reads scoring.daily_budget_usd).
         model_tier: "haiku" or "sonnet" (or "opus"). Defaults to "sonnet".
 
     Returns:
@@ -163,22 +163,9 @@ def cost_gate(
         return True
 
     scoring_cfg = config.get("scoring", {})
-    monthly_cap: float = scoring_cfg.get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
     daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
     now = datetime.now(timezone.utc)
-
-    # Monthly check
-    month_start = now.strftime("%Y-%m-01T00:00:00Z")
-    row = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) "
-        "FROM scoring_costs WHERE timestamp >= ?",
-        (month_start,),
-    ).fetchone()
-    if (row[0] if row else 0.0) >= monthly_cap:
-        return False
-
-    # Daily check
     day_start = now.strftime("%Y-%m-%dT00:00:00Z")
     row = conn.execute(
         "SELECT COALESCE(SUM(cost_usd), 0.0) "
@@ -204,18 +191,18 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         month (float): Total spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
         by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose.
-        budget_cap (float): The monthly budget cap.
+        budget_cap (float): The daily budget cap (matches enforcement in cost_gate).
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        budget_cap: Override the default monthly budget cap.  When None,
-            uses DEFAULT_MONTHLY_BUDGET_USD from config.
+        budget_cap: Override the default daily budget cap.  When None,
+            uses DEFAULT_DAILY_BUDGET_USD.
 
     Returns:
         Stats dict as described above.
     """
     if budget_cap is None:
-        budget_cap = DEFAULT_MONTHLY_BUDGET_USD
+        budget_cap = DEFAULT_DAILY_BUDGET_USD
     now = datetime.now(timezone.utc)
 
     today_start = now.strftime("%Y-%m-%dT00:00:00Z")
@@ -437,7 +424,7 @@ def call_claude(
 
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
-            f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
+            f"Daily budget cap reached. Sonnet calls paused. Model: {model}"
         )
 
     effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT_SECONDS
@@ -477,6 +464,16 @@ def call_claude(
                 f"Claude API request timed out after {effective_timeout}s "
                 f"(model={model}, purpose={purpose})"
             ) from exc
+        # Convert Anthropic account-level spend cap (403 PermissionDeniedError) to
+        # BudgetExceededError only when the error text indicates credit exhaustion.
+        # Other 403s (suspended account, model access restriction, org feature gates)
+        # must propagate as-is so the real reason surfaces in logs.
+        if _anthropic is not None and isinstance(exc, _anthropic.PermissionDeniedError):
+            msg = str(exc).lower()
+            _credit_patterns = ("credit balance", "spending limit", "insufficient credits",
+                                "credit balance too low", "out of credits")
+            if any(p in msg for p in _credit_patterns):
+                raise BudgetExceededError(str(exc)) from exc
         raise
 
     # Extract token counts and record cost before parsing content,

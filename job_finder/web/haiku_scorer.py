@@ -190,7 +190,7 @@ def score_job_haiku(
         experience_profile: Profile dict with target_titles, target_locations,
                  min_salary, skills, industries keys.
         conn: Open SQLite connection for cost recording.
-        config: Application config dict (reads scoring.monthly_budget_usd).
+        config: Application config dict (reads scoring.daily_budget_usd).
         max_chars: Maximum characters for description snippet (default 2000).
                    Pass 4000 for borderline re-evaluation to expand context.
         purpose: Cost tracking purpose label (default "haiku_score", use "haiku_reeval"
@@ -282,13 +282,12 @@ def score_job_haiku(
         )
         return ScoringResult(data=result, status="success")
     except BudgetExceededError:
-        # Haiku should never hit budget cap, but handle defensively
         logger.warning(
-            "BudgetExceededError for Haiku scoring of '%s' @ '%s'",
+            "BudgetExceededError for Haiku scoring of '%s' @ '%s' — re-raising to abort batch",
             title,
             company,
         )
-        return ScoringResult(data=None, status="budget_exceeded")
+        raise  # Propagate so batch callers can abort instead of retrying all remaining jobs
     except Exception as e:
         logger.warning(
             "Haiku scoring failed for '%s' @ '%s': %s",

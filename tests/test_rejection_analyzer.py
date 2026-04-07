@@ -119,7 +119,7 @@ class TestNoUnreviewedRejections:
         path, conn = make_migrated_db()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -135,7 +135,7 @@ class TestNoUnreviewedRejections:
         insert_rejected_job(conn, "acme|ds|remote", rejection_reviewed=1)
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -151,7 +151,7 @@ class TestNoUnreviewedRejections:
         path, conn = make_migrated_db()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -177,17 +177,25 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         mock_client, _ = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = mock_client
-            run_rejection_analysis(path, config)
+            result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 
-        # Should be called exactly once (not 3 times)
+        # Verify batch behaviour: all 3 rejections in one Opus call
         assert mock_client.messages.create.call_count == 1, (
             f"Expected 1 Opus call for all rejections, got {mock_client.messages.create.call_count}"
+        )
+        # Verify output reflects all 3 rejections were processed
+        assert result["rejections_analyzed"] == 3, (
+            f"Expected rejections_analyzed=3, got {result['rejections_analyzed']!r}. "
+            "The call was made but results may not have been parsed correctly."
+        )
+        assert result.get("report_id") is not None, (
+            "Expected a stored report_id after successful analysis"
         )
 
     def test_report_stored_in_rejection_reports_table(self):
@@ -199,7 +207,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         mock_client, _ = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = mock_client
@@ -232,7 +240,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         mock_client, _ = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = mock_client
@@ -261,7 +269,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         mock_client, _ = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = mock_client
@@ -283,7 +291,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         mock_client, _ = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_anthropic.Anthropic.return_value = mock_client
@@ -293,6 +301,33 @@ class TestRejectionAnalysisBatch:
 
         # Only 1 unreviewed rejection should be analyzed
         assert result["rejections_analyzed"] == 1
+
+    def test_analyze_handles_malformed_opus_response(self):
+        """call_model raising on schema mismatch → error dict returned, not crash."""
+        from job_finder.web.rejection_analyzer import run_rejection_analysis
+
+        path, conn = make_migrated_db()
+        insert_rejected_job(conn, "acme|malformed|remote")
+        conn.close()
+
+        config = {"scoring": {"daily_budget_usd": 25.0}}
+
+        with patch(
+            "job_finder.web.rejection_analyzer.call_model",
+            side_effect=RuntimeError("Schema validation failed"),
+        ):
+            result = run_rejection_analysis(path, config)
+
+        os.unlink(path)
+
+        assert result["rejections_analyzed"] == 0
+        assert result.get("report_id") is None
+        assert result.get("error"), (
+            f"Expected a non-empty error string, got: {result.get('error')!r}"
+        )
+        assert "Schema validation" in result["error"], (
+            f"Error message should contain the exception text. Got: {result['error']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +346,7 @@ class TestBudgetGate:
         conn.close()
 
         # Zero budget forces cost_gate to return False
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
 
         with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
             mock_client = MagicMock()
@@ -332,7 +367,7 @@ class TestBudgetGate:
         insert_rejected_job(conn, "acme|ds|remote")
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
         with patch("job_finder.web.rejection_analyzer.anthropic"):
             run_rejection_analysis(path, config)
 
@@ -342,6 +377,7 @@ class TestBudgetGate:
         os.unlink(path)
 
         assert count == 0, f"Expected 0 reports when budget exceeded, got {count}"
+
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +390,7 @@ def _make_test_config(db_path, budget=25.0):
         "db": {"path": db_path},
         "scoring": {
             "min_score_threshold": 40,
-            "monthly_budget_usd": budget,
+            "daily_budget_usd": budget,
         },
         "profile": {
             "target_titles": ["Data Scientist"],
@@ -401,7 +437,7 @@ class TestOnDemandTrigger:
                 flashes = sess.get("_flashes", [])
 
         messages = [msg for cat, msg in flashes]
-        assert any("No unreviewed" in m or "0" in m for m in messages), (
+        assert any("no unreviewed" in m.lower() for m in messages), (
             f"Expected 'no unreviewed' flash, got: {messages}"
         )
 
@@ -426,8 +462,8 @@ class TestOnDemandTrigger:
                 flashes = sess.get("_flashes", [])
 
         messages = [msg for cat, msg in flashes]
-        assert any("1" in m or "analyzed" in m.lower() for m in messages), (
-            f"Expected success flash with count, got: {messages}"
+        assert any("analyzed" in m.lower() or "1 rejection" in m.lower() for m in messages), (
+            f"Expected success flash with analyzed count, got: {messages}"
         )
 
     def test_route_flashes_budget_exceeded_warning(self, tmp_db_path):

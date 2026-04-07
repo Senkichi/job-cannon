@@ -27,7 +27,7 @@ def app_with_detection_db(migrated_db_with_jobs):
 
     test_config = {
         "db": {"path": db_path},
-        "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
         "profile": {
             "target_titles": ["Staff Data Scientist"],
             "target_locations": ["Remote"],
@@ -274,8 +274,7 @@ class TestDashboardPendingCount:
 
         assert response.status_code == 200
         body = response.data.decode()
-        # The count "1" should appear in the amber-colored pending stat
-        assert "1" in body
+        assert "text-amber-400" in body, "Pending count amber highlight must be present"
 
     def test_dashboard_zero_pending_no_yellow_highlight(self, client_with_db):
         """When pending_count is 0, amber CSS classes are absent."""

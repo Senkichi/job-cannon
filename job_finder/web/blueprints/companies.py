@@ -257,7 +257,7 @@ def add():
         return redirect(url_for("companies.index"))
 
     try:
-        from job_finder.web.ats_scanner import find_or_create_company
+        from job_finder.web.ats_company import find_or_create_company
         company_id = find_or_create_company(
             conn,
             name=company_name,

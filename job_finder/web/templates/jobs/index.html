@@ -15,13 +15,12 @@
   <form id="filter-form"
         hx-get="/jobs/table"
         hx-target="#job-table-body"
-        hx-trigger="change from:select, change from:input, input from:#filter-date-from, input from:#filter-date-to"
+        hx-trigger="change from:select, change from:input"
         hx-swap="innerHTML"
-        class="flex flex-wrap gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+        class="flex flex-col gap-2 mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
 
-    <!-- Status filter: checkbox pills with "All" toggle -->
-    <div class="flex flex-wrap items-center gap-1">
-      <!-- All toggle button -->
+    <!-- Row 1: Status pills (full width) -->
+    <div class="flex flex-wrap items-center gap-1 w-full">
       <button type="button" id="status-all-btn"
               onclick="toggleAllStatus(this)"
               title="Select or deselect all statuses"
@@ -44,88 +43,81 @@
       {% endfor %}
     </div>
 
-    <!-- Location filter -->
-    <label for="filter-location" class="sr-only">Location</label>
-    <select name="location" id="filter-location"
-            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-      <option value="">All Locations</option>
-      {% for loc in locations %}
-        <option value="{{ loc }}" {% if filters.get('location') == loc %}selected{% endif %}>{{ loc }}</option>
-      {% endfor %}
-    </select>
+    <!-- Row 2: Remaining filters -->
+    <div class="flex flex-wrap items-center gap-2 w-full">
 
-    <!-- Source filter -->
-    <label for="filter-source" class="sr-only">Source</label>
-    <select name="source" id="filter-source"
-            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-      <option value="">All Sources</option>
-      {% for src in sources %}
-        <option value="{{ src }}" {% if filters.get('source') == src %}selected{% endif %}>{{ src }}</option>
-      {% endfor %}
-    </select>
+      <!-- Location -->
+      <label for="filter-location" class="sr-only">Location</label>
+      <select name="location" id="filter-location"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        <option value="">All Locations</option>
+        {% for loc in locations %}
+          <option value="{{ loc }}" {% if filters.get('location') == loc %}selected{% endif %}>{{ loc }}</option>
+        {% endfor %}
+      </select>
 
-    <!-- Min score -->
-    <label for="filter-min-score" class="sr-only">Minimum score</label>
-    <input type="number" name="min_score" id="filter-min-score" min="0" max="10" step="0.5"
-           value="{{ filters.get('min_score', '') }}"
-           placeholder="Min score"
-           class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+      <!-- Posted within dropdown -->
+      <label for="filter-posted-within" class="sr-only">Posted within</label>
+      <select name="posted_within" id="filter-posted-within"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        <option value="">Any time</option>
+        <option value="today" {% if filters.get('posted_within') == 'today' %}selected{% endif %}>Today</option>
+        <option value="3d" {% if filters.get('posted_within') == '3d' %}selected{% endif %}>Last 3 days</option>
+        <option value="1w" {% if filters.get('posted_within') == '1w' %}selected{% endif %}>Last week</option>
+        <option value="1m" {% if filters.get('posted_within') == '1m' %}selected{% endif %}>Last month</option>
+      </select>
 
-    <!-- Max score -->
-    <label for="filter-max-score" class="sr-only">Maximum score</label>
-    <input type="number" name="max_score" id="filter-max-score" min="0" max="10" step="0.5"
-           value="{{ filters.get('max_score', '') }}"
-           placeholder="Max score"
-           class="w-24 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+      <!-- Freshness toggle buttons -->
+      <button type="button" id="filter-biz-1"
+              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle"
+              onclick="toggleFreshness(this, 'biz1')">Last Biz Day</button>
+      <button type="button" id="filter-biz-3"
+              class="px-2 py-1 text-xs rounded border border-slate-600 bg-slate-700 text-slate-200 hover:bg-slate-600 transition-colors cursor-pointer freshness-toggle"
+              onclick="toggleFreshness(this, 'biz3')">Last 3 Biz Days</button>
+      <input type="hidden" name="freshness" id="filter-freshness" value="{{ filters.get('freshness', '') }}">
 
-    <!-- Salary min -->
-    <label for="filter-salary-min" class="sr-only">Minimum salary</label>
-    <input type="number" name="salary_min" id="filter-salary-min" step="10000"
-           value="{{ filters.get('salary_min', '') }}"
-           placeholder="Min salary $"
-           class="w-28 bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500 placeholder-slate-500" />
+      <!-- Sort -->
+      <label for="filter-sort-by" class="sr-only">Sort by</label>
+      <select name="sort_by" id="filter-sort-by"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        <option value="score" {% if filters.get('sort_by', 'score') == 'score' %}selected{% endif %}>Score</option>
+        <option value="first_seen" {% if filters.get('sort_by') == 'first_seen' %}selected{% endif %}>Date</option>
+        <option value="salary_max" {% if filters.get('sort_by') == 'salary_max' %}selected{% endif %}>Salary</option>
+        <option value="company" {% if filters.get('sort_by') == 'company' %}selected{% endif %}>Company</option>
+      </select>
 
-    <!-- Date from -->
-    <label for="filter-date-from" class="sr-only">Date from</label>
-    <input type="date" name="date_from" id="filter-date-from"
-           value="{{ filters.get('date_from', '') }}"
-           class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
+      <label for="filter-sort-dir" class="sr-only">Sort direction</label>
+      <select name="sort_dir" id="filter-sort-dir"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        <option value="DESC" {% if filters.get('sort_dir', 'DESC') == 'DESC' %}selected{% endif %}>Desc</option>
+        <option value="ASC" {% if filters.get('sort_dir') == 'ASC' %}selected{% endif %}>Asc</option>
+      </select>
 
-    <!-- Date to -->
-    <label for="filter-date-to" class="sr-only">Date to</label>
-    <input type="date" name="date_to" id="filter-date-to"
-           value="{{ filters.get('date_to', '') }}"
-           class="bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500" />
+      <!-- Hide stale (default ON) -->
+      <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+        <input type="checkbox" name="hide_stale" value="on"
+               {% if filters.get('hide_stale', 'on') == 'on' %}checked{% endif %}
+               hx-get="/jobs/table" hx-trigger="change" hx-target="#job-table-body"
+               hx-include="[name='status'],[name='location'],[name='posted_within'],[name='freshness'],[name='sort_by'],[name='sort_dir'],[name='hide_stale'],[name='show_hidden']"
+               class="w-3.5 h-3.5 accent-violet-500">
+        Hide stale
+        {% if stale_count > 0 %}
+          <span class="px-1 py-0.5 rounded text-xs bg-amber-900/50 text-amber-400 border border-amber-700/50 font-mono">{{ stale_count }}</span>
+        {% endif %}
+      </label>
 
-    <!-- Sort -->
-    <label for="filter-sort-by" class="sr-only">Sort by</label>
-    <select name="sort_by" id="filter-sort-by"
-            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-      <option value="score" {% if filters.get('sort_by', 'score') == 'score' %}selected{% endif %}>Score</option>
-      <option value="first_seen" {% if filters.get('sort_by') == 'first_seen' %}selected{% endif %}>Date</option>
-      <option value="salary_max" {% if filters.get('sort_by') == 'salary_max' %}selected{% endif %}>Salary</option>
-      <option value="company" {% if filters.get('sort_by') == 'company' %}selected{% endif %}>Company</option>
-    </select>
+      <!-- Show hidden (dismissed/rejected/archived/withdrawn) -->
+      <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+        <input type="checkbox" name="show_hidden" value="on"
+               {% if filters.get('show_hidden') == 'on' %}checked{% endif %}
+               class="w-3.5 h-3.5 accent-violet-500">
+        Show hidden
+        {% if hidden_count > 0 %}
+          <span class="px-1 py-0.5 rounded text-xs bg-slate-700 text-slate-400 border border-slate-600 font-mono">{{ hidden_count }}</span>
+        {% endif %}
+      </label>
 
-    <label for="filter-sort-dir" class="sr-only">Sort direction</label>
-    <select name="sort_dir" id="filter-sort-dir"
-            class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
-      <option value="DESC" {% if filters.get('sort_dir', 'DESC') == 'DESC' %}selected{% endif %}>Desc</option>
-      <option value="ASC" {% if filters.get('sort_dir') == 'ASC' %}selected{% endif %}>Asc</option>
-    </select>
-
-    <!-- Hide stale checkbox -->
-    <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-      <input type="checkbox" name="hide_stale" value="on"
-             {% if filters.get('hide_stale') == 'on' %}checked{% endif %}
-             hx-get="/jobs/table" hx-trigger="change" hx-target="#job-table-body"
-             hx-include="[name='status'],[name='location'],[name='min_score'],[name='max_score'],[name='salary_min'],[name='source'],[name='date_from'],[name='date_to'],[name='sort_by'],[name='sort_dir'],[name='hide_stale']"
-             class="w-3.5 h-3.5 accent-violet-500">
-      Hide stale
-      {% if stale_count > 0 %}
-        <span class="px-1 py-0.5 rounded text-xs bg-amber-900/50 text-amber-400 border border-amber-700/50 not-italic font-mono">{{ stale_count }}</span>
-      {% endif %}
-    </label>
+    </div>
 
   </form>
 
@@ -376,5 +368,70 @@ function toggleArchived() {
     }
   });
 })();
+
+/* --- Freshness toggle buttons --- */
+function toggleFreshness(btn, value) {
+  var hidden = document.getElementById('filter-freshness');
+  var allToggles = document.querySelectorAll('.freshness-toggle');
+  if (hidden.value === value) {
+    hidden.value = '';
+    allToggles.forEach(function(b) {
+      b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
+      b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
+    });
+  } else {
+    hidden.value = value;
+    allToggles.forEach(function(b) {
+      b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
+      b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
+    });
+    btn.classList.remove('bg-slate-700', 'border-slate-600', 'text-slate-200');
+    btn.classList.add('bg-indigo-600', 'border-indigo-500', 'text-white');
+  }
+  document.getElementById('filter-posted-within').value = '';
+  htmx.trigger(document.getElementById('filter-form'), 'change');
+}
+
+document.getElementById('filter-posted-within').addEventListener('change', function() {
+  document.getElementById('filter-freshness').value = '';
+  document.querySelectorAll('.freshness-toggle').forEach(function(b) {
+    b.classList.remove('bg-indigo-600', 'border-indigo-500', 'text-white');
+    b.classList.add('bg-slate-700', 'border-slate-600', 'text-slate-200');
+  });
+});
+
+/* --- Filter persistence in localStorage --- */
+var FILTER_STORAGE_KEY = 'jc-job-filters';
+var PERSISTED_FILTERS = ['hide_stale', 'show_hidden', 'sort_by', 'sort_dir', 'posted_within'];
+
+function saveFilters() {
+  var form = document.getElementById('filter-form');
+  var state = {};
+  PERSISTED_FILTERS.forEach(function(name) {
+    var el = form.querySelector('[name="' + name + '"]');
+    if (!el) return;
+    state[name] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(state));
+}
+
+function restoreFilters() {
+  var raw = localStorage.getItem(FILTER_STORAGE_KEY);
+  if (!raw) return;
+  try {
+    var state = JSON.parse(raw);
+    var form = document.getElementById('filter-form');
+    PERSISTED_FILTERS.forEach(function(name) {
+      var el = form.querySelector('[name="' + name + '"]');
+      if (!el || !(name in state)) return;
+      if (el.type === 'checkbox') { el.checked = state[name]; }
+      else { el.value = state[name]; }
+    });
+    htmx.trigger(form, 'change');
+  } catch (e) { /* ignore corrupt storage */ }
+}
+
+document.getElementById('filter-form').addEventListener('change', saveFilters);
+document.addEventListener('DOMContentLoaded', restoreFilters);
 </script>
 {% endblock %}

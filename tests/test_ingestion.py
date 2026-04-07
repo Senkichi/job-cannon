@@ -97,7 +97,7 @@ class TestEmailParseLog:
         """After a successful Gmail run, an email_parse_log entry is written."""
         fake_jobs = [_make_job()]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -119,7 +119,7 @@ class TestEmailParseLog:
 
     def test_gmail_failure_creates_error_log_entry(self, minimal_config, migrated_db_path):
         """When GmailSource raises, an error entry is written to email_parse_log."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -152,7 +152,7 @@ class TestSourceErrorIsolation:
         """If Gmail throws an exception, SerpAPI still runs."""
         serpapi_jobs = [_make_job(title="Staff DS", company="TechCorp")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -177,7 +177,7 @@ class TestSourceErrorIsolation:
         """If SerpAPI throws, Gmail still persists its jobs."""
         gmail_jobs = [_make_job(title="Senior DS", company="StartupCo")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -213,7 +213,7 @@ class TestThordataErrorIsolation:
         }
         gmail_jobs = [_make_job(title="Senior DS", company="GmailCo")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -228,6 +228,46 @@ class TestThordataErrorIsolation:
         assert len(summary["thordata_errors"]) >= 1
         assert summary["gmail_fetched"] == 1
         assert summary["serpapi_fetched"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: Batch error continuation
+# ---------------------------------------------------------------------------
+
+class TestBatchErrorContinuation:
+    """Verify all non-failing sources complete when one source raises."""
+
+    def test_batch_error_continuation_after_single_source_failure(
+        self, minimal_config, migrated_db_path
+    ):
+        """If Gmail raises, SerpAPI and Thordata still run and persist jobs."""
+        minimal_config["sources"]["thordata"] = {
+            "enabled": True,
+            "api_key": "test-key",
+            "queries": [{"query": "DS", "location": "Remote"}],
+            "max_age_days": 3,
+        }
+        serpapi_jobs = [_make_job(title="SerpAPI Job", company="SerpCo")]
+        thordata_jobs = [_make_job(title="Thordata Job", company="ThorCo")]
+
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+            MockGmail.side_effect = Exception("Gmail auth revoked")
+            MockSerpAPI.return_value.fetch_jobs.return_value = serpapi_jobs
+            MockThordata.return_value.fetch_jobs.return_value = thordata_jobs
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, minimal_config)
+
+        assert len(summary["gmail_errors"]) >= 1
+        assert summary["serpapi_fetched"] == 1
+        assert summary["thordata_fetched"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        conn.close()
+        assert count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +289,7 @@ class TestCrossSourceDedup:
         # Identical title/company/location → same dedup_key
         shared_job = _make_job(title="Staff Data Scientist", company="DupCo", location="Remote")
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.sources.thordata_source.ThordataSource") as MockThordata, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
@@ -289,9 +329,9 @@ class TestJobErrorIsolation:
                 raise sqlite3.OperationalError("disk full")
             return True
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
-             patch("job_finder.web.pipeline_runner.upsert_job", side_effect=mock_upsert), \
+             patch("job_finder.web.ingestion_runner.upsert_job", side_effect=mock_upsert), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
             mock_gmail_instance = MockGmail.return_value
@@ -314,7 +354,7 @@ class TestJobErrorIsolation:
 class TestSummaryDict:
     def test_run_ingestion_returns_summary_dict(self, minimal_config, migrated_db_path):
         """run_ingestion always returns a dict with the expected keys."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -344,7 +384,7 @@ class TestSummaryDict:
         gmail_jobs = [_make_job(title="Senior DS", company="Co1")]
         serp_jobs = [_make_job(title="Staff DS", company="Co2")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -362,7 +402,7 @@ class TestSummaryDict:
 
     def test_empty_run_returns_zero_counts(self, minimal_config, migrated_db_path):
         """When no jobs are fetched, all counts are zero and no errors."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -838,7 +878,7 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -874,7 +914,7 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -909,7 +949,7 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch(
                  "job_finder.web.ats_scanner.upsert_company",
@@ -939,7 +979,7 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -1132,7 +1172,7 @@ class TestGmailMessageDedup:
         mock_source.fetch_jobs.return_value = ([], [])
         mock_source.parse_failures = []
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -1167,7 +1207,7 @@ class TestGmailMessageDedup:
         mock_source.fetch_jobs.return_value = ([], new_msg_ids)
         mock_source.parse_failures = []
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -1216,7 +1256,7 @@ class TestGmailMessageDedup:
         mock_source.fetch_jobs.return_value = ([], [])
         mock_source.parse_failures = []
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner.anthropic", None):
 
@@ -1421,7 +1461,7 @@ class TestBatchDedup:
 
         mock_score_and_persist = MagicMock()
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
@@ -1440,7 +1480,7 @@ class TestBatchDedup:
         job = _make_job()
         mock_score_and_persist = MagicMock()
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
@@ -1470,7 +1510,7 @@ class TestBatchDedup:
 
         mock_score_and_persist = MagicMock()
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
@@ -1545,7 +1585,7 @@ class TestBatchDedup:
 
         mock_score_and_persist = MagicMock()
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner._touch_existing_job",
                    side_effect=Exception("DB locked")), \
@@ -1583,7 +1623,7 @@ class TestBatchDedup:
 
         mock_score_and_persist = MagicMock()
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch("job_finder.web.pipeline_runner._score_and_persist", mock_score_and_persist), \
              patch("job_finder.web.pipeline_runner.anthropic", None):
@@ -1726,3 +1766,4 @@ class TestDataForSEOOrchestration:
         assert len(summary["dataforseo_errors"]) == 1
         assert "poll timed out" in summary["dataforseo_errors"][0]
         assert summary["dataforseo_fetched"] == 0
+

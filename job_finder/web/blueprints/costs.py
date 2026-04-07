@@ -10,8 +10,8 @@ from flask import (
     render_template,
 )
 
-from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.web.claude_client import (
+    DEFAULT_DAILY_BUDGET_USD,
     get_cost_stats,
     get_daily_cost_breakdown,
     get_monthly_feature_breakdown,
@@ -33,11 +33,11 @@ def index():
     """Cost Monitor page — 30-day chart, budget bar, stat cards, feature table."""
     conn = _get_db()
 
-    # Read budget_cap from config (not hardcoded from get_cost_stats)
+    # Read daily_budget_usd from config — matches what cost_gate() enforces
     budget_cap = (
         current_app.config.get("JF_CONFIG", {})
         .get("scoring", {})
-        .get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+        .get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     )
 
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)

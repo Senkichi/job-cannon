@@ -25,10 +25,10 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
-    DEFAULT_MONTHLY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
+from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.drive_status import get_drive_status
 from job_finder.web.resume_style_guide import (
     load_style_guide,
@@ -295,8 +295,11 @@ def _parse_form_to_config(form) -> dict:
         scoring["weights"] = weights
     if _has("min_score_threshold"):
         scoring["min_score_threshold"] = safe_int(form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD)
-    if _has("monthly_budget_usd"):
-        scoring["monthly_budget_usd"] = safe_float(form["monthly_budget_usd"], DEFAULT_MONTHLY_BUDGET_USD)
+    if _has("daily_budget_usd"):
+        scoring["daily_budget_usd"] = safe_float(form["daily_budget_usd"], DEFAULT_DAILY_BUDGET_USD)
+    elif _has("monthly_budget_usd"):
+        # Legacy field name — silently migrate to daily_budget_usd on next save
+        scoring["daily_budget_usd"] = safe_float(form["monthly_budget_usd"], DEFAULT_DAILY_BUDGET_USD)
     if _has("haiku_threshold"):
         scoring["haiku_threshold"] = safe_int(form["haiku_threshold"], DEFAULT_HAIKU_THRESHOLD)
     models = {}

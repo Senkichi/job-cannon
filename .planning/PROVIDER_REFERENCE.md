@@ -4,6 +4,10 @@
 > **Purpose**: Exhaustive reference for all LLM API providers evaluated for Job Cannon's scoring pipeline
 > **Use case**: Replace Sonnet-tier deep evaluation (~2,500 input + ~220 output tokens per job)
 
+> **Cerebras, Groq, and OpenRouter removed** (2026-04-06): Provider adapters deleted —
+> never validated in production. Ollama (r=0.852) is sufficient as free primary with
+> Anthropic paid fallback. Sections below retained for historical reference only.
+
 ---
 
 ## Table of Contents

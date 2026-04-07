@@ -4,11 +4,10 @@ import logging
 import time as _time
 from datetime import datetime
 
-from flask import Blueprint, abort, current_app, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, make_response, redirect, render_template, request, url_for
 
 from job_finder.db import (
     get_distinct_locations,
-    get_distinct_sources,
     get_filtered_jobs,
     get_job,
     get_pipeline_events,
@@ -37,47 +36,28 @@ logger = logging.getLogger(__name__)
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
 
 
-def _safe_float(raw: str, param_name: str) -> float | None:
-    """Coerce a query-string value to float, or abort 400 on malformed input."""
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except (ValueError, TypeError):
-        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
-
-
-def _safe_int(raw: str, param_name: str) -> int | None:
-    """Coerce a query-string value to int, or abort 400 on malformed input."""
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except (ValueError, TypeError):
-        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
-
-
 def _get_filter_kwargs() -> dict:
-    """Extract and coerce filter query parameters from request.args."""
+    """Extract filter query parameters from request.args."""
     args = request.args
-
-    # Multi-select status: getlist returns [] when absent, or [""] for a blank submit
     statuses = [s for s in args.getlist("status") if s]
-
     return {
         "status": statuses if len(statuses) > 1 else (statuses[0] if statuses else None),
         "location": args.get("location") or None,
-        "min_score": _safe_float(args.get("min_score", ""), "min_score"),
-        "max_score": _safe_float(args.get("max_score", ""), "max_score"),
-        "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
-        "source": args.get("source") or None,
-        "date_from": args.get("date_from") or None,
-        "date_to": args.get("date_to") or None,
+        "posted_within": args.get("posted_within") or None,
+        "freshness": args.get("freshness") or None,
         "sort_by": args.get("sort_by", "score"),
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,
-        "hide_stale": args.get("hide_stale") == "on",
+        "hide_stale": args.get("hide_stale", "on") == "on",
+        "show_hidden": args.get("show_hidden") == "on",
     }
+
+
+def _get_hidden_count(conn) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE pipeline_status IN ('archived', 'withdrawn', 'dismissed', 'rejected')"
+    ).fetchone()
+    return row[0] if row else 0
 
 
 def relative_date(iso_str):
@@ -133,14 +113,16 @@ def _register_filters(state):
 @jobs_bp.route("/", strict_slashes=False)
 def index():
     """Job Board landing page -- full page render with filter bar."""
+    from job_finder.utils.business_days import business_days_ago
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
     filters = _get_filter_kwargs()
     jobs = get_filtered_jobs(conn, **filters)
     locations = get_distinct_locations(conn)
-    sources = get_distinct_sources(conn)
     stale_count = _get_stale_count(conn)
+    hidden_count = _get_hidden_count(conn)
+    freshness_cutoff = business_days_ago(3).isoformat()
     archived_count = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
     ).fetchone()[0]
@@ -151,8 +133,9 @@ def index():
         filters=request.args,
         pipeline_statuses=PIPELINE_STATUSES,
         locations=locations,
-        sources=sources,
         stale_count=stale_count,
+        hidden_count=hidden_count,
+        freshness_cutoff=freshness_cutoff,
         archived_count=archived_count,
     )
 

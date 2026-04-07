@@ -506,14 +506,16 @@ class TestDiscoverHomepagesBatch:
 class TestRunHomepageDiscoveryThroughput:
     """Tests that run_homepage_discovery processes more than 10 companies in Phase A."""
 
-    def test_fast_batch_processes_up_to_50(self, migrated_db):
-        """Phase A free-tier batch handles up to _FAST_BATCH_CAP=50 companies."""
+    def test_fast_batch_processes_up_to_cap(self, migrated_db):
+        """Phase A free-tier batch handles up to _FAST_BATCH_CAP companies."""
         db_path, conn = migrated_db
         from datetime import datetime
+        from job_finder.web.homepage_discoverer import _FAST_BATCH_CAP
         now = datetime.now().isoformat()
 
-        # Insert 55 companies with no homepage
-        for i in range(55):
+        # Insert more companies than _FAST_BATCH_CAP
+        insert_count = _FAST_BATCH_CAP + 5
+        for i in range(insert_count):
             conn.execute(
                 """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
                    VALUES (?, ?, 'pending', ?, ?)""",
@@ -525,8 +527,8 @@ class TestRunHomepageDiscoveryThroughput:
             from job_finder.web.homepage_discoverer import run_homepage_discovery
             result = run_homepage_discovery(db_path, None)
 
-        # Phase A should process up to 50 (no api_key so Phase B is skipped)
-        assert result["companies_checked"] == 50
+        # Phase A should process up to _FAST_BATCH_CAP (no api_key so Phase B is skipped)
+        assert result["companies_checked"] == _FAST_BATCH_CAP
 
 
 class TestTryDomainGuessTwoWord:
