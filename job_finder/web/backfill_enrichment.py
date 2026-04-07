@@ -36,6 +36,7 @@ from job_finder.db import persist_haiku_score, persist_sonnet_score
 from job_finder.web.claude_client import BudgetExceededError, MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 from job_finder.web.scoring_types import unwrap_scoring_result
 from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
@@ -73,16 +74,18 @@ _BORDERLINE_MAX = 70
 # ---------------------------------------------------------------------------
 
 
-def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
+def estimate_and_confirm(conn: sqlite3.Connection, config: dict, client: Any = None) -> bool:
     """Count eligible jobs, estimate AI cost, and prompt user for confirmation.
 
     Counts jobs at each enrichment tier that would be processed. Computes
     estimated cost using MODEL_PRICING constants (rough per-job estimates).
-    Prints a tier breakdown and total cost estimate, then prompts.
+    When free providers are configured for haiku/sonnet tiers, the Anthropic
+    estimate is labeled as an upper bound.
 
     Args:
         conn: Open SQLite connection.
         config: Application config dict.
+        client: Anthropic client instance (or None).
 
     Returns:
         True if user enters 'y' or 'Y', False otherwise (including empty Enter).
@@ -133,10 +136,33 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     )
     total_estimate = haiku_cost + sonnet_cost
 
-    print(f"\nEstimated AI cost:")
-    print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
-    print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
-    print(f"  TOTAL ESTIMATE:   ${total_estimate:.4f}")
+    # Check if any locally-usable haiku/sonnet provider is non-Anthropic
+    haiku_has_free = tier_has_configured_provider("haiku", config, client) and (
+        config.get("providers", {}).get("haiku", {}).get("provider", "anthropic") != "anthropic"
+        or any(
+            e.get("provider") != "anthropic"
+            for e in config.get("providers", {}).get("haiku", {}).get("fallback_chain", [])
+        )
+    )
+    sonnet_has_free = tier_has_configured_provider("sonnet", config, client) and (
+        config.get("providers", {}).get("sonnet", {}).get("provider", "anthropic") != "anthropic"
+        or any(
+            e.get("provider") != "anthropic"
+            for e in config.get("providers", {}).get("sonnet", {}).get("fallback_chain", [])
+        )
+    )
+
+    if haiku_has_free or sonnet_has_free:
+        print(f"\nAnthropic fallback upper bound:")
+        print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
+        print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
+        print(f"  TOTAL UPPER BOUND: ${total_estimate:.4f}")
+        print(f"\nConfigured free-provider path: $0 in the app budget model for these tiers.")
+    else:
+        print(f"\nEstimated AI cost:")
+        print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
+        print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
+        print(f"  TOTAL ESTIMATE:   ${total_estimate:.4f}")
     print("\nNote: Actual cost depends on how many jobs need AI tiers.")
     print("=" * 60)
 
@@ -234,7 +260,7 @@ def run_passes_to_convergence(
     Returns:
         Tuple of (total_enriched, cumulative_tier_advanced_keys).
     """
-    if not estimate_and_confirm(conn, config):
+    if not estimate_and_confirm(conn, config, client=client):
         print("Aborted by user.")
         return 0, set()
 
@@ -395,7 +421,10 @@ def main() -> None:
     like stale_detector.py), instantiates Anthropic client. Runs convergence
     passes, then Sonnet backfill, then borderline re-score.
     """
-    import anthropic as _anthropic
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        _anthropic = None
 
     from job_finder.config import load_config
 
@@ -407,9 +436,23 @@ def main() -> None:
     if not serpapi_key:
         print("Warning: SerpAPI key not configured — SerpAPI tier will be skipped.")
 
+    # Best-effort Anthropic client creation (two-step pattern)
+    client = None
+    if _anthropic is not None:
+        try:
+            client = _anthropic.Anthropic()
+        except Exception:
+            logger.debug("Anthropic client unavailable — will use free providers only")
+
+    # Check that at least one tier is routable before proceeding
+    haiku_ok = tier_has_configured_provider("haiku", config, client)
+    sonnet_ok = tier_has_configured_provider("sonnet", config, client)
+    if not haiku_ok and not sonnet_ok:
+        print("Error: No routable haiku or sonnet provider — cannot run backfill.")
+        return
+
     # Open own connection (thread-safe, not Flask g.db)
     with standalone_connection(db_path) as conn:
-        client = _anthropic.Anthropic()
 
         print("\n=== Phase 1: Convergence Enrichment Passes ===")
         total_enriched, tier_advanced_keys = run_passes_to_convergence(

@@ -13,6 +13,7 @@ from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
+from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.scoring_orchestrator import (
     load_scoring_profile,
     score_and_persist_haiku,
@@ -58,13 +59,20 @@ def run_haiku_scoring(
     if not new_job_keys:
         return [], 0
 
-    if anthropic is None:
-        logger.debug("anthropic not installed -- skipping Haiku scoring")
+    # Best-effort Anthropic client creation (two-step pattern)
+    client = None
+    if anthropic is not None:
+        try:
+            client = anthropic.Anthropic()
+        except Exception:
+            logger.debug("Anthropic client unavailable — will use free providers only")
+
+    if not tier_has_configured_provider("haiku", config, client):
+        logger.debug("No routable haiku provider — skipping Haiku scoring")
         return [], 0
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
     sonnet_queue: list[str] = []
     haiku_scored = 0
 
@@ -209,16 +217,23 @@ def run_sonnet_evaluation(
     if not sonnet_queue:
         return 0
 
-    if anthropic is None:
-        logger.debug("anthropic not installed -- skipping Sonnet evaluation")
-        return 0
-
     if evaluate_job_sonnet is None:
         logger.warning("Sonnet evaluation module not available -- skipping")
         return 0
 
+    # Best-effort Anthropic client creation (two-step pattern)
+    client = None
+    if anthropic is not None:
+        try:
+            client = anthropic.Anthropic()
+        except Exception:
+            logger.debug("Anthropic client unavailable — will use free providers only")
+
+    if not tier_has_configured_provider("sonnet", config, client):
+        logger.debug("No routable sonnet provider — skipping Sonnet evaluation")
+        return 0
+
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
     sonnet_evaluated = 0
 
     with standalone_connection(db_path) as conn:

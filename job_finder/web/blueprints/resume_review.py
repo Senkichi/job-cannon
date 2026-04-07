@@ -13,7 +13,11 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
+
 try:
     import fitz  # PyMuPDF -- optional; guarded so app starts without it
 except ImportError:
@@ -153,7 +157,12 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         Returns [] on error.
     """
     try:
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         system = (
             "You are a resume conflict analyzer. Compare a PDF resume against a structured "

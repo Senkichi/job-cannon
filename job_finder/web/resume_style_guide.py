@@ -15,7 +15,10 @@ import json
 import logging
 import sqlite3
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 from job_finder.web.model_provider import call_model
 
@@ -158,7 +161,12 @@ def extract_style_guide(
         None on error (caller must handle failure).
     """
     try:
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         if existing_guide:
             system = (
@@ -315,7 +323,12 @@ def migrate_style_guide(
 
         existing_guide = load_style_guide(style_guide_path)
 
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,

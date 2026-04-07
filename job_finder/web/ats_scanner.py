@@ -278,13 +278,14 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     }
     all_new_job_keys: list[str] = []
 
-    # Create Anthropic client for Haiku fallback calls in careers scraper
+    # Best-effort Anthropic client for Haiku fallback calls in careers scraper.
+    # Passing client=None to call_model() routes through free providers when configured.
     _anthropic_client = None
     try:
-        import anthropic
-        _anthropic_client = anthropic.Anthropic()
+        import anthropic as _anthropic_mod
+        _anthropic_client = _anthropic_mod.Anthropic()
     except (ImportError, Exception):
-        logger.debug("Anthropic client not available — Haiku fallbacks disabled")
+        logger.debug("Anthropic client not available — haiku tier will use free providers if configured")
 
     with standalone_connection(db_path) as conn:
         # Query companies with confirmed ATS slug (hit) AND error companies eligible
@@ -573,10 +574,26 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # Uses scoring_orchestrator directly (no pipeline_runner dependency).
         if all_new_job_keys and score_and_persist_haiku is not None:
             try:
-                import anthropic as _anthropic  # noqa: F401 — import check only
                 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+                from job_finder.web.model_provider import tier_has_configured_provider
 
-                client = _anthropic.Anthropic()
+                try:
+                    import anthropic as _anthropic_inline
+                except ImportError:
+                    _anthropic_inline = None
+
+                _scoring_client = None
+                if _anthropic_inline is not None:
+                    try:
+                        _scoring_client = _anthropic_inline.Anthropic()
+                    except Exception:
+                        pass
+
+                if not tier_has_configured_provider("haiku", config, _scoring_client):
+                    logger.debug("No routable haiku provider — skipping ATS auto-scoring")
+                    raise ImportError("No routable haiku provider")
+
+                client = _scoring_client
                 profile = load_scoring_profile(config)
                 threshold = config.get("scoring", {}).get(
                     "haiku_threshold", DEFAULT_HAIKU_THRESHOLD

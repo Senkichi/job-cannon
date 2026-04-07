@@ -236,7 +236,9 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         _prune_stale_data(runner_conn, gmail_lookback)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
-    if new_job_keys and anthropic is not None:
+    # Scoring functions now self-gate on tier_has_configured_provider() —
+    # no need to check Anthropic availability at the pipeline level.
+    if new_job_keys:
         try:
             sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
             summary["haiku_scored"] = haiku_scored_count
@@ -253,11 +255,6 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 summary["sonnet_evaluated"] = sonnet_evaluated
             except Exception as e:
                 logger.error("Sonnet evaluation failed (non-fatal): %s", e)
-    elif new_job_keys and anthropic is None:
-        logger.debug(
-            "anthropic package not installed -- skipping AI scoring for %d new jobs",
-            len(new_job_keys),
-        )
 
     # --- Budget alert notification (check after AI scoring completes) ---
     _check_budget_alert(config, db_path)

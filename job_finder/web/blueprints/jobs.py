@@ -370,11 +370,26 @@ def paste_jd(dedup_key: str):
     error = None
     try:
         from job_finder.web.claude_client import BudgetExceededError
+        from job_finder.web.model_provider import tier_has_configured_provider
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
-        import anthropic
+        try:
+            import anthropic as _anthropic
+        except ImportError:
+            _anthropic = None
+
         config = current_app.config.get("JF_CONFIG", {})
-        client = anthropic.Anthropic()
+        client = None
+        if _anthropic is not None:
+            try:
+                client = _anthropic.Anthropic()
+            except Exception:
+                pass
+
+        if not tier_has_configured_provider("sonnet", config, client):
+            error = "Sonnet tier unavailable"
+            raise ImportError("No routable sonnet provider")
+
         profile = load_scoring_profile(config)
 
         # Refresh job row with jd_full
@@ -442,11 +457,26 @@ def rescore(dedup_key: str):
     t0 = _time.time()
     try:
         from job_finder.web.claude_client import BudgetExceededError
+        from job_finder.web.model_provider import tier_has_configured_provider
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
-        import anthropic
+        try:
+            import anthropic as _anthropic
+        except ImportError:
+            _anthropic = None
+
         config = current_app.config.get("JF_CONFIG", {})
-        client = anthropic.Anthropic()
+        client = None
+        if _anthropic is not None:
+            try:
+                client = _anthropic.Anthropic()
+            except Exception:
+                pass
+
+        if not tier_has_configured_provider("sonnet", config, client):
+            error = "Sonnet tier unavailable"
+            raise ImportError("No routable sonnet provider")
+
         profile = load_scoring_profile(config)
 
         result = score_and_persist_sonnet(conn, job, config, client, profile)

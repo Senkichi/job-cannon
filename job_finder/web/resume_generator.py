@@ -261,8 +261,13 @@ def generate_resume_background(
                 resume_data = generate_resume_multi(db_path, job_row, profile, config)
                 generation_type = "multi"
             else:
-                # Single-pass generation
-                client = anthropic.Anthropic()
+                # Single-pass generation — best-effort Anthropic client
+                client = None
+                if anthropic is not None:
+                    try:
+                        client = anthropic.Anthropic()
+                    except Exception:
+                        pass
                 resume_data = generate_resume_single(client, job_row, profile, conn, config)
                 generation_type = "single"
 

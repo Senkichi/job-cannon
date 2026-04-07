@@ -23,6 +23,7 @@ import json
 import sqlite3
 import tempfile
 import os
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -752,13 +753,12 @@ class TestFieldCeilings:
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
             mock_fetch.return_value = None
             mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
             mock_ddg_fetch.return_value = (None, None)
             mock_haiku.return_value = {}
             mock_serp.return_value = (None, [])
-            mock_gate.return_value = True
             mock_sonnet.return_value = {"jd_full": _LONG_JD}
 
             result = enrich_job(
@@ -777,7 +777,7 @@ class TestFieldCeilings:
 
 
 class TestSonnetEnrichment:
-    """Sonnet enrichment uses all prior fragments and checks cost_gate."""
+    """Sonnet enrichment uses all prior fragments and checks tier routability."""
 
     def test_sonnet_receives_all_fragments(self, sparse_job_row, mock_anthropic_client):
         """Sonnet enrichment prompt includes ALL text fragments from prior tiers."""
@@ -792,13 +792,12 @@ class TestSonnetEnrichment:
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
             mock_fetch.return_value = None
             mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "DDG text about the role"}
             mock_ddg_fetch.return_value = (None, None)
             mock_haiku.return_value = {}  # Haiku failed
             mock_serp.return_value = (None, [])  # SerpAPI failed
-            mock_gate.return_value = True
             mock_sonnet.return_value = {"jd_full": _LONG_JD}
 
             result = enrich_job(
@@ -817,12 +816,16 @@ class TestSonnetEnrichment:
             f"DDG snippet content must reach Sonnet, got fragments: {fragments}"
         )
 
-    def test_sonnet_checks_cost_gate(self, sparse_job_row, mock_anthropic_client, temp_db):
-        """Sonnet enrichment checks cost_gate('sonnet') before calling API."""
+    def test_sonnet_blocked_when_not_routable(self, sparse_job_row, mock_anthropic_client, temp_db):
+        """Sonnet enrichment is skipped when tier is not routable."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = '[]'
         sparse_job_row["company_id"] = None
+
+        def _tier_check(tier, *args, **kwargs):
+            """Haiku is routable, Sonnet is not."""
+            return tier != "sonnet"
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
@@ -830,13 +833,12 @@ class TestSonnetEnrichment:
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", side_effect=_tier_check):
             mock_fetch.return_value = None
             mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
             mock_ddg_fetch.return_value = (None, None)
             mock_haiku.return_value = {}
             mock_serp.return_value = (None, [])
-            mock_gate.return_value = False  # Budget exceeded
 
             result = enrich_job(
                 sparse_job_row,
@@ -845,7 +847,7 @@ class TestSonnetEnrichment:
                 conn=temp_db,
             )
 
-        # Sonnet should NOT be called when cost_gate returns False
+        # Sonnet should NOT be called when tier is not routable
         mock_sonnet.assert_not_called()
 
 
@@ -2226,7 +2228,8 @@ class TestAgenticExhaustedTtlReset:
             (
                 "recent|ds|remote", "Data Scientist", "Recent Corp", "Remote",
                 '["test"]', '["https://example.com"]',
-                "2026-03-01T00:00:00", "2026-03-30T00:00:00",  # last_seen 2 days ago
+                "2026-03-01T00:00:00",
+                (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S"),  # last_seen 2 days ago
                 0, "{}", "unreviewed", "agentic_exhausted", None,
             ),
         )

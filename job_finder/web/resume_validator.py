@@ -14,7 +14,10 @@ import json
 import logging
 import sqlite3
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 from job_finder.web.model_provider import call_model
 from job_finder.web.resume_generator import RESUME_SCHEMA
@@ -162,7 +165,12 @@ def validate_resume(
         On any exception, returns {"passed": True, "violations": []} (fail-open).
     """
     try:
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         # Build a compact profile summary for Sonnet to cross-reference
         profile_skills = profile.get("skills", [])
@@ -236,7 +244,12 @@ def fix_resume_violations(
         return resume_data
 
     try:
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         profile_skills = profile.get("skills", [])
 

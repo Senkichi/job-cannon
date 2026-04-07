@@ -148,9 +148,23 @@ def run_description_reformat_pass(
 
     try:
         with standalone_connection(db_path) as conn:
-            import anthropic
-            # Utility function — standalone client instantiation (not blueprint/orchestrator scope)
-            client = anthropic.Anthropic(api_key=anthropic_api_key) if anthropic_api_key else anthropic.Anthropic()
+            from job_finder.web.model_provider import tier_has_configured_provider
+
+            try:
+                import anthropic as _anthropic
+            except ImportError:
+                _anthropic = None
+
+            client = None
+            if _anthropic is not None:
+                try:
+                    client = _anthropic.Anthropic(api_key=anthropic_api_key) if anthropic_api_key else _anthropic.Anthropic()
+                except Exception:
+                    logger.debug("Anthropic client unavailable — will use free providers only")
+
+            if not tier_has_configured_provider("haiku", config, client):
+                logger.debug("No routable haiku provider — skipping description reformat")
+                return 0
 
             rows = conn.execute(
                 "SELECT dedup_key, description FROM jobs "

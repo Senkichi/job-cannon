@@ -248,14 +248,22 @@ def quick_apply(dedup_key: str):
 
         # Open a direct connection (not g.db) -- this call may take 30-60s
         with standalone_connection(db_path) as direct_conn:
-            if not _anthropic_available:
+            from job_finder.web.model_provider import tier_has_configured_provider
+
+            client = None
+            if _anthropic_available:
+                try:
+                    client = anthropic.Anthropic()
+                except Exception:
+                    pass
+
+            if not tier_has_configured_provider("sonnet", config, client):
                 return render_template(
                     "jobs/_resume_error.html",
                     dedup_key=dedup_key,
                     gen_id=None,
-                    error_msg="Anthropic library not installed -- cannot generate resume.",
+                    error_msg="Sonnet tier unavailable -- cannot generate resume.",
                 )
-            client = anthropic.Anthropic()
 
             resume_data = generate_resume_single(client, job_row, profile, direct_conn, config)
 
