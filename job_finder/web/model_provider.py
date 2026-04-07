@@ -170,8 +170,74 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # call_model() dispatcher — Phase 26
 # ---------------------------------------------------------------------------
 
-# Providers that are free (no cost_gate needed, record cost via record_cost)
-_FREE_PROVIDERS: frozenset[str] = frozenset({"gemini", "ollama", "ollm", "sambanova"})
+# Single source of truth for all registered provider names.
+# _make_adapter() derives its validation from this set — adding a new provider
+# requires updating both _SUPPORTED_PROVIDERS and the dispatch chain in _make_adapter().
+_SUPPORTED_PROVIDERS: frozenset[str] = frozenset({
+    "anthropic", "gemini", "ollama", "ollm", "cohere", "mistral", "sambanova",
+    "groq", "cerebras",
+})
+
+# Providers that are free (no cost_gate needed, record cost via record_cost).
+# groq and cerebras are free in this app's budget model only.
+# Vendor billing/rate limits still exist outside the app.
+_FREE_PROVIDERS: frozenset[str] = frozenset({
+    "gemini", "ollama", "ollm", "sambanova",
+    "groq", "cerebras",
+})
+
+
+class ProviderCascadeExhaustedError(RuntimeError):
+    """Raised when every configured provider in a cascade has been exhausted.
+
+    Only raised by the cascade path in call_model() after all entries have been
+    tried and skipped/failed. Not raised for schema-validation failures or
+    non-cascade paths.
+    """
+
+
+def is_supported_provider_name(name: str) -> bool:
+    """Return True if name is a registered provider in _SUPPORTED_PROVIDERS."""
+    return name in _SUPPORTED_PROVIDERS
+
+
+def tier_has_configured_provider(
+    tier: str,
+    config: dict,
+    client: Any | None,
+    conn: "sqlite3.Connection | None" = None,
+) -> bool:
+    """Return True if the tier has at least one operationally-routable provider entry.
+
+    This validates provider names plus constructor-time readiness checks (e.g.,
+    API-key presence and existing adapter health checks such as Ollama reachability),
+    but does not probe model correctness or perform a live inference call.
+
+    conn is accepted for API symmetry with call_model() callers but is not used
+    during validation — _make_adapter() only uses conn for AnthropicProvider, which
+    is short-circuited via the client-is-not-None check before _make_adapter() is called.
+    """
+    resolved = resolve_provider_config(tier, config)
+    primary = resolved["provider"]
+    chain = resolved["fallback_chain"]
+    all_providers = [primary] + [entry["provider"] for entry in chain]
+
+    for provider_name in all_providers:
+        if provider_name == "anthropic":
+            if client is not None:
+                return True
+            continue
+
+        if not is_supported_provider_name(provider_name):
+            continue
+
+        try:
+            _make_adapter(provider_name, client, conn, config)
+            return True
+        except (ValueError, RuntimeError, ImportError):
+            continue
+
+    return False
 
 
 def _validate_schema(data: dict, schema: dict | None) -> list[str]:
@@ -219,17 +285,18 @@ def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
 def _make_adapter(
     provider_name: str,
     client: Any | None,
-    conn: sqlite3.Connection,
-    config: dict,
+    conn: "sqlite3.Connection | None" = None,
+    config: dict | None = None,
     job_id: str | None = None,
     purpose: str = "",
 ) -> "BaseProvider":
     """Instantiate the correct provider adapter.
 
     Args:
-        provider_name: "anthropic", "gemini", "ollama", "ollm", "cohere", "mistral", or "sambanova".
+        provider_name: Any name in _SUPPORTED_PROVIDERS.
         client: Anthropic client (required for anthropic, unused for others).
-        conn: Open SQLite connection (required for anthropic).
+        conn: Open SQLite connection. Required only for the Anthropic adapter;
+            pass None for non-Anthropic validation calls.
         config: Application config dict.
         job_id: Job dedup_key for cost attribution (nullable, Anthropic only).
         purpose: Feature attribution label for cost rows (Anthropic only).
@@ -238,12 +305,21 @@ def _make_adapter(
         Concrete BaseProvider instance.
 
     Raises:
-        ValueError: If provider_name is unrecognised.
+        ValueError: If provider_name is not in _SUPPORTED_PROVIDERS or
+            if a provider's local prerequisites are missing (e.g. API key).
     """
+    if provider_name not in _SUPPORTED_PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider_name!r}")
+
+    if config is None:
+        config = {}
+
     # Lazy imports to avoid circular import: providers import from model_provider
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
+    from job_finder.web.providers.cerebras_provider import CerebrasProvider
     from job_finder.web.providers.cohere_provider import CohereProvider
     from job_finder.web.providers.gemini_provider import GeminiProvider
+    from job_finder.web.providers.groq_provider import GroqProvider
     from job_finder.web.providers.mistral_provider import MistralProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
     from job_finder.web.providers.ollm_provider import OllmProvider
@@ -253,10 +329,14 @@ def _make_adapter(
         return AnthropicProvider(
             client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
         )
+    if provider_name == "cerebras":
+        return CerebrasProvider(config=config)
     if provider_name == "cohere":
         return CohereProvider(config=config)
     if provider_name == "gemini":
         return GeminiProvider(config=config)
+    if provider_name == "groq":
+        return GroqProvider(config=config)
     if provider_name == "mistral":
         return MistralProvider(config=config)
     if provider_name == "ollama":
@@ -265,7 +345,6 @@ def _make_adapter(
         return OllmProvider(config=config)
     if provider_name == "sambanova":
         return SambanovaProvider(config=config)
-    raise ValueError(f"Unknown provider: {provider_name!r}")
 
 
 def _maybe_record_cost(
@@ -460,7 +539,7 @@ def call_model(
                     logger.warning("Cascade: %s error: %s", entry_provider, exc)
                     break  # Unknown errors — don't retry
 
-        raise RuntimeError(
+        raise ProviderCascadeExhaustedError(
             f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
             f"Providers tried: {[e['provider'] for e in chain]}"
         )

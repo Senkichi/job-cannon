@@ -841,3 +841,345 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
     assert actual_system == "custom system prompt", (
         f"Primary entry with no prompt_variant should use caller's system prompt unchanged, got: {actual_system!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _SUPPORTED_PROVIDERS / _FREE_PROVIDERS / is_supported_provider_name tests
+# ---------------------------------------------------------------------------
+
+from job_finder.web.model_provider import (
+    _SUPPORTED_PROVIDERS,
+    _FREE_PROVIDERS,
+    is_supported_provider_name,
+    ProviderCascadeExhaustedError,
+    tier_has_configured_provider,
+    _make_adapter,
+)
+
+
+def test_groq_in_supported_providers():
+    assert "groq" in _SUPPORTED_PROVIDERS
+
+
+def test_cerebras_in_supported_providers():
+    assert "cerebras" in _SUPPORTED_PROVIDERS
+
+
+def test_groq_in_free_providers():
+    assert "groq" in _FREE_PROVIDERS
+
+
+def test_cerebras_in_free_providers():
+    assert "cerebras" in _FREE_PROVIDERS
+
+
+def test_is_supported_provider_name_groq():
+    assert is_supported_provider_name("groq") is True
+
+
+def test_is_supported_provider_name_cerebras():
+    assert is_supported_provider_name("cerebras") is True
+
+
+def test_is_supported_provider_name_typo():
+    assert is_supported_provider_name("gorq") is False
+
+
+def test_is_supported_provider_name_unknown():
+    assert is_supported_provider_name("deepseek") is False
+
+
+# ---------------------------------------------------------------------------
+# _make_adapter registration tests
+# ---------------------------------------------------------------------------
+
+
+def test_make_adapter_groq():
+    """_make_adapter("groq") instantiates GroqProvider when env var is set."""
+    from job_finder.web.providers.groq_provider import GroqProvider
+
+    with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
+        adapter = _make_adapter("groq", client=None, conn=None, config={})
+    assert isinstance(adapter, GroqProvider)
+
+
+def test_make_adapter_cerebras():
+    """_make_adapter("cerebras") instantiates CerebrasProvider when env var is set."""
+    from job_finder.web.providers.cerebras_provider import CerebrasProvider
+
+    with patch.dict("os.environ", {"CEREBRAS_API_KEY": "test-key"}):
+        adapter = _make_adapter("cerebras", client=None, conn=None, config={})
+    assert isinstance(adapter, CerebrasProvider)
+
+
+def test_make_adapter_unknown_provider_raises():
+    """_make_adapter raises ValueError for unknown provider names."""
+    with pytest.raises(ValueError, match="Unknown provider"):
+        _make_adapter("deepseek", client=None, conn=None, config={})
+
+
+def test_make_adapter_conn_none_for_non_anthropic():
+    """conn=None is accepted for non-Anthropic providers."""
+    with patch.dict("os.environ", {"GROQ_API_KEY": "key"}):
+        adapter = _make_adapter("groq", client=None, conn=None, config={})
+    assert adapter is not None
+
+
+# ---------------------------------------------------------------------------
+# _SUPPORTED_PROVIDERS sync-enforcement test (mandatory per plan)
+# ---------------------------------------------------------------------------
+
+
+def test_supported_providers_all_wired_in_make_adapter():
+    """Every name in _SUPPORTED_PROVIDERS must be wired into _make_adapter().
+
+    Patch all required provider env vars so supported providers don't fail
+    for unrelated credential reasons. The assertion is: _make_adapter(name)
+    must not raise ValueError("Unknown provider: ...").
+    """
+    env_vars = {
+        "GROQ_API_KEY": "test",
+        "CEREBRAS_API_KEY": "test",
+        "CO_API_KEY": "test",
+        "GEMINI_API_KEY": "test",
+        "MISTRAL_API_KEY": "test",
+        "SAMBANOVA_API_KEY": "test",
+    }
+
+    mock_client = MagicMock()
+
+    for provider_name in _SUPPORTED_PROVIDERS:
+        with patch.dict("os.environ", env_vars, clear=False):
+            try:
+                _make_adapter(provider_name, client=mock_client, conn=None, config={})
+            except ValueError as exc:
+                if "Unknown provider" in str(exc):
+                    pytest.fail(
+                        f"{provider_name!r} is in _SUPPORTED_PROVIDERS but not wired "
+                        f"into _make_adapter() dispatch chain"
+                    )
+                # Other ValueError (e.g. missing API key for a provider not covered
+                # in env_vars) is acceptable — the provider IS wired in but has a
+                # constructor-time prerequisite we didn't mock.
+            except (RuntimeError, ImportError):
+                # Constructor-time readiness check (e.g. Ollama unreachable) — provider
+                # IS wired in, just not locally available.
+                pass
+
+
+# ---------------------------------------------------------------------------
+# ProviderCascadeExhaustedError tests
+# ---------------------------------------------------------------------------
+
+
+def test_cascade_exhausted_error_is_runtime_error():
+    assert issubclass(ProviderCascadeExhaustedError, RuntimeError)
+
+
+def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily_state):
+    """When all cascade providers are exhausted, ProviderCascadeExhaustedError is raised."""
+    from job_finder.web.model_provider import call_model
+
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {"ollama": 350, "gemini": 170}
+    _mp._usage_date = today
+
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "anthropic":
+            raise ValueError("no key")
+        raise ValueError(f"unexpected call for {provider_name}")
+
+    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+
+        with pytest.raises(ProviderCascadeExhaustedError):
+            call_model(
+                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            )
+
+
+def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
+    """Non-cascade path schema failure raises plain RuntimeError, not ProviderCascadeExhaustedError."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    conn = _migrated_conn(tmp_path)
+    schema = {"type": "object", "required": ["score"], "properties": {"score": {"type": "integer"}}}
+    bad_result = _make_result(data={"wrong_key": 1})
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = bad_result
+        mock_make_adapter.return_value = mock_adapter
+
+        with pytest.raises(RuntimeError) as exc_info:
+            call_model(
+                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
+                output_schema=schema,
+            )
+        assert not isinstance(exc_info.value, ProviderCascadeExhaustedError)
+
+
+# ---------------------------------------------------------------------------
+# tier_has_configured_provider tests
+# ---------------------------------------------------------------------------
+
+
+def test_tier_has_provider_non_anthropic_with_key():
+    """Non-Anthropic primary + valid API key -> True even when client=None."""
+    config = {"providers": {"haiku": {"provider": "groq", "model": "llama-3.1-8b-instant"}}}
+    with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
+        assert tier_has_configured_provider("haiku", config, client=None) is True
+
+
+def test_tier_has_provider_anthropic_only_no_client():
+    """Anthropic-only chain + client=None -> False."""
+    config = {}  # default: anthropic
+    assert tier_has_configured_provider("haiku", config, client=None) is False
+
+
+def test_tier_has_provider_anthropic_only_with_client():
+    """Anthropic-only chain + client present -> True."""
+    config = {}
+    mock_client = MagicMock()
+    assert tier_has_configured_provider("haiku", config, client=mock_client) is True
+
+
+def test_tier_has_provider_typo_no_client():
+    """Typo provider name + client=None -> False."""
+    config = {"providers": {"haiku": {"provider": "gorq", "model": "llama-3.1-8b-instant"}}}
+    assert tier_has_configured_provider("haiku", config, client=None) is False
+
+
+def test_tier_has_provider_missing_api_key():
+    """Recognized provider name but missing required API key -> False."""
+    config = {"providers": {"haiku": {"provider": "groq", "model": "llama-3.1-8b-instant"}}}
+    with patch.dict("os.environ", {}, clear=True):
+        assert tier_has_configured_provider("haiku", config, client=None) is False
+
+
+def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
+    """Mixed chain where primary is misconfigured but fallback is locally valid -> True."""
+    config = {"providers": {"haiku": {
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
+        "fallback_chain": [
+            {"provider": "cerebras", "model": "llama3.1-8b"},
+        ],
+    }}}
+    with patch.dict("os.environ", {"CEREBRAS_API_KEY": "test-key"}, clear=True):
+        assert tier_has_configured_provider("haiku", config, client=None) is True
+
+
+def test_tier_has_provider_conn_none_accepted():
+    """conn=None accepted without error (validates signature change)."""
+    config = {"providers": {"haiku": {"provider": "groq", "model": "llama-3.1-8b-instant"}}}
+    with patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
+        result = tier_has_configured_provider("haiku", config, client=None, conn=None)
+    assert result is True
+
+
+def test_tier_has_provider_ollama_unreachable():
+    """Ollama configured but unreachable -> False (operational check)."""
+    config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    with patch(
+        "job_finder.web.providers.ollama_provider.OllamaProvider.__init__",
+        side_effect=RuntimeError("Connection refused"),
+    ):
+        assert tier_has_configured_provider("haiku", config, client=None) is False
+
+
+# ---------------------------------------------------------------------------
+# Cascade + Groq/Cerebras integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_cascade_groq_primary_cerebras_fallback(tmp_path, _reset_daily_state):
+    """Groq primary -> Cerebras fallback -> Anthropic last-resort routes correctly."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"haiku": {
+        "provider": "groq",
+        "model": "llama-3.1-8b-instant",
+        "fallback_chain": [
+            {"provider": "cerebras", "model": "llama3.1-8b"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5"},
+        ],
+    }}}
+    conn = _migrated_conn(tmp_path)
+    today = _mp._date.today().isoformat()
+    _mp._daily_usage = {}
+    _mp._usage_date = today
+
+    groq_result = ModelResult(
+        data={"score": 80}, cost_usd=0.0, input_tokens=100, output_tokens=50,
+        model="llama-3.1-8b-instant", provider="groq", schema_valid=True,
+    )
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider._ensure_usage_current"), \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = groq_result
+        mock_make_adapter.return_value = mock_adapter
+
+        result = call_model(
+            "haiku", "sys", [{"role": "user", "content": "hi"}], conn, config,
+        )
+
+    assert result.provider == "groq"
+    mock_make_adapter.assert_called_once()
+    assert mock_make_adapter.call_args[0][0] == "groq"
+
+
+def test_backward_compat_single_groq_no_cascade(tmp_path):
+    """Single-provider Groq config with no fallback_chain routes correctly."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"haiku": {"provider": "groq", "model": "llama-3.1-8b-instant"}}}
+    conn = _migrated_conn(tmp_path)
+
+    groq_result = ModelResult(
+        data={"score": 80}, cost_usd=0.0, input_tokens=100, output_tokens=50,
+        model="llama-3.1-8b-instant", provider="groq", schema_valid=True,
+    )
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = groq_result
+        mock_make_adapter.return_value = mock_adapter
+
+        result = call_model(
+            "haiku", "sys", [{"role": "user", "content": "hi"}], conn, config,
+        )
+
+    assert result.provider == "groq"
+    # Budget gate should be skipped (groq is free)
+
+
+@pytest.mark.parametrize("provider_name,model_name", [
+    ("groq", "llama-3.1-8b-instant"),
+    ("cerebras", "llama3.1-8b"),
+])
+def test_call_model_skips_budget_for_new_free_providers(provider_name, model_name, tmp_path):
+    """call_model does NOT call cost_gate for groq and cerebras."""
+    from job_finder.web.model_provider import call_model
+
+    config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
+    conn = _migrated_conn(tmp_path)
+
+    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
+         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
+         patch("job_finder.web.model_provider.record_cost"):
+        mock_adapter = MagicMock()
+        mock_adapter.call.return_value = _make_result(provider=provider_name)
+        mock_make_adapter.return_value = mock_adapter
+
+        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+
+    mock_cost_gate.assert_not_called()
