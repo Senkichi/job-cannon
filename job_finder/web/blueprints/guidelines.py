@@ -5,7 +5,11 @@ import json
 import logging
 from pathlib import Path
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
+
 from flask import Blueprint, current_app, request
 
 from job_finder.web.db_helpers import get_db
@@ -84,7 +88,12 @@ def preview_guidelines_merge():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config["DB_PATH"]
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,

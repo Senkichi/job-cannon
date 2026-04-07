@@ -294,15 +294,25 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
-        import anthropic
+        import anthropic as _anthropic
+    except ImportError:
+        _anthropic = None
 
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_haiku
+    from job_finder.web.model_provider import tier_has_configured_provider
+    from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_haiku
 
-        profile = load_scoring_profile(config)
-        client = anthropic.Anthropic()
-    except ImportError as e:
-        _mark_session_error(db_path, session_id, f"Import error: {e}")
+    client = None
+    if _anthropic is not None:
+        try:
+            client = _anthropic.Anthropic()
+        except Exception:
+            pass
+
+    if not tier_has_configured_provider("haiku", config, client):
+        _mark_session_error(db_path, session_id, "No routable haiku provider")
         return
+
+    profile = load_scoring_profile(config)
 
     # Lazy import enrichment (matches scoring_runner pattern)
     try:
@@ -439,16 +449,26 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
-        import anthropic
+        import anthropic as _anthropic
+    except ImportError:
+        _anthropic = None
 
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
-    except ImportError as e:
-        _mark_session_error(db_path, session_id, f"Import error: {e}")
+    from job_finder.web.model_provider import tier_has_configured_provider
+    from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
+
+    client = None
+    if _anthropic is not None:
+        try:
+            client = _anthropic.Anthropic()
+        except Exception:
+            pass
+
+    if not tier_has_configured_provider("sonnet", config, client):
+        _mark_session_error(db_path, session_id, "No routable sonnet provider")
         return
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
 
     try:
         with standalone_connection(db_path) as conn:

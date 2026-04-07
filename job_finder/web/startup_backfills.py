@@ -33,11 +33,9 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
     if config.get("TESTING"):
         return
 
-    # Key is injected by anthropic-telemetry from ~/.anthropic-telemetry/config.toml.
-    # No need to check os.environ for ANTHROPIC_API_KEY.
+    # description_reformatter owns the routability decision via
+    # tier_has_configured_provider("haiku") — no need to check Anthropic here.
     try:
-        import anthropic
-
         import threading
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
@@ -53,8 +51,6 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
         t.start()
         logger.debug("Description reformat pass started in background thread")
 
-    except ImportError:
-        logger.debug("anthropic not installed — skipping description reformat pass")
     except Exception as e:
         logger.warning("Failed to start description reformat pass: %s", e)
 

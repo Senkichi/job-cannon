@@ -6,7 +6,10 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
@@ -267,8 +270,17 @@ def generate_resume_multi(
         RuntimeError: If all 3 variant generators fail.
     """
     # Step 1: Haiku selects 3 strategies
+    # Best-effort Anthropic client — free providers route via call_model(client=None)
+    def _make_client() -> Any:
+        if anthropic is not None:
+            try:
+                return anthropic.Anthropic()
+            except Exception:
+                pass
+        return None
+
     with standalone_connection(db_path) as strategy_conn:
-        strategy_client = anthropic.Anthropic()
+        strategy_client = _make_client()
         strategies = _haiku_select_strategies(strategy_client, job_row, strategy_conn, config)
 
     logger.debug(
@@ -279,8 +291,9 @@ def generate_resume_multi(
     )
 
     # Step 2: Parallel Sonnet variant generation
+    # Each thread gets its own client instance (stateless — thread-safe)
     def client_factory() -> Any:
-        return anthropic.Anthropic()
+        return _make_client()
 
     variants: list[dict] = []
     futures_to_strategy: dict = {}
@@ -342,7 +355,12 @@ def _synthesize_variants(
         Final synthesized resume dict matching RESUME_SCHEMA.
     """
     with standalone_connection(db_path) as conn:
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         synthesis_system = (
             "You are a resume editor. You have multiple resume variants for the same candidate "

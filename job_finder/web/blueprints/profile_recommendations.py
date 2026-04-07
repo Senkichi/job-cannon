@@ -10,7 +10,10 @@ import json
 import logging
 import shutil
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 from flask import (
     Blueprint,
@@ -99,7 +102,12 @@ def recommendation():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         system = (
             "You are a profile improvement advisor. Given a profile validation warning "
@@ -178,7 +186,12 @@ def recommendations_all():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
+        client = None
+        if anthropic is not None:
+            try:
+                client = anthropic.Anthropic()
+            except Exception:
+                pass
 
         system = (
             "You are a profile improvement advisor. Given a set of profile validation warnings "

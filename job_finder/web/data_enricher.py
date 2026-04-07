@@ -34,7 +34,10 @@ Exports:
 import logging
 from typing import Optional, Any
 
-from job_finder.web.claude_client import cost_gate
+from job_finder.web.model_provider import (
+    ProviderCascadeExhaustedError,
+    tier_has_configured_provider,
+)
 from job_finder.web.domain_policy import is_blocked_domain
 from job_finder.web.enrichment_tiers import (
     TransientEnrichmentError,
@@ -307,7 +310,9 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Tier 2: haiku — Extract structured data from accumulated fragments
         # ---------------------------------------------------------------
-        if start_idx <= TIER_ORDER.index("haiku") and anthropic_client is not None:
+        if start_idx <= TIER_ORDER.index("haiku") and tier_has_configured_provider(
+            "haiku", config, anthropic_client, conn
+        ):
             try:
                 # Compose search text from all fragments collected so far.
                 # None means no meaningful fragments — skip AI extraction entirely
@@ -441,25 +446,16 @@ def enrich_job(
             and is_stub_jd(fragments.get("jd_full"), title, company)
         )
 
+        sonnet_routable = tier_has_configured_provider(
+            "sonnet", config, anthropic_client, conn
+        )
+
         if (
             start_idx <= TIER_ORDER.index("sonnet")
-            and anthropic_client is not None
+            and sonnet_routable
             and jd_still_missing
         ):
             try:
-                # Check cost gate before calling Sonnet (requires a live DB connection)
-                gate_ok = conn is not None and cost_gate(conn, config, "sonnet")
-                if not gate_ok:
-                    # Budget exceeded: persist as "serpapi" so Sonnet can be retried
-                    # next month when budget resets. Do NOT mark as exhausted.
-                    logger.debug(
-                        "Sonnet cost gate blocked for '%s' @ '%s' — will retry later",
-                        title, company,
-                    )
-                    enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
-                    _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "serpapi")
-                    return enriched_so_far
-
                 sonnet_result = extract_with_sonnet(
                     fragments, job_row, anthropic_client, conn, config
                 )
@@ -476,8 +472,28 @@ def enrich_job(
                         _persist(conn, job_row, enriched, "sonnet")
                         return enriched
 
+            except ProviderCascadeExhaustedError:
+                # Cascade exhausted all configured Sonnet providers at runtime.
+                # Treat as "serpapi" (retryable) — same semantics as the former cost_gate() block.
+                logger.debug(
+                    "Sonnet cascade exhausted for '%s' @ '%s' — staying retryable",
+                    title, company,
+                )
+                enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
+                _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "serpapi")
+                return enriched_so_far
             except Exception as e:
                 logger.debug("Sonnet tier failed for '%s': %s", title, e)
+
+        elif (
+            start_idx <= TIER_ORDER.index("sonnet")
+            and not sonnet_routable
+            and jd_still_missing
+        ):
+            # No locally-usable Sonnet provider — stay retryable, same as former budget block.
+            enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
+            _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "serpapi")
+            return enriched_so_far
 
         # All tiers exhausted
         _persist(conn, job_row, {}, "exhausted")
