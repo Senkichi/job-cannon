@@ -145,8 +145,13 @@ def test_convergence_multiple_passes(migrated_db):
             conn, serpapi_key=None, config={}, client=MagicMock()
         )
 
-    # Multiple passes should complete and all 5 jobs should have been advanced
-    assert total_enriched > 5  # multiple passes × 5 jobs
+    # Multiple passes should complete and all 5 jobs should have been advanced.
+    # Actual convergence: 5 jobs x 4 tier advancements each = 20 total before exhausted.
+    # The test fixture advances through free->ddg->haiku->serpapi (4 tiers); pass 5 finds 0.
+    # Note: >= 25 was wrong because the sonnet/exhausted tiers are terminal, not transitional.
+    assert total_enriched >= 20, (
+        f"Expected >=20 enrichments (5 jobs x 4 active tiers), got {total_enriched}"
+    )
     assert len(tier_advanced_keys) == 5
 
 
@@ -210,8 +215,9 @@ def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     captured = capsys.readouterr()
 
     # Should show tier counts and an estimated cost in the output
-    assert "NULL" in captured.out or "null" in captured.out.lower()
-    assert "$" in captured.out  # cost estimate printed
+    assert "NULL" in captured.out, "NULL tier must appear in tier breakdown output"
+    assert "$" in captured.out, "Cost estimate must be printed"
+    assert "Eligible jobs" in captured.out, "Eligible jobs header must appear"
 
 
 # ---------------------------------------------------------------------------

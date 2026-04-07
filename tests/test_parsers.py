@@ -653,7 +653,7 @@ class TestIndeedParser:
     def test_parses_indeed_alert_jobs(self):
         """parse_indeed_alert returns 2+ jobs from realistic alert HTML."""
         jobs = parse_indeed_alert(SAMPLE_INDEED_ALERT_HTML)
-        assert len(jobs) >= 2, f"Expected 2+ jobs, got {len(jobs)}"
+        assert len(jobs) == 3, f"Expected 3 jobs from fixture, got {len(jobs)}"
 
     def test_job_source_is_indeed(self):
         """All parsed jobs have source='indeed'."""
@@ -915,7 +915,7 @@ class TestParseFailureActivityFeed:
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}
 
-        with patch("job_finder.web.pipeline_runner.GmailSource", return_value=mock_source):
+        with patch("job_finder.web.ingestion_runner.GmailSource", return_value=mock_source):
             _fetch_gmail(config, conn, summary)
 
         rows = conn.execute(
@@ -945,7 +945,7 @@ class TestParseFailureActivityFeed:
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}
 
-        with patch("job_finder.web.pipeline_runner.GmailSource", return_value=mock_source):
+        with patch("job_finder.web.ingestion_runner.GmailSource", return_value=mock_source):
             _fetch_gmail(config, conn, summary)
 
         rows = conn.execute(

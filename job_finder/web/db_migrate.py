@@ -505,6 +505,39 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_email_parse_log_sender_processed_at"
         " ON email_parse_log(sender, processed_at)",
     ],
+
+    # Migration 25: Clean up Eightfold/Phenom PCS ATS SPA shell garbage in jd_full.
+    # Eightfold-powered careers pages (vizientinc.com, bayer.com, caci.com, etc.)
+    # inject CSS theming config as inline JSON on page load:
+    #   {"themeOptions": {"customTheme": {"varTheme": {...}}}}
+    # fetch_direct_jd() fetched these JS-rendered SPA shells before the detection
+    # fix in Migration 25 was added to _WRONG_PAGE_SIGNATURES. The content:
+    #   - Is 8000 chars (passes is_stub_jd length check)
+    #   - Contains "benefits" from "perks-and-benefits-icon-color" CSS variable
+    #     (passes has_jd_content check — false positive)
+    #   - Has no auth-wall or chrome markers (passes all rejection filters)
+    # 4 jobs affected. Fix A: exhausted-tier jobs — null jd_full + Sonnet scores so
+    # agentic enricher (Playwright) can fetch the real JD on next nightly run.
+    # Fix B: free-tier jobs — null jd_full + reset enrichment_tier so the free tier
+    # re-runs and falls through to DDG/Haiku without storing SPA garbage again.
+    [
+        # Fix A: exhausted-tier jobs — agentic enricher picks up jd_full IS NULL
+        """UPDATE jobs
+           SET jd_full = NULL,
+               sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full LIKE '%"themeOptions"%'
+             AND enrichment_tier = 'exhausted'""",
+
+        # Fix B: non-exhausted jobs — reset to re-run free tier cleanly
+        """UPDATE jobs
+           SET jd_full = NULL,
+               enrichment_tier = NULL,
+               sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full LIKE '%"themeOptions"%'
+             AND (enrichment_tier IS NULL OR enrichment_tier != 'exhausted')""",
+    ],
 ]
 
 
@@ -561,6 +594,36 @@ def run_migrations(db_path: str) -> None:
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # Column already exists — expected on fresh DBs
+
+        # Fixup: ensure jobs_matched column exists on company_scan_log.
+        # Migration 23 added this column, but DB restores from backup can skip it
+        # when the backup already has user_version >= 23.
+        if final_version >= 23:
+            try:
+                conn.execute(
+                    "ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER DEFAULT NULL"
+                )
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists — expected on fresh DBs
+
+        # Fixup: clean up stuck-pending companies left by legacy probe code.
+        # Old code set ats_probe_attempted_at without resolving status to hit/miss/error.
+        # Current probe_ats_slugs selects WHERE ats_probe_status = 'pending' ORDER BY
+        # created_at ASC LIMIT 150, so these old companies block newer ones from being
+        # probed. Reset their ats_probe_attempted_at for consistency, and log the count.
+        if final_version >= 7:
+            stuck = conn.execute(
+                "SELECT COUNT(*) FROM companies "
+                "WHERE ats_probe_status = 'pending' AND ats_probe_attempted_at IS NOT NULL"
+            ).fetchone()[0]
+            if stuck > 0:
+                conn.execute(
+                    "UPDATE companies SET ats_probe_attempted_at = NULL "
+                    "WHERE ats_probe_status = 'pending' AND ats_probe_attempted_at IS NOT NULL"
+                )
+                conn.commit()
+                logger.info("Reset %d stuck-pending companies for re-probing", stuck)
 
 
 def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:

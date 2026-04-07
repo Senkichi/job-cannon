@@ -41,7 +41,7 @@ def _check_daily_limit(provider: str, daily_limits: dict[str, int]) -> bool:
     """Return True if provider is under its daily limit or has no configured limit.
 
     Args:
-        provider: Provider name (e.g., "cerebras", "groq").
+        provider: Provider name (e.g., "ollama", "gemini").
         daily_limits: Dict of {provider_name: max_requests_per_day}.
 
     Returns:
@@ -171,7 +171,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 # Providers that are free (no cost_gate needed, record cost via record_cost)
-_FREE_PROVIDERS: frozenset[str] = frozenset({"gemini", "ollama", "ollm", "openrouter", "sambanova", "groq", "cerebras"})
+_FREE_PROVIDERS: frozenset[str] = frozenset({"gemini", "ollama", "ollm", "sambanova"})
 
 
 def _validate_schema(data: dict, schema: dict | None) -> list[str]:
@@ -227,7 +227,7 @@ def _make_adapter(
     """Instantiate the correct provider adapter.
 
     Args:
-        provider_name: "anthropic", "gemini", or "ollama".
+        provider_name: "anthropic", "gemini", "ollama", "ollm", "cohere", "mistral", or "sambanova".
         client: Anthropic client (required for anthropic, unused for others).
         conn: Open SQLite connection (required for anthropic).
         config: Application config dict.
@@ -242,36 +242,27 @@ def _make_adapter(
     """
     # Lazy imports to avoid circular import: providers import from model_provider
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
-    from job_finder.web.providers.cerebras_provider import CerebrasProvider
     from job_finder.web.providers.cohere_provider import CohereProvider
-    from job_finder.web.providers.groq_provider import GroqProvider
-    from job_finder.web.providers.openrouter_provider import OpenRouterProvider
-    from job_finder.web.providers.sambanova_provider import SambanovaProvider
     from job_finder.web.providers.gemini_provider import GeminiProvider
     from job_finder.web.providers.mistral_provider import MistralProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
     from job_finder.web.providers.ollm_provider import OllmProvider
+    from job_finder.web.providers.sambanova_provider import SambanovaProvider
 
     if provider_name == "anthropic":
         return AnthropicProvider(
             client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
         )
-    if provider_name == "cerebras":
-        return CerebrasProvider(config=config)
     if provider_name == "cohere":
         return CohereProvider(config=config)
     if provider_name == "gemini":
         return GeminiProvider(config=config)
-    if provider_name == "groq":
-        return GroqProvider(config=config)
     if provider_name == "mistral":
         return MistralProvider(config=config)
     if provider_name == "ollama":
         return OllamaProvider(config=config)
     if provider_name == "ollm":
         return OllmProvider(config=config)
-    if provider_name == "openrouter":
-        return OpenRouterProvider(config=config)
     if provider_name == "sambanova":
         return SambanovaProvider(config=config)
     raise ValueError(f"Unknown provider: {provider_name!r}")

@@ -9,6 +9,7 @@ from flask import Blueprint, current_app, render_template
 from job_finder.db import JOBS_ALL_COLUMNS
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.db_helpers import standalone_connection
 
@@ -390,6 +391,19 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                         scored_count += 1
                     else:
                         skipped_count += 1
+                except BudgetExceededError as e:
+                    logger.error(
+                        "Batch Haiku: API budget exceeded after %d scored — aborting: %s",
+                        scored_count, e,
+                    )
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, "
+                        "scored = ?, skipped = ?, finished_at = ? WHERE id = ?",
+                        (f"API budget exceeded: {e}", scored_count, skipped_count,
+                         utc_now_iso(), session_id),
+                    )
+                    conn.commit()
+                    return
                 except Exception as e:
                     logger.warning(
                         "Batch Haiku: error scoring job '%s': %s -- continuing",

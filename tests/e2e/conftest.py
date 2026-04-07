@@ -38,7 +38,9 @@ def _populate_sample_data(db_path: str) -> None:
     """Insert sample jobs so E2E pages have visible content."""
     conn = sqlite3.connect(db_path)
     now = datetime.now().isoformat()
+    today = datetime.now().strftime("%Y-%m-%dT00:00:00")
     week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    month_ago = (datetime.now() - timedelta(days=35)).isoformat()
 
     conn.executemany(
         """INSERT INTO jobs
@@ -48,6 +50,7 @@ def _populate_sample_data(db_path: str) -> None:
              pipeline_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
+            # Active jobs — visible by default
             (
                 "stripe|senior data scientist|remote",
                 "Senior Data Scientist",
@@ -70,7 +73,7 @@ def _populate_sample_data(db_path: str) -> None:
                 "2222",
                 150000, 200000,
                 "Design and maintain data pipelines.",
-                week_ago, now, 7.0, '{"skills": 0.7}', "unreviewed", None,
+                week_ago, now, 7.0, '{"skills": 0.7}', "unreviewed", "discovered",
             ),
             (
                 "widgetco|staff ml engineer|san francisco ca",
@@ -83,6 +86,44 @@ def _populate_sample_data(db_path: str) -> None:
                 200000, 280000,
                 "Lead machine learning team at WidgetCo.",
                 week_ago, now, 9.1, '{"skills": 0.95}', "interested", "applied",
+            ),
+            # Fresh job — first_seen today (for freshness toggle tests)
+            (
+                "freshco|data scientist|remote",
+                "Data Scientist",
+                "FreshCo",
+                "Remote",
+                '["linkedin"]',
+                '["https://linkedin.com/jobs/view/4444/"]',
+                "4444",
+                160000, 220000,
+                "Brand new posting from today.",
+                today, now, 7.5, '{}', "unreviewed", "discovered",
+            ),
+            # Hidden jobs — excluded from default view
+            (
+                "acme|intern|remote",
+                "Data Science Intern",
+                "Acme Corp",
+                "Remote",
+                '["linkedin"]',
+                '["https://linkedin.com/jobs/view/5555/"]',
+                "5555",
+                80000, 100000,
+                "Entry-level internship position.",
+                month_ago, now, 3.0, '{}', "unreviewed", "dismissed",
+            ),
+            (
+                "oldco|data analyst|remote",
+                "Data Analyst",
+                "OldCo",
+                "Remote",
+                '["glassdoor"]',
+                '["https://glassdoor.com/job/6666"]',
+                "6666",
+                90000, 120000,
+                "Data analysis role.",
+                month_ago, now, 4.0, '{}', "unreviewed", "rejected",
             ),
         ],
     )
@@ -109,7 +150,7 @@ def live_server(e2e_db_path):
         "db": {"path": e2e_db_path},
         "scoring": {
             "min_score_threshold": 40,
-            "monthly_budget_usd": 25.0,
+            "daily_budget_usd": 25.0,
         },
         "profile": {
             "target_titles": ["Staff Data Scientist"],

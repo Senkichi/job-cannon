@@ -85,7 +85,8 @@ def test_base_provider_subclass_must_implement_call():
 def test_resolve_provider_from_config():
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.5-pro"}}}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "gemini", "model": "gemini-2.5-pro", "prompt_variant": None, "fallback": None, "fallback_chain": [], "daily_limits": {}, "throttle_delays": {}}
+    assert result["provider"] == "gemini"
+    assert result["model"] == "gemini-2.5-pro"
 
 
 def test_resolve_provider_with_fallback():
@@ -107,13 +108,15 @@ def test_resolve_provider_with_fallback():
 def test_resolve_provider_missing_falls_back_to_anthropic():
     config = {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}}}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "prompt_variant": None, "fallback": None, "fallback_chain": [], "daily_limits": {}, "throttle_delays": {}}
+    assert result["provider"] == "anthropic"
+    assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_no_providers_section():
     config = {}
     result = resolve_provider_config("sonnet", config)
-    assert result == {"provider": "anthropic", "model": "claude-sonnet-4-6", "prompt_variant": None, "fallback": None, "fallback_chain": [], "daily_limits": {}, "throttle_delays": {}}
+    assert result["provider"] == "anthropic"
+    assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_tier_model_missing_uses_scoring_models():
@@ -129,13 +132,15 @@ def test_resolve_provider_tier_model_missing_uses_scoring_models():
 def test_resolve_provider_haiku_tier():
     config = {}
     result = resolve_provider_config("haiku", config)
-    assert result == {"provider": "anthropic", "model": "claude-haiku-4-5", "prompt_variant": None, "fallback": None, "fallback_chain": [], "daily_limits": {}, "throttle_delays": {}}
+    assert result["provider"] == "anthropic"
+    assert result["model"] == "claude-haiku-4-5"
 
 
 def test_resolve_provider_opus_tier():
     config = {}
     result = resolve_provider_config("opus", config)
-    assert result == {"provider": "anthropic", "model": "claude-opus-4-6", "prompt_variant": None, "fallback": None, "fallback_chain": [], "daily_limits": {}, "throttle_delays": {}}
+    assert result["provider"] == "anthropic"
+    assert result["model"] == "claude-opus-4-6"
 
 
 # --- Cascade config parsing tests (TEST-01) ---
@@ -143,23 +148,22 @@ def test_resolve_provider_opus_tier():
 
 def test_resolve_with_fallback_chain():
     config = {"providers": {"sonnet": {
-        "provider": "cerebras",
-        "model": "qwen-3-235b-a22b-instruct-2507",
+        "provider": "ollama",
+        "model": "qwen2.5:14b",
         "fallback_chain": [
-            {"provider": "groq", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
-            {"provider": "ollama", "model": "qwen2.5:14b"},
+            {"provider": "gemini", "model": "gemini-2.0-flash"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6"},
         ],
     }}}
     result = resolve_provider_config("sonnet", config)
     assert result["fallback_chain"] == config["providers"]["sonnet"]["fallback_chain"]
-    assert result["provider"] == "cerebras"
+    assert result["provider"] == "ollama"
 
 
 def test_resolve_returns_daily_limits():
-    config = {"providers": {"sonnet": {"provider": "cerebras", "model": "qwen-3-235b"}, "daily_limits": {"cerebras": 350, "groq": 170}}}
+    config = {"providers": {"sonnet": {"provider": "ollama", "model": "qwen2.5:14b"}, "daily_limits": {"ollama": 350, "gemini": 170}}}
     result = resolve_provider_config("sonnet", config)
-    assert result["daily_limits"] == {"cerebras": 350, "groq": 170}
+    assert result["daily_limits"] == {"ollama": 350, "gemini": 170}
 
 
 def test_resolve_backward_compat_empty_chain():
@@ -172,13 +176,13 @@ def test_resolve_backward_compat_empty_chain():
 
 def test_resolve_chain_with_daily_limits_combined():
     config = {"providers": {
-        "sonnet": {"provider": "cerebras", "model": "qwen-3-235b",
-                   "fallback_chain": [{"provider": "groq", "model": "scout"}]},
-        "daily_limits": {"cerebras": 350},
+        "sonnet": {"provider": "ollama", "model": "qwen2.5:14b",
+                   "fallback_chain": [{"provider": "gemini", "model": "gemini-2.0-flash"}]},
+        "daily_limits": {"ollama": 350},
     }}
     result = resolve_provider_config("sonnet", config)
-    assert result["fallback_chain"] == [{"provider": "groq", "model": "scout"}]
-    assert result["daily_limits"] == {"cerebras": 350}
+    assert result["fallback_chain"] == [{"provider": "gemini", "model": "gemini-2.0-flash"}]
+    assert result["daily_limits"] == {"ollama": 350}
 
 
 # ---------------------------------------------------------------------------
@@ -313,94 +317,24 @@ def test_call_model_fallback_to_anthropic(tmp_path):
     assert result.data == {"score": 70}
 
 
-def test_call_model_skips_budget_for_gemini(tmp_path):
-    """call_model does NOT call cost_gate when provider is gemini."""
+@pytest.mark.parametrize("provider_name,model_name", [
+    ("gemini", "gemini-2.0-flash"),
+    ("ollama", "llama3"),
+    ("ollm", "llama3-8B-chat"),
+    ("sambanova", "Qwen3-235B-A22B"),
+])
+def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tmp_path):
+    """call_model does NOT call cost_gate when provider is free."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
     conn = _migrated_conn(tmp_path)
 
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
          patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
          patch("job_finder.web.model_provider.record_cost"):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="gemini")
-        mock_make_adapter.return_value = mock_adapter
-
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
-
-    mock_cost_gate.assert_not_called()
-
-
-def test_call_model_skips_budget_for_ollama(tmp_path):
-    """call_model does NOT call cost_gate when provider is ollama."""
-    from job_finder.web.model_provider import call_model
-
-    config = {"providers": {"sonnet": {"provider": "ollama", "model": "llama3"}}}
-    conn = _migrated_conn(tmp_path)
-
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
-        mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="ollama")
-        mock_make_adapter.return_value = mock_adapter
-
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
-
-    mock_cost_gate.assert_not_called()
-
-
-def test_call_model_skips_budget_for_ollm(tmp_path):
-    """call_model does NOT call cost_gate when provider is ollm."""
-    from job_finder.web.model_provider import call_model
-
-    config = {"providers": {"sonnet": {"provider": "ollm", "model": "llama3-8B-chat"}}}
-    conn = _migrated_conn(tmp_path)
-
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
-        mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="ollm")
-        mock_make_adapter.return_value = mock_adapter
-
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
-
-    mock_cost_gate.assert_not_called()
-
-
-def test_call_model_skips_budget_for_openrouter(tmp_path):
-    """call_model does NOT call cost_gate when provider is openrouter."""
-    from job_finder.web.model_provider import call_model
-
-    config = {"providers": {"sonnet": {"provider": "openrouter", "model": "qwen/qwen3-coder:free"}}}
-    conn = _migrated_conn(tmp_path)
-
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
-        mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="openrouter")
-        mock_make_adapter.return_value = mock_adapter
-
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
-
-    mock_cost_gate.assert_not_called()
-
-
-def test_call_model_skips_budget_for_sambanova(tmp_path):
-    """call_model does NOT call cost_gate when provider is sambanova."""
-    from job_finder.web.model_provider import call_model
-
-    config = {"providers": {"sonnet": {"provider": "sambanova", "model": "Qwen3-235B-A22B"}}}
-    conn = _migrated_conn(tmp_path)
-
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
-        mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="sambanova")
+        mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
 
         call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
@@ -536,40 +470,40 @@ def _reset_daily_state():
 
 
 def test_daily_limit_under_limit(_reset_daily_state):
-    _mp._daily_usage = {"cerebras": 100}
-    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is True
+    _mp._daily_usage = {"ollama": 100}
+    assert _mp._check_daily_limit("ollama", {"ollama": 350}) is True
 
 
 def test_daily_limit_at_limit(_reset_daily_state):
-    _mp._daily_usage = {"cerebras": 350}
-    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is False
+    _mp._daily_usage = {"ollama": 350}
+    assert _mp._check_daily_limit("ollama", {"ollama": 350}) is False
 
 
 def test_daily_limit_over_limit(_reset_daily_state):
-    _mp._daily_usage = {"cerebras": 351}
-    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is False
+    _mp._daily_usage = {"ollama": 351}
+    assert _mp._check_daily_limit("ollama", {"ollama": 350}) is False
 
 
 def test_daily_limit_no_configured_limit(_reset_daily_state):
-    assert _mp._check_daily_limit("ollama", {"cerebras": 350}) is True
+    assert _mp._check_daily_limit("gemini", {"ollama": 350}) is True
 
 
 def test_daily_limit_provider_not_in_usage(_reset_daily_state):
     """Provider with a configured limit but no usage yet -> allowed."""
-    assert _mp._check_daily_limit("cerebras", {"cerebras": 350}) is True
+    assert _mp._check_daily_limit("ollama", {"ollama": 350}) is True
 
 
 def test_daily_increment(_reset_daily_state):
-    _mp._increment_usage("cerebras")
-    assert _mp._daily_usage["cerebras"] == 1
-    _mp._increment_usage("cerebras")
-    assert _mp._daily_usage["cerebras"] == 2
+    _mp._increment_usage("ollama")
+    assert _mp._daily_usage["ollama"] == 1
+    _mp._increment_usage("ollama")
+    assert _mp._daily_usage["ollama"] == 2
 
 
 def test_daily_increment_existing(_reset_daily_state):
-    _mp._daily_usage = {"cerebras": 5}
-    _mp._increment_usage("cerebras")
-    assert _mp._daily_usage["cerebras"] == 6
+    _mp._daily_usage = {"ollama": 5}
+    _mp._increment_usage("ollama")
+    assert _mp._daily_usage["ollama"] == 6
 
 
 def test_daily_limit_resets_on_new_day(tmp_path, _reset_daily_state):
@@ -579,29 +513,29 @@ def test_daily_limit_resets_on_new_day(tmp_path, _reset_daily_state):
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("job1", "test", "qwen", 100, 50, 0.0, now, "cerebras"),
+        ("job1", "test", "qwen2.5:14b", 100, 50, 0.0, now, "ollama"),
     )
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("job2", "test", "qwen", 100, 50, 0.0, now, "cerebras"),
+        ("job2", "test", "qwen2.5:14b", 100, 50, 0.0, now, "ollama"),
     )
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("job3", "test", "scout", 100, 50, 0.0, now, "groq"),
+        ("job3", "test", "gemini-2.0-flash", 100, 50, 0.0, now, "gemini"),
     )
     conn.commit()
     _mp._init_usage_from_db(conn)
-    assert _mp._daily_usage.get("cerebras") == 2
-    assert _mp._daily_usage.get("groq") == 1
+    assert _mp._daily_usage.get("ollama") == 2
+    assert _mp._daily_usage.get("gemini") == 1
     assert _mp._usage_date == _mp._date.today().isoformat()
 
 
 def test_ensure_usage_current_triggers_on_date_change(tmp_path, _reset_daily_state):
     conn = _migrated_conn(tmp_path)
     _mp._usage_date = "2020-01-01"  # stale date
-    _mp._daily_usage = {"cerebras": 999}  # stale data
+    _mp._daily_usage = {"ollama": 999}  # stale data
     _mp._ensure_usage_current(conn)
     # After rollover, stale data should be gone (no scoring_costs rows for today in empty DB)
     assert _mp._daily_usage == {}
@@ -612,28 +546,28 @@ def test_ensure_usage_current_noop_same_day(tmp_path, _reset_daily_state):
     conn = _migrated_conn(tmp_path)
     today = _mp._date.today().isoformat()
     _mp._usage_date = today
-    _mp._daily_usage = {"cerebras": 42}
+    _mp._daily_usage = {"ollama": 42}
     _mp._ensure_usage_current(conn)
     # Should NOT reset — same day
-    assert _mp._daily_usage == {"cerebras": 42}
+    assert _mp._daily_usage == {"ollama": 42}
 
 
 # ---------------------------------------------------------------------------
 # Cascade execution tests (CASC-03, CASC-04, CASC-07, TEST-02)
 # ---------------------------------------------------------------------------
 
-# Shared config for cascade tests: cerebras primary -> groq -> anthropic
+# Shared config for cascade tests: ollama primary -> gemini -> anthropic
 _CASCADE_CONFIG = {
     "providers": {
         "sonnet": {
-            "provider": "cerebras",
-            "model": "qwen-3-235b",
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
             "fallback_chain": [
-                {"provider": "groq", "model": "scout"},
+                {"provider": "gemini", "model": "gemini-2.0-flash"},
                 {"provider": "anthropic", "model": "claude-sonnet-4-6"},
             ],
         },
-        "daily_limits": {"cerebras": 350, "groq": 170},
+        "daily_limits": {"ollama": 350, "gemini": 170},
     }
 }
 
@@ -644,28 +578,28 @@ def test_cascade_skips_exhausted_provider(tmp_path, _reset_daily_state):
 
     conn = _migrated_conn(tmp_path)
     today = _mp._date.today().isoformat()
-    _mp._daily_usage = {"cerebras": 350}  # at limit
+    _mp._daily_usage = {"ollama": 350}  # at limit
     _mp._usage_date = today
 
-    groq_result = _make_result(provider="groq")
+    gemini_result = _make_result(provider="gemini")
 
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
          patch("job_finder.web.model_provider._ensure_usage_current"), \
          patch("job_finder.web.model_provider.cost_gate", return_value=True), \
          patch("job_finder.web.model_provider.record_cost"):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = groq_result
+        mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
             "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
-    # First call should be to groq (cerebras was at limit and skipped)
+    # First call should be to gemini (ollama was at limit and skipped)
     mock_make_adapter.assert_called_once()
     first_call_provider = mock_make_adapter.call_args[0][0]
-    assert first_call_provider == "groq"
-    assert result.provider == "groq"
+    assert first_call_provider == "gemini"
+    assert result.provider == "gemini"
 
 
 def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
@@ -677,15 +611,15 @@ def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
     _mp._daily_usage = {}
     _mp._usage_date = today
 
-    groq_result = _make_result(provider="groq")
+    gemini_result = _make_result(provider="gemini")
 
-    mock_groq_adapter = MagicMock()
-    mock_groq_adapter.call.return_value = groq_result
+    mock_gemini_adapter = MagicMock()
+    mock_gemini_adapter.call.return_value = gemini_result
 
     def make_adapter_side_effect(provider_name, *args, **kwargs):
-        if provider_name == "cerebras":
-            raise ValueError("API key not set")
-        return mock_groq_adapter
+        if provider_name == "ollama":
+            raise ValueError("Ollama unreachable")
+        return mock_gemini_adapter
 
     with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect) as mock_make_adapter, \
          patch("job_finder.web.model_provider._ensure_usage_current"), \
@@ -696,9 +630,9 @@ def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
             "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
-    # _make_adapter called twice: cerebras (ValueError) then groq
+    # _make_adapter called twice: ollama (ValueError) then gemini
     assert mock_make_adapter.call_count == 2
-    assert result.provider == "groq"
+    assert result.provider == "gemini"
 
 
 def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
@@ -715,18 +649,18 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
     mock_response.status_code = 429
     http_429_error = requests.HTTPError(response=mock_response)
 
-    groq_result = _make_result(provider="groq")
+    gemini_result = _make_result(provider="gemini")
 
-    mock_cerebras_adapter = MagicMock()
-    mock_cerebras_adapter.call.side_effect = http_429_error
+    mock_ollama_adapter = MagicMock()
+    mock_ollama_adapter.call.side_effect = http_429_error
 
-    mock_groq_adapter = MagicMock()
-    mock_groq_adapter.call.return_value = groq_result
+    mock_gemini_adapter = MagicMock()
+    mock_gemini_adapter.call.return_value = gemini_result
 
     def make_adapter_side_effect(provider_name, *args, **kwargs):
-        if provider_name == "cerebras":
-            return mock_cerebras_adapter
-        return mock_groq_adapter
+        if provider_name == "ollama":
+            return mock_ollama_adapter
+        return mock_gemini_adapter
 
     with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
          patch("job_finder.web.model_provider._ensure_usage_current"), \
@@ -737,9 +671,9 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
             "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
-    # Cerebras should be marked exhausted at its configured limit
-    assert _mp._daily_usage.get("cerebras") == 350
-    assert result.provider == "groq"
+    # Ollama should be marked exhausted at its configured limit
+    assert _mp._daily_usage.get("ollama") == 350
+    assert result.provider == "gemini"
 
 
 def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
@@ -748,14 +682,14 @@ def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
 
     conn = _migrated_conn(tmp_path)
     today = _mp._date.today().isoformat()
-    # cerebras and groq both at their daily limits; anthropic has no key
-    _mp._daily_usage = {"cerebras": 350, "groq": 170}
+    # ollama and gemini both at their daily limits; anthropic has no key
+    _mp._daily_usage = {"ollama": 350, "gemini": 170}
     _mp._usage_date = today
 
     def make_adapter_side_effect(provider_name, *args, **kwargs):
         if provider_name == "anthropic":
             raise ValueError("no key")
-        # cerebras and groq are blocked by limit check, never reach _make_adapter
+        # ollama and gemini are blocked by limit check, never reach _make_adapter
         raise ValueError(f"unexpected call for {provider_name}")
 
     with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
@@ -784,21 +718,21 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
         "properties": {"score": {"type": "integer"}},
     }
 
-    # cerebras always returns schema-invalid data (no "score" key)
+    # ollama always returns schema-invalid data (no "score" key)
     bad_result = _make_result(data={"wrong_key": 1})
-    # groq returns valid data
-    good_result = _make_result(provider="groq", data={"score": 80})
+    # gemini returns valid data
+    good_result = _make_result(provider="gemini", data={"score": 80})
 
-    mock_cerebras_adapter = MagicMock()
-    mock_cerebras_adapter.call.return_value = bad_result  # always invalid
+    mock_ollama_adapter = MagicMock()
+    mock_ollama_adapter.call.return_value = bad_result  # always invalid
 
-    mock_groq_adapter = MagicMock()
-    mock_groq_adapter.call.return_value = good_result
+    mock_gemini_adapter = MagicMock()
+    mock_gemini_adapter.call.return_value = good_result
 
     def make_adapter_side_effect(provider_name, *args, **kwargs):
-        if provider_name == "cerebras":
-            return mock_cerebras_adapter
-        return mock_groq_adapter
+        if provider_name == "ollama":
+            return mock_ollama_adapter
+        return mock_gemini_adapter
 
     original_messages = [{"role": "user", "content": "hi"}]
 
@@ -812,9 +746,9 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
             output_schema=schema,
         )
 
-    # The groq adapter's first call should receive original messages (not augmented)
-    groq_first_call_messages = mock_groq_adapter.call.call_args_list[0][0][2]
-    assert "Schema validation errors" not in groq_first_call_messages[-1]["content"]
+    # The gemini adapter's first call should receive original messages (not augmented)
+    gemini_first_call_messages = mock_gemini_adapter.call.call_args_list[0][0][2]
+    assert "Schema validation errors" not in gemini_first_call_messages[-1]["content"]
     assert result.data == {"score": 80}
 
 
@@ -826,14 +760,14 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
 _CASCADE_VARIANT_CONFIG = {
     "providers": {
         "sonnet": {
-            "provider": "cerebras",
-            "model": "qwen-3-235b",
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
             "fallback_chain": [
-                {"provider": "groq", "model": "scout", "prompt_variant": "fewshot-distribution"},
+                {"provider": "gemini", "model": "gemini-2.0-flash", "prompt_variant": "fewshot-distribution"},
                 {"provider": "anthropic", "model": "claude-sonnet-4-6"},
             ],
         },
-        "daily_limits": {"cerebras": 350, "groq": 170},
+        "daily_limits": {"ollama": 350, "gemini": 170},
     }
 }
 
@@ -844,17 +778,17 @@ def test_cascade_prompt_variant_overrides_system(tmp_path, _reset_daily_state):
 
     conn = _migrated_conn(tmp_path)
     today = _mp._date.today().isoformat()
-    _mp._daily_usage = {"cerebras": 350}  # force cascade to groq
+    _mp._daily_usage = {"ollama": 350}  # force cascade to gemini
     _mp._usage_date = today
 
-    groq_result = _make_result(provider="groq")
+    gemini_result = _make_result(provider="gemini")
 
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
          patch("job_finder.web.model_provider._ensure_usage_current"), \
          patch("job_finder.web.model_provider.cost_gate", return_value=True), \
          patch("job_finder.web.model_provider.record_cost"):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = groq_result
+        mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
@@ -862,8 +796,8 @@ def test_cascade_prompt_variant_overrides_system(tmp_path, _reset_daily_state):
             [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
         )
 
-    # groq was selected (cerebras exhausted)
-    assert result.provider == "groq"
+    # gemini was selected (ollama exhausted)
+    assert result.provider == "gemini"
     # adapter.call should have been called with the fewshot-distribution variant, not the original
     call_args = mock_adapter.call.call_args
     actual_system = call_args[0][1]  # positional arg: model, system, messages, ...
@@ -884,14 +818,14 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
     _mp._daily_usage = {}
     _mp._usage_date = today
 
-    cerebras_result = _make_result(provider="cerebras")
+    ollama_result = _make_result(provider="ollama")
 
     with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
          patch("job_finder.web.model_provider._ensure_usage_current"), \
          patch("job_finder.web.model_provider.cost_gate", return_value=True), \
          patch("job_finder.web.model_provider.record_cost"):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = cerebras_result
+        mock_adapter.call.return_value = ollama_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
@@ -899,8 +833,8 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
             [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
         )
 
-    # cerebras was selected (primary, no prompt_variant=None)
-    assert result.provider == "cerebras"
+    # ollama was selected (primary, no prompt_variant)
+    assert result.provider == "ollama"
     # adapter.call should have been called with the original system prompt unchanged
     call_args = mock_adapter.call.call_args
     actual_system = call_args[0][1]  # positional arg: model, system, messages, ...

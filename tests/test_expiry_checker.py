@@ -45,7 +45,7 @@ class TestCheckAtsApi:
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_lever_404_returns_expired(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, EXPIRED
-        mock_get.return_value = MagicMock(status_code=404)
+        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
         result = _check_ats_api("acme", "abc-123", "lever")
         assert result == EXPIRED
         mock_get.assert_called_once()
@@ -54,14 +54,14 @@ class TestCheckAtsApi:
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_lever_200_returns_live(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, LIVE
-        mock_get.return_value = MagicMock(status_code=200)
+        mock_get.return_value = MagicMock(spec=requests.Response, status_code=200)
         result = _check_ats_api("acme", "abc-123", "lever")
         assert result == LIVE
 
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_greenhouse_404_returns_expired(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, EXPIRED
-        mock_get.return_value = MagicMock(status_code=404)
+        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
         result = _check_ats_api("acme", "12345", "greenhouse")
         assert result == EXPIRED
         assert "boards-api.greenhouse.io" in mock_get.call_args[0][0]
@@ -179,8 +179,8 @@ class TestSignalCascade:
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     def test_ats_inconclusive_falls_through_to_careers(self, mock_ats, mock_careers, mock_serpapi):
-        from job_finder.web.expiry_checker import _check_job_expiry, LIVE
-        mock_ats.return_value = "inconclusive"
+        from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE, LIVE
+        mock_ats.return_value = INCONCLUSIVE
         mock_careers.return_value = LIVE
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
                "source_urls": '["https://jobs.lever.co/acme/abc-123"]'}

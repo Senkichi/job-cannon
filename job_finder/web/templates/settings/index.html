@@ -325,11 +325,11 @@
 
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Monthly Budget Cap (USD)</label>
-            <input type="number" name="monthly_budget_usd" step="1" min="0"
-                   value="{{ config.get('scoring', {}).get('monthly_budget_usd', DEFAULT_MONTHLY_BUDGET_USD) }}"
+            <label class="block text-sm font-medium text-slate-300 mb-1">Daily Budget Cap (USD)</label>
+            <input type="number" name="daily_budget_usd" step="1" min="0"
+                   value="{{ config.get('scoring', {}).get('daily_budget_usd', DEFAULT_DAILY_BUDGET_USD) }}"
                    class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
-            <p class="text-xs text-slate-600 mt-1">Default: $25/month</p>
+            <p class="text-xs text-slate-600 mt-1">Default: ${{ DEFAULT_DAILY_BUDGET_USD|int }}/day</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">Haiku Score Threshold</label>

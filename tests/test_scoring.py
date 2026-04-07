@@ -117,11 +117,11 @@ class TestCostRecording:
 # ---------------------------------------------------------------------------
 
 class TestCostGate:
-    """Verify cost_gate correctly gates Sonnet at budget and always allows Haiku."""
+    """Verify cost_gate correctly gates Sonnet at the daily budget and always allows Haiku."""
 
     @pytest.fixture
     def gate_config(self):
-        return {"scoring": {"monthly_budget_usd": 10.0}}
+        return {"scoring": {"daily_budget_usd": 10.0}}
 
     def test_haiku_always_allowed_when_under_budget(self, migrated_db, gate_config):
         path, conn = migrated_db
@@ -154,19 +154,19 @@ class TestCostGate:
         _insert_cost_row(conn, cost_usd=5.0)
         assert cost_gate(conn, {}, "sonnet") is True
 
-    def test_sonnet_only_counts_current_month(self, migrated_db, gate_config):
+    def test_sonnet_only_counts_today(self, migrated_db, gate_config):
         path, conn = migrated_db
-        # Insert last month's spend (exceeds budget) but this month should be 0
-        last_month = (datetime.now(timezone.utc) - timedelta(days=35)).strftime(
+        # Insert spend from 35 days ago (exceeds daily budget) but today should be 0
+        old_spend = (datetime.now(timezone.utc) - timedelta(days=35)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (None, "test", "claude-sonnet-4-6", 100, 50, 50.0, last_month),
+            (None, "test", "claude-sonnet-4-6", 100, 50, 50.0, old_spend),
         )
         conn.commit()
-        # This month's spend is 0 -- should be allowed
+        # Today's spend is 0 -- should be allowed
         assert cost_gate(conn, gate_config, "sonnet") is True
 
 
@@ -267,7 +267,7 @@ class TestBudgetExceededError:
 
     def test_raises_when_budget_exceeded(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"monthly_budget_usd": 0.0}}  # zero budget -- always blocked
+        config = {"scoring": {"daily_budget_usd": 0.0}}  # zero daily budget -- always blocked
         # Insert any spend > 0
         _insert_cost_row(conn, cost_usd=0.01)
         with pytest.raises(BudgetExceededError):
@@ -285,7 +285,7 @@ class TestBudgetExceededError:
 
     def test_haiku_succeeds_even_at_zero_budget(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
         _insert_cost_row(conn, cost_usd=999.0)
         # Should not raise for haiku
         result, cost = call_claude(
@@ -359,7 +359,7 @@ class TestHaikuScorer:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -507,24 +507,23 @@ class TestHaikuScorer:
         assert scoring_result.status == "success"
         assert "score" in scoring_result.data
 
-    def test_score_job_haiku_handles_budget_exceeded_gracefully(
+    def test_score_job_haiku_propagates_budget_exceeded(
         self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
-        """score_job_haiku must return ScoringResult with budget_exceeded status.
+        """score_job_haiku must re-raise BudgetExceededError to abort the batch.
 
-        Note: Haiku never actually hits budget cap, but the function must be
-        defensive against unexpected budget errors.
+        When the Anthropic account-level spend cap is hit, the error propagates
+        so batch callers can abort immediately instead of retrying all remaining jobs.
         """
+        import pytest
         from job_finder.web.haiku_scorer import score_job_haiku
         from job_finder.web.claude_client import BudgetExceededError
 
-        # Create a mock client that raises BudgetExceededError
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = BudgetExceededError("Budget exceeded")
         path, conn = migrated_db
-        result = score_job_haiku(mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        assert result.status == "budget_exceeded"
-        assert result.data is None
+        with pytest.raises(BudgetExceededError):
+            score_job_haiku(mock_client, sample_job_row, sample_profile, conn, scoring_config)
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +618,7 @@ class TestHaikuPipelineIntegration:
             },
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -819,7 +818,7 @@ class TestExclusionFilterIntegration:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -927,6 +926,83 @@ class TestExclusionFilterIntegration:
         assert score_call_count["n"] == 1
         assert summary["haiku_scored"] == 1
 
+    def test_excluded_job_auto_dismissed(self, migrated_db, pipeline_config):
+        """Excluded job auto-transitions from discovered to dismissed."""
+        from job_finder.web.pipeline_runner import run_ingestion
+        from job_finder.models import Job
+
+        path, conn = migrated_db
+
+        excluded_job = Job(
+            title="Junior Data Analyst",
+            company="DismissCo",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/job/dismiss1",
+            source_id="dismiss-1",
+            salary_min=80000,
+            salary_max=100000,
+            description="Entry level position.",
+        )
+
+        with patch("job_finder.web.scoring_runner.score_job_haiku") as mock_score, \
+             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
+             patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[excluded_job]), \
+             patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
+            mock_anthropic_module.Anthropic.return_value = MagicMock()
+            run_ingestion(path, pipeline_config)
+
+        row = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE company = 'DismissCo'"
+        ).fetchone()
+        assert row is not None
+        assert row["pipeline_status"] == "dismissed"
+
+        event = conn.execute(
+            "SELECT source FROM pipeline_events WHERE job_id = ("
+            "  SELECT dedup_key FROM jobs WHERE company = 'DismissCo'"
+            ") AND to_status = 'dismissed'"
+        ).fetchone()
+        assert event is not None
+        assert event["source"] == "exclusion_filter"
+
+    def test_auto_dismiss_does_not_override_reviewing(self, migrated_db, pipeline_config):
+        """Auto-dismiss only affects discovered jobs, not user-advanced statuses."""
+        from job_finder.web.pipeline_runner import run_ingestion
+        from job_finder.models import Job
+        from job_finder.db import upsert_job, update_pipeline_status
+
+        path, conn = migrated_db
+
+        job = Job(
+            title="Junior Data Analyst",
+            company="AdvancedCo",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/job/adv1",
+            source_id="adv-1",
+            salary_min=80000,
+            salary_max=100000,
+            description="Entry level.",
+        )
+        upsert_job(conn, job)
+        update_pipeline_status(conn, job.dedup_key, "reviewing", source="manual")
+
+        with patch("job_finder.web.scoring_runner.score_job_haiku"), \
+             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
+             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
+             patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[job]), \
+             patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
+            mock_anthropic_module.Anthropic.return_value = MagicMock()
+            run_ingestion(path, pipeline_config)
+
+        row = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
+            (job.dedup_key,),
+        ).fetchone()
+        assert row["pipeline_status"] == "reviewing"
+
 
 # ---------------------------------------------------------------------------
 # Sonnet evaluator tests (Plan 02-03 Task 1)
@@ -997,7 +1073,7 @@ class TestSonnetEvaluator:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1163,7 +1239,7 @@ class TestSonnetPipelineIntegration:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1408,7 +1484,7 @@ class TestSonnetPreferences:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1455,7 +1531,7 @@ class TestSonnetPreferences:
         empty_config = {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-6"},
             },
             "profile": {},  # empty profile section
@@ -1674,7 +1750,7 @@ class TestBorderlineReeval:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1868,7 +1944,7 @@ class TestBatchHaikuBorderlineReeval:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -2249,7 +2325,7 @@ class TestHaikuCompensationContext:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5"},
             }
         }

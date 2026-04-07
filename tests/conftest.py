@@ -161,7 +161,7 @@ def app(tmp_db_path):
         "db": {"path": tmp_db_path},
         "scoring": {
             "min_score_threshold": 40,
-            "monthly_budget_usd": 25.0,
+            "daily_budget_usd": 25.0,
         },
         "profile": {
             "target_titles": ["Staff Data Scientist"],

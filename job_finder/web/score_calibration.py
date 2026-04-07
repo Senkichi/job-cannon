@@ -64,7 +64,7 @@ def calibrate_score(raw_score: float | int, provider: str) -> float:
 
     Args:
         raw_score: Raw score from the model (0-100 scale).
-        provider: Provider name (e.g., "ollama", "cerebras").
+        provider: Provider name (e.g., "ollama", "gemini").
 
     Returns:
         Calibrated score on the Opus scale. Returns the raw score unchanged

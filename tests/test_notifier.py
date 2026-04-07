@@ -38,25 +38,18 @@ class TestSendNotification(unittest.TestCase):
 
     def test_does_not_block_caller(self):
         """send_notification returns immediately without waiting for thread."""
-        from job_finder.web.notifier import send_notification
-
-        # Use an event to detect if the inner function blocks
         import time
 
-        slow_event = threading.Event()
+        from job_finder.web.notifier import send_notification
 
-        def slow_toast(*args, **kwargs):
-            time.sleep(5)  # simulates a blocking call
-            slow_event.set()
-
-        with patch("job_finder.web.notifier.send_notification") as mock_send:
-            # Verify the original function returns quickly
-            mock_send.return_value = None
+        with patch("threading.Thread") as mock_thread:
+            t_instance = MagicMock()
+            mock_thread.return_value = t_instance
             start = time.time()
             send_notification("Title", "Body")
             elapsed = time.time() - start
-            # Should return essentially instantly since we mocked it
-            assert elapsed < 1.0
+            assert elapsed < 1.0, f"send_notification blocked for {elapsed:.2f}s"
+            t_instance.start.assert_called_once()
 
     def test_passes_url_as_on_click(self):
         """send_notification passes url as on_click kwarg to toast."""
@@ -87,26 +80,25 @@ class TestSendNotification(unittest.TestCase):
 
     def test_no_url_omits_on_click(self):
         """send_notification without url does not pass on_click to toast."""
+        import sys
+
         from job_finder.web.notifier import send_notification
-
-        captured_kwargs = {}
-
-        def fake_toast(title, body, **kwargs):
-            captured_kwargs.update(kwargs)
-
-        def fake_thread_target():
-            try:
-                from win11toast import toast as _toast
-            except ImportError:
-                pass
 
         with patch("threading.Thread") as mock_thread:
             t_instance = MagicMock()
             mock_thread.return_value = t_instance
-            send_notification("Title", "Body")
-            # daemon=True should be set, no url means on_click not needed
-            mock_thread.assert_called_once()
-            assert mock_thread.call_args.kwargs.get("daemon") is True
+            send_notification("Title", "Body")  # no url
+            target_fn = mock_thread.call_args.kwargs["target"]
+
+        mock_toast = MagicMock()
+        fake_win11toast = MagicMock()
+        fake_win11toast.toast = mock_toast
+        with patch.dict(sys.modules, {"win11toast": fake_win11toast}):
+            target_fn()
+
+        mock_toast.assert_called_once()
+        _, toast_kwargs = mock_toast.call_args
+        assert "on_click" not in toast_kwargs, "on_click must not be passed when url is None"
 
 
 class TestFallbackGraceful(unittest.TestCase):
@@ -144,33 +136,31 @@ class TestFallbackGraceful(unittest.TestCase):
 
     def test_no_exception_on_toast_error(self):
         """send_notification silently swallows any exception from toast."""
+        import sys
+
         from job_finder.web.notifier import send_notification
 
         captured_target = []
 
-        with patch("threading.Thread") as mock_thread:
-            def capture_thread_call(*args, **kwargs):
-                captured_target.append(kwargs.get("target"))
-                m = MagicMock()
-                m.start = MagicMock()
-                return m
+        def capture_thread_call(*args, **kwargs):
+            captured_target.append(kwargs.get("target"))
+            m = MagicMock()
+            m.start = MagicMock()
+            return m
 
+        with patch("threading.Thread") as mock_thread:
             mock_thread.side_effect = capture_thread_call
             send_notification("Title", "Body")
 
-        # Inject a mock win11toast that raises
-        with patch("builtins.__import__") as mock_import:
-            def side_effect(name, *args, **kwargs):
-                if name == "win11toast":
-                    raise RuntimeError("win11toast crash!")
-                return __import__(name, *args, **kwargs)
-            mock_import.side_effect = side_effect
-
-            if captured_target and captured_target[0]:
-                try:
-                    captured_target[0]()
-                except Exception as e:
-                    self.fail(f"Thread target raised exception: {e}")
+        # Inject a mock win11toast whose toast() raises
+        failing_module = MagicMock()
+        failing_module.toast.side_effect = RuntimeError("toast crash!")
+        assert captured_target and captured_target[0]
+        with patch.dict(sys.modules, {"win11toast": failing_module}):
+            try:
+                captured_target[0]()
+            except Exception as e:
+                self.fail(f"Thread target must swallow exceptions, got: {e}")
 
 
 class TestToggleGating(unittest.TestCase):
@@ -349,9 +339,9 @@ class TestBudgetAlertURL(unittest.TestCase):
                 call_args = mock_send.call_args
                 bodies[pct] = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
 
-        # 100% should say "reached", 80% should say "at 80%"
-        assert "reached" in bodies[100.0] or "100" in bodies[100.0]
         assert "80" in bodies[80.0]
+        assert "100" in bodies[100.0]
+        assert bodies[80.0] != bodies[100.0], "80% and 100% bodies must differ"
 
 
 class TestPipelineChangeLabels(unittest.TestCase):

@@ -42,7 +42,7 @@ _PARKED_DOMAIN_SIGNATURES = [
 ]
 
 _BATCH_CAP = 10   # Conservative SerpAPI quota (100-250/month depending on plan)
-_FAST_BATCH_CAP = 50  # Free-tier (Tier 1+2) batch cap — no API cost
+_FAST_BATCH_CAP = 200  # Free-tier (Tier 1+2) batch cap — no API cost, just HTTP HEAD probes
 
 # Domains to skip as SerpAPI results (not real company sites)
 _SKIP_DOMAINS = [

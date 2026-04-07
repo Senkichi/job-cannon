@@ -33,7 +33,7 @@ from typing import Any, Optional
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.db import persist_haiku_score, persist_sonnet_score
-from job_finder.web.claude_client import MODEL_PRICING
+from job_finder.web.claude_client import BudgetExceededError, MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_orchestrator import load_scoring_profile
@@ -365,7 +365,11 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        scoring_result = score_job_haiku(client, job_row, profile, conn, config)
+        try:
+            scoring_result = score_job_haiku(client, job_row, profile, conn, config)
+        except BudgetExceededError:
+            logger.warning("Budget exhausted during borderline re-score — aborting remaining jobs")
+            break
         result = unwrap_scoring_result(scoring_result)
 
         if result is None:

@@ -190,13 +190,19 @@ class TestJobBoardRoutes:
         # The discovered job should not appear
         assert "Acme Corp" not in data
 
-    def test_jobs_table_filter_by_min_score(self, jobs_client):
-        """GET /jobs/table?min_score=9 returns only high-score jobs."""
-        response = jobs_client.get("/jobs/table?min_score=9", headers={"HX-Request": "true"})
+    def test_jobs_table_filter_by_posted_within(self, jobs_client):
+        """GET /jobs/table?posted_within=today returns 200 (date filter handled without error)."""
+        response = jobs_client.get("/jobs/table?posted_within=today", headers={"HX-Request": "true"})
+        assert response.status_code == 200
+
+    def test_jobs_table_filter_by_sort_salary(self, jobs_client):
+        """GET /jobs/table?sort_by=salary_max returns rows sorted by salary."""
+        response = jobs_client.get("/jobs/table?sort_by=salary_max&sort_dir=DESC", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
-        assert "Beta Inc" in data  # score 9.1 >= 9
-        assert "Acme Corp" not in data  # score 8.5 < 9
+        # Both jobs present (neither is hidden status)
+        assert "Beta Inc" in data
+        assert "Acme Corp" in data
 
     def test_jobs_expand_returns_accordion(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion row HTML."""
@@ -992,7 +998,7 @@ class TestSourceCountBadge:
         data = response.data.decode()
         # Single-source badge should NOT appear
         assert "1 sources" not in data
-        assert "sources" not in data or "greenhouse" in data  # sources list present but no badge
+        assert "1 source" not in data, "Single-source job must not show source count badge"
 
     def test_multi_source_job_shows_all_source_links(self, multi_source_client):
         """GET /jobs/<key>/expand shows all source URLs as clickable links for merged jobs."""
@@ -1009,7 +1015,9 @@ class TestSourceCountBadge:
         assert response.status_code == 200
         data = response.data.decode()
         # Enrichment sparkle indicator should appear for multi-source jobs
-        assert "&#10024;" in data or "sparkle" in data.lower() or "sources" in data
+        assert "&#10024;" in data or "sparkle" in data.lower(), (
+            "Enrichment sparkle indicator must appear for multi-source jobs"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1227,7 +1235,7 @@ class TestSettingsAtsScanSection:
                     "weight_company_signals": "0.05",
                     "weight_recency": "0.05",
                     "min_score_threshold": "40",
-                    "monthly_budget_usd": "25.0",
+                    "daily_budget_usd": "25.0",
                     "haiku_threshold": "42",
                     "model_haiku": "claude-haiku-4-5",
                     "model_sonnet": "claude-sonnet-4-6",
@@ -1448,16 +1456,23 @@ class TestProfileEditor:
 
         # Patch get_db to return a connection whose execute raises OperationalError
         # when querying resume_preferences_detected — simulates table absent pre-migration5.
+        real_conn = sqlite3.connect(app.config["DB_PATH"])
+        real_conn.row_factory = sqlite3.Row
+
         class FailingConn:
             def execute(self, sql, *args, **kwargs):
                 if "resume_preferences_detected" in sql:
                     raise sqlite3.OperationalError("no such table: resume_preferences_detected")
-                # Delegate to a real in-memory connection for other queries
-                real = sqlite3.connect(":memory:")
-                return real.execute(sql, *args, **kwargs)
+                return real_conn.execute(sql, *args, **kwargs)
 
-        with patch("job_finder.web.blueprints.profile.get_db", return_value=FailingConn()):
-            response = app.test_client().get("/profile")
+            def __getattr__(self, name):
+                return getattr(real_conn, name)
+
+        try:
+            with patch("job_finder.web.blueprints.profile.get_db", return_value=FailingConn()):
+                response = app.test_client().get("/profile")
+        finally:
+            real_conn.close()
 
         assert response.status_code == 200, (
             f"GET /profile should return 200 even when preferences query fails, "
@@ -1888,6 +1903,7 @@ class TestUXPolish:
         response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
+        assert 'hx-trigger="load"' not in data, "Regular expand must not include hx-trigger=load"
 
 
 class TestDashboardUserActivity:
@@ -2765,25 +2781,19 @@ class TestScanExceptionSeparation:
 # ---------------------------------------------------------------------------
 
 
-class TestDateFilterHtmxTrigger:
-    """Verify date filter inputs have input event triggers for clearing."""
+class TestFilterBarHtmxTrigger:
+    """Verify filter form uses correct HTMX triggers for new filter controls."""
 
-    def test_date_filter_has_input_trigger_for_date_from(self, client):
-        """GET /jobs renders filter form with input trigger on date-from input."""
+    def test_filter_form_has_freshness_hidden_input(self, client):
+        """GET /jobs renders filter bar with freshness hidden input."""
         response = client.get("/jobs")
         assert response.status_code == 200
         data = response.data.decode()
-        assert "input from:#filter-date-from" in data, (
-            "filter form hx-trigger must include 'input from:#filter-date-from' "
-            "so clearing the date input fires an HTMX request"
-        )
+        assert 'name="freshness"' in data
 
-    def test_date_filter_has_input_trigger_for_date_to(self, client):
-        """GET /jobs renders filter form with input trigger on date-to input."""
+    def test_filter_form_has_posted_within_select(self, client):
+        """GET /jobs renders filter bar with posted_within select."""
         response = client.get("/jobs")
         assert response.status_code == 200
         data = response.data.decode()
-        assert "input from:#filter-date-to" in data, (
-            "filter form hx-trigger must include 'input from:#filter-date-to' "
-            "so clearing the date input fires an HTMX request"
-        )
+        assert 'name="posted_within"' in data

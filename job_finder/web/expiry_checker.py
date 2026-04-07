@@ -140,7 +140,7 @@ except ImportError:
 # Lazy import of _title_matches from ats_scanner (per user decision:
 # reuse existing title matching for consistency with ATS scan behavior)
 try:
-    from job_finder.web.ats_scanner import _title_matches
+    from job_finder.web.ats_platforms import _title_matches
 except ImportError:
     _title_matches = None  # type: ignore[assignment]
 

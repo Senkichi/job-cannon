@@ -9,6 +9,7 @@ import tempfile
 import os
 from unittest.mock import MagicMock, patch
 
+import anthropic
 import pytest
 
 from job_finder.web.db_migrate import run_migrations
@@ -109,7 +110,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
+            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
                  patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")):
@@ -142,7 +143,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
+            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
                  patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}):
                 _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
@@ -173,7 +174,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())  # non-None → scored
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
+            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
                  patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
@@ -215,7 +216,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
+            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
                  patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
@@ -246,7 +247,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
+            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
                  patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch("job_finder.web.activity_tracker.log_activity"):

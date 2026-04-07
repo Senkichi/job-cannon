@@ -12,6 +12,7 @@ PIPELINE_STATUSES = (
     "archived",
     "rejected",
     "withdrawn",
+    "dismissed",
 )
 
 VALID_PIPELINE_STATUSES = frozenset(PIPELINE_STATUSES)

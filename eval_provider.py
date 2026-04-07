@@ -799,7 +799,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         required=True,
-        choices=["cerebras", "cohere", "gemini", "groq", "mistral", "ollama", "ollm", "openrouter", "sambanova"],
+        choices=["cohere", "gemini", "mistral", "ollama", "ollm", "sambanova"],
         help="Provider to evaluate.",
     )
     parser.add_argument(

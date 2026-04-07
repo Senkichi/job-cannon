@@ -8,7 +8,8 @@ except ImportError:
     anthropic = None  # type: ignore[assignment]
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-from job_finder.db import JOBS_ALL_COLUMNS
+from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
@@ -125,6 +126,11 @@ def run_haiku_scoring(
                         job_row.get("company"),
                         reason,
                     )
+                    if job_row.get("pipeline_status") == "discovered":
+                        update_pipeline_status(
+                            conn, dedup_key, "dismissed",
+                            source="exclusion_filter", evidence=reason,
+                        )
                     continue
 
                 # --- Haiku scoring + borderline re-eval + DB persistence ---
@@ -161,6 +167,12 @@ def run_haiku_scoring(
                     except Exception:
                         logger.debug("notification dispatch failed for job %s", dedup_key, exc_info=True)
 
+            except BudgetExceededError:
+                logger.warning(
+                    "Budget exceeded during Haiku scoring — aborting batch after %d scored",
+                    haiku_scored,
+                )
+                break  # Exit the job loop; return partial count to caller
             except Exception as e:
                 logger.warning(
                     "Haiku scoring error for job '%s': %s -- continuing", dedup_key, e

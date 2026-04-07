@@ -222,10 +222,10 @@ class TestReformatDescription:
         mock_call.assert_not_called()
         assert result == already_formatted
 
-    def test_reformat_description_with_conn_records_cost(
+    def test_reformat_description_with_conn_calls_model(
         self, mock_anthropic_client, temp_db_path
     ):
-        """reformat_description records cost via client.record_cost when conn provided."""
+        """reformat_description calls call_model once when conn is provided."""
         from job_finder.web.description_reformatter import reformat_description
 
         conn = sqlite3.connect(temp_db_path)
@@ -373,8 +373,8 @@ class TestRunDescriptionReformatPass:
         # No jobs should remain unprocessed
         assert unprocessed["cnt"] == 0
 
-    def test_records_cost_per_haiku_call(self, db_with_unformatted_jobs):
-        """run_description_reformat_pass records cost in scoring_costs for each Haiku call."""
+    def test_reformat_pass_calls_model_per_job(self, db_with_unformatted_jobs):
+        """run_description_reformat_pass calls call_model once per eligible job."""
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         reformatted_text = "About the Role\n\nReformatted.\n\nRequirements\n\n- Python"

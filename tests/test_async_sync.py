@@ -28,7 +28,7 @@ class TestAsyncSync:
         app = create_app(config={
             "TESTING": True,
             "db": {"path": db_path},
-            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "monthly_budget_usd": 25.0},
+            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
             "polling": {"interval_minutes": 30},
         })
         # Set Flask's native TESTING flag so routes skip background threads.

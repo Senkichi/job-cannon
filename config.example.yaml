@@ -176,19 +176,12 @@ scoring:
 #
 # providers:
 #   sonnet:
-#     provider: cerebras
-#     model: qwen-3-235b-a22b-instruct-2507
+#     provider: ollama
+#     model: qwen2.5:14b
 #     fallback_chain:
-#       - provider: groq
-#         model: meta-llama/llama-4-scout-17b-16e-instruct
-#         prompt_variant: fewshot-distribution   # optional per-model prompt override
-#       - provider: ollama
-#         model: qwen2.5:14b
 #       - provider: anthropic
 #         model: claude-sonnet-4-6
-#   daily_limits:
-#     cerebras: 350    # Conservative below measured 363/day hard cap
-#     groq: 170        # Conservative below measured 181/day hard cap
+#   daily_limits: {}
 
 # --- Output settings ---
 output:

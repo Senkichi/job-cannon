@@ -383,7 +383,11 @@ def rescore_sample(
         dedup_key = job["dedup_key"]
 
         # Haiku re-score — pass config as both profile and config (Haiku resolves profile sub-key)
-        haiku_result = score_job_haiku(client, job, config, conn, config)
+        try:
+            haiku_result = score_job_haiku(client, job, config, conn, config)
+        except BudgetExceededError:
+            logger.warning("Budget exhausted during evaluation re-score — aborting remaining jobs")
+            break
         if haiku_result:
             new_haiku_score = haiku_result.get("score")
             new_haiku_summary = haiku_result.get("summary", "")

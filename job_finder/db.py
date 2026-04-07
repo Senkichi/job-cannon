@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime, date
 
 from job_finder.models import Job
 from job_finder.json_utils import safe_json_load, utc_now_iso
@@ -67,22 +66,11 @@ def merge_description(existing: str | None, new: str | None) -> str | None:
 
 
 def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
-    """Insert or update a job. Returns True if it's new.
+    """Insert or update a job. Returns True if new, False if existing.
 
-    Deduplication: if the same job (by dedup_key) already exists,
-    merge source URLs, locations (Remote/Hybrid first), and descriptions
-    (substring dedup -- keep longer; append different content with separator).
-    Keep first_seen from the original row.
-
-    INSERT branch initializes locations_raw as a JSON array with the
-    initial location so the UPDATE merge logic always has a base array.
-
-    Args:
-        conn: Open sqlite3 connection.
-        job: Job object to insert or update.
-
-    Returns:
-        True if the job is new (inserted), False if existing (updated).
+    Merges sources, locations (Remote/Hybrid first), and descriptions
+    (keep longer; append divergent content with separator). Keeps first_seen
+    from the original row. Initializes locations_raw as JSON array.
     """
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
@@ -272,7 +260,7 @@ def persist_sonnet_score(
         dedup_key: The job's primary key.
         sonnet_score: Numeric score from Sonnet deep evaluation.
         fit_analysis: JSON string containing fit analysis details.
-        provider: Provider name that produced the score (e.g. "cerebras"). None preserves existing value.
+        provider: Provider name that produced the score (e.g. "ollama"). None preserves existing value.
     """
     conn.execute(
         "UPDATE jobs SET sonnet_score = ?, fit_analysis = ?, "
@@ -336,139 +324,6 @@ def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
     }
 
 
-def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
-    """Return stat card data for the Dashboard page.
-
-    Returns:
-        dict with keys:
-            total_jobs (int): all jobs in DB
-            new_today (int): jobs where first_seen date == today
-            reviewing_count (int): jobs where pipeline_status == 'reviewing'
-            by_status (dict[str, int]): count per pipeline_status, active only
-            stale_count (int): jobs where is_stale == 1
-            pending_detections (int): pipeline_detections where status == 'pending' (0 if table missing)
-    """
-    today_prefix = date.today().isoformat()  # e.g. "2026-03-10"
-
-    total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-    new_today = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE first_seen LIKE ?",
-        (f"{today_prefix}%",),
-    ).fetchone()[0]
-    reviewing_count = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'reviewing'",
-    ).fetchone()[0]
-
-    # Active statuses: exclude archived, withdrawn
-    by_status_rows = conn.execute(
-        """SELECT pipeline_status, COUNT(*) as cnt FROM jobs
-           WHERE pipeline_status NOT IN ('archived', 'withdrawn')
-           GROUP BY pipeline_status
-           ORDER BY cnt DESC"""
-    ).fetchall()
-    by_status = {row["pipeline_status"]: row["cnt"] for row in by_status_rows}
-
-    stale_count = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE is_stale = 1",
-    ).fetchone()[0]
-
-    # Pending pipeline detections (0 if table not yet created)
-    try:
-        pending_detections = conn.execute(
-            "SELECT COUNT(*) FROM pipeline_detections WHERE status = 'pending'"
-        ).fetchone()[0]
-    except sqlite3.OperationalError:
-        pending_detections = 0
-
-    return {
-        "total_jobs": total_jobs,
-        "new_today": new_today,
-        "reviewing_count": reviewing_count,
-        "by_status": by_status,
-        "stale_count": stale_count,
-        "pending_detections": pending_detections,
-    }
-
-
-def get_recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list:
-    """Return recent ingestion run records ordered newest-first.
-
-    Args:
-        conn: Open sqlite3 connection.
-        limit: Max number of runs to return.
-
-    Returns:
-        List of dicts with keys: id, source, jobs_fetched, jobs_new, jobs_scored, timestamp.
-    """
-    rows = conn.execute(
-        "SELECT id, timestamp, source, jobs_fetched, jobs_new, jobs_scored "
-        "FROM runs ORDER BY timestamp DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def get_pipeline_summary(conn: sqlite3.Connection) -> dict:
-    """Return job count per pipeline_status, excluding statuses with 0 jobs.
-
-    Returns:
-        dict mapping pipeline_status -> count (only non-zero counts).
-    """
-    rows = conn.execute(
-        """SELECT pipeline_status, COUNT(*) as cnt FROM jobs
-           GROUP BY pipeline_status
-           HAVING cnt > 0"""
-    ).fetchall()
-    return {row["pipeline_status"]: row["cnt"] for row in rows}
-
-
-def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
-    """Return all jobs grouped by pipeline_status.
-
-    Each job dict includes dedup_key, title, company, score, salary_min,
-    salary_max, location, pipeline_status, first_seen, and days_in_stage
-    (days since the job entered its current pipeline stage, based on the most
-    recent pipeline_events record with matching to_status, falling back to
-    first_seen).
-
-    Returns:
-        dict mapping pipeline_status (str) -> list of job dicts
-    """
-    rows = conn.execute(
-        """SELECT j.dedup_key, j.title, j.company, j.score,
-                  j.salary_min, j.salary_max, j.location,
-                  j.pipeline_status, j.first_seen,
-                  (
-                      SELECT pe.timestamp
-                      FROM pipeline_events pe
-                      WHERE pe.job_id = j.dedup_key
-                        AND pe.to_status = j.pipeline_status
-                      ORDER BY pe.timestamp DESC
-                      LIMIT 1
-                  ) AS stage_entered_at
-           FROM jobs j
-           ORDER BY j.score DESC"""
-    ).fetchall()
-
-    now = datetime.now()
-    result: dict = {}
-    for row in rows:
-        job = dict(row)
-        # Compute days_in_stage from stage_entered_at or first_seen
-        entered_str = job.pop("stage_entered_at") or job["first_seen"]
-        try:
-            entered_dt = datetime.fromisoformat(entered_str).replace(tzinfo=None)
-        except (ValueError, TypeError):
-            entered_dt = now
-        days_in_stage = max(0, (now - entered_dt).days)
-        job["days_in_stage"] = days_in_stage
-
-        status = job["pipeline_status"] or "discovered"
-        result.setdefault(status, []).append(job)
-
-    return result
-
-
 def update_pipeline_status(
     conn: sqlite3.Connection,
     dedup_key: str,
@@ -523,29 +378,27 @@ def update_pipeline_status(
     conn.commit()
 
 
+_HIDDEN_STATUSES = ("archived", "withdrawn", "dismissed", "rejected")
+
+
 def get_filtered_jobs(
     conn: sqlite3.Connection,
     status: str | list[str] | None = None,
     location: str | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    salary_min: int | None = None,
-    source: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
+    posted_within: str | None = None,
+    freshness: str | None = None,
     sort_by: str = "score",
     sort_dir: str = "DESC",
     limit: int = 100,
     hide_stale: bool = False,
+    show_hidden: bool = False,
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
-    All filters are optional; passing None skips that filter.
-    status accepts a single string or a list of strings for multi-select
-    filtering (builds WHERE pipeline_status IN (?, ?, ...) clause).
-    sort_by is validated against an allowlist to prevent SQL injection.
-    When sort_by is "score", uses COALESCE(sonnet_score, haiku_score, score)
-    to prefer the best available AI score over the heuristic score.
+    status: single string or list for IN-filter. sort_by validated against
+    allowlist (SQL injection guard). score sort uses COALESCE(sonnet, haiku,
+    heuristic). Hidden statuses excluded by default unless status set or
+    show_hidden=True.
     """
     allowed_sort_cols = {
         "score",
@@ -569,16 +422,7 @@ def get_filtered_jobs(
     else:
         sort_expr = f"{sort_by} {sort_dir}"
 
-    # Deprioritize archived/withdrawn jobs (push to bottom) when viewing all statuses.
-    # When the user explicitly filters by a specific status, skip deprioritization
-    # so that e.g. "show me all archived" sorts purely by score.
-    if not status:
-        order_expr = (
-            "CASE WHEN pipeline_status IN ('archived', 'withdrawn') THEN 1 ELSE 0 END, "
-            + sort_expr
-        )
-    else:
-        order_expr = sort_expr
+    order_expr = sort_expr
 
     conditions: list[str] = []
     params: list = []
@@ -591,27 +435,36 @@ def get_filtered_jobs(
         else:
             conditions.append("pipeline_status = ?")
             params.append(status)
+    elif not show_hidden:
+        hidden_placeholders = ", ".join("?" * len(_HIDDEN_STATUSES))
+        conditions.append(f"pipeline_status NOT IN ({hidden_placeholders})")
+        params.extend(_HIDDEN_STATUSES)
+
     if location:
         conditions.append("location LIKE ?")
         params.append(f"%{location}%")
-    if min_score is not None:
-        conditions.append("score >= ?")
-        params.append(min_score)
-    if max_score is not None:
-        conditions.append("score <= ?")
-        params.append(max_score)
-    if salary_min is not None:
-        conditions.append("(salary_min >= ? OR salary_max >= ?)")
-        params.extend([salary_min, salary_min])
-    if source:
-        conditions.append("sources LIKE ?")
-        params.append(f'%"{source}"%')
-    if date_from:
-        conditions.append("first_seen >= ?")
-        params.append(date_from)
-    if date_to:
-        conditions.append("first_seen <= ?")
-        params.append(date_to)
+
+    if posted_within:
+        _within_map = {
+            "today": "date('now')",
+            "3d": "date('now', '-3 days')",
+            "1w": "date('now', '-7 days')",
+            "1m": "date('now', '-1 month')",
+        }
+        if posted_within in _within_map:
+            conditions.append(f"first_seen >= {_within_map[posted_within]}")
+
+    if freshness:
+        from job_finder.utils.business_days import business_days_ago
+        cutoff = None
+        if freshness == "biz1":
+            cutoff = business_days_ago(1).isoformat()
+        elif freshness == "biz3":
+            cutoff = business_days_ago(3).isoformat()
+        if cutoff:
+            conditions.append("first_seen >= ?")
+            params.append(cutoff)
+
     if hide_stale:
         conditions.append("is_stale = 0")
 
@@ -623,151 +476,21 @@ def get_filtered_jobs(
     return [dict(row) for row in rows]
 
 
-def get_pipeline_events(conn: sqlite3.Connection, dedup_key: str) -> list[dict]:
-    """Return all pipeline events for a job, newest first."""
-    rows = conn.execute(
-        "SELECT id, job_id, from_status, to_status, timestamp, source, evidence "
-        "FROM pipeline_events WHERE job_id = ? ORDER BY timestamp DESC",
-        (dedup_key,),
-    ).fetchall()
-    return [dict(row) for row in rows]
+# ---------------------------------------------------------------------------
+# Re-exports for backward compatibility
+# ---------------------------------------------------------------------------
 
-
-def get_distinct_locations(conn: sqlite3.Connection) -> list[str]:
-    """Return distinct non-empty location values for filter dropdown."""
-    rows = conn.execute(
-        "SELECT DISTINCT location FROM jobs WHERE location != '' ORDER BY location"
-    ).fetchall()
-    return [row[0] for row in rows]
-
-
-def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
-    """Return distinct source names parsed from the JSON sources column."""
-    rows = conn.execute(
-        "SELECT DISTINCT sources FROM jobs WHERE sources != '[]'"
-    ).fetchall()
-    seen: set[str] = set()
-    for row in rows:
-        try:
-            for src in json.loads(row[0]):
-                seen.add(src)
-        except (json.JSONDecodeError, TypeError):
-            _log.warning("get_distinct_sources: corrupt sources JSON skipped: %r", row[0])
-    return sorted(seen)
-
-
-def get_recent_activity(conn: sqlite3.Connection, limit: int = 15) -> list[dict]:
-    """Return recent user_activity rows ordered newest-first.
-
-    Args:
-        conn: Open sqlite3 connection.
-        limit: Max number of rows to return.
-
-    Returns:
-        List of dicts with keys: id, action, entity_id, metadata, occurred_at.
-        Returns empty list if user_activity table does not exist (graceful
-        pre-migration handling, same pattern as get_recent_pipeline_events).
-    """
-    try:
-        rows = conn.execute(
-            "SELECT id, action, entity_id, metadata, occurred_at "
-            "FROM user_activity ORDER BY occurred_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [dict(row) for row in rows]
-    except sqlite3.OperationalError as exc:
-        # Gracefully handle missing table (pre-migration); re-raise other errors.
-        if "no such table" in str(exc).lower():
-            return []
-        raise
-
-
-def get_recent_pipeline_events(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
-    """Return recent pipeline status change events, newest first.
-
-    Joins with jobs to include job title and company for display.
-
-    Args:
-        conn: Open sqlite3 connection.
-        limit: Max number of events to return.
-
-    Returns:
-        List of dicts with: id, job_id, from_status, to_status, timestamp,
-        source, job_title, job_company.
-        Returns empty list if pipeline_events table does not exist.
-    """
-    try:
-        rows = conn.execute(
-            """SELECT pe.id, pe.job_id, pe.from_status, pe.to_status,
-                      pe.timestamp, pe.source,
-                      j.title AS job_title,
-                      j.company AS job_company
-               FROM pipeline_events pe
-               LEFT JOIN jobs j ON pe.job_id = j.dedup_key
-               ORDER BY pe.timestamp DESC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
-        return [dict(row) for row in rows]
-    except sqlite3.OperationalError as exc:
-        # Gracefully handle missing table (pre-migration); re-raise other errors.
-        if "no such table" in str(exc).lower():
-            return []
-        raise
-
-
-def get_pending_detections(conn: sqlite3.Connection) -> list[dict]:
-    """Return pending pipeline detections joined with job details.
-
-    Queries pipeline_detections WHERE status = 'pending' ordered by
-    created_at DESC. Joins with jobs table to include job title and company.
-
-    Args:
-        conn: Open sqlite3 connection.
-
-    Returns:
-        List of dicts with all detection fields plus job_title, job_company.
-        job_title and job_company are None if job_id is NULL or job not found.
-    """
-    rows = conn.execute(
-        """SELECT pd.id, pd.gmail_message_id, pd.detection_type, pd.job_id,
-                  pd.confidence_score, pd.matched_signals, pd.snippet,
-                  pd.email_subject, pd.email_from, pd.email_date,
-                  pd.status, pd.created_at, pd.resolved_at,
-                  j.title AS job_title,
-                  j.company AS job_company,
-                  j.pipeline_status AS job_pipeline_status
-           FROM pipeline_detections pd
-           LEFT JOIN jobs j ON pd.job_id = j.dedup_key
-           WHERE pd.status = 'pending'
-           ORDER BY pd.created_at DESC"""
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def resolve_detection(
-    conn: sqlite3.Connection,
-    detection_id: int,
-    resolution: str,
-) -> None:
-    """Update a pipeline detection's status to 'confirmed' or 'dismissed'.
-
-    Sets resolved_at to the current timestamp.
-
-    Args:
-        conn: Open sqlite3 connection.
-        detection_id: The detection's primary key.
-        resolution: Either 'confirmed' or 'dismissed'.
-    """
-    _VALID_RESOLUTIONS = ("confirmed", "dismissed")
-    if resolution not in _VALID_RESOLUTIONS:
-        raise ValueError(
-            f"Invalid resolution: {resolution!r}. "
-            f"Must be one of: {', '.join(_VALID_RESOLUTIONS)}."
-        )
-    now = utc_now_iso()
-    conn.execute(
-        "UPDATE pipeline_detections SET status = ?, resolved_at = ? WHERE id = ?",
-        (resolution, now, detection_id),
-    )
-    conn.commit()
+from job_finder.db_queries import (  # noqa: E402
+    get_dashboard_stats,
+    get_distinct_locations,
+    get_jobs_by_status,
+    get_pipeline_summary,
+    get_recent_activity,
+    get_recent_pipeline_events,
+    get_recent_runs,
+)
+from job_finder.db_pipeline import (  # noqa: E402
+    get_pending_detections,
+    get_pipeline_events,
+    resolve_detection,
+)

@@ -124,6 +124,10 @@ _WRONG_PAGE_SIGNATURES = [
     "perks + benefits",        # Built In company overview chrome
     "similar companies hiring",  # Built In company overview chrome
     "jobs at similar companies",  # Built In company overview chrome
+    # Eightfold/Phenom PCS ATS SPA shell: JS-rendered careers pages inject CSS
+    # theming config as inline JSON. The actual JD requires JS execution to render.
+    '"themeoptions"',          # Eightfold/PCS careers page SPA config JSON
+    '"vartheme"',              # Eightfold/PCS CSS variable theming config
 ]
 
 
@@ -503,7 +507,7 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
 
         # Lazy import with ImportError guard
         try:
-            from job_finder.web.ats_scanner import scan_lever, scan_greenhouse, scan_ashby
+            from job_finder.web.ats_platforms import scan_lever, scan_greenhouse, scan_ashby
         except ImportError:
             return {}
 

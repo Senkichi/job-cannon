@@ -129,7 +129,7 @@ def test_haiku_batch_fetch(migrated_db):
         patch.object(sr, "standalone_connection", _make_tracking_connection_factory(select_calls)),
         patch.object(sr, "anthropic") as mock_anthropic,
         patch.object(sr, "score_and_persist_haiku", return_value={"score": 7}),
-        patch.object(sr, "enrich_job", None),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
         patch.object(sr, "should_exclude", return_value=(False, "")),
         patch.object(sr, "load_scoring_profile", return_value={}),
     ):
@@ -162,7 +162,7 @@ def test_haiku_missing_key_skipped(migrated_db, caplog):
     with (
         patch.object(sr, "anthropic") as mock_anthropic,
         patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist),
-        patch.object(sr, "enrich_job", None),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
         patch.object(sr, "should_exclude", return_value=(False, "")),
         patch.object(sr, "load_scoring_profile", return_value={}),
         caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),
@@ -220,7 +220,7 @@ def test_sonnet_batch_fetch(migrated_db):
         patch.object(sr, "standalone_connection", _make_tracking_connection_factory(select_calls)),
         patch.object(sr, "anthropic") as mock_anthropic,
         patch.object(sr, "score_and_persist_sonnet", return_value={"sonnet_score": 85}),
-        patch.object(sr, "enrich_company_info", None),
+        patch.object(sr, "enrich_company_info", MagicMock(return_value=None)),
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "evaluate_job_sonnet", MagicMock()),
     ):
@@ -252,7 +252,7 @@ def test_sonnet_missing_key_skipped(migrated_db, caplog):
     with (
         patch.object(sr, "anthropic") as mock_anthropic,
         patch.object(sr, "score_and_persist_sonnet", side_effect=mock_persist),
-        patch.object(sr, "enrich_company_info", None),
+        patch.object(sr, "enrich_company_info", MagicMock(return_value=None)),
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "evaluate_job_sonnet", MagicMock()),
         caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),

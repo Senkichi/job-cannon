@@ -812,9 +812,10 @@ class TestSonnetEnrichment:
         mock_sonnet.assert_called_once()
         call_args = mock_sonnet.call_args
         fragments = call_args[0][0] if call_args[0] else call_args[1].get("fragments", {})
-        # Check that fragments contain DDG content
-        fragments_str = str(fragments)
-        assert "DDG" in fragments_str or "ddg" in fragments_str
+        # Assert on actual DDG snippet content, not just the dict key name
+        assert "DDG text about the role" in str(fragments), (
+            f"DDG snippet content must reach Sonnet, got fragments: {fragments}"
+        )
 
     def test_sonnet_checks_cost_gate(self, sparse_job_row, mock_anthropic_client, temp_db):
         """Sonnet enrichment checks cost_gate('sonnet') before calling API."""

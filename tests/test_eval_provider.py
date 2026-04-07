@@ -769,7 +769,8 @@ class TestPromptVariants:
             messages.append(msg)
         assert all(m == messages[0] for m in messages)
 
-    def test_unknown_variant_falls_back_to_default(self, prompt_inputs):
+    def test_unknown_variant_falls_back_to_fewshot_prompt(self, prompt_inputs):
+        """Unknown prompt variant falls back to the production fewshot prompt (_SYSTEM_PROMPT)."""
         job, profile, config = prompt_inputs
         system, _ = reconstruct_prompt(job, profile, config, prompt_variant="nonexistent")
         assert system == _SYSTEM_PROMPT

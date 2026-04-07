@@ -31,6 +31,7 @@ class TestPipelineStatuses:
             "applied",
             "archived",
             "rejected",
+            "dismissed",
         }
         missing = required - VALID_PIPELINE_STATUSES
         assert not missing, f"Missing required statuses: {missing}"
