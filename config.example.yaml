@@ -170,18 +170,39 @@ scoring:
 #     model: mistral-small-latest
 #     fallback: anthropic
 #
-# Example: Cascade through free providers before falling back to paid Anthropic
+# Example: Cascade through free providers before falling back to paid Anthropic.
 # Each provider is tried in order; exhausted/unavailable providers are skipped.
+# These tier settings affect ALL features using haiku/sonnet logical tiers,
+# not only job scoring — enrichment, resume generation, profile recommendations,
+# guideline merging, and batch jobs all route through the same cascade.
 # daily_limits is a sibling of tier configs (sonnet/haiku/opus), not nested inside them.
 #
 # providers:
-#   sonnet:
-#     provider: ollama
-#     model: qwen2.5:14b
+#   haiku:
+#     provider: groq
+#     model: llama-3.1-8b-instant
 #     fallback_chain:
+#       - provider: cerebras
+#         model: llama3.1-8b
+#       - provider: ollama
+#         model: qwen2.5:14b
+#       - provider: anthropic
+#         model: claude-haiku-4-5
+#   sonnet:
+#     provider: cerebras
+#     model: qwen-3-235b
+#     fallback_chain:
+#       - provider: groq
+#         model: llama-4-scout-17b-16e-instruct
+#       - provider: ollama
+#         model: qwen2.5:14b
 #       - provider: anthropic
 #         model: claude-sonnet-4-6
 #   daily_limits: {}
+#
+# Note: Groq (GROQ_API_KEY) and Cerebras (CEREBRAS_API_KEY) are real APIs with
+# their own rate limits and terms. They are zero-cost in this app's budget model
+# only — vendor billing still applies outside the app.
 
 # --- Output settings ---
 output:
