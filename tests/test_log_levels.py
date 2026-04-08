@@ -40,84 +40,79 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
 
-    def test_anthropic_not_installed_logs_at_debug(self, caplog):
-        """'anthropic package not installed' branch uses logger.debug not WARNING."""
-        # Source inspection: verify the run_ingestion elif branch uses logger.debug.
-        # This is a regression test — if anyone reverts it to logger.warning it fails.
-        import inspect
-        import job_finder.web.pipeline_runner as runner_module
+    def test_no_routable_provider_logs_at_debug(self, caplog):
+        """'No routable' provider message in scoring_runner uses logger.debug not WARNING.
 
-        source = inspect.getsource(runner_module.run_ingestion)
+        After the provider-agnostic refactor, scoring_runner owns the routability
+        check (pipeline_runner no longer gates on Anthropic availability).
+        """
+        import inspect
+        import job_finder.web.scoring_runner as runner_module
+
+        source = inspect.getsource(runner_module.run_haiku_scoring)
         lines = source.splitlines()
 
         for i, line in enumerate(lines):
-            if "anthropic package not installed" in line.lower():
+            if "no routable" in line.lower():
                 context = "\n".join(lines[max(0, i-3):i+1])
                 assert "logger.warning" not in context, (
-                    f"pipeline_runner 'anthropic package not installed' must not use logger.warning.\n"
+                    f"scoring_runner 'No routable' must not use logger.warning.\n"
                     f"Context:\n{context}"
                 )
                 assert "logger.debug" in context, (
-                    f"pipeline_runner 'anthropic package not installed' must use logger.debug.\n"
+                    f"scoring_runner 'No routable' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
                 return  # found and validated
 
-        # If the message text changed, fail explicitly
         raise AssertionError(
-            "Could not find 'anthropic package not installed' log message in "
-            "pipeline_runner.run_ingestion — was the message text changed?"
+            "Could not find 'No routable' log message in "
+            "scoring_runner.run_haiku_scoring — was the message text changed?"
         )
 
-    def test_anthropic_not_installed_caplog_integration(self, caplog):
-        """When anthropic is None and new jobs exist, run_ingestion emits DEBUG not WARNING."""
+    def test_no_routable_provider_caplog_integration(self, caplog):
+        """When no provider is routable and new jobs exist, scoring emits DEBUG not WARNING."""
         import job_finder.web.pipeline_runner as runner_module
+        import job_finder.web.scoring_runner as scoring_runner_module
         from job_finder.models import Job
 
-        original_anthropic = runner_module.anthropic
+        db_path, conn = _make_migrated_db()
+        conn.close()
+
+        config = {
+            "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
+            "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
+            "profile": {"target_titles": [], "target_locations": [],
+                        "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
+        }
+
+        fake_job = Job(
+            title="Fake Job", company="FakeCo", location="Remote",
+            source="test", source_url="http://example.com", source_id="x1",
+        )
 
         try:
-            runner_module.anthropic = None
-
-            db_path, conn = _make_migrated_db()
-            conn.close()
-
-            config = {
-                "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
-                "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
-                "profile": {"target_titles": [], "target_locations": [],
-                            "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
-            }
-
-            fake_job = Job(
-                title="Fake Job", company="FakeCo", location="Remote",
-                source="test", source_url="http://example.com", source_id="x1",
-            )
-
-            try:
-                with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]):
-                    with patch.object(runner_module, "_fetch_serpapi", return_value=[]):
-                        with patch.object(runner_module, "_check_budget_alert"):
-                            with caplog.at_level(logging.DEBUG, logger="job_finder.web.pipeline_runner"):
-                                runner_module.run_ingestion(db_path, config)
-            finally:
-                if os.path.exists(db_path):
-                    os.remove(db_path)
-
+            with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]), \
+                 patch.object(runner_module, "_fetch_serpapi", return_value=[]), \
+                 patch.object(runner_module, "_check_budget_alert"), \
+                 patch.object(scoring_runner_module, "tier_has_configured_provider", return_value=False):
+                with caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"):
+                    runner_module.run_ingestion(db_path, config)
         finally:
-            runner_module.anthropic = original_anthropic
+            if os.path.exists(db_path):
+                os.remove(db_path)
 
         debug_records = [
             r for r in caplog.records
-            if r.levelno == logging.DEBUG and "anthropic" in r.message.lower()
+            if r.levelno == logging.DEBUG and "routable" in r.message.lower()
         ]
         warning_records = [
             r for r in caplog.records
-            if r.levelno == logging.WARNING and "anthropic" in r.message.lower()
+            if r.levelno == logging.WARNING and "routable" in r.message.lower()
         ]
-        assert debug_records, "Expected a DEBUG record mentioning 'anthropic' — none found"
+        assert debug_records, "Expected a DEBUG record mentioning 'routable' — none found"
         assert not warning_records, (
-            f"anthropic-not-installed message should not be WARNING; found: {warning_records}"
+            f"no-routable-provider message should not be WARNING; found: {warning_records}"
         )
 
     def test_zero_job_email_routed_to_activity_feed_logs_at_debug(self, caplog):
