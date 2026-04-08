@@ -187,7 +187,7 @@ class TestGuidelinesImport:
         assert b"Please enter guidelines text" in resp.data
 
     def test_preview_returns_diff_html(self, settings_app):
-        """POST /settings/preview-guidelines-merge returns diff HTML with stashed JSON."""
+        """POST /settings/preview-guidelines-merge exercises the real merge helper."""
         merged_result = {
             "bullet_style": "dashes",
             "verb_tense": "past",
@@ -196,17 +196,30 @@ class TestGuidelinesImport:
             "date_format": "MMM YYYY",
         }
         client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.guidelines.merge_guidelines_into_guide") as mock_merge:
-            mock_merge.return_value = merged_result
-            with patch("job_finder.web.blueprints.guidelines.anthropic.Anthropic"):
-                resp = client.post(
-                    "/settings/preview-guidelines-merge",
-                    data={"guidelines_text": "Use dashes for bullets"},
-                )
+        with patch("job_finder.web.blueprints.guidelines.tier_has_configured_provider", return_value=True), \
+             patch("job_finder.web.blueprints.guidelines.load_style_guide", return_value={}), \
+             patch("job_finder.web.resume_style_guide.call_model") as mock_call_model:
+            mock_call_model.return_value.data = merged_result
+            resp = client.post(
+                "/settings/preview-guidelines-merge",
+                data={"guidelines_text": "Use dashes for bullets"},
+            )
         assert resp.status_code == 200
         assert b"merged_guide_json" in resp.data
         assert b"guidelines-diff-container" in resp.data
         assert b"apply-guidelines-merge" in resp.data
+        assert b"Preview failed" not in resp.data
+
+    def test_preview_returns_tier_unavailable_fragment(self, settings_app):
+        """POST /settings/preview-guidelines-merge returns explicit Sonnet tier unavailability."""
+        client = settings_app.test_client()
+        with patch("job_finder.web.blueprints.guidelines.tier_has_configured_provider", return_value=False):
+            resp = client.post(
+                "/settings/preview-guidelines-merge",
+                data={"guidelines_text": "Use dashes for bullets"},
+            )
+        assert resp.status_code == 200
+        assert b"Sonnet tier unavailable" in resp.data
 
     def test_apply_saves_merged_guide(self, settings_app):
         """POST /settings/apply-guidelines-merge saves the stashed dict and returns success."""

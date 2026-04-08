@@ -951,7 +951,7 @@ def test_supported_providers_all_wired_in_make_adapter():
     for provider_name in _SUPPORTED_PROVIDERS:
         with patch.dict("os.environ", env_vars, clear=False):
             try:
-                _make_adapter(provider_name, client=mock_client, conn=None, config={})
+                adapter = _make_adapter(provider_name, client=mock_client, conn=None, config={})
             except ValueError as exc:
                 if "Unknown provider" in str(exc):
                     pytest.fail(
@@ -961,10 +961,17 @@ def test_supported_providers_all_wired_in_make_adapter():
                 # Other ValueError (e.g. missing API key for a provider not covered
                 # in env_vars) is acceptable — the provider IS wired in but has a
                 # constructor-time prerequisite we didn't mock.
+                continue
             except (RuntimeError, ImportError):
                 # Constructor-time readiness check (e.g. Ollama unreachable) — provider
                 # IS wired in, just not locally available.
-                pass
+                continue
+            # If we reach here, _make_adapter returned without error —
+            # adapter must not be None (would mean missing dispatch branch).
+            assert adapter is not None, (
+                f"{provider_name!r} is in _SUPPORTED_PROVIDERS and _make_adapter() "
+                f"did not raise, but returned None — missing dispatch branch"
+            )
 
 
 # ---------------------------------------------------------------------------

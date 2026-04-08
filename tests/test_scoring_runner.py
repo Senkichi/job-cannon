@@ -287,3 +287,79 @@ def test_sonnet_empty_keys(migrated_db):
 
     assert result == 0
     assert not db_touched, "DB should not be accessed for empty queue"
+
+
+# ---------------------------------------------------------------------------
+# Provider-agnostic routing tests (audit fix — client=None + free providers)
+# ---------------------------------------------------------------------------
+
+
+def test_haiku_scoring_with_free_provider_no_anthropic(migrated_db):
+    """Haiku scoring proceeds with client=None when a free provider is routable.
+
+    Regression test: anthropic module is None (package absent) but
+    tier_has_configured_provider returns True (e.g. Groq configured).
+    Must not raise AttributeError on None.Anthropic().
+    """
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "free-haiku-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    with (
+        patch.object(sr, "anthropic", None),
+        patch.object(sr, "tier_has_configured_provider", return_value=True),
+        patch.object(sr, "score_and_persist_haiku", return_value={"score": 7}),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
+        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "load_scoring_profile", return_value={}),
+    ):
+        sonnet_queue, haiku_scored = sr.run_haiku_scoring(
+            ["free-haiku-1"], _TEST_CONFIG, db_path,
+        )
+
+    assert haiku_scored >= 1, "Haiku scoring must proceed via free provider"
+
+
+def test_sonnet_evaluation_with_free_provider_no_anthropic(migrated_db):
+    """Sonnet evaluation proceeds with client=None when a free provider is routable."""
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "free-sonnet-1", jd_full=_LONG_JD)
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    with (
+        patch.object(sr, "anthropic", None),
+        patch.object(sr, "tier_has_configured_provider", return_value=True),
+        patch.object(sr, "score_and_persist_sonnet", return_value={"sonnet_score": 85}),
+        patch.object(sr, "enrich_company_info", MagicMock(return_value=None)),
+        patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "evaluate_job_sonnet", MagicMock()),
+    ):
+        evaluated = sr.run_sonnet_evaluation(
+            ["free-sonnet-1"], _TEST_CONFIG, db_path,
+        )
+
+    assert evaluated >= 1, "Sonnet evaluation must proceed via free provider"
+
+
+def test_haiku_scoring_no_routable_provider_returns_zero(migrated_db):
+    """Haiku scoring returns ([], 0) when no provider is routable at all."""
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "no-route-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    with (
+        patch.object(sr, "anthropic", None),
+        patch.object(sr, "tier_has_configured_provider", return_value=False),
+    ):
+        sonnet_queue, haiku_scored = sr.run_haiku_scoring(
+            ["no-route-1"], _TEST_CONFIG, db_path,
+        )
+
+    assert sonnet_queue == []
+    assert haiku_scored == 0

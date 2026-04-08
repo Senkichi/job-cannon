@@ -850,6 +850,129 @@ class TestSonnetEnrichment:
         # Sonnet should NOT be called when tier is not routable
         mock_sonnet.assert_not_called()
 
+    def test_sonnet_runs_with_client_none_when_tier_routable(self, sparse_job_row):
+        """Sonnet enrichment proceeds with anthropic_client=None when a free provider is routable."""
+        from job_finder.web.data_enricher import enrich_job
+
+        sparse_job_row["source_urls"] = '[]'
+        sparse_job_row["company_id"] = None
+
+        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
+             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
+             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_fetch.return_value = (None, None)
+            mock_haiku.return_value = {}
+            mock_serp.return_value = (None, [])
+            mock_sonnet.return_value = {"jd_full": _LONG_JD}
+
+            result = enrich_job(
+                sparse_job_row,
+                serpapi_key="test-key",
+                anthropic_client=None,  # NOT a MagicMock — truly absent
+                conn=MagicMock(),
+            )
+
+        mock_sonnet.assert_called_once()
+        assert result.get("jd_full") == _LONG_JD
+
+    def test_sonnet_cascade_exhausted_maps_to_serpapi(self, sparse_job_row, temp_db):
+        """ProviderCascadeExhaustedError from Sonnet maps to enrichment_tier='serpapi'."""
+        from job_finder.web.data_enricher import enrich_job
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
+        sparse_job_row["source_urls"] = '[]'
+        sparse_job_row["company_id"] = None
+
+        temp_db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (sparse_job_row["dedup_key"], sparse_job_row["title"],
+             sparse_job_row["company"], sparse_job_row["location"],
+             sparse_job_row["source_urls"]),
+        )
+        temp_db.commit()
+
+        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
+             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
+             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_fetch.return_value = (None, None)
+            mock_haiku.return_value = {}
+            mock_serp.return_value = (None, [])
+            mock_sonnet.side_effect = ProviderCascadeExhaustedError("all exhausted")
+
+            enrich_job(
+                sparse_job_row,
+                serpapi_key="test-key",
+                anthropic_client=None,
+                conn=temp_db,
+            )
+
+        row = temp_db.execute(
+            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+        assert row["enrichment_tier"] == "serpapi", (
+            f"Cascade exhaustion must map to 'serpapi' (retryable), got {row['enrichment_tier']!r}"
+        )
+
+    def test_sonnet_non_routing_failure_maps_to_exhausted(self, sparse_job_row, temp_db):
+        """Non-routing Sonnet failure (e.g. JSONDecodeError) maps to enrichment_tier='exhausted'."""
+        import json as _json
+        from job_finder.web.data_enricher import enrich_job
+
+        sparse_job_row["source_urls"] = '[]'
+        sparse_job_row["company_id"] = None
+
+        temp_db.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (sparse_job_row["dedup_key"], sparse_job_row["title"],
+             sparse_job_row["company"], sparse_job_row["location"],
+             sparse_job_row["source_urls"]),
+        )
+        temp_db.commit()
+
+        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
+             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
+             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
+             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
+            mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_fetch.return_value = (None, None)
+            mock_haiku.return_value = {}
+            mock_serp.return_value = (None, [])
+            mock_sonnet.side_effect = _json.JSONDecodeError("bad json", "", 0)
+
+            enrich_job(
+                sparse_job_row,
+                serpapi_key="test-key",
+                anthropic_client=None,
+                conn=temp_db,
+            )
+
+        row = temp_db.execute(
+            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
+            (sparse_job_row["dedup_key"],),
+        ).fetchone()
+        assert row["enrichment_tier"] == "exhausted", (
+            f"Non-routing failure must map to 'exhausted', got {row['enrichment_tier']!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests for enrichment_tier persistence (Phase 10 — NEW)

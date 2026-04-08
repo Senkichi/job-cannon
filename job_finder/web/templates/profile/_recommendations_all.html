@@ -1,3 +1,8 @@
+{% if error_message %}
+<p class="text-xs text-red-400">{{ error_message }}</p>
+{% elif not recommendations %}
+<p class="text-xs text-slate-500 italic">No recommendations generated.</p>
+{% endif %}
 {% for rec in recommendations %}
 <div class="mt-2 p-3 bg-slate-800/50 border border-slate-700 rounded-lg" id="batch-rec-{{ loop.index0 }}">
   <div class="flex items-center gap-2 mb-1">
@@ -27,6 +32,3 @@
   {% endif %}
 </div>
 {% endfor %}
-{% if not recommendations %}
-<p class="text-xs text-slate-500 italic">No recommendations generated.</p>
-{% endif %}

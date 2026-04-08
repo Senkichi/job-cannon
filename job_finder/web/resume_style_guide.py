@@ -222,7 +222,6 @@ def merge_guidelines_into_guide(
     guidelines_text: str,
     existing_guide: dict,
     client,
-    model: str,
     conn: sqlite3.Connection,
     config: dict,
     mode: str = "populate_new",
@@ -234,7 +233,6 @@ def merge_guidelines_into_guide(
         guidelines_text: Raw text of the resume generation guidelines document.
         existing_guide: Current style guide dict (may be empty).
         client: Anthropic client instance (injected for testability).
-        model: Full model identifier, e.g. "claude-sonnet-4-6".
         conn: Open SQLite connection for cost recording.
         config: Application YAML config dict.
         mode: Merge mode — "populate_new" only fills missing/empty fields;
@@ -334,7 +332,6 @@ def migrate_style_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
             client=client,
-            model="",
             conn=conn,
             config=config,
             mode="populate_new",
