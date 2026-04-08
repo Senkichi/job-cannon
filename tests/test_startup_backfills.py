@@ -97,8 +97,12 @@ def test_description_reformat_skipped_in_testing():
 # ---------------------------------------------------------------------------
 
 
-def test_description_reformat_skipped_without_anthropic():
-    """run_description_reformat_once does not spawn a thread when anthropic is not installed."""
+def test_description_reformat_launches_without_anthropic():
+    """run_description_reformat_once still spawns a thread even without anthropic.
+
+    After the provider-agnostic refactor, the thread always launches —
+    description_reformatter.py self-gates on tier_has_configured_provider("haiku").
+    """
     started: list = []
 
     class _SyncThread:
@@ -108,12 +112,12 @@ def test_description_reformat_skipped_without_anthropic():
         def start(self):
             started.append(True)
 
-    # Simulate anthropic not being importable
+    # Simulate anthropic not being importable — thread still launches
     with patch("threading.Thread", _SyncThread), \
          patch.dict("sys.modules", {"anthropic": None}):
         run_description_reformat_once("/fake/path.db", {})
 
-    assert started == [], "No thread should start without anthropic installed"
+    assert started == [True], "Thread should start — reformatter self-gates on routability"
 
 
 # ---------------------------------------------------------------------------
