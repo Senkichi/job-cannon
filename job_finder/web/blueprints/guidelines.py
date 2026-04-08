@@ -12,7 +12,12 @@ except ImportError:
 
 from flask import Blueprint, current_app, request
 
+from job_finder.web.ai_route_responses import (
+    render_htmx_error_fragment,
+    tier_unavailable_message,
+)
 from job_finder.web.db_helpers import get_db
+from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.resume_style_guide import (
     FIELD_LABELS,
     STYLE_GUIDE_SCHEMA,
@@ -94,6 +99,12 @@ def preview_guidelines_merge():
                 client = anthropic.Anthropic()
             except Exception:
                 pass
+
+        if not tier_has_configured_provider("sonnet", config, client, conn):
+            return render_htmx_error_fragment(
+                "guidelines-diff-container",
+                tier_unavailable_message("sonnet", "Guidelines preview"),
+            )
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
@@ -193,11 +204,9 @@ def preview_guidelines_merge():
 
     except Exception as exc:
         logger.warning("preview_guidelines_merge: %s", exc, exc_info=True)
-        return (
-            f'<div id="guidelines-diff-container" class="text-xs text-red-400">'
-            f"Preview failed: {exc}. Check logs for details."
-            f"</div>",
-            200,
+        return render_htmx_error_fragment(
+            "guidelines-diff-container",
+            f"Preview failed: {exc}. Check logs for details.",
         )
 
 

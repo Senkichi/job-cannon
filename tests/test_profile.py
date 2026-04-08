@@ -1310,6 +1310,11 @@ class TestProfileRecommendations:
         import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
         monkeypatch.setattr(
             profile_recs_mod,
+            "tier_has_configured_provider",
+            lambda *args, **kwargs: True,
+        )
+        monkeypatch.setattr(
+            profile_recs_mod,
             "call_model",
             lambda **kwargs: _make_model_result(_CANNED_REC_RESULT),
         )
@@ -1332,6 +1337,11 @@ class TestProfileRecommendations:
         """POST /profile/recommendations-all returns batch guidance for all warnings."""
         import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
 
+        monkeypatch.setattr(
+            profile_recs_mod,
+            "tier_has_configured_provider",
+            lambda *args, **kwargs: True,
+        )
         batch_result = {
             "recommendations": [
                 {
@@ -1357,6 +1367,38 @@ class TestProfileRecommendations:
         html = resp.data.decode()
         assert "Add quantified achievements for TestCo." in html
         assert "Tag some skills for TestCo." in html
+
+    def test_single_recommendation_route_shows_tier_unavailable(self, rec_client, monkeypatch):
+        """GET /profile/recommendation returns explicit Haiku tier-unavailable guidance."""
+        import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
+
+        monkeypatch.setattr(
+            profile_recs_mod,
+            "tier_has_configured_provider",
+            lambda *args, **kwargs: False,
+        )
+
+        resp = rec_client.get(
+            "/profile/recommendation?field=skills&message=Missing%20skill"
+        )
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Haiku tier unavailable" in html
+
+    def test_batch_recommendations_route_shows_tier_unavailable(self, rec_client, monkeypatch):
+        """POST /profile/recommendations-all returns explicit Haiku tier-unavailable guidance."""
+        import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
+
+        monkeypatch.setattr(
+            profile_recs_mod,
+            "tier_has_configured_provider",
+            lambda *args, **kwargs: False,
+        )
+
+        resp = rec_client.post("/profile/recommendations-all")
+        assert resp.status_code == 200
+        html = resp.data.decode()
+        assert "Haiku tier unavailable" in html
 
     def test_apply_fix_add_skill(self, rec_app, tmp_path, monkeypatch):
         """POST /profile/apply-fix with add_skill appends the skill to the profile."""

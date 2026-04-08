@@ -23,7 +23,9 @@ from flask import (
     url_for,
 )
 
+from job_finder.web.ai_route_responses import tier_unavailable_message
 from job_finder.web.model_provider import call_model
+from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
 from job_finder.web.blueprints.profile import _get_all_skills
@@ -109,6 +111,15 @@ def recommendation():
             except Exception:
                 pass
 
+        if not tier_has_configured_provider("haiku", config, client, conn):
+            return render_template(
+                "profile/_recommendation.html",
+                field=field,
+                guidance=tier_unavailable_message("haiku", "Recommendations"),
+                actions=[],
+                error=True,
+            )
+
         system = (
             "You are a profile improvement advisor. Given a profile validation warning "
             "and the relevant profile data, suggest how to fix the warning. Return structured "
@@ -193,6 +204,14 @@ def recommendations_all():
             except Exception:
                 pass
 
+        if not tier_has_configured_provider("haiku", config, client, conn):
+            return render_template(
+                "profile/_recommendations_all.html",
+                recommendations=[],
+                warnings=warnings,
+                error_message=tier_unavailable_message("haiku", "Recommendations"),
+            )
+
         system = (
             "You are a profile improvement advisor. Given a set of profile validation warnings "
             "and the relevant profile data, suggest how to fix each warning. Return structured "
@@ -236,6 +255,7 @@ def recommendations_all():
             "profile/_recommendations_all.html",
             recommendations=recommendations,
             warnings=warnings,
+            error_message=None,
         )
 
     except Exception as exc:
@@ -244,6 +264,7 @@ def recommendations_all():
             "profile/_recommendations_all.html",
             recommendations=[],
             warnings=[],
+            error_message="Could not generate recommendations. Please try again.",
         )
 
 

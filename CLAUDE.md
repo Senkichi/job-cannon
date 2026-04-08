@@ -22,9 +22,9 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 uv run python run.py                              # Flask dev server on localhost:5000
 
 # Tests
-uv run pytest tests/                              # All tests (1359 passing)
-uv run pytest tests/test_pipeline_detector.py -v  # Specific file
-uv run pytest -x                                  # Stop on first failure
+uv run --active pytest tests/                              # All tests (1359 passing)
+uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
+uv run --active pytest -x                                  # Stop on first failure
 
 # Dependencies
 uv pip install -r requirements.txt
@@ -128,12 +128,6 @@ When verifying phase completion or running `/gsd:verify-work`, self-check everyt
 - Subjective UX quality ("is this intuitive?")
 
 **Use these agents/skills proactively at the right stages:**
-- `arch-reviewer` — when implementing features or making code changes, check against .planning/ docs for anti-patterns and boundary violations
-- `flask-template-auditor` — after editing any .html template or blueprint route
-- `htmx-reviewer` — when modifying templates or hx-* attributes
-- `gsd-integration-checker` — during verification, check cross-phase E2E flows
-- `gsd-nyquist-auditor` — during verification, fill test coverage gaps
-- `/brainstorming` — BEFORE any creative work (new features, components, behavior changes)
 - `/systematic-debugging` — when encountering any bug or test failure, BEFORE proposing fixes
 
 ## Custom Agents, Skills, and Hooks

@@ -200,7 +200,7 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
 
     except Exception as e:
         logger.warning("_compare_conflicts: failed to compare conflicts: %s", e)
-        return []
+        return None
 
 
 @resume_review_bp.route("/review/<int:upload_id>", strict_slashes=False)
@@ -234,10 +234,12 @@ def conflict_review(upload_id: int):
     config = current_app.config.get("JF_CONFIG", {})
 
     conflicts = _compare_conflicts(row["raw_text"], profile, conn, config)
+    ai_unavailable = conflicts is None
 
     return render_template(
         "profile/conflict_review.html",
-        conflicts=conflicts,
+        conflicts=conflicts or [],
+        ai_unavailable=ai_unavailable,
         upload_id=upload_id,
         upload=row,
     )
