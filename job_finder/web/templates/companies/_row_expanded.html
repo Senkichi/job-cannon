@@ -165,4 +165,25 @@
     </div>
   </div>
 
+  <!-- Company research section -->
+  {% if research and research.status in ('done', 'error') %}
+  <div class="px-4 py-3 border-t border-slate-700">
+    {% include "companies/_research_section.html" %}
+  </div>
+  {% else %}
+  <div class="px-4 py-3 border-t border-slate-700">
+    <button type="button"
+            hx-post="/companies/{{ company.id }}/research"
+            hx-target="this"
+            hx-swap="outerHTML"
+            hx-disable-elt="this"
+            class="px-3 py-1.5 bg-teal-700 hover:bg-teal-600 text-white text-xs rounded transition-colors disabled:opacity-50">
+      Research Company
+      <span class="htmx-indicator ml-1 inline-flex items-center gap-1">
+        <span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+      </span>
+    </button>
+  </div>
+  {% endif %}
+
 </div>

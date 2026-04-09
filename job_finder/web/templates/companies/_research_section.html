@@ -1,0 +1,14 @@
+{# Final research display — shown for done and error states. #}
+{% if research.status == 'error' %}
+<div class="bg-red-900/30 border border-red-700/50 rounded px-3 py-2 text-xs text-red-300">
+  Research failed: {{ research.error_msg or 'Unknown error' }}
+</div>
+{% elif research.status == 'done' %}
+<div class="bg-teal-900/30 border border-teal-700/50 rounded px-3 py-2 text-xs">
+  <div class="text-teal-400 font-semibold mb-1">Company Research — {{ company.name }}</div>
+  <div class="text-slate-300 leading-relaxed whitespace-pre-line">{{ research.research_json }}</div>
+  {% if research.cost_usd %}
+  <div class="text-slate-600 mt-1">Cost: ${{ "%.4f" | format(research.cost_usd) }}</div>
+  {% endif %}
+</div>
+{% endif %}
