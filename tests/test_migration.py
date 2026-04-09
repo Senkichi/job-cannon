@@ -415,10 +415,59 @@ def test_migration_count_is_thirteen():
     Migration 24 adds index on email_parse_log.processed_at for dedup query.
     Migration 25 cleans up Eightfold/PCS SPA shell garbage from jd_full.
     Migration 26 adds enrichment retry columns to companies table.
+    Migration 27 adds career-ops scoring metadata columns (expiry_status, eval_blocks,
+    job_archetype) to jobs table.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 26
+    assert len(MIGRATIONS) == 27
+
+
+class TestMigration27:
+    """Tests for Migration 27 (career-ops scoring metadata columns)."""
+
+    def test_migration27_adds_expiry_status(self, tmp_db_path):
+        """Migration 27 adds expiry_status column to jobs table."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "expiry_status" in cols, "expiry_status column missing from jobs"
+
+    def test_migration27_adds_eval_blocks(self, tmp_db_path):
+        """Migration 27 adds eval_blocks column to jobs table."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "eval_blocks" in cols, "eval_blocks column missing from jobs"
+
+    def test_migration27_adds_job_archetype(self, tmp_db_path):
+        """Migration 27 adds job_archetype column to jobs table."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "job_archetype" in cols, "job_archetype column missing from jobs"
+
+    def test_migration27_expiry_status_default_null(self, tmp_db_path):
+        """expiry_status defaults to NULL for existing rows."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            """INSERT INTO jobs
+                (dedup_key, title, company, location, first_seen, last_seen)
+            VALUES ('test|mig27', 'Test Job', 'Test Co', 'Remote',
+                    '2026-04-01', '2026-04-01')"""
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT expiry_status, eval_blocks, job_archetype FROM jobs WHERE dedup_key = 'test|mig27'"
+        ).fetchone()
+        conn.close()
+        assert row[0] is None, f"Expected expiry_status=NULL, got: {row[0]}"
+        assert row[1] is None, f"Expected eval_blocks=NULL, got: {row[1]}"
+        assert row[2] is None, f"Expected job_archetype=NULL, got: {row[2]}"
 
 
 class TestMigration13:
@@ -1124,5 +1173,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 26 entries (updated for Migration 26 enrichment retry columns)."""
-        assert len(MIGRATIONS) == 26
+        """MIGRATIONS list has exactly 27 entries (updated for Migration 27 career-ops columns)."""
+        assert len(MIGRATIONS) == 27

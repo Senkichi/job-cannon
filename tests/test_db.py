@@ -329,3 +329,129 @@ class TestProviderAttribution:
         result = get_job(migrated_conn, "acme|data-scientist")
         assert result is not None
         assert result["scoring_provider"] == "gemini"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Career-ops persistence helpers (Migration 27)
+# ---------------------------------------------------------------------------
+
+
+class TestEvalBlocksPersistence:
+    """Tests for eval_blocks parameter on persist_sonnet_score."""
+
+    def test_persist_sonnet_score_writes_eval_blocks(self, migrated_conn):
+        """persist_sonnet_score with eval_blocks= writes JSON to eval_blocks column."""
+        from job_finder.db import persist_sonnet_score, get_job
+        _insert_job(migrated_conn, "acme|eval-blocks-test")
+        eval_blocks_json = '[{"criterion": "Python expertise", "score": 8, "rationale": "Strong match"}]'
+        persist_sonnet_score(
+            migrated_conn, "acme|eval-blocks-test", 75.0, '{"strengths":[]}',
+            eval_blocks=eval_blocks_json,
+        )
+        result = get_job(migrated_conn, "acme|eval-blocks-test")
+        assert result is not None
+        assert result["eval_blocks"] == eval_blocks_json
+
+    def test_persist_sonnet_score_eval_blocks_defaults_null(self, migrated_conn):
+        """persist_sonnet_score without eval_blocks= leaves eval_blocks NULL."""
+        from job_finder.db import persist_sonnet_score, get_job
+        _insert_job(migrated_conn, "acme|no-eval-blocks")
+        persist_sonnet_score(
+            migrated_conn, "acme|no-eval-blocks", 60.0, '{"strengths":[]}'
+        )
+        result = get_job(migrated_conn, "acme|no-eval-blocks")
+        assert result is not None
+        assert result["eval_blocks"] is None
+
+    def test_persist_sonnet_score_eval_blocks_with_provider(self, migrated_conn):
+        """persist_sonnet_score with both eval_blocks and provider writes both."""
+        from job_finder.db import persist_sonnet_score, get_job
+        _insert_job(migrated_conn, "acme|eval-blocks-provider")
+        persist_sonnet_score(
+            migrated_conn, "acme|eval-blocks-provider", 82.0, '{"strengths":[]}',
+            provider="ollama",
+            eval_blocks='[{"criterion": "test"}]',
+        )
+        result = get_job(migrated_conn, "acme|eval-blocks-provider")
+        assert result is not None
+        assert result["scoring_provider"] == "ollama"
+        assert result["eval_blocks"] == '[{"criterion": "test"}]'
+
+
+class TestPersistJobExpiryState:
+    """Tests for persist_job_expiry_state helper."""
+
+    def test_writes_expiry_status_and_checked_at(self, migrated_conn):
+        """persist_job_expiry_state writes expiry_status and expiry_checked_at atomically."""
+        from job_finder.db import persist_job_expiry_state, get_job
+        _insert_job(migrated_conn, "acme|expiry-test")
+        persist_job_expiry_state(
+            migrated_conn, "acme|expiry-test", "expired", "2026-04-09T12:00:00Z"
+        )
+        result = get_job(migrated_conn, "acme|expiry-test")
+        assert result is not None
+        assert result["expiry_status"] == "expired"
+        assert result["expiry_checked_at"] == "2026-04-09T12:00:00Z"
+
+    def test_writes_live_status(self, migrated_conn):
+        """persist_job_expiry_state persists 'live' status."""
+        from job_finder.db import persist_job_expiry_state, get_job
+        _insert_job(migrated_conn, "acme|live-test")
+        persist_job_expiry_state(
+            migrated_conn, "acme|live-test", "live", "2026-04-09T12:00:00Z"
+        )
+        result = get_job(migrated_conn, "acme|live-test")
+        assert result["expiry_status"] == "live"
+
+    def test_writes_inconclusive_status(self, migrated_conn):
+        """persist_job_expiry_state persists 'inconclusive' status."""
+        from job_finder.db import persist_job_expiry_state, get_job
+        _insert_job(migrated_conn, "acme|inconclusive-test")
+        persist_job_expiry_state(
+            migrated_conn, "acme|inconclusive-test", "inconclusive", "2026-04-09T12:00:00Z"
+        )
+        result = get_job(migrated_conn, "acme|inconclusive-test")
+        assert result["expiry_status"] == "inconclusive"
+
+
+class TestPersistJobArchetype:
+    """Tests for persist_job_archetype helper."""
+
+    def test_writes_job_archetype(self, migrated_conn):
+        """persist_job_archetype writes job_archetype to jobs table."""
+        from job_finder.db import persist_job_archetype, get_job
+        _insert_job(migrated_conn, "acme|archetype-test")
+        persist_job_archetype(migrated_conn, "acme|archetype-test", "platform_engineering")
+        result = get_job(migrated_conn, "acme|archetype-test")
+        assert result is not None
+        assert result["job_archetype"] == "platform_engineering"
+
+    def test_overwrites_existing_archetype(self, migrated_conn):
+        """persist_job_archetype overwrites a previously set archetype."""
+        from job_finder.db import persist_job_archetype, get_job
+        _insert_job(migrated_conn, "acme|archetype-overwrite")
+        persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "ml_engineering")
+        persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "analytics_lead")
+        result = get_job(migrated_conn, "acme|archetype-overwrite")
+        assert result["job_archetype"] == "analytics_lead"
+
+    def test_job_archetype_in_jobs_all_columns(self, migrated_conn):
+        """get_job() returns job_archetype — confirms JOBS_ALL_COLUMNS includes it."""
+        from job_finder.db import persist_job_archetype, get_job
+        _insert_job(migrated_conn, "acme|archetype-columns-test")
+        persist_job_archetype(migrated_conn, "acme|archetype-columns-test", "platform_engineering")
+        result = get_job(migrated_conn, "acme|archetype-columns-test")
+        assert "job_archetype" in result
+        assert result["job_archetype"] == "platform_engineering"
+
+
+class TestOpusScoreInAllColumns:
+    """Confirm JOBS_ALL_COLUMNS includes opus_score (pre-existing omission fix)."""
+
+    def test_opus_score_in_get_job(self, migrated_conn):
+        """get_job() returns opus_score column."""
+        from job_finder.db import get_job
+        _insert_job(migrated_conn, "acme|opus-score-test")
+        result = get_job(migrated_conn, "acme|opus-score-test")
+        assert result is not None
+        assert "opus_score" in result
