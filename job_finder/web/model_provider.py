@@ -334,7 +334,6 @@ def _make_adapter(
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
     from job_finder.web.providers.cerebras_provider import CerebrasProvider
     from job_finder.web.providers.cohere_provider import CohereProvider
-    from job_finder.web.providers.gemini_provider import GeminiProvider
     from job_finder.web.providers.groq_provider import GroqProvider
     from job_finder.web.providers.mistral_provider import MistralProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
@@ -350,6 +349,7 @@ def _make_adapter(
     if provider_name == "cohere":
         return CohereProvider(config=config)
     if provider_name == "gemini":
+        from job_finder.web.providers.gemini_provider import GeminiProvider
         return GeminiProvider(config=config)
     if provider_name == "groq":
         return GroqProvider(config=config)
