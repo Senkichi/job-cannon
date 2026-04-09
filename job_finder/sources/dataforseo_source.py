@@ -321,11 +321,22 @@ class DataForSEOSource:
 
     def _parse_item(self, item: dict) -> Optional[Job]:
         """Parse a single google_jobs_item dict into a Job. Returns None if filtered."""
+        from job_finder.web.ats_company import classify_company_name
+
         title = item.get("title", "")
         company = item.get("employer_name", "")
 
         if not title or not company:
             return None
+
+        decision = classify_company_name(company)
+        if decision.action == "reject":
+            logger.info(
+                "DataForSEO: skipping '%s' — company '%s' rejected (%s)",
+                title, company[:60], decision.reason,
+            )
+            return None
+        # Keep the original company name — jobs.company is the raw source-of-truth.
 
         location = item.get("location", "")
         source_url = item.get("source_url", "")

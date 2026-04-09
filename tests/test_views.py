@@ -693,6 +693,11 @@ def unscored_client(app_with_unscored_jobs):
 
 
 class TestBatchScoreHaikuStart:
+    @pytest.fixture(autouse=True)
+    def _mock_tier_available(self, monkeypatch):
+        import job_finder.web.blueprints.batch_scoring as bs_mod
+        monkeypatch.setattr(bs_mod, "tier_has_configured_provider", lambda *a, **kw: True)
+
     def test_haiku_start_returns_progress_fragment_when_unscored_exist(
         self, unscored_client
     ):
@@ -740,8 +745,24 @@ class TestBatchScoreHaikuStart:
         assert session["session_type"] == "haiku"
         assert session["status"] in ("running", "done", "cancelled")
 
+    def test_haiku_start_returns_error_when_tier_unavailable(self, unscored_client, monkeypatch):
+        """POST /dashboard/batch-score/haiku/start returns error fragment when no provider configured."""
+        import job_finder.web.blueprints.batch_scoring as bs_mod
+        monkeypatch.setattr(bs_mod, "tier_has_configured_provider", lambda *a, **kw: False)
+
+        response = unscored_client.post("/dashboard/batch-score/haiku/start")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "Haiku tier unavailable" in data
+        assert "hx-trigger" not in data  # no polling on error
+
 
 class TestBatchScoreSonnetStart:
+    @pytest.fixture(autouse=True)
+    def _mock_tier_available(self, monkeypatch):
+        import job_finder.web.blueprints.batch_scoring as bs_mod
+        monkeypatch.setattr(bs_mod, "tier_has_configured_provider", lambda *a, **kw: True)
+
     def test_sonnet_start_returns_progress_when_qualifying_jobs_exist(
         self, unscored_client
     ):
@@ -769,6 +790,17 @@ class TestBatchScoreSonnetStart:
         assert response.status_code == 200
         data = response.data.decode()
         assert "Sonnet" in data
+
+    def test_sonnet_start_returns_error_when_tier_unavailable(self, unscored_client, monkeypatch):
+        """POST /dashboard/batch-score/sonnet/start returns error fragment when no provider configured."""
+        import job_finder.web.blueprints.batch_scoring as bs_mod
+        monkeypatch.setattr(bs_mod, "tier_has_configured_provider", lambda *a, **kw: False)
+
+        response = unscored_client.post("/dashboard/batch-score/sonnet/start")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "Sonnet tier unavailable" in data
+        assert "hx-trigger" not in data
 
 
 class TestBatchScoreStatus:
@@ -1144,6 +1176,63 @@ class TestCompaniesPage:
         conn.close()
         assert company is not None
 
+    def test_companies_add_rejects_denylist_company(self, app_with_companies):
+        """POST /companies/add does not create a company that matches the denylist."""
+        import sqlite3
+        from unittest.mock import patch
+        from job_finder.web.ats_company import CompanyNameDecision
+        client = app_with_companies.test_client()
+
+        # Patch classify_company_name to simulate a denylist rejection
+        with patch(
+            "job_finder.web.ats_company.classify_company_name",
+            return_value=CompanyNameDecision(
+                cleaned_name=None, action="reject", reason="denylist"
+            ),
+        ):
+            response = client.post(
+                "/companies/add",
+                data={"company_name": "StaffingAgency Inc", "homepage_url": ""},
+            )
+
+        assert response.status_code == 302
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        company = conn.execute(
+            "SELECT * FROM companies WHERE name_raw = 'StaffingAgency Inc'"
+        ).fetchone()
+        conn.close()
+        assert company is None
+
+    def test_companies_add_rejects_garbage_name(self, app_with_companies):
+        """POST /companies/add does not create a company with a non-alpha garbage name."""
+        import sqlite3
+        from unittest.mock import patch
+        from job_finder.web.ats_company import CompanyNameDecision
+        client = app_with_companies.test_client()
+
+        with patch(
+            "job_finder.web.ats_company.classify_company_name",
+            return_value=CompanyNameDecision(
+                cleaned_name=None, action="reject", reason="no_alpha"
+            ),
+        ):
+            response = client.post(
+                "/companies/add",
+                data={"company_name": "12345", "homepage_url": ""},
+            )
+
+        assert response.status_code == 302
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        company = conn.execute(
+            "SELECT * FROM companies WHERE name_raw = '12345'"
+        ).fetchone()
+        conn.close()
+        assert company is None
+
     def test_companies_toggle_switches_scan_enabled(self, app_with_companies):
         """POST /companies/<id>/toggle toggles scan_enabled and returns updated row."""
         import sqlite3
@@ -1290,6 +1379,29 @@ class TestDashboardAtsStat:
         # The _get_ats_context wraps queries in try/except — should not crash
         response = app.test_client().get("/dashboard")
         assert response.status_code == 200
+
+
+class TestDashboardTierAvailability:
+
+    def test_dashboard_disables_haiku_button_when_tier_unavailable(self, client, monkeypatch):
+        """GET /dashboard shows disabled Haiku button when no provider configured."""
+        import job_finder.web.blueprints.dashboard as dash_mod
+        monkeypatch.setattr(dash_mod, "tier_has_configured_provider", lambda *a, **kw: False)
+
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'title="No Haiku-tier provider configured"' in data
+
+    def test_dashboard_disables_sonnet_button_when_tier_unavailable(self, client, monkeypatch):
+        """GET /dashboard shows disabled Sonnet button when no provider configured."""
+        import job_finder.web.blueprints.dashboard as dash_mod
+        monkeypatch.setattr(dash_mod, "tier_has_configured_provider", lambda *a, **kw: False)
+
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'title="No Sonnet-tier provider configured"' in data
 
 
 # ---------------------------------------------------------------------------

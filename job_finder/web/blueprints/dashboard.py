@@ -15,6 +15,7 @@ from job_finder.db import (
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD, get_cost_stats
 from job_finder.web.db_helpers import get_db
+from job_finder.web.model_provider import tier_has_configured_provider
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,20 @@ def index():
     except Exception:
         sonnet_eligible_count = 0
 
+    # Check tier availability for batch scoring buttons
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        _anthropic = None
+    client = None
+    if _anthropic is not None:
+        try:
+            client = _anthropic.Anthropic()
+        except Exception:
+            pass
+    haiku_available = tier_has_configured_provider("haiku", config, client)
+    sonnet_available = tier_has_configured_provider("sonnet", config, client)
+
     return render_template(
         "dashboard/index.html",
         stats=stats,
@@ -122,6 +137,8 @@ def index():
         latest_report=rejection_ctx["latest_report"],
         unreviewed_rejection_count=rejection_ctx["unreviewed_rejection_count"],
         sonnet_eligible_count=sonnet_eligible_count,
+        haiku_available=haiku_available,
+        sonnet_available=sonnet_available,
         ats_last_scan=ats_ctx["last_scan"],
         company_count=ats_ctx["company_count"],
         ats_tracked_count=ats_ctx["ats_tracked_count"],

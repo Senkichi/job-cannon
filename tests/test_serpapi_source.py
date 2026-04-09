@@ -203,10 +203,45 @@ class TestSerpAPIFormatAudit:
                 {"query": "data scientist", "location": "San Francisco"},
                 {"query": "machine learning engineer", "location": "New York"},
             ]
-            jobs = source.fetch_jobs(queries)
+            jobs = source.fetch_jobs(queries, delay=0)
 
         assert mock_get.call_count == 2
         assert len(jobs) == 2
+
+    def test_fetch_jobs_sleeps_between_queries(self):
+        """fetch_jobs sleeps between consecutive queries, not before the first."""
+        source = _make_source()
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"jobs_results": []}
+
+        with patch("requests.get", return_value=mock_response):
+            with patch("job_finder.sources.serpapi_source.time.sleep") as mock_sleep:
+                queries = [
+                    {"query": "q1", "location": ""},
+                    {"query": "q2", "location": ""},
+                    {"query": "q3", "location": ""},
+                ]
+                source.fetch_jobs(queries, delay=1.5)
+
+        # 3 queries → 2 sleeps (never before the first query)
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_called_with(1.5)
+
+    def test_fetch_jobs_no_sleep_for_single_query(self):
+        """fetch_jobs does not sleep when there is only one query."""
+        source = _make_source()
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"jobs_results": []}
+
+        with patch("requests.get", return_value=mock_response):
+            with patch("job_finder.sources.serpapi_source.time.sleep") as mock_sleep:
+                source.fetch_jobs([{"query": "only one", "location": ""}], delay=1.0)
+
+        assert mock_sleep.call_count == 0
 
     def test_salary_en_dash_specifically_handled(self):
         """Salary regex correctly handles en-dash (U+2013) distinct from hyphen (U+002D)."""

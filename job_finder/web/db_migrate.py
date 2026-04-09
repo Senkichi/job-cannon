@@ -538,6 +538,28 @@ MIGRATIONS = [
            WHERE jd_full LIKE '%"themeOptions"%'
              AND (enrichment_tier IS NULL OR enrichment_tier != 'exhausted')""",
     ],
+
+    # Migration 26: Enrichment retry metadata + last_scanned_at index.
+    #
+    # enrichment_* columns track DuckDuckGo company-metadata enrichment failures
+    # separately from the ATS probe retry columns (retry_count/retry_after/miss_reason
+    # added in Migration 12). The enrichment_ prefix makes the distinction unambiguous.
+    #
+    # Backoff policy (enforced in run_ddg_enrichment):
+    #   attempt 1 empty result:    +24h
+    #   attempts 2-4 empty result: +72h
+    #   attempt 5+ empty result:   +30 days
+    #   exceptions follow same schedule with error recorded in enrichment_last_error
+    #
+    # idx_companies_last_scanned_at: supports ORDER BY last_scanned_at ASC NULLS FIRST
+    # in the HTML fallback loop in ats_scanner.py (Plan 5B).
+    [
+        "ALTER TABLE companies ADD COLUMN enrichment_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE companies ADD COLUMN enrichment_last_attempted_at TEXT DEFAULT NULL",
+        "ALTER TABLE companies ADD COLUMN enrichment_backoff_until TEXT DEFAULT NULL",
+        "ALTER TABLE companies ADD COLUMN enrichment_last_error TEXT DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_companies_last_scanned_at ON companies(last_scanned_at)",
+    ],
 ]
 
 

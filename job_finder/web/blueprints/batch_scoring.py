@@ -9,13 +9,30 @@ from flask import Blueprint, current_app, render_template
 from job_finder.db import JOBS_ALL_COLUMNS
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.json_utils import utc_now_iso
+from job_finder.web.ai_route_responses import tier_unavailable_message
 from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import tier_has_configured_provider
 
 logger = logging.getLogger(__name__)
 
+try:
+    import anthropic as _anthropic
+except ImportError:
+    _anthropic = None
+
 batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
+
+
+def _try_anthropic_client():
+    """Return an Anthropic client if available, else None."""
+    if _anthropic is None:
+        return None
+    try:
+        return _anthropic.Anthropic()
+    except Exception:
+        return None
 
 
 @batch_scoring_bp.route("/batch-score/haiku/start", methods=["POST"], strict_slashes=False)
@@ -29,6 +46,19 @@ def batch_score_haiku_start():
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
     testing = current_app.config.get("TESTING", False)
+
+    # Early provider check — avoid creating a session if no provider is routable
+    client = _try_anthropic_client()
+    if not tier_has_configured_provider("haiku", config, client):
+        return render_template(
+            "dashboard/_batch_score_done.html",
+            label="Haiku",
+            scored=0,
+            skipped=0,
+            status="error",
+            message=None,
+            error_msg=tier_unavailable_message("haiku", "Batch scoring"),
+        )
 
     with standalone_connection(db_path) as conn:
         total_unscored = conn.execute(
@@ -109,6 +139,19 @@ def batch_score_sonnet_start():
     config = current_app.config.get("JF_CONFIG", {})
     testing = current_app.config.get("TESTING", False)
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
+
+    # Early provider check — avoid creating a session if no provider is routable
+    client = _try_anthropic_client()
+    if not tier_has_configured_provider("sonnet", config, client):
+        return render_template(
+            "dashboard/_batch_score_done.html",
+            label="Sonnet",
+            scored=0,
+            skipped=0,
+            status="error",
+            message=None,
+            error_msg=tier_unavailable_message("sonnet", "Batch scoring"),
+        )
 
     with standalone_connection(db_path) as conn:
         total = conn.execute(

@@ -430,6 +430,9 @@ def init_scheduler(app) -> None:
         )
 
         # -- Company enrichment (weekly, Sunday 4:00 AM) -------------------
+        # Uses retry-aware query that skips backoff and denylist companies.
+        # Switch to daily at 4:00 AM only after summary logs show meaningful
+        # backlog with acceptable failure rates (manual judgment call).
         def _import_enrichment():
             from job_finder.web.backfill_companies import run_scheduled_enrichment
             return run_scheduled_enrichment
@@ -443,7 +446,25 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        # -- Enrichment backfill (every 6 hours) ---------------------------
+        # -- Registry hygiene (1st of month, 3:30 AM) ----------------------
+        # Runs denylist cleanup then orphan cleanup in order.
+        # Replaces the ad-hoc denylist splicing that was previously mixed
+        # into orphan cleanup internals.
+
+        def _import_registry_hygiene():
+            from job_finder.web.backfill_companies import run_registry_hygiene
+            return run_registry_hygiene
+
+        scheduler.add_job(
+            _make_simple_job(app, "Registry hygiene", _import_registry_hygiene),
+            trigger=CronTrigger(day=1, hour=3, minute=30),
+            id="registry_hygiene",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # -- Enrichment backfill (1 hour after each ingestion run: 1am, 9am, 5pm Pacific) --
 
         def _run_enrichment_backfill():
             """Backfill enrichment for jobs that were missed or prematurely exhausted."""
@@ -465,7 +486,7 @@ def init_scheduler(app) -> None:
 
         scheduler.add_job(
             _run_enrichment_backfill,
-            trigger=IntervalTrigger(hours=6),
+            trigger=CronTrigger(hour="1,9,17", timezone="US/Pacific"),
             id="enrichment_backfill",
             replace_existing=True,
             max_instances=1,
@@ -506,7 +527,7 @@ def init_scheduler(app) -> None:
 
         scheduler.start()
         _scheduler = scheduler
-        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 Pacific)")
+        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 Pacific); enrichment 1h after each (1:00, 9:00, 17:00 Pacific)")
 
 
 def run_sync_now(app) -> dict:

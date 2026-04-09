@@ -15,6 +15,7 @@ Exports:
 
 import logging
 import sqlite3
+from datetime import datetime, timedelta
 from typing import Optional
 
 from thefuzz import fuzz
@@ -25,6 +26,25 @@ from job_finder.web.company_enricher import enrich_company_info
 from job_finder.web.dedup_normalizer import normalize_company
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_enrichment_backoff(attempts: int) -> str:
+    """Compute enrichment backoff timestamp based on cumulative attempt count.
+
+    Args:
+        attempts: Total attempts including the one just completed.
+
+    Returns:
+        ISO-format timestamp for enrichment_backoff_until.
+    """
+    now = datetime.now()
+    if attempts <= 1:
+        delta = timedelta(hours=24)
+    elif attempts <= 4:
+        delta = timedelta(hours=72)
+    else:
+        delta = timedelta(days=30)
+    return (now + delta).isoformat()
 
 # Fuzzy match threshold (0–100). Score >= this means a match.
 _FUZZY_THRESHOLD = 85
@@ -428,39 +448,44 @@ def link_jobs_to_companies(
 def run_ddg_enrichment(
     conn: sqlite3.Connection,
     new_company_ids: list[int],
-) -> int:
-    """Run DuckDuckGo enrichment on newly created company records.
+) -> dict:
+    """Run DuckDuckGo enrichment on company records and persist attempt metadata.
 
-    For each company_id in new_company_ids, looks up name_raw from the
-    companies table and calls enrich_company_info(). If results are
-    non-empty and the returned fields exist as columns in the companies
-    table, updates the companies row with the enriched data.
+    For each company_id, looks up name_raw and calls enrich_company_info().
+    Persists enrichment attempt state (attempts, timestamp, backoff, error)
+    so the scheduler can skip companies in backoff and avoid infinite churn.
 
-    DDG reliability is LOW per existing code comments. Failures are
-    non-fatal and logged at debug level.
+    Backoff schedule (from _compute_enrichment_backoff):
+        attempt 1 empty: +24h, attempts 2-4: +72h, attempt 5+: +30 days.
+        Exceptions follow same schedule with error type recorded.
+
+    DDG reliability is LOW. Failures are non-fatal and logged at INFO level.
 
     Args:
         conn: Open SQLite connection.
-        new_company_ids: List of company IDs for newly created records.
+        new_company_ids: List of company IDs to enrich.
 
     Returns:
-        Number of companies enriched with at least one field.
+        Dict with enriched (int), empty_result (int), error (int) counts.
     """
     if not new_company_ids:
-        return 0
+        return {"enriched": 0, "empty_result": 0, "error": 0}
 
-    # Get companies table columns for safe UPDATE construction
     col_rows = conn.execute("PRAGMA table_info(companies)").fetchall()
     valid_columns: frozenset[str] = frozenset(row["name"] for row in col_rows)
+    has_retry_cols = "enrichment_attempts" in valid_columns
 
     enriched_count = 0
+    empty_count = 0
+    error_count = 0
     total = len(new_company_ids)
 
-    print(f"\n--- DDG Enrichment ({total} companies) ---")
+    logger.info("run_ddg_enrichment: starting %d companies", total)
 
-    for idx, company_id in enumerate(new_company_ids, 1):
+    for company_id in new_company_ids:
         row = conn.execute(
-            "SELECT name_raw FROM companies WHERE id = ?", (company_id,)
+            "SELECT name_raw, enrichment_attempts FROM companies WHERE id = ?",
+            (company_id,),
         ).fetchone()
 
         if row is None:
@@ -468,15 +493,62 @@ def run_ddg_enrichment(
             continue
 
         name_raw = row["name_raw"]
-        print(f"  [{idx}/{total}] Enriching: {name_raw}")
+        now = datetime.now().isoformat()
+        prev_attempts = row["enrichment_attempts"] or 0
+
+        # Increment attempt counter before the call
+        if has_retry_cols:
+            try:
+                conn.execute(
+                    """UPDATE companies
+                       SET enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1,
+                           enrichment_last_attempted_at = ?
+                       WHERE id = ?""",
+                    (now, company_id),
+                )
+                conn.commit()
+            except Exception as e:
+                logger.debug("Failed to increment enrichment_attempts for %d: %s", company_id, e)
+
+        attempts = prev_attempts + 1
 
         try:
             result = enrich_company_info(name_raw)
         except Exception as e:
-            logger.debug("enrich_company_info failed for '%s': %s", name_raw, e)
-            result = {}
+            logger.info("enrich_company_info failed for '%s': %s", name_raw, e)
+            error_count += 1
+            if has_retry_cols:
+                backoff_until = _compute_enrichment_backoff(attempts)
+                error_msg = f"{type(e).__name__}: {e!s}"[:200]
+                try:
+                    conn.execute(
+                        """UPDATE companies
+                           SET enrichment_backoff_until = ?,
+                               enrichment_last_error = ?
+                           WHERE id = ?""",
+                        (backoff_until, error_msg, company_id),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+            continue
 
         if not result:
+            empty_count += 1
+            if has_retry_cols:
+                backoff_until = _compute_enrichment_backoff(attempts)
+                try:
+                    conn.execute(
+                        """UPDATE companies
+                           SET enrichment_backoff_until = ?,
+                               enrichment_last_error = 'no_signals_found'
+                           WHERE id = ?""",
+                        (backoff_until, company_id),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+            logger.debug("DDG enrichment: no signals found for '%s' (attempt %d)", name_raw, attempts)
             continue
 
         # Filter to only fields that exist as columns in the companies table
@@ -485,12 +557,10 @@ def run_ddg_enrichment(
         if not updatable:
             logger.debug(
                 "DDG enrichment for '%s': fields %s not in companies schema — skipping",
-                name_raw,
-                list(result.keys()),
+                name_raw, list(result.keys()),
             )
             continue
 
-        # Build UPDATE statement dynamically (only valid columns)
         set_clauses = ", ".join(f"{col} = ?" for col in updatable)
         values = list(updatable.values()) + [company_id]
 
@@ -499,13 +569,23 @@ def run_ddg_enrichment(
                 f"UPDATE companies SET {set_clauses} WHERE id = ?",
                 values,
             )
+            # Clear backoff and error on success
+            if has_retry_cols:
+                conn.execute(
+                    """UPDATE companies
+                       SET enrichment_last_error = NULL,
+                           enrichment_backoff_until = NULL
+                       WHERE id = ?""",
+                    (company_id,),
+                )
             conn.commit()
             enriched_count += 1
             logger.debug("DDG enrichment stored for '%s': %s", name_raw, updatable)
         except Exception as e:
-            logger.warning(
-                "Failed to store DDG enrichment for '%s': %s", name_raw, e
-            )
+            logger.warning("Failed to store DDG enrichment for '%s': %s", name_raw, e)
 
-    print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
-    return enriched_count
+    logger.info(
+        "run_ddg_enrichment: enriched=%d, empty_result=%d, error=%d / %d total",
+        enriched_count, empty_count, error_count, total,
+    )
+    return {"enriched": enriched_count, "empty_result": empty_count, "error": error_count}

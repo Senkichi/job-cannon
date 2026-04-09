@@ -5,7 +5,19 @@ imported by both job_finder.models and job_finder.web.dedup_normalizer without
 creating an upward dependency from the foundation layer into the web layer.
 """
 
+import html
 import re
+
+
+# ---------------------------------------------------------------------------
+# Company name deterministic cleanup regexes
+# ---------------------------------------------------------------------------
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Leading numeric prefix junk: "1. ", "123) ", "42 - " at start of string.
+# Only stripped when the remainder after the match is non-empty.
+_LEADING_NUMERIC_JUNK_RE = re.compile(r"^\d+[\.\-\)\s]+")
 
 
 # ---------------------------------------------------------------------------
@@ -97,18 +109,33 @@ _TITLE_STRIP_SUFFIX = re.compile(
 def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
 
-    Strips common legal entity suffixes and lowercases. Handles variants like
-    "Google LLC", "Intuit, Inc.", "Acme Corp." all normalizing to their
-    bare name.
+    Applies deterministic cleanup in order: HTML entity decode, HTML tag
+    strip, whitespace collapse, leading numeric prefix strip, lowercase,
+    then legal suffix stripping. All steps preserve the dedup invariant:
+    same real company always maps to the same canonical name.
 
     Args:
         company: Raw company name string.
 
     Returns:
-        Lowercased, suffix-stripped company name.
+        Lowercased, suffix-stripped company name. Always lowercase — do not
+        use as a display value; the raw input or name_raw column serves that
+        purpose.
     """
-    normalized = company.strip().lower()
-    # Strip suffixes repeatedly (e.g., "Acme Corp. Inc." -> "acme")
+    # 1. Decode HTML entities (e.g. "&amp;" -> "&", "&#34;" -> '"')
+    normalized = html.unescape(company)
+    # 2. Strip HTML tags (e.g. "<b>Acme</b>" -> "Acme")
+    normalized = _HTML_TAG_RE.sub("", normalized)
+    # 3. Collapse repeated whitespace
+    normalized = " ".join(normalized.split())
+    # 4. Strip leading numeric prefix junk only when remainder is non-empty
+    #    e.g. "1. Acme Corp" -> "Acme Corp", but "100" stays "100"
+    m = _LEADING_NUMERIC_JUNK_RE.match(normalized)
+    if m and normalized[m.end():].strip():
+        normalized = normalized[m.end():]
+    # 5. Strip and lowercase (original behavior)
+    normalized = normalized.strip().lower()
+    # 6. Strip legal suffixes repeatedly (e.g. "Acme Corp. Inc." -> "acme")
     prev = None
     while normalized != prev:
         prev = normalized

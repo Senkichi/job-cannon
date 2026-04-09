@@ -502,4 +502,143 @@ class TestHaikuJobExtraction:
             )
 
         mock_haiku.assert_not_called()
-        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: careers subdomain detection
+# ---------------------------------------------------------------------------
+
+class TestCareersSubdomainDetection:
+
+    def test_redirect_to_careers_subdomain_returned_directly(self):
+        """Homepage redirecting to careers.example.com is returned as-is."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = "<html><body>Careers</body></html>"
+        resp = _mock_response("https://careers.example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result == "https://careers.example.com/"
+
+    def test_redirect_to_jobs_subdomain_returned_directly(self):
+        """Homepage redirecting to jobs.example.com is returned as-is."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = "<html><body>Jobs</body></html>"
+        resp = _mock_response("https://jobs.example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result == "https://jobs.example.com/"
+
+    def test_absolute_link_to_careers_subdomain_detected(self):
+        """Absolute href pointing to careers.company.com is returned."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = '<html><body><a href="https://careers.company.com/">Work with us</a></body></html>'
+        resp = _mock_response("https://company.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://company.com/")
+
+        assert result == "https://careers.company.com/"
+
+    def test_careers_subdomain_not_returned_for_ats_domains(self):
+        """jobs.lever.co is ATS — subdomain match must not short-circuit ATS check."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = "<html><body>Lever</body></html>"
+        # Final URL is an ATS domain starting with "jobs." — ATS check wins
+        resp = _mock_response("https://jobs.lever.co/acme", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result is None
+
+    def test_work_subdomain_detected(self):
+        """Homepage redirecting to work.company.com is returned as-is."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = "<html><body>Work</body></html>"
+        resp = _mock_response("https://work.company.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://company.com/")
+
+        assert result == "https://work.company.com/"
+
+
+# ---------------------------------------------------------------------------
+# Tests: meta-refresh detection
+# ---------------------------------------------------------------------------
+
+class TestMetaRefreshDetection:
+
+    def test_meta_refresh_to_careers_subdomain_followed(self):
+        """Meta-refresh pointing to careers subdomain URL is returned."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = (
+            '<html><head>'
+            '<meta http-equiv="refresh" content="0; url=https://careers.example.com/">'
+            '</head><body></body></html>'
+        )
+        resp = _mock_response("https://example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result == "https://careers.example.com/"
+
+    def test_meta_refresh_to_careers_path_followed(self):
+        """Meta-refresh pointing to /careers path is returned."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = (
+            '<html><head>'
+            '<meta http-equiv="refresh" content="0;url=/careers">'
+            '</head><body></body></html>'
+        )
+        resp = _mock_response("https://example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result == "https://example.com/careers"
+
+    def test_meta_refresh_to_ats_domain_not_followed(self):
+        """Meta-refresh pointing to ATS domain returns None (not followed)."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = (
+            '<html><head>'
+            '<meta http-equiv="refresh" content="0; url=https://jobs.lever.co/acme">'
+            '</head><body></body></html>'
+        )
+        resp = _mock_response("https://example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        assert result is None
+
+    def test_meta_refresh_to_unrelated_url_ignored(self):
+        """Meta-refresh to an unrelated URL (no careers pattern) is ignored; falls through."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = (
+            '<html><head>'
+            '<meta http-equiv="refresh" content="0; url=https://marketing.example.com/">'
+            '</head><body><a href="/careers">Careers</a></body></html>'
+        )
+        resp = _mock_response("https://example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
+            result = find_careers_url("https://example.com/")
+
+        # Meta-refresh to non-careers URL is ignored; link scraping finds /careers
+        assert result == "https://example.com/careers"

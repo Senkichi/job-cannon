@@ -141,20 +141,29 @@
 
       <!-- Batch Haiku Score — async with HTMX polling progress bar -->
       <div id="batch-score-haiku-status">
-        <form hx-post="/dashboard/batch-score/haiku/start"
-              hx-target="#batch-score-haiku-status"
-              hx-swap="outerHTML">
-          <button type="submit"
-                  class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
-                  title="Run Haiku AI scoring on all unscored jobs in the database">
+        {% if haiku_available %}
+          <form hx-post="/dashboard/batch-score/haiku/start"
+                hx-target="#batch-score-haiku-status"
+                hx-swap="outerHTML">
+            <button type="submit"
+                    class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
+                    title="Run Haiku AI scoring on all unscored jobs in the database">
+              Batch Haiku Score
+            </button>
+          </form>
+        {% else %}
+          <button type="button"
+                  disabled
+                  class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
+                  title="No Haiku-tier provider configured">
             Batch Haiku Score
           </button>
-        </form>
+        {% endif %}
       </div>
 
-      <!-- Batch Sonnet Eval — disabled when no qualifying jobs -->
+      <!-- Batch Sonnet Eval — disabled when no qualifying jobs or no provider -->
       <div id="batch-score-sonnet-status">
-        {% if sonnet_eligible_count > 0 %}
+        {% if sonnet_available and sonnet_eligible_count > 0 %}
           <form hx-post="/dashboard/batch-score/sonnet/start"
                 hx-target="#batch-score-sonnet-status"
                 hx-swap="outerHTML">
@@ -169,7 +178,7 @@
           <button type="button"
                   disabled
                   class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
-                  title="No jobs with Haiku score above threshold and full job description available">
+                  title="{{ 'No Sonnet-tier provider configured' if not sonnet_available else 'No jobs with Haiku score above threshold and full job description available' }}">
             Batch Sonnet Eval
           </button>
         {% endif %}

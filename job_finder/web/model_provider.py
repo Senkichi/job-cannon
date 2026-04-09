@@ -144,6 +144,22 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     providers_cfg = config.get("providers", {})
     tier_cfg = providers_cfg.get(tier, {})
 
+    # Inherit provider routing from a configured peer tier when this tier has
+    # no explicit config.  This lets a single providers.sonnet entry cover all
+    # tiers without duplicating the cascade in config.yaml.  The model and
+    # prompt_variant stay tier-specific (only provider + fallback_chain inherit).
+    if not tier_cfg:
+        _non_meta = {k: v for k, v in providers_cfg.items()
+                     if isinstance(v, dict) and k not in ("daily_limits", "throttle_delays")}
+        if _non_meta:
+            _donor = next(iter(_non_meta.values()))
+            tier_cfg = {
+                "provider": _donor.get("provider", "anthropic"),
+                "model": _donor.get("model"),
+                "fallback_chain": _donor.get("fallback_chain", []),
+                "fallback": _donor.get("fallback"),
+            }
+
     scoring_model = config.get("scoring", {}).get("models", {}).get(tier)
     default_model = scoring_model or _TIER_DEFAULTS.get(tier, DEFAULT_MODEL_SONNET)
 

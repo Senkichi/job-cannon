@@ -131,6 +131,13 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
             continue
         if re.match(r"^Results from\b", line, re.IGNORECASE):
             continue
+        # Navigation/footer links that bleed into blocks — never job titles
+        if re.match(r"^See all jobs", line, re.IGNORECASE):
+            continue
+        if re.match(r"^View all jobs", line, re.IGNORECASE):
+            continue
+        if re.match(r"^https?://", line):
+            continue
         content_lines.append(line)
 
     if len(content_lines) < 2:
@@ -140,6 +147,11 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
     title = content_lines[0]
     company = content_lines[1]
     location = content_lines[2] if len(content_lines) >= 3 else "Unknown"
+
+    # Sanity check: a job title must not contain a URL (catches any navigation
+    # lines that survived the filter loop above, e.g. mid-line URL patterns)
+    if "https://" in title or "http://" in title:
+        return None
 
     # Try to extract salary from the email snippet/subject if present
     salary_min, salary_max = _extract_salary(block)

@@ -1515,6 +1515,104 @@ class TestRunAtsScanHtmlFallback:
         # scrape_careers_page should NOT be called when find_careers_url returns None
         mock_scrape.assert_not_called()
 
+    def test_html_fallback_batch_limit_enforced(self, migrated_db_path):
+        """HTML fallback processes at most _HTML_BATCH_LIMIT (50) miss companies per run."""
+        from job_finder.web.ats_scanner import run_ats_scan, _HTML_BATCH_LIMIT
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        # Insert more than the batch limit
+        for i in range(_HTML_BATCH_LIMIT + 5):
+            self._insert_miss_company(
+                conn, f"Company{i:03d}", homepage_url=f"https://company{i:03d}.io"
+            )
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        call_count = 0
+
+        def counting_find_careers_url(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return None  # No careers URL found
+
+        with patch("job_finder.web.ats_scanner.find_careers_url", side_effect=counting_find_careers_url):
+            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.time.sleep"):
+                    run_ats_scan(migrated_db_path, config=config)
+
+        assert call_count == _HTML_BATCH_LIMIT
+
+    def test_html_fallback_no_careers_increments_html_scraped_zero(self, migrated_db_path):
+        """When find_careers_url returns None for all companies, html_scraped stays 0."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_miss_company(conn, "NoCareers1", homepage_url="https://no1.io")
+        self._insert_miss_company(conn, "NoCareers2", homepage_url="https://no2.io")
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.find_careers_url", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.time.sleep"):
+                    result = run_ats_scan(migrated_db_path, config=config)
+
+        assert result["html_scraped"] == 0
+
+    def test_html_fallback_oldest_scanned_processed_first(self, migrated_db_path):
+        """HTML fallback orders companies by last_scanned_at ASC NULLS FIRST (oldest first)."""
+        from datetime import datetime
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        # Insert two companies: one with old scan time, one with recent scan time
+        now = datetime.now().isoformat()
+        old_time = "2020-01-01T00:00:00"
+        conn.execute(
+            """INSERT INTO companies (name, name_raw, homepage_url, ats_probe_status,
+               scan_enabled, created_at, updated_at, last_scanned_at)
+               VALUES (?, ?, ?, 'miss', 1, ?, ?, ?)""",
+            ("recentco", "RecentCo", "https://recent.io", now, now, now),
+        )
+        conn.execute(
+            """INSERT INTO companies (name, name_raw, homepage_url, ats_probe_status,
+               scan_enabled, created_at, updated_at, last_scanned_at)
+               VALUES (?, ?, ?, 'miss', 1, ?, ?, ?)""",
+            ("oldco", "OldCo", "https://old.io", now, now, old_time),
+        )
+        conn.commit()
+        conn.close()
+
+        call_order = []
+
+        def recording_find(url, **kwargs):
+            call_order.append(url)
+            return None
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.find_careers_url", side_effect=recording_find):
+            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.time.sleep"):
+                    run_ats_scan(migrated_db_path, config=config)
+
+        # OldCo (oldest last_scanned_at) must appear before RecentCo
+        assert call_order.index("https://old.io") < call_order.index("https://recent.io")
+
 
 # ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)

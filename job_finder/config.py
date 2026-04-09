@@ -53,6 +53,23 @@ COMPANY_DENYLIST: frozenset[str] = frozenset({
 })
 
 
+def get_company_allowlist(config: dict) -> frozenset[str]:
+    """Return the company allowlist from config, merged with hardcoded defaults.
+
+    The allowlist lets users rescue false-positive rejections without code
+    changes. An allowed name bypasses overlong and suspicious-value rejection
+    (but not the empty/no-alpha hard rejects).
+
+    Args:
+        config: Full config dict (may contain filters.company_allowlist list).
+
+    Returns:
+        frozenset of lowercased, stripped company name strings to always accept.
+    """
+    config_entries = config.get("filters", {}).get("company_allowlist", [])
+    return frozenset(e.lower().strip() for e in config_entries if e)
+
+
 def get_company_denylist(config: dict) -> frozenset[str]:
     """Return the company denylist, merging config.yaml entries with hardcoded defaults.
 

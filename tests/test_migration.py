@@ -414,10 +414,11 @@ def test_migration_count_is_thirteen():
     Migration 23 recalibrates jobs_found_total and adds jobs_matched column.
     Migration 24 adds index on email_parse_log.processed_at for dedup query.
     Migration 25 cleans up Eightfold/PCS SPA shell garbage from jd_full.
+    Migration 26 adds enrichment retry columns to companies table.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 25
+    assert len(MIGRATIONS) == 26
 
 
 class TestMigration13:
@@ -1123,5 +1124,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 25 entries (updated for Migration 25 dismissed status)."""
-        assert len(MIGRATIONS) == 25
+        """MIGRATIONS list has exactly 26 entries (updated for Migration 26 enrichment retry columns)."""
+        assert len(MIGRATIONS) == 26
