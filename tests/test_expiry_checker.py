@@ -10,6 +10,84 @@ import pytest
 import requests
 
 
+class TestQuickLivenessCheck:
+    """quick_liveness_check: lightweight per-job URL check for scoring preflight."""
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_404_returns_expired(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
+        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
+        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_410_returns_expired(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
+        mock_get.return_value = MagicMock(spec=requests.Response, status_code=410)
+        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_200_returns_live(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, LIVE
+        mock_get.return_value = MagicMock(
+            spec=requests.Response, status_code=200, text="Job description here"
+        )
+        assert quick_liveness_check("https://example.com/job/123") == LIVE
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_timeout_returns_inconclusive(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, INCONCLUSIVE
+        mock_get.side_effect = requests.exceptions.Timeout("timed out")
+        assert quick_liveness_check("https://example.com/job/123") == INCONCLUSIVE
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_connection_error_returns_inconclusive(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, INCONCLUSIVE
+        mock_get.side_effect = requests.exceptions.ConnectionError("refused")
+        assert quick_liveness_check("https://example.com/job/123") == INCONCLUSIVE
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_body_marker_position_filled_returns_expired(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
+        mock_get.return_value = MagicMock(
+            spec=requests.Response, status_code=200,
+            text="Sorry, this position has been filled. Please check other openings."
+        )
+        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
+
+    @patch("job_finder.web.expiry_checker.requests.get")
+    def test_body_marker_no_longer_available_returns_expired(self, mock_get):
+        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
+        mock_get.return_value = MagicMock(
+            spec=requests.Response, status_code=200,
+            text="This job is no longer available."
+        )
+        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
+
+
+class TestCheckJobLiveness:
+    """check_job_liveness: extract URLs and call quick_liveness_check."""
+
+    @patch("job_finder.web.expiry_checker.quick_liveness_check")
+    def test_calls_first_url(self, mock_check):
+        from job_finder.web.expiry_checker import check_job_liveness, LIVE
+        mock_check.return_value = LIVE
+        job = {"source_urls": '["https://a.com/1", "https://b.com/2"]'}
+        assert check_job_liveness(job) == LIVE
+        mock_check.assert_called_once_with("https://a.com/1")
+
+    def test_no_urls_returns_inconclusive(self):
+        from job_finder.web.expiry_checker import check_job_liveness, INCONCLUSIVE
+        assert check_job_liveness({"source_urls": "[]"}) == INCONCLUSIVE
+        assert check_job_liveness({}) == INCONCLUSIVE
+
+    @patch("job_finder.web.expiry_checker.quick_liveness_check")
+    def test_handles_list_type_source_urls(self, mock_check):
+        from job_finder.web.expiry_checker import check_job_liveness, EXPIRED
+        mock_check.return_value = EXPIRED
+        job = {"source_urls": ["https://example.com/job/1"]}
+        assert check_job_liveness(job) == EXPIRED
+
+
 class TestExtractPostingId:
     """_extract_posting_id extracts individual posting IDs from ATS URLs."""
 

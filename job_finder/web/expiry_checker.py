@@ -298,6 +298,80 @@ def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Lightweight per-job liveness helpers (scoring preflight)
+# ---------------------------------------------------------------------------
+
+_EXPIRED_BODY_MARKERS = (
+    "position filled",
+    "position has been filled",
+    "no longer accepting",
+    "this job is no longer available",
+    "job has been removed",
+    "this position has been closed",
+)
+
+
+def quick_liveness_check(url: str, timeout: int = 8) -> str:
+    """Lightweight HTTP GET check for a single job URL.
+
+    Used by the scoring preflight to gate Sonnet evaluation. Independent
+    from the nightly ATS-specific signal cascade.
+
+    Args:
+        url: Job posting URL.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        EXPIRED if 404/410 or body contains expired markers.
+        LIVE if 200 with no expired markers.
+        INCONCLUSIVE on error, timeout, or non-standard status.
+    """
+    try:
+        resp = requests.get(url, timeout=timeout, allow_redirects=True)
+        if resp.status_code in (404, 410):
+            return EXPIRED
+        if resp.status_code == 200:
+            body_lower = resp.text[:5000].lower()
+            for marker in _EXPIRED_BODY_MARKERS:
+                if marker in body_lower:
+                    return EXPIRED
+            return LIVE
+        return INCONCLUSIVE
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+        return INCONCLUSIVE
+    except Exception as e:
+        logger.debug("quick_liveness_check: error for %s: %s", url, e)
+        return INCONCLUSIVE
+
+
+def check_job_liveness(job_row: dict) -> str:
+    """Check if a job posting is still live by testing its first source URL.
+
+    Extracts the first URL from source_urls JSON and runs
+    quick_liveness_check. Returns INCONCLUSIVE if no URL is available.
+
+    Args:
+        job_row: Job row dict (must include source_urls).
+
+    Returns:
+        EXPIRED, LIVE, or INCONCLUSIVE.
+    """
+    source_urls_raw = job_row.get("source_urls", "[]")
+    if isinstance(source_urls_raw, str):
+        try:
+            source_urls = json.loads(source_urls_raw)
+        except (json.JSONDecodeError, TypeError):
+            source_urls = []
+    else:
+        source_urls = source_urls_raw or []
+
+    if not source_urls:
+        return INCONCLUSIVE
+
+    return quick_liveness_check(source_urls[0])
+
+
+# ---------------------------------------------------------------------------
 # Signal cascade orchestrator
 # ---------------------------------------------------------------------------
 
@@ -414,14 +488,11 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
                 (recheck_cutoff, batch_size),
             ).fetchall()
 
-            from job_finder.db import update_pipeline_status
+            from job_finder.db import update_pipeline_status, persist_job_expiry_state
 
             archived = 0
             live = 0
             inconclusive = 0
-
-            # Collect (checked_at, dedup_key) pairs for batch expiry_checked_at update
-            expiry_checked_updates: list[tuple[str, str]] = []
 
             for row in rows:
                 job = dict(row)
@@ -470,33 +541,24 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
                         _record_careers_outcome(company_id, success=False)
 
                 if result == EXPIRED:
+                    # Persist expiry state via the sole write path
+                    persist_job_expiry_state(conn, job["dedup_key"], EXPIRED, now)
                     # update_pipeline_status commits internally (pipeline_events audit trail)
                     update_pipeline_status(
                         conn, job["dedup_key"], "archived",
                         source="expiry_check", evidence=evidence,
                     )
-                    expiry_checked_updates.append((now, job["dedup_key"]))
                     archived += 1
                     logger.info("run_expiry_check: archived %s (%s)", job["dedup_key"], evidence)
 
                 elif result == LIVE:
-                    expiry_checked_updates.append((now, job["dedup_key"]))
+                    persist_job_expiry_state(conn, job["dedup_key"], LIVE, now)
                     live += 1
 
                 else:
+                    persist_job_expiry_state(conn, job["dedup_key"], INCONCLUSIVE, now)
                     inconclusive += 1
                     logger.debug("run_expiry_check: inconclusive for %s", job["dedup_key"])
-
-                # Rate limit between jobs
-                time.sleep(_INTER_REQUEST_DELAY)
-
-            # Batch-update expiry_checked_at for all checked jobs in one round-trip
-            if expiry_checked_updates:
-                conn.executemany(
-                    "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
-                    expiry_checked_updates,
-                )
-                conn.commit()
 
             result_summary = {
                 "checked": len(rows),
