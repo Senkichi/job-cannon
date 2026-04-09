@@ -2440,6 +2440,209 @@ class TestHaikuCompensationContext:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Sonnet liveness preflight and calibration bypass (career-ops)
+# ---------------------------------------------------------------------------
+
+
+class TestSonnetLivenessPreflight:
+    """score_and_persist_sonnet preflight gates Sonnet on job liveness."""
+
+    @pytest.fixture
+    def _job_row(self, migrated_db):
+        """Insert a job with jd_full and return (path, conn, job_row)."""
+        path, conn = migrated_db
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
+               first_seen, last_seen, score, score_breakdown, user_interest, haiku_score, jd_full)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("pftest|ds|remote", "Data Scientist", "PrefCo", "Remote",
+             '["test"]', '["https://example.com/jobs/123"]',
+             "2026-04-01", "2026-04-01", 0, "{}", "unreviewed", 72,
+             "Full job description with details about data science role..."),
+        )
+        conn.commit()
+        job = dict(conn.execute(
+            "SELECT * FROM jobs WHERE dedup_key = 'pftest|ds|remote'"
+        ).fetchone())
+        return path, conn, job
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness")
+    def test_expired_skips_evaluator(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        path, conn, job_row = _job_row
+        mock_liveness.return_value = "expired"
+
+        mock_evaluator = MagicMock()
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        assert result is None
+        mock_evaluator.assert_not_called()
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness")
+    def test_expired_persists_expiry_status(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        path, conn, job_row = _job_row
+        mock_liveness.return_value = "expired"
+
+        score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=MagicMock(),
+        )
+        row = conn.execute(
+            "SELECT expiry_status FROM jobs WHERE dedup_key = 'pftest|ds|remote'"
+        ).fetchone()
+        assert row["expiry_status"] == "expired"
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness")
+    def test_live_runs_evaluator(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        from job_finder.web.scoring_types import ScoringResult
+        path, conn, job_row = _job_row
+        mock_liveness.return_value = "live"
+
+        mock_evaluator = MagicMock(return_value=ScoringResult(
+            data={"score": 75, "fit_analysis": {}, "summary": "Good fit"},
+            status="success",
+        ))
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        assert result is not None
+        mock_evaluator.assert_called_once()
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness")
+    def test_inconclusive_runs_evaluator(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        from job_finder.web.scoring_types import ScoringResult
+        path, conn, job_row = _job_row
+        mock_liveness.return_value = "inconclusive"
+
+        mock_evaluator = MagicMock(return_value=ScoringResult(
+            data={"score": 65, "fit_analysis": {}, "summary": "OK"},
+            status="success",
+        ))
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        assert result is not None
+        mock_evaluator.assert_called_once()
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness")
+    def test_liveness_cache_prevents_duplicate_check(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        path, conn, job_row = _job_row
+        cache = {"https://example.com/jobs/123": "expired"}
+
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {},
+            evaluator_fn=MagicMock(), liveness_cache=cache,
+        )
+        assert result is None
+        mock_liveness.assert_not_called()  # cache hit — no HTTP call
+
+
+class TestSonnetCalibrationBypass:
+    """Calibration is skipped when eval_blocks are present in Sonnet result."""
+
+    @pytest.fixture
+    def _job_row(self, migrated_db):
+        path, conn = migrated_db
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
+               first_seen, last_seen, score, score_breakdown, user_interest, haiku_score, jd_full)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("caltest|ml|remote", "ML Engineer", "CalCo", "Remote",
+             '["test"]', '["https://example.com/cal"]',
+             "2026-04-01", "2026-04-01", 0, "{}", "unreviewed", 72,
+             "Full ML engineering job description with requirements..."),
+        )
+        conn.commit()
+        job = dict(conn.execute(
+            "SELECT * FROM jobs WHERE dedup_key = 'caltest|ml|remote'"
+        ).fetchone())
+        return path, conn, job
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
+    @patch("job_finder.web.score_calibration.has_calibration", return_value=True)
+    @patch("job_finder.web.score_calibration.calibrate_score", return_value=60)
+    def test_eval_blocks_bypasses_calibration(
+        self, mock_cal, mock_has_cal, mock_liveness, _job_row,
+    ):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        from job_finder.web.scoring_types import ScoringResult
+        path, conn, job_row = _job_row
+
+        mock_evaluator = MagicMock(return_value=ScoringResult(
+            data={
+                "score": 82,
+                "fit_analysis": {},
+                "summary": "Great fit",
+                "eval_blocks": [{"criterion": "Python", "score": 9}],
+                "provider": "ollama",
+            },
+            status="success",
+        ))
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        assert result is not None
+        assert result["score"] == 82  # raw score, NOT calibrated to 60
+        mock_cal.assert_not_called()
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
+    @patch("job_finder.web.score_calibration.has_calibration", return_value=True)
+    @patch("job_finder.web.score_calibration.calibrate_score", return_value=60)
+    def test_no_eval_blocks_applies_calibration(
+        self, mock_cal, mock_has_cal, mock_liveness, _job_row,
+    ):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        from job_finder.web.scoring_types import ScoringResult
+        path, conn, job_row = _job_row
+
+        mock_evaluator = MagicMock(return_value=ScoringResult(
+            data={
+                "score": 82,
+                "fit_analysis": {},
+                "summary": "Great fit",
+                "provider": "ollama",
+            },
+            status="success",
+        ))
+        result = score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        assert result is not None
+        assert result["score"] == 60  # calibrated
+        mock_cal.assert_called_once()
+
+    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
+    def test_eval_blocks_persisted_to_db(self, mock_liveness, _job_row):
+        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
+        from job_finder.web.scoring_types import ScoringResult
+        path, conn, job_row = _job_row
+
+        eval_blocks = [{"criterion": "Python", "score": 9, "rationale": "Strong match"}]
+        mock_evaluator = MagicMock(return_value=ScoringResult(
+            data={
+                "score": 78,
+                "fit_analysis": {"strengths": ["Python"]},
+                "summary": "Good",
+                "eval_blocks": eval_blocks,
+            },
+            status="success",
+        ))
+        score_and_persist_sonnet(
+            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
+        )
+        row = conn.execute(
+            "SELECT eval_blocks FROM jobs WHERE dedup_key = 'caltest|ml|remote'"
+        ).fetchone()
+        assert row["eval_blocks"] is not None
+        import json
+        assert json.loads(row["eval_blocks"]) == eval_blocks
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
