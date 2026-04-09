@@ -1,6 +1,9 @@
-"""Gemini provider adapter — google-genai SDK with response_json_schema.
+"""Gemini provider adapter — google-generativeai SDK with response_json_schema.
 
 Phase 25 deliverable — part of the multi-provider routing system.
+
+NOTE: This implementation requires google-generativeai >= 0.8.5.
+The API may differ from earlier versions; ensure compatibility.
 """
 from __future__ import annotations
 
@@ -10,9 +13,8 @@ import os
 import time
 from typing import Any
 
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
+import google.generativeai as genai
+from google.generativeai import types
 
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
@@ -20,22 +22,23 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(BaseProvider):
-    """Provider adapter for Google Gemini via google-genai SDK.
+    """Provider adapter for Google Gemini via google-generativeai SDK.
 
-    Uses response_json_schema (dict path) for structured output with
-    response_mime_type="application/json".  Automatically retries once
-    on HTTP 429 rate-limit errors with a configurable sleep duration
-    (default 15.0s for the 5 RPM free tier introduced in Dec 2025).
+    Uses response_json_schema for structured output with
+    response_mime_type="application/json". Automatically retries once
+    on transient errors with a configurable sleep duration
+    (default 15.0s for the 5 RPM free tier).
 
     Args:
-        config: Application config dict.  Reads ``providers.gemini.*``.
-        client: Optional pre-built genai.Client for testing.  When provided,
-            the GEMINI_API_KEY env-var check is bypassed entirely.
+        config: Application config dict. Reads providers.gemini.*.
+        client: Optional pre-built genai.GenerativeModel for testing.
+                When provided, skips API key configuration.
     """
 
     def __init__(self, config: dict, *, client: Any | None = None) -> None:
         provider_cfg = config.get("providers", {}).get("gemini", {})
         self._retry_sleep: float = provider_cfg.get("retry_sleep_seconds", 15.0)
+
         if client is not None:
             self._client = client
         else:
@@ -45,7 +48,10 @@ class GeminiProvider(BaseProvider):
                 raise ValueError(
                     f"Gemini API key not set — expected env var {api_key_env!r}"
                 )
-            self._client = genai.Client(api_key=api_key)
+            genai.configure(api_key=api_key)
+            # Defer model instantiation to call() so we can use the specified model
+            self._api_key = api_key
+
 
     def call(
         self,
@@ -64,50 +70,69 @@ class GeminiProvider(BaseProvider):
             messages: List of message dicts [{role, content}].
             output_schema: JSON schema dict for structured output. When provided,
                 sets response_mime_type="application/json" and passes the schema
-                via response_json_schema.  When None, raw text is returned as
-                {"text": response.text}.
-            max_tokens: Maximum output tokens.  Defaults to 1024.
-            timeout: Unused (google-genai SDK handles timeouts internally).
+                via response_json_schema. When None, raw text is returned.
+            max_tokens: Maximum output tokens. Defaults to 1024.
+            timeout: Unused (google-generativeai SDK handles timeouts internally).
 
         Returns:
             ModelResult with provider="gemini", cost_usd=0.0 (free tier),
-            schema_valid=True.
+            schema_valid=True if output_schema was provided.
 
         Raises:
-            genai_errors.ClientError: On 429 after both attempts, or any other
-                API error immediately.
+            Exception: On any API error (rate limits, validation, etc).
         """
+        client = genai.GenerativeModel(model)
         contents = self._build_contents(messages)
+
         gen_config_kwargs: dict[str, Any] = {
-            "system_instruction": system,
             "max_output_tokens": max_tokens,
         }
+
+        # Set response format for structured output
         if output_schema is not None:
             gen_config_kwargs["response_mime_type"] = "application/json"
             gen_config_kwargs["response_json_schema"] = output_schema
-        gen_config = types.GenerateContentConfig(**gen_config_kwargs)
+
+        # Add system instruction
+        generation_config = types.GenerationConfig(**gen_config_kwargs)
 
         response = None
-        for attempt in range(2):
+        last_exception = None
+
+        for attempt in range(2):  # Retry once on transient errors
             try:
-                response = self._client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=gen_config,
+                response = client.generate_content(
+                    contents,
+                    generation_config=generation_config,
+                    system_instruction=system,
+                    stream=False,
                 )
                 break
-            except genai_errors.ClientError as exc:
-                if exc.code == 429 and attempt == 0:
+            except Exception as exc:
+                last_exception = exc
+                # Retry on transient errors (rate limits, timeouts)
+                # Check for common transient error indicators
+                error_str = str(exc).lower()
+                if attempt == 0 and ("429" in error_str or "rate" in error_str or "timeout" in error_str):
                     logger.warning(
-                        "Gemini 429 rate limit on attempt 1, retrying in %.1fs",
-                        self._retry_sleep,
+                        "Gemini transient error on attempt 1, retrying in %.1fs: %s",
+                        self._retry_sleep, exc,
                     )
                     time.sleep(self._retry_sleep)
                     continue
+                # Non-transient error, raise immediately
                 raise
 
+        if response is None:
+            raise last_exception or Exception("Gemini API returned no response")
+
+        # Parse response
         if output_schema is not None:
-            data = json.loads(response.text)
+            try:
+                data = json.loads(response.text)
+            except json.JSONDecodeError as e:
+                logger.error("Gemini returned invalid JSON: %s", response.text[:200])
+                raise ValueError(f"Invalid JSON from Gemini: {e}") from e
         else:
             data = {"text": response.text}
 
