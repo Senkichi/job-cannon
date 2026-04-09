@@ -561,7 +561,7 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_companies_last_scanned_at ON companies(last_scanned_at)",
     ],
 
-    # Migration 27: Career-ops scoring metadata columns.
+    # Migration 27: Career-ops scoring metadata columns + interview story reuse.
     #
     # expiry_status: per-job liveness verdict from scoring preflight
     #   ('expired', 'live', 'inconclusive'). Written by persist_job_expiry_state()
@@ -577,6 +577,15 @@ MIGRATIONS = [
         "ALTER TABLE jobs ADD COLUMN expiry_status TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN eval_blocks TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN job_archetype TEXT DEFAULT NULL",
+    ],
+
+    # Migration 28: Interview story reuse — reusable_stories_json on interview_preps.
+    #
+    # Stores up to 5 distinct {question, star_story, key_points} objects extracted
+    # from completed prep output. Pure JSON filtering from predicted_questions —
+    # no LLM call required. Stories are row-scoped (no separate table).
+    [
+        "ALTER TABLE interview_preps ADD COLUMN reusable_stories_json TEXT DEFAULT NULL",
     ],
 ]
 

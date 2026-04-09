@@ -417,10 +417,11 @@ def test_migration_count_is_thirteen():
     Migration 26 adds enrichment retry columns to companies table.
     Migration 27 adds career-ops scoring metadata columns (expiry_status, eval_blocks,
     job_archetype) to jobs table.
+    Migration 28 adds reusable_stories_json to interview_preps.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 27
+    assert len(MIGRATIONS) == 28
 
 
 class TestMigration27:
@@ -449,6 +450,14 @@ class TestMigration27:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
         assert "job_archetype" in cols, "job_archetype column missing from jobs"
+
+    def test_migration28_adds_reusable_stories_json(self, tmp_db_path):
+        """Migration 28 adds reusable_stories_json column to interview_preps."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(interview_preps)").fetchall()}
+        conn.close()
+        assert "reusable_stories_json" in cols, "reusable_stories_json column missing from interview_preps"
 
     def test_migration27_expiry_status_default_null(self, tmp_db_path):
         """expiry_status defaults to NULL for existing rows."""
@@ -1173,5 +1182,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 27 entries (updated for Migration 27 career-ops columns)."""
-        assert len(MIGRATIONS) == 27
+        """MIGRATIONS list has exactly 28 entries (updated for Migration 28 interview story reuse)."""
+        assert len(MIGRATIONS) == 28
