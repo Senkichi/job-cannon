@@ -418,10 +418,11 @@ def test_migration_count_is_thirteen():
     Migration 27 adds career-ops scoring metadata columns (expiry_status, eval_blocks,
     job_archetype) to jobs table.
     Migration 28 adds reusable_stories_json to interview_preps.
+    Migration 29 adds company_research table.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 28
+    assert len(MIGRATIONS) == 29
 
 
 class TestMigration27:
@@ -1182,5 +1183,5 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 28 entries (updated for Migration 28 interview story reuse)."""
-        assert len(MIGRATIONS) == 28
+        """MIGRATIONS list has exactly 29 entries (updated for Migration 29 company research)."""
+        assert len(MIGRATIONS) == 29

@@ -437,3 +437,102 @@ def retry(company_id):
     ).fetchone()
 
     return render_template("companies/_row.html", company=updated_company)
+
+
+# ---------------------------------------------------------------------------
+# Company research routes
+# ---------------------------------------------------------------------------
+
+
+@companies_bp.route("/<int:company_id>/research", methods=["POST"], strict_slashes=False)
+def start_research(company_id):
+    """Start on-demand company research. Returns generating fragment for polling."""
+    from job_finder.web.company_research import get_cached_company_research, start_company_research
+
+    db_path = current_app.config["DB_PATH"]
+    config = current_app.config.get("JF_CONFIG", {})
+    conn = get_db(db_path)
+
+    company = conn.execute(
+        "SELECT * FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
+    if company is None:
+        return "Company not found", 404
+
+    # Check for cached or in-progress research
+    cached = get_cached_company_research(conn, company_id)
+    if cached and cached["status"] == "done":
+        return render_template(
+            "companies/_research_section.html",
+            research=cached, company=company,
+        )
+    if cached and cached["status"] in ("pending", "generating"):
+        return render_template(
+            "companies/_research_generating.html",
+            research_id=cached["id"], company_id=company_id,
+        )
+
+    research_id = start_company_research(conn, company_id, db_path, config)
+    return render_template(
+        "companies/_research_generating.html",
+        research_id=research_id, company_id=company_id,
+    )
+
+
+@companies_bp.route(
+    "/<int:company_id>/research/status/<int:research_id>",
+    strict_slashes=False,
+)
+def research_status(company_id, research_id):
+    """Poll research status. Returns generating fragment or final section."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    company = conn.execute(
+        "SELECT * FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
+    if company is None:
+        return "Company not found", 404
+
+    row = conn.execute(
+        "SELECT * FROM company_research WHERE id = ? AND company_id = ?",
+        (research_id, company_id),
+    ).fetchone()
+    if row is None:
+        return "Research not found", 404
+
+    research = dict(row)
+
+    # Timeout safety net: mark stale generating rows as error
+    if research["status"] in ("pending", "generating") and research.get("requested_at"):
+        try:
+            requested = _dt.fromisoformat(research["requested_at"])
+            age_minutes = (
+                _dt.now(_tz.utc) - requested.replace(tzinfo=_tz.utc)
+            ).total_seconds() / 60
+            if age_minutes > 10:
+                now = _dt.now(_tz.utc).isoformat()
+                conn.execute(
+                    "UPDATE company_research SET status = 'error', "
+                    "error_msg = 'Generation timed out', completed_at = ? WHERE id = ?",
+                    (now, research_id),
+                )
+                conn.commit()
+                research["status"] = "error"
+                research["error_msg"] = "Generation timed out"
+        except (ValueError, TypeError):
+            pass
+
+    if research["status"] in ("done", "error"):
+        return render_template(
+            "companies/_research_section.html",
+            research=research, company=company,
+        )
+
+    # Still generating — return polling fragment
+    return render_template(
+        "companies/_research_generating.html",
+        research_id=research_id, company_id=company_id,
+    )

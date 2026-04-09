@@ -640,3 +640,90 @@ class TestIndexHealthCard:
         # Health card labels are only rendered in the full index.html
         assert "Since Last Scan" not in body
         assert "Pending Probe" not in body
+
+
+# ---------------------------------------------------------------------------
+# Company Research Route Tests
+# ---------------------------------------------------------------------------
+
+
+class TestCompanyResearchRoutes:
+    """POST /companies/<id>/research and GET status routes."""
+
+    def test_start_research_creates_generating_row(self, companies_client):
+        """POST /companies/<id>/research creates a generating row."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn)
+
+        with patch("job_finder.web.company_research.threading.Thread") as mock_thread:
+            mock_thread.return_value = mock_thread.return_value
+            mock_thread.return_value.start = lambda: None
+            resp = client.post(f"/companies/{company_id}/research")
+
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "Researching" in body or "hx-trigger" in body or "hx-get" in body
+
+    def test_start_research_returns_cached_done(self, companies_client):
+        """POST /companies/<id>/research returns cached section if research exists."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn)
+
+        from datetime import timezone
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (company_id, "done", "TestCo is a great company.", now, now),
+        )
+        conn.commit()
+
+        resp = client.post(f"/companies/{company_id}/research")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "TestCo is a great company" in body
+
+    def test_research_status_returns_done(self, companies_client):
+        """GET research/status returns final section when done."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn)
+
+        from datetime import timezone
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (company_id, "done", "Research result text.", now, now),
+        )
+        conn.commit()
+        research_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        resp = client.get(f"/companies/{company_id}/research/status/{research_id}")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "Research result text" in body
+
+    def test_research_status_timeout_marks_error(self, companies_client):
+        """GET research/status marks stale generating rows as error."""
+        client, db_path, conn = companies_client
+        company_id = _insert_company(conn)
+
+        from datetime import timezone, timedelta
+        old = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+        conn.execute(
+            "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
+            (company_id, "generating", old),
+        )
+        conn.commit()
+        research_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        resp = client.get(f"/companies/{company_id}/research/status/{research_id}")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "timed out" in body.lower() or "error" in body.lower()
+
+    def test_research_missing_company_returns_404(self, companies_client):
+        """POST /companies/<id>/research returns 404 for unknown company."""
+        client, db_path, conn = companies_client
+        resp = client.post("/companies/99999/research")
+        assert resp.status_code == 404

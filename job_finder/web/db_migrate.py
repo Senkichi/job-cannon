@@ -587,6 +587,25 @@ MIGRATIONS = [
     [
         "ALTER TABLE interview_preps ADD COLUMN reusable_stories_json TEXT DEFAULT NULL",
     ],
+
+    # Migration 29: Company research table — on-demand company research lifecycle.
+    #
+    # Follows the resume-generation async pattern: pending → generating → done/error.
+    # One row per research request. TTL-based cache: callers check completed_at age
+    # before starting a new request.
+    [
+        """CREATE TABLE IF NOT EXISTS company_research (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL REFERENCES companies(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            research_json TEXT DEFAULT NULL,
+            error_msg TEXT DEFAULT NULL,
+            requested_at TEXT NOT NULL,
+            completed_at TEXT DEFAULT NULL,
+            cost_usd REAL DEFAULT 0.0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_company_research_company_id ON company_research(company_id)",
+    ],
 ]
 
 
