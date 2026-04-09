@@ -32,7 +32,10 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from job_finder.config import DEFAULT_BORDERLINE_HIGH, DEFAULT_HAIKU_THRESHOLD
-from job_finder.db import persist_haiku_score, persist_sonnet_score, persist_job_expiry_state
+from job_finder.db import (
+    persist_haiku_score, persist_sonnet_score,
+    persist_job_expiry_state, persist_job_archetype,
+)
 from job_finder.web.scoring_types import unwrap_scoring_result
 
 logger = logging.getLogger(__name__)
@@ -227,13 +230,26 @@ def score_and_persist_sonnet(
     if preflight is not None:
         return None
 
+    # --- Archetype classification (after preflight, before evaluator) ---
+    from job_finder.web.archetype_classifier import classify_job_archetype
+
+    dedup_key = job_row.get("dedup_key", "unknown")
+    job_archetype = classify_job_archetype(
+        job_row.get("title", ""),
+        job_row.get("jd_full") or job_row.get("description", ""),
+        config,
+    )
+    if job_archetype:
+        persist_job_archetype(conn, dedup_key, job_archetype)
+
     if evaluator_fn is None:
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         evaluator_fn = evaluate_job_sonnet
 
-    dedup_key = job_row.get("dedup_key", "unknown")
-
-    scoring_result = evaluator_fn(client, job_row, profile, conn, config)
+    scoring_result = evaluator_fn(
+        client, job_row, profile, conn, config,
+        job_archetype=job_archetype,
+    )
 
     result = unwrap_scoring_result(scoring_result)
     if result is None:

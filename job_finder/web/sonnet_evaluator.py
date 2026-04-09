@@ -76,6 +76,29 @@ SONNET_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Extended schema that accepts optional eval_blocks from enhanced prompts.
+# eval_blocks are structured evaluation criteria that, when present, trigger
+# calibration bypass in the orchestrator.
+SONNET_SCHEMA_WITH_EVAL_BLOCKS = {
+    **SONNET_SCHEMA,
+    "properties": {
+        **SONNET_SCHEMA["properties"],
+        "eval_blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "criterion": {"type": "string"},
+                    "score": {"type": "integer"},
+                    "rationale": {"type": "string"},
+                },
+                "required": ["criterion", "score", "rationale"],
+            },
+            "description": "Optional structured evaluation criteria blocks",
+        },
+    },
+}
+
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
@@ -133,12 +156,33 @@ PROMPT_VARIANTS: dict[str, str] = {
 }
 
 
+def _build_sonnet_system_prompt(job_archetype: str | None = None) -> str:
+    """Build the Sonnet system prompt, optionally including archetype context.
+
+    Args:
+        job_archetype: Classified archetype key, or None.
+
+    Returns:
+        Complete system prompt string.
+    """
+    prompt = _SYSTEM_PROMPT
+    if job_archetype:
+        prompt += (
+            f"\n\n## Job Archetype\n\n"
+            f"This job has been classified as **{job_archetype.replace('_', ' ')}**. "
+            f"Weight your evaluation to emphasize skills and experience relevant to this "
+            f"archetype category."
+        )
+    return prompt
+
+
 def evaluate_job_sonnet(
     client: Any,
     job_row: JobRow,
     experience_profile: dict,
     conn: Any,
     config: dict,
+    job_archetype: str | None = None,
 ) -> ScoringResult:
     """Evaluate a job against the candidate profile using Claude Sonnet.
 
@@ -239,9 +283,10 @@ def evaluate_job_sonnet(
     )
 
     try:
+        system_prompt = _build_sonnet_system_prompt(job_archetype=job_archetype)
         result_obj = call_model(
             tier="sonnet",
-            system=_SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
             conn=conn,
             config=config,
