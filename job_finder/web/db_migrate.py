@@ -560,6 +560,24 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN enrichment_last_error TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_companies_last_scanned_at ON companies(last_scanned_at)",
     ],
+
+    # Migration 27: Career-ops scoring metadata columns.
+    #
+    # expiry_status: per-job liveness verdict from scoring preflight
+    #   ('expired', 'live', 'inconclusive'). Written by persist_job_expiry_state()
+    #   which is the sole write path for both expiry_status and expiry_checked_at.
+    #
+    # eval_blocks: JSON array of structured evaluation criteria from Sonnet.
+    #   Presence triggers calibration bypass in score_and_persist_sonnet().
+    #
+    # job_archetype: deterministic classification result ('platform_engineering',
+    #   'ml_engineering', 'analytics_lead', etc.). Used 'job_archetype' (not
+    #   'archetype') to avoid semantic collision with resume-generation role_archetype.
+    [
+        "ALTER TABLE jobs ADD COLUMN expiry_status TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN eval_blocks TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN job_archetype TEXT DEFAULT NULL",
+    ],
 ]
 
 

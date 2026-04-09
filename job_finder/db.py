@@ -24,7 +24,8 @@ JOBS_ALL_COLUMNS = (
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
     "haiku_score, haiku_summary, sonnet_score, fit_analysis, jd_full, is_stale, "
     "company_id, comp_data_json, enrichment_tier, rejection_reviewed, "
-    "locations_raw, description_reformatted, expiry_checked_at, scoring_provider"
+    "locations_raw, description_reformatted, expiry_checked_at, scoring_provider, "
+    "opus_score, expiry_status, eval_blocks, job_archetype"
 )
 
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch needs.
@@ -249,6 +250,7 @@ def persist_sonnet_score(
     sonnet_score: float,
     fit_analysis: str,
     provider: str | None = None,
+    eval_blocks: str | None = None,
 ) -> None:
     """Persist Sonnet evaluation results for a job.
 
@@ -261,11 +263,57 @@ def persist_sonnet_score(
         sonnet_score: Numeric score from Sonnet deep evaluation.
         fit_analysis: JSON string containing fit analysis details.
         provider: Provider name that produced the score (e.g. "ollama"). None preserves existing value.
+        eval_blocks: JSON string of structured evaluation criteria. None leaves column unchanged.
     """
     conn.execute(
         "UPDATE jobs SET sonnet_score = ?, fit_analysis = ?, "
-        "scoring_provider = COALESCE(?, scoring_provider) WHERE dedup_key = ?",
-        (sonnet_score, fit_analysis, provider, dedup_key),
+        "scoring_provider = COALESCE(?, scoring_provider), "
+        "eval_blocks = COALESCE(?, eval_blocks) WHERE dedup_key = ?",
+        (sonnet_score, fit_analysis, provider, eval_blocks, dedup_key),
+    )
+    conn.commit()
+
+
+def persist_job_expiry_state(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    expiry_status: str,
+    checked_at: str,
+) -> None:
+    """Persist job expiry verdict and timestamp atomically.
+
+    Single write path for expiry_status and expiry_checked_at. Called by
+    the scoring preflight (per-job liveness check) and the nightly batch
+    expiry runner.
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        expiry_status: One of 'expired', 'live', or 'inconclusive'.
+        checked_at: ISO 8601 timestamp string of when the check ran.
+    """
+    conn.execute(
+        "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ? WHERE dedup_key = ?",
+        (expiry_status, checked_at, dedup_key),
+    )
+    conn.commit()
+
+
+def persist_job_archetype(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    job_archetype: str,
+) -> None:
+    """Persist the deterministic job archetype classification result.
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        job_archetype: Archetype label (e.g. 'platform_engineering').
+    """
+    conn.execute(
+        "UPDATE jobs SET job_archetype = ? WHERE dedup_key = ?",
+        (job_archetype, dedup_key),
     )
     conn.commit()
 
