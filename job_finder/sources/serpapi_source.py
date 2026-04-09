@@ -5,6 +5,7 @@ Google Jobs aggregates from LinkedIn, Indeed, Glassdoor, ZipRecruiter, etc.
 """
 
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -23,17 +24,22 @@ class SerpAPISource:
         self.api_key = api_key
         self.source_name = source_name
 
-    def fetch_jobs(self, queries: list[dict]) -> list[Job]:
+    def fetch_jobs(self, queries: list[dict], delay: float = 1.0) -> list[Job]:
         """Run multiple search queries and return combined results.
 
         Args:
             queries: List of dicts with 'query' and 'location' keys.
+            delay: Seconds to wait between consecutive requests. SerpAPI
+                enforces a per-second rate limit; 1.0s keeps burst traffic
+                within that limit.
 
         Returns:
             List of Job objects.
         """
         all_jobs = []
-        for q in queries:
+        for i, q in enumerate(queries):
+            if i > 0:
+                time.sleep(delay)
             jobs = self._search(q["query"], q.get("location", ""))
             all_jobs.extend(jobs)
         return all_jobs
@@ -66,12 +72,24 @@ class SerpAPISource:
 
     def _parse_result(self, result: dict) -> Optional[Job]:
         """Parse a single SerpAPI Google Jobs result into a Job."""
+        from job_finder.web.ats_company import classify_company_name
+
         title = result.get("title", "")
         company = result.get("company_name", "")
         location = result.get("location", "")
 
         if not title or not company:
             return None
+
+        decision = classify_company_name(company)
+        if decision.action == "reject":
+            logger.info(
+                "SerpAPI: skipping '%s' — company '%s' rejected (%s)",
+                title, company[:60], decision.reason,
+            )
+            return None
+        # Keep the original company name — jobs.company is the raw source-of-truth.
+        # Normalization for lookup happens at upsert_company() at the write boundary.
 
         # Extract salary if available
         salary_min, salary_max = self._extract_salary(result)

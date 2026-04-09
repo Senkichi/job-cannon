@@ -310,12 +310,12 @@ class TestDdgEnrichment:
         # Use homepage_url which exists in the companies schema as a storable field
         with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {"homepage_url": "https://example.com"}
-            count = run_ddg_enrichment(conn, new_company_ids)
+            result = run_ddg_enrichment(conn, new_company_ids)
 
         # enrich_company_info called once per new company
         assert mock_enrich.call_count == 2
         # Both companies got a storable field (homepage_url exists in schema)
-        assert count == 2
+        assert result["enriched"] == 2
 
     def test_ddg_enrichment_results_stored(self, migrated_db):
         """DDG enrichment results are stored in the companies table."""
@@ -323,9 +323,6 @@ class TestDdgEnrichment:
 
         path, conn = migrated_db
 
-        # Need company_size and industry columns — check migration applied them
-        # (These may need to be added via migration for companies table)
-        # For now, test that enrich_company_info was called and run returned count
         conn.execute(
             "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
             "VALUES ('testco', 'TestCo', 'pending', '2026-01-01', '2026-01-01')"
@@ -336,10 +333,11 @@ class TestDdgEnrichment:
 
         with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {}  # Empty result — no fields to store
-            count = run_ddg_enrichment(conn, [company_id])
+            result = run_ddg_enrichment(conn, [company_id])
 
-        # Still counts as attempted even if result is empty
-        assert count == 0  # Empty result means 0 enriched
+        # Empty result means 0 enriched, 1 empty_result
+        assert result["enriched"] == 0
+        assert result["empty_result"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -985,3 +983,229 @@ class TestOrphanCleanup:
         assert "recalibrated_total" in result
         assert isinstance(result["orphans_deleted"], int)
         assert isinstance(result["recalibrated_total"], int)
+
+
+# ---------------------------------------------------------------------------
+# cleanup_invalid_company_data tests
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupInvalidCompanyData:
+    """Tests for cleanup_invalid_company_data()."""
+
+    def _insert_job(self, conn, dedup_key, company, company_id=None):
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, company_id) "
+            "VALUES (?, 'Engineer', ?, 'Remote', '2026-01-01', '2026-01-01', ?)",
+            (dedup_key, company, company_id),
+        )
+        conn.commit()
+
+    def test_rejected_company_nulls_company_id_not_raw(self, migrated_db):
+        """Rejected (denylist) company name nulls company_id but never modifies jobs.company."""
+        from job_finder.web.backfill_companies import cleanup_invalid_company_data
+
+        db_path, conn = migrated_db
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
+            "VALUES ('medical jobs', 'Medical jobs', 'pending', '2026-01-01', '2026-01-01')"
+        )
+        conn.commit()
+        bad_id = conn.execute("SELECT id FROM companies WHERE name = 'medical jobs'").fetchone()["id"]
+        self._insert_job(conn, "bad|eng", "Medical jobs", bad_id)
+
+        config = {"filters": {}}
+        cleanup_invalid_company_data(conn, config)
+
+        row = conn.execute(
+            "SELECT company, company_id FROM jobs WHERE dedup_key = 'bad|eng'"
+        ).fetchone()
+        assert row["company"] == "Medical jobs"  # raw value NEVER modified
+        assert row["company_id"] is None           # linkage nulled
+
+    def test_normalizable_company_links_to_correct_record(self, migrated_db):
+        """Company with normalize action gets linked to the correct upserted record."""
+        from job_finder.web.backfill_companies import cleanup_invalid_company_data
+
+        db_path, conn = migrated_db
+        self._insert_job(conn, "stripe|swe", "Stripe", None)
+
+        config = {"filters": {}}
+        result = cleanup_invalid_company_data(conn, config)
+
+        assert result["normalized"] >= 1
+        row = conn.execute(
+            "SELECT company_id FROM jobs WHERE dedup_key = 'stripe|swe'"
+        ).fetchone()
+        assert row["company_id"] is not None
+
+    def test_cleanup_never_mutates_jobs_company(self, migrated_db):
+        """After cleanup, jobs.company is unchanged regardless of action taken."""
+        from job_finder.web.backfill_companies import cleanup_invalid_company_data
+
+        db_path, conn = migrated_db
+        raw_name = "Mercor"  # denylist entry
+        self._insert_job(conn, "mercor|pm", raw_name, None)
+
+        config = {"filters": {}}
+        cleanup_invalid_company_data(conn, config)
+
+        row = conn.execute("SELECT company FROM jobs WHERE dedup_key = 'mercor|pm'").fetchone()
+        assert row["company"] == raw_name  # never modified
+
+    def test_cleanup_is_idempotent(self, migrated_db):
+        """Running cleanup twice produces no new repair work on the second run."""
+        from job_finder.web.backfill_companies import cleanup_invalid_company_data
+
+        db_path, conn = migrated_db
+        self._insert_job(conn, "google|swe", "Google LLC", None)
+
+        config = {"filters": {}}
+        result1 = cleanup_invalid_company_data(conn, config)
+        result2 = cleanup_invalid_company_data(conn, config)
+
+        # Second run: same company is already linked, no unlinked rows remain
+        assert result1["normalized"] >= 1
+        assert result2["normalized"] <= result1["normalized"]
+
+
+# ---------------------------------------------------------------------------
+# run_registry_hygiene tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunRegistryHygiene:
+    """Tests for run_registry_hygiene()."""
+
+    def test_hygiene_deletes_denylist_companies(self, migrated_db):
+        """run_registry_hygiene removes denylist company records."""
+        db_path, conn = migrated_db
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
+            "VALUES ('mercor', 'Mercor', 'pending', '2026-01-01', '2026-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        assert result["companies_denylist_deleted"] >= 1
+
+    def test_hygiene_returns_all_expected_keys(self, migrated_db):
+        """run_registry_hygiene returns companies_denylist_deleted, jobs_denylist_unlinked, orphans_deleted."""
+        db_path, conn = migrated_db
+        conn.close()
+
+        from job_finder.web.backfill_companies import run_registry_hygiene
+        result = run_registry_hygiene(db_path, {"filters": {}})
+
+        for key in ("companies_denylist_deleted", "jobs_denylist_unlinked", "orphans_deleted"):
+            assert key in result
+            assert isinstance(result[key], int)
+
+
+# ---------------------------------------------------------------------------
+# Retry-aware enrichment tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetryAwareEnrichment:
+    """Tests for enrichment retry metadata in run_ddg_enrichment."""
+
+    def _insert_company(self, conn, name):
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
+            "VALUES (?, ?, 'pending', '2026-01-01', '2026-01-01')",
+            (name.lower(), name),
+        )
+        conn.commit()
+        return conn.execute("SELECT id FROM companies WHERE name = ?", (name.lower(),)).fetchone()["id"]
+
+    def test_empty_result_sets_backoff_and_error(self, migrated_db):
+        """Empty DDG result sets enrichment_backoff_until and enrichment_last_error='no_signals_found'."""
+        from unittest.mock import patch
+        from job_finder.web.company_resolver import run_ddg_enrichment
+
+        db_path, conn = migrated_db
+        company_id = self._insert_company(conn, "EmptyCo")
+
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_ddg_enrichment(conn, [company_id])
+
+        row = conn.execute(
+            "SELECT enrichment_attempts, enrichment_backoff_until, enrichment_last_error "
+            "FROM companies WHERE id = ?",
+            (company_id,),
+        ).fetchone()
+        assert row["enrichment_attempts"] == 1
+        assert row["enrichment_backoff_until"] is not None
+        assert row["enrichment_last_error"] == "no_signals_found"
+
+    def test_success_clears_backoff_and_error(self, migrated_db):
+        """Successful enrichment clears enrichment_backoff_until and enrichment_last_error."""
+        from unittest.mock import patch
+        from job_finder.web.company_resolver import run_ddg_enrichment
+
+        db_path, conn = migrated_db
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, "
+            "enrichment_backoff_until, enrichment_last_error, created_at, updated_at) "
+            "VALUES ('goodco', 'GoodCo', 'pending', '2099-01-01', 'no_signals_found', "
+            "'2026-01-01', '2026-01-01')"
+        )
+        conn.commit()
+        company_id = conn.execute("SELECT id FROM companies WHERE name = 'goodco'").fetchone()["id"]
+
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
+            mock_enrich.return_value = {"company_size": "large"}
+            run_ddg_enrichment(conn, [company_id])
+
+        row = conn.execute(
+            "SELECT enrichment_backoff_until, enrichment_last_error FROM companies WHERE id = ?",
+            (company_id,),
+        ).fetchone()
+        assert row["enrichment_backoff_until"] is None
+        assert row["enrichment_last_error"] is None
+
+    def test_exception_sets_backoff_and_records_error_type(self, migrated_db):
+        """Exception during enrichment sets backoff and records error class name."""
+        from unittest.mock import patch
+        from job_finder.web.company_resolver import run_ddg_enrichment
+
+        db_path, conn = migrated_db
+        company_id = self._insert_company(conn, "ErrCo")
+
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
+            mock_enrich.side_effect = RuntimeError("DDG timeout")
+            result = run_ddg_enrichment(conn, [company_id])
+
+        assert result["error"] == 1
+        row = conn.execute(
+            "SELECT enrichment_backoff_until, enrichment_last_error FROM companies WHERE id = ?",
+            (company_id,),
+        ).fetchone()
+        assert row["enrichment_backoff_until"] is not None
+        assert "RuntimeError" in row["enrichment_last_error"]
+
+    def test_scheduled_enrichment_skips_backoff_companies(self, migrated_db):
+        """run_scheduled_enrichment excludes companies within their backoff window."""
+        from unittest.mock import patch
+        from job_finder.web.backfill_companies import run_scheduled_enrichment
+
+        db_path, conn = migrated_db
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, ats_probe_status, "
+            "enrichment_backoff_until, created_at, updated_at) "
+            "VALUES ('backoffco', 'BackoffCo', 'pending', '2099-12-31', "
+            "'2026-01-01', '2026-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
+            mock_enrich.return_value = {}
+            result = run_scheduled_enrichment(db_path, {"filters": {}})
+
+        assert result["checked"] == 0  # backoff company excluded

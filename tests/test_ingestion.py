@@ -1001,6 +1001,45 @@ class TestCompanyAutoPopulation:
             "Job should be linked to its company via company_id"
         )
 
+    def test_denylist_company_not_written_to_db(self, minimal_config, migrated_db_path):
+        """upsert_company returns None for denylist names — no company row created."""
+        from job_finder.web.ats_company import CompanyNameDecision
+
+        denylist_jobs = [
+            Job(
+                title="Data Scientist",
+                company="Recruiting Agency Inc",
+                location="Remote",
+                source="linkedin",
+                source_url="https://www.linkedin.com/jobs/view/42/",
+            )
+        ]
+
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
+             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
+             patch(
+                 "job_finder.web.ats_company.classify_company_name",
+                 return_value=CompanyNameDecision(
+                     cleaned_name=None, action="reject", reason="denylist"
+                 ),
+             ), \
+             patch("job_finder.web.pipeline_runner.anthropic", None):
+
+            MockGmail.return_value.fetch_jobs.return_value = (denylist_jobs, [])
+            MockSerpAPI.return_value.fetch_jobs.return_value = []
+
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, minimal_config)
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company = conn.execute(
+            "SELECT * FROM companies WHERE name = 'recruiting agency'"
+        ).fetchone()
+        conn.close()
+
+        assert company is None, "Denylist company must not be inserted into companies table"
+
 
 # ---------------------------------------------------------------------------
 # Test: ScoringResult unwrap (Phase 11 plan 01)

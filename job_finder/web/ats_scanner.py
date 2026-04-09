@@ -91,6 +91,7 @@ from job_finder.web.ats_platforms import (  # noqa: F401,E402
 )
 
 _PROBE_BATCH_LIMIT = 150  # Max companies probed per scheduled run (~7-8 min wall-clock)
+_HTML_BATCH_LIMIT = 50   # Max miss companies scraped per HTML fallback run
 
 
 # ---------------------------------------------------------------------------
@@ -462,13 +463,24 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # Companies with ats_probe_status='miss' but with homepage_url get scraped.
         # This loop runs AFTER the ATS API loop (which handles hit companies).
         # Guard: only run if careers_scraper was imported successfully.
+        # Bounded by _HTML_BATCH_LIMIT and ordered by oldest-first to ensure
+        # all miss companies get cycled through over successive runs.
         if find_careers_url is not None and scrape_careers_page is not None:
             miss_companies = conn.execute(
                 """SELECT id, name_raw, homepage_url FROM companies
                    WHERE ats_probe_status = 'miss'
                      AND homepage_url IS NOT NULL
-                     AND scan_enabled = 1"""
+                     AND scan_enabled = 1
+                   ORDER BY last_scanned_at ASC NULLS FIRST, id ASC
+                   LIMIT ?""",
+                (_HTML_BATCH_LIMIT,),
             ).fetchall()
+
+            html_tried = 0
+            html_careers_found = 0
+            html_jobs_scraped = 0
+            html_no_careers = 0
+            html_exceptions = 0
 
             for miss_company in miss_companies:
                 miss_company_id = miss_company["id"]
@@ -483,6 +495,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 )
 
                 try:
+                    html_tried += 1
                     # Step 1: Find careers URL from homepage
                     careers_url = find_careers_url(
                         miss_homepage_url,
@@ -491,11 +504,19 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         config=config,
                     )
                     if not careers_url:
+                        html_no_careers += 1
                         logger.debug(
                             "ATS HTML fallback: no careers link found for %s",
                             miss_company_name,
                         )
+                        # Still update last_scanned_at so this company rotates to the back
+                        conn.execute(
+                            "UPDATE companies SET last_scanned_at = ? WHERE id = ?",
+                            (now, miss_company_id),
+                        )
+                        conn.commit()
                         continue
+                    html_careers_found += 1
 
                     # Step 2: Scrape careers page for keyword-matched jobs
                     scraped_jobs = scrape_careers_page(
@@ -530,6 +551,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                     summary["jobs_new"] += 1
                                     company_html_new += 1
                                     all_new_job_keys.append(job.dedup_key)
+                                html_jobs_scraped += 1
                                 summary["html_scraped"] += 1
                             except Exception as job_err:
                                 error_msg = f"{miss_company_name} HTML job error: {job_err}"
@@ -557,6 +579,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     conn.commit()
 
                 except Exception as html_err:
+                    html_exceptions += 1
                     error_msg = f"{miss_company_name} HTML fallback error: {html_err}"
                     summary["errors"].append(error_msg)
                     logger.error(
@@ -567,6 +590,13 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
                 # Polite delay — HTML scraping is slower than ATS API calls
                 time.sleep(1.0)
+
+            logger.info(
+                "ATS HTML fallback summary: tried=%d, careers_found=%d, "
+                "jobs_scraped=%d, no_careers=%d, exceptions=%d",
+                html_tried, html_careers_found, html_jobs_scraped,
+                html_no_careers, html_exceptions,
+            )
 
         # --- Haiku auto-scoring for newly discovered jobs ---
         # Runs AFTER both the ATS API loop and the HTML fallback loop so that

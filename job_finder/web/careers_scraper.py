@@ -17,6 +17,7 @@ ATS URL redirect detection (Research Pitfall 6):
 """
 
 import logging
+import re
 import sqlite3
 import time
 from typing import Any, Optional
@@ -46,6 +47,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", "/openings"]
+
+# Subdomains that indicate a careers/jobs page directly
+_CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.")
+
+# Meta-refresh content pattern: "0;url=https://..." or "0; URL=..."
+_META_REFRESH_RE = re.compile(r"url\s*=\s*([^\s\"'>]+)", re.IGNORECASE)
 
 _HAIKU_HTML_CHARS = 3000  # Truncate HTML sent to Haiku (~1000 tokens)
 
@@ -326,6 +333,15 @@ def find_careers_url(
         )
         return None
 
+    # If the final URL already lands on a careers/jobs subdomain (non-ATS),
+    # return it directly — no need to scrape for a link.
+    if any(parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
+        logger.debug(
+            "find_careers_url('%s'): final URL is careers subdomain '%s'",
+            homepage_url, final_url,
+        )
+        return final_url
+
     # Parse homepage HTML for careers links
     try:
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -333,32 +349,58 @@ def find_careers_url(
         logger.debug("find_careers_url('%s') HTML parse error: %s", homepage_url, e)
         return None
 
+    # Check <meta http-equiv="refresh" content="0; url=..."> redirects
+    meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.IGNORECASE)})
+    if meta_refresh:
+        content = meta_refresh.get("content", "")
+        m = _META_REFRESH_RE.search(str(content))
+        if m:
+            refresh_url = m.group(1).strip().strip("'\"")
+            refresh_url = urljoin(homepage_url, refresh_url)
+            refresh_parsed = urlparse(refresh_url)
+            # Only follow if it's not an ATS redirect and looks like a careers destination
+            if not any(ats_domain in refresh_parsed.netloc for ats_domain in _ATS_DOMAINS):
+                if any(refresh_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS) or \
+                   any(pattern in refresh_parsed.path.lower() for pattern in _CAREERS_PATTERNS):
+                    logger.debug(
+                        "find_careers_url('%s'): meta-refresh to careers URL '%s'",
+                        homepage_url, refresh_url,
+                    )
+                    return refresh_url
+
     # Search all <a href="..."> for careers-pattern matches
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
         if not href:
             continue
 
-        # Check if href matches any careers pattern
         href_lower = href.lower()
+
+        # Check for absolute links pointing to careers subdomains (non-ATS)
+        if href_lower.startswith("http"):
+            href_parsed = urlparse(href_lower)
+            if any(href_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS) and \
+               not any(ats_domain in href_parsed.netloc for ats_domain in _ATS_DOMAINS):
+                logger.debug(
+                    "find_careers_url('%s'): found careers subdomain link '%s'",
+                    homepage_url, href,
+                )
+                return href
+
+        # Match path-based careers patterns
         for pattern in _CAREERS_PATTERNS:
-            # Match: href starts with pattern OR contains the pattern as a path segment
             if href_lower == pattern or href_lower.startswith(pattern + "/") or href_lower.startswith(pattern + "?"):
-                # Resolve relative URL to absolute
                 absolute_url = urljoin(homepage_url, href)
                 logger.debug(
                     "find_careers_url('%s'): found careers link '%s'",
-                    homepage_url,
-                    absolute_url,
+                    homepage_url, absolute_url,
                 )
                 return absolute_url
 
-            # Also match absolute URLs that contain the pattern in path
             if href_lower.startswith("http") and pattern in urlparse(href_lower).path:
                 logger.debug(
                     "find_careers_url('%s'): found absolute careers link '%s'",
-                    homepage_url,
-                    href,
+                    homepage_url, href,
                 )
                 return href
 

@@ -9,6 +9,7 @@ Purpose:
     2. Run ATS probing on newly created companies
     3. Run DuckDuckGo enrichment on newly created companies
     4. Clean up orphan company records nightly
+    5. Registry hygiene (denylist + orphan cleanup, monthly)
 
 Usage:
     python -m job_finder.web.backfill_companies
@@ -19,6 +20,8 @@ Exports:
     run_ats_probing: Scheduler-compatible ATS probe wrapper.
     run_scheduled_enrichment: Scheduler-compatible enrichment wrapper.
     run_orphan_cleanup: Scheduler-compatible orphan cleanup wrapper.
+    run_registry_hygiene: Scheduler-compatible hygiene wrapper (monthly).
+    cleanup_invalid_company_data: One-time linkage-repair backfill.
     cleanup_orphan_companies: Orphan detection and deletion.
 
     # Re-exported from company_resolver for backwards compatibility:
@@ -30,7 +33,7 @@ Exports:
 import logging
 import sqlite3
 
-from job_finder.config import load_config
+from job_finder.config import get_company_denylist, load_config
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.ats_scanner import probe_ats_slugs
 from job_finder.web.company_resolver import (
@@ -49,6 +52,7 @@ logger = logging.getLogger(__name__)
 # Re-export everything from company_resolver so existing importers don't break
 __all__ = [
     "cleanup_denylist_companies",
+    "cleanup_invalid_company_data",
     "cleanup_orphan_companies",
     "find_duplicate_companies",
     "find_fuzzy_false_positives",
@@ -59,6 +63,7 @@ __all__ = [
     "run_company_linkage",
     "run_ddg_enrichment",
     "run_orphan_cleanup",
+    "run_registry_hygiene",
     "run_scheduled_enrichment",
     "verify_all_linkable_jobs_linked",
     "verify_homepage_urls",
@@ -166,26 +171,171 @@ def run_ats_probing(db_path: str, config: dict) -> dict:
     return result
 
 
-def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
-    """Scheduler-compatible wrapper: enrich up to 50 unenriched companies.
+def cleanup_invalid_company_data(
+    conn: sqlite3.Connection,
+    config: dict,
+    dry_run: bool = False,
+) -> dict:
+    """Repair company linkage for invalid/garbage company names.
 
-    Selects companies with no company_size AND no industry set.
+    Scans distinct jobs.company values through the shared sanitizer. For
+    normalizable values, finds/creates the correct company record and updates
+    jobs.company_id. For rejected values, nulls jobs.company_id.
+
+    NEVER modifies jobs.company — that field is the raw source-of-truth.
+    Only jobs.company_id linkage is repaired. After linkage repair, runs
+    orphan cleanup to remove dead company rows.
+
+    This function is idempotent: running it twice produces no new repair work
+    for already-handled rows.
+
+    Args:
+        conn: Open SQLite connection.
+        config: Application config dict (for denylist/allowlist enforcement).
+        dry_run: If True, log what would happen but make no changes.
+
+    Returns:
+        Dict with normalized (int), rejected (int), orphans_deleted (int) counts.
+    """
+    from job_finder.web.ats_company import classify_company_name, upsert_company
+
+    normalized_count = 0
+    rejected_count = 0
+
+    # Scan all distinct jobs.company values with NULL company_id (unlinked)
+    rows = conn.execute(
+        "SELECT DISTINCT company FROM jobs WHERE company IS NOT NULL"
+    ).fetchall()
+    distinct_names = [r["company"] for r in rows]
+
+    logger.info(
+        "cleanup_invalid_company_data: scanning %d distinct company values%s",
+        len(distinct_names),
+        " (dry_run)" if dry_run else "",
+    )
+
+    for raw_name in distinct_names:
+        decision = classify_company_name(raw_name, config=config)
+
+        if decision.action == "reject":
+            rejected_count += 1
+            logger.warning(
+                "cleanup: nulling company_id for rejected company '%s' (reason=%s)",
+                raw_name[:60], decision.reason,
+            )
+            if not dry_run:
+                conn.execute(
+                    "UPDATE jobs SET company_id = NULL WHERE company = ? AND company_id IS NOT NULL",
+                    (raw_name,),
+                )
+
+        elif decision.action in ("accept", "normalize"):
+            # Find or create the correct company record under the cleaned name
+            if not dry_run:
+                company_id = upsert_company(conn, raw_name)
+                if company_id is not None:
+                    conn.execute(
+                        "UPDATE jobs SET company_id = ? WHERE company = ? AND company_id IS NULL",
+                        (company_id, raw_name),
+                    )
+                    normalized_count += 1
+            else:
+                normalized_count += 1
+
+    if not dry_run:
+        conn.commit()
+
+    # Run orphan cleanup after linkage repair
+    orphan_result = {"orphans_deleted": 0, "recalibrated_total": 0}
+    if not dry_run:
+        orphan_result = cleanup_orphan_companies(conn)
+
+    result = {
+        "normalized": normalized_count,
+        "rejected": rejected_count,
+        "orphans_deleted": orphan_result["orphans_deleted"],
+    }
+    logger.info("cleanup_invalid_company_data complete: %s", result)
+    return result
+
+
+def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
+    """Scheduler-compatible wrapper: enrich up to 200 companies with retry backoff.
+
+    Selects companies where at least one metadata field is missing
+    (company_size IS NULL OR industry IS NULL), backoff window has elapsed,
+    and the company is not on the denylist. Orders by oldest eligible work first.
+
     Opens its own connection (thread-safe for APScheduler).
 
     Args:
         db_path: Absolute path to the SQLite database file.
-        config: Application config dict (unused, kept for scheduler signature).
+        config: Application config dict (for denylist enforcement).
 
     Returns:
-        Dict with checked (int) and enriched (int) counts.
+        Dict with checked, enriched, empty_result, error counts.
     """
+    denylist = get_company_denylist(config)
+    # Build parameterized NOT IN clause; use a sentinel that matches nothing when denylist is empty
+    if denylist:
+        denylist_placeholders = ", ".join("?" * len(denylist))
+        denylist_params: list = list(denylist)
+    else:
+        denylist_placeholders = "?"
+        denylist_params = ["__never_match__"]
+
     with standalone_connection(db_path) as conn:
         rows = conn.execute(
-            "SELECT id FROM companies WHERE company_size IS NULL AND industry IS NULL LIMIT 50"
+            f"""SELECT id FROM companies
+               WHERE (company_size IS NULL OR industry IS NULL)
+                 AND (enrichment_backoff_until IS NULL
+                      OR enrichment_backoff_until <= datetime('now'))
+                 AND LOWER(name) NOT IN ({denylist_placeholders})
+               ORDER BY enrichment_last_attempted_at ASC NULLS FIRST,
+                        enrichment_backoff_until ASC NULLS FIRST,
+                        id ASC
+               LIMIT 200""",
+            denylist_params,
         ).fetchall()
         company_ids = [r["id"] for r in rows]
-        enriched = run_ddg_enrichment(conn, company_ids)
-    return {"checked": len(company_ids), "enriched": enriched}
+        ddg_result = run_ddg_enrichment(conn, company_ids)
+
+    result = {
+        "checked": len(company_ids),
+        "enriched": ddg_result["enriched"],
+        "empty_result": ddg_result["empty_result"],
+        "error": ddg_result["error"],
+    }
+    logger.info("run_scheduled_enrichment: %s", result)
+    return result
+
+
+def run_registry_hygiene(db_path: str, config: dict) -> dict:
+    """Monthly registry hygiene: denylist cleanup then orphan cleanup.
+
+    Runs in a single standalone connection (thread-safe for APScheduler).
+    Order is critical: denylist cleanup unlinking jobs before orphan cleanup
+    ensures denylist-matched company rows become orphans and are deleted.
+
+    Args:
+        db_path: Absolute path to the SQLite database file.
+        config: Application config dict (for denylist enforcement).
+
+    Returns:
+        Dict with companies_denylist_deleted, jobs_denylist_unlinked,
+        orphans_deleted counts.
+    """
+    with standalone_connection(db_path) as conn:
+        denylist_result = cleanup_denylist_companies(conn, config)
+        orphan_result = cleanup_orphan_companies(conn)
+
+    result = {
+        "companies_denylist_deleted": denylist_result["companies_deleted"],
+        "jobs_denylist_unlinked": denylist_result["jobs_unlinked"],
+        "orphans_deleted": orphan_result["orphans_deleted"],
+    }
+    logger.info("run_registry_hygiene: %s", result)
+    return result
 
 
 def run_orphan_cleanup(db_path: str, config: dict) -> dict:
@@ -242,7 +392,8 @@ def main() -> None:
         ats_result = run_ats_probing(db_path, config)
 
         # Phase 3: DDG enrichment
-        ddg_count = run_ddg_enrichment(conn, new_company_ids)
+        ddg_result = run_ddg_enrichment(conn, new_company_ids)
+        ddg_count = ddg_result["enriched"] if isinstance(ddg_result, dict) else ddg_result
 
         # Final summary
         null_after = conn.execute(

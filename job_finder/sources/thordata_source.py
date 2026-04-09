@@ -103,10 +103,21 @@ class ThordataSource:
 
         Returns None if the job is missing required fields or is older than max_age_days.
         """
+        from job_finder.web.ats_company import classify_company_name
+
         title = result.get("title", "")
         company = result.get("company_name", "")
         if not title or not company:
             return None
+
+        decision = classify_company_name(company)
+        if decision.action == "reject":
+            logger.info(
+                "Thordata: skipping '%s' — company '%s' rejected (%s)",
+                title, company[:60], decision.reason,
+            )
+            return None
+        # Keep the original company name — jobs.company is the raw source-of-truth.
 
         extensions: list[str] = result.get("extensions", [])
 

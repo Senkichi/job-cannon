@@ -93,3 +93,73 @@ class TestNotificationFilter:
         assert result[0].title == "Data Scientist, People Innovation"
         assert result[0].company == "OpenAI"
         assert result[1].title == "Senior Data Scientist"
+
+
+class TestFooterContaminationFilter:
+    """Navigation/footer lines in a block must not become job titles (DQ-05)."""
+
+    def test_see_all_jobs_header_filtered(self):
+        """'See all jobs' navigation link above a job listing should be stripped."""
+        sep = "-" * 40
+        body = "\n".join([
+            "See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search-results/?keywords=analytics",
+            "",
+            "Senior Data Scientist",
+            "Netflix",
+            "United States",
+            "",
+            "View job: https://www.linkedin.com/comm/jobs/view/4382524355/tracking",
+            sep,
+        ])
+        result = parse_linkedin_alert(body)
+        assert len(result) == 1
+        assert result[0].title == "Senior Data Scientist"
+        assert result[0].company == "Netflix"
+
+    def test_view_all_jobs_header_filtered(self):
+        """'View all jobs' navigation link above a job listing should be stripped."""
+        sep = "-" * 40
+        body = "\n".join([
+            "View all jobs: https://www.linkedin.com/jobs/search-results/?keywords=data+scientist",
+            "",
+            "Staff Data Scientist",
+            "Acme Corp",
+            "San Francisco, CA",
+            "",
+            "View job: https://www.linkedin.com/comm/jobs/view/111222333/tracking",
+            sep,
+        ])
+        result = parse_linkedin_alert(body)
+        assert len(result) == 1
+        assert result[0].title == "Staff Data Scientist"
+
+    def test_url_only_line_filtered(self):
+        """A bare URL line at the top of a block should be stripped."""
+        sep = "-" * 40
+        body = "\n".join([
+            "https://www.linkedin.com/comm/jobs/some-stray-link",
+            "",
+            "Data Analyst",
+            "Stripe",
+            "Remote",
+            "",
+            "View job: https://www.linkedin.com/comm/jobs/view/999888777/tracking",
+            sep,
+        ])
+        result = parse_linkedin_alert(body)
+        assert len(result) == 1
+        assert result[0].title == "Data Analyst"
+
+    def test_url_in_title_after_filter_returns_none(self):
+        """A title that still contains a URL after filtering is rejected entirely."""
+        sep = "-" * 40
+        body = "\n".join([
+            "Check this out: https://example.com/some-embedded-url in the title",
+            "Some Company",
+            "Remote",
+            "",
+            "View job: https://www.linkedin.com/comm/jobs/view/123456789/tracking",
+            sep,
+        ])
+        result = parse_linkedin_alert(body)
+        assert result == []
