@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
 
-
 def _safe_float(raw: str, param_name: str) -> float | None:
     """Coerce a query-string value to float, or abort 400 on malformed input."""
     if not raw:
@@ -46,7 +45,6 @@ def _safe_float(raw: str, param_name: str) -> float | None:
     except (ValueError, TypeError):
         abort(400, description=f"Invalid value for {param_name}: {raw!r}")
 
-
 def _safe_int(raw: str, param_name: str) -> int | None:
     """Coerce a query-string value to int, or abort 400 on malformed input."""
     if not raw:
@@ -55,7 +53,6 @@ def _safe_int(raw: str, param_name: str) -> int | None:
         return int(raw)
     except (ValueError, TypeError):
         abort(400, description=f"Invalid value for {param_name}: {raw!r}")
-
 
 def _get_filter_kwargs() -> dict:
     """Extract and coerce filter query parameters from request.args."""
@@ -78,7 +75,6 @@ def _get_filter_kwargs() -> dict:
         "limit": 200,
         "hide_stale": args.get("hide_stale") == "on",
     }
-
 
 def relative_date(iso_str):
     """Format date as 'Mar 3 (1w ago)' — absolute then relative.
@@ -123,12 +119,10 @@ def relative_date(iso_str):
 
     return f"{abs_part} ({rel})"
 
-
 @jobs_bp.record_once
 def _register_filters(state):
     """Register the relative_date Jinja2 filter when blueprint is registered."""
     state.app.jinja_env.filters["relative_date"] = relative_date
-
 
 @jobs_bp.route("/", strict_slashes=False)
 def index():
@@ -156,7 +150,6 @@ def index():
         archived_count=archived_count,
     )
 
-
 @jobs_bp.route("/table", strict_slashes=False)
 def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
@@ -174,7 +167,6 @@ def table():
         pipeline_statuses=PIPELINE_STATUSES,
     )
 
-
 @jobs_bp.route("/archived-table", strict_slashes=False)
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
@@ -188,7 +180,6 @@ def archived_table():
         jobs=jobs,
         pipeline_statuses=PIPELINE_STATUSES,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
 def expand(dedup_key: str):
@@ -228,7 +219,6 @@ def expand(dedup_key: str):
         drive_status=drive_status,
     )
 
-
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
@@ -244,7 +234,6 @@ def collapse(dedup_key: str):
         "jobs/_row_collapse_response.html",
         job=job,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)
 def update_status(dedup_key: str):
@@ -310,7 +299,6 @@ def update_status(dedup_key: str):
 
     return resp
 
-
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
@@ -328,7 +316,6 @@ def detail_inline(dedup_key: str):
         events=events,
         pipeline_statuses=PIPELINE_STATUSES,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/paste-jd", methods=["POST"], strict_slashes=False)
 def paste_jd(dedup_key: str):
@@ -391,13 +378,11 @@ def paste_jd(dedup_key: str):
 
         config = current_app.config.get("JF_CONFIG", {})
         if cost_gate(conn, config, "sonnet"):
-            import anthropic
-            client = anthropic.Anthropic()
             profile = load_scoring_profile(config)
 
             # Refresh job row with jd_full
             job = get_job(conn, dedup_key)
-            score_and_persist_sonnet(conn, job, config, client, profile)
+            score_and_persist_sonnet(conn, job, config, profile)
         else:
             logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
             error = "Budget cap reached. Sonnet scoring skipped."
@@ -422,7 +407,6 @@ def paste_jd(dedup_key: str):
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
-
 
 @jobs_bp.route("/<path:dedup_key>/rescore", methods=["POST"], strict_slashes=False)
 def rescore(dedup_key: str):
@@ -462,11 +446,9 @@ def rescore(dedup_key: str):
 
         config = current_app.config.get("JF_CONFIG", {})
         if cost_gate(conn, config, "sonnet"):
-            import anthropic
-            client = anthropic.Anthropic()
             profile = load_scoring_profile(config)
 
-            result = score_and_persist_sonnet(conn, job, config, client, profile)
+            result = score_and_persist_sonnet(conn, job, config, profile)
             if result:
                 try:
                     log_activity(
@@ -526,7 +508,6 @@ def rescore(dedup_key: str):
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
 
-
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
@@ -536,7 +517,6 @@ def score_cell(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_score_cell.html", job=job)
-
 
 @jobs_bp.route("/<path:dedup_key>/interview-prep/status", strict_slashes=False)
 def interview_prep_status(dedup_key: str):
@@ -587,7 +567,6 @@ def interview_prep_status(dedup_key: str):
         )
 
     return "", 200
-
 
 @jobs_bp.route("/<path:dedup_key>/save-jd", methods=["POST"], strict_slashes=False)
 def save_jd(dedup_key: str):
@@ -647,7 +626,6 @@ def save_jd(dedup_key: str):
         drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
 
-
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
@@ -657,7 +635,6 @@ def jd_edit_form(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_jd_edit_form.html", job=job)
-
 
 @jobs_bp.route("/<path:dedup_key>", strict_slashes=False)
 def detail(dedup_key: str):

@@ -1,14 +1,13 @@
 """Centralized scoring orchestration for Haiku and Sonnet evaluation.
 
-Consolidates the scoring workflow (cost gate, client creation, profile loading,
-API call, borderline re-evaluation, DB persistence) that was previously
-duplicated across pipeline_runner, dashboard batch scoring, and jobs blueprint
-routes.
+Consolidates the scoring workflow (cost gate, profile loading, CLI oneshot,
+borderline re-evaluation, DB persistence) that was previously duplicated
+across pipeline_runner, dashboard batch scoring, and jobs blueprint routes.
 
 Public API:
-    score_and_persist_haiku(conn, job_row, config, client, profile,
+    score_and_persist_haiku(conn, job_row, config, profile,
                             scorer_fn=None) -> dict | None
-    score_and_persist_sonnet(conn, job_row, config, client, profile,
+    score_and_persist_sonnet(conn, job_row, config, profile,
                              evaluator_fn=None) -> dict | None
     load_scoring_profile(config) -> dict
 
@@ -36,7 +35,6 @@ from job_finder.web.scoring_types import unwrap_scoring_result
 
 logger = logging.getLogger(__name__)
 
-
 def load_scoring_profile(config: dict) -> dict:
     """Load experience profile from disk via the canonical loader.
 
@@ -60,12 +58,10 @@ def load_scoring_profile(config: dict) -> dict:
     )
     return load_profile(profile_path)
 
-
 def score_and_persist_haiku(
     conn: sqlite3.Connection,
     job_row: dict,
     config: dict,
-    client,
     profile: dict,
     scorer_fn: Optional[Callable] = None,
 ) -> Optional[dict]:
@@ -82,7 +78,6 @@ def score_and_persist_haiku(
         conn: Open SQLite connection (caller manages lifecycle).
         job_row: Dict-like job row from the jobs table.
         config: Application config dict.
-        client: Anthropic client instance.
         profile: Experience profile dict.
         scorer_fn: Optional scoring function reference. If None, imports
                    score_job_haiku from haiku_scorer. Pass the caller's
@@ -98,7 +93,7 @@ def score_and_persist_haiku(
 
     dedup_key = job_row.get("dedup_key", "unknown")
 
-    scoring_result = scorer_fn(client, job_row, profile, conn, config)
+    scoring_result = scorer_fn(job_row, profile, conn, config)
 
     result = unwrap_scoring_result(scoring_result)
     if result is None:
@@ -118,7 +113,7 @@ def score_and_persist_haiku(
             dedup_key, score, threshold, borderline_high,
         )
         reeval_scoring = scorer_fn(
-            client, job_row, profile, conn, config,
+            job_row, profile, conn, config,
             max_chars=4000, purpose="haiku_reeval",
         )
         reeval_result = unwrap_scoring_result(reeval_scoring)
@@ -135,12 +130,10 @@ def score_and_persist_haiku(
 
     return result
 
-
 def score_and_persist_sonnet(
     conn: sqlite3.Connection,
     job_row: dict,
     config: dict,
-    client,
     profile: dict,
     evaluator_fn: Optional[Callable] = None,
 ) -> Optional[dict]:
@@ -154,7 +147,6 @@ def score_and_persist_sonnet(
         conn: Open SQLite connection (caller manages lifecycle).
         job_row: Dict-like job row from the jobs table (must have jd_full).
         config: Application config dict.
-        client: Anthropic client instance.
         profile: Experience profile dict.
         evaluator_fn: Optional evaluator function reference. If None, imports
                       evaluate_job_sonnet from sonnet_evaluator. Pass the
@@ -170,7 +162,7 @@ def score_and_persist_sonnet(
 
     dedup_key = job_row.get("dedup_key", "unknown")
 
-    scoring_result = evaluator_fn(client, job_row, profile, conn, config)
+    scoring_result = evaluator_fn(job_row, profile, conn, config)
 
     result = unwrap_scoring_result(scoring_result)
     if result is None:

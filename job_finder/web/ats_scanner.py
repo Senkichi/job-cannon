@@ -79,12 +79,9 @@ from job_finder.web.ats_prober import (  # noqa: E402
     _PROBE_TIMEOUT,
 )
 
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
 
 def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) -> bool:
     """Return True if title matches any target keyword and no exclusion keyword.
@@ -113,7 +110,6 @@ def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) 
         return False
 
     return True
-
 
 def upsert_company(
     conn: sqlite3.Connection,
@@ -211,7 +207,6 @@ def upsert_company(
     except Exception as e:
         logger.warning("upsert_company failed for '%s' (non-fatal): %s", name, e)
         return None
-
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
     """Probe ATS APIs speculatively for companies with pending probe status.
@@ -312,11 +307,9 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
     )
     return summary
 
-
 # ---------------------------------------------------------------------------
 # ATS Scan Functions
 # ---------------------------------------------------------------------------
-
 
 def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Lever API for keyword-matched job postings.
@@ -387,7 +380,6 @@ def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> li
 
     logger.debug("scan_lever('%s'): %d postings fetched, %d matched", slug, len(postings), len(results))
     return results
-
 
 def scan_greenhouse(board_token: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Greenhouse API for keyword-matched job postings.
@@ -472,7 +464,6 @@ def scan_greenhouse(board_token: str, target_titles: list[str], exclusions: list
     )
     return results
 
-
 def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan Ashby API for keyword-matched job postings.
 
@@ -556,7 +547,6 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
     )
     return results
 
-
 def run_ats_scan(db_path: str, config: dict) -> dict:
     """Scan all enabled companies' ATS platforms for keyword-matched job postings.
 
@@ -614,14 +604,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         "errors": [],
     }
     all_new_job_keys: list[str] = []
-
-    # Create Anthropic client for Haiku fallback calls in careers scraper
-    _anthropic_client = None
-    try:
-        import anthropic
-        _anthropic_client = anthropic.Anthropic()
-    except (ImportError, Exception):
-        logger.debug("Anthropic client not available — Haiku fallbacks disabled")
 
     with standalone_connection(db_path) as conn:
         # Query companies with confirmed ATS slug (hit) AND error companies eligible
@@ -817,7 +799,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     # Step 1: Find careers URL from homepage
                     careers_url = find_careers_url(
                         miss_homepage_url,
-                        client=_anthropic_client,
                         conn=conn,
                         config=config,
                     )
@@ -831,7 +812,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     # Step 2: Scrape careers page for keyword-matched jobs
                     scraped_jobs = scrape_careers_page(
                         careers_url, target_titles, title_exclusions,
-                        client=_anthropic_client,
                         conn=conn,
                         config=config,
                     )
@@ -900,10 +880,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # Uses scoring_orchestrator directly (no pipeline_runner dependency).
         if all_new_job_keys and score_and_persist_haiku is not None:
             try:
-                import anthropic as _anthropic  # noqa: F401 — import check only
                 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 
-                client = _anthropic.Anthropic()
                 profile = load_scoring_profile(config)
                 threshold = config.get("scoring", {}).get(
                     "haiku_threshold", DEFAULT_HAIKU_THRESHOLD
@@ -921,7 +899,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         job_row = dict(row)
 
                         result = score_and_persist_haiku(
-                            conn, job_row, config, client, profile,
+                            conn, job_row, config, profile,
                         )
                         if result is None:
                             continue
@@ -951,7 +929,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             if not job_row.get("jd_full"):
                                 continue
                             s_result = score_and_persist_sonnet(
-                                conn, job_row, config, client, profile,
+                                conn, job_row, config, profile,
                             )
                             if s_result is not None:
                                 sonnet_evaluated += 1
@@ -962,8 +940,6 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             )
                     summary["sonnet_evaluated"] = sonnet_evaluated
 
-            except ImportError:
-                logger.debug("anthropic not installed — skipping Haiku scoring for ATS jobs")
             except Exception as score_err:
                 logger.warning("ATS scan Haiku scoring failed (non-fatal): %s", score_err)
 

@@ -55,7 +55,6 @@ EMPTY_PROFILE = {
     },
 }
 
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -117,7 +116,6 @@ def validate_profile(profile: dict) -> list:
 
     return warnings
 
-
 # ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
@@ -140,7 +138,6 @@ def load_profile(profile_path: str = "experience_profile.json") -> dict:
             return json.load(f)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in profile file {path}: {exc}") from exc
-
 
 def save_profile(profile: dict, profile_path: str = "experience_profile.json", *, force: bool = False) -> None:
     """Save the experience profile to a JSON file.
@@ -199,7 +196,6 @@ def save_profile(profile: dict, profile_path: str = "experience_profile.json", *
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
 
-
 # ---------------------------------------------------------------------------
 # Opus-powered markdown extraction
 # ---------------------------------------------------------------------------
@@ -237,7 +233,6 @@ Rules:
 Resume/markdown to extract from:
 """
 
-
 def extract_profile_from_markdown(markdown_text: str) -> dict:
     """Extract a structured profile from markdown text using Claude Opus.
 
@@ -248,26 +243,20 @@ def extract_profile_from_markdown(markdown_text: str) -> dict:
         Profile dict matching PROFILE_SCHEMA, or an error dict with key 'error'.
     """
     try:
-        import anthropic
+        from job_finder.web.claude_client import _run_oneshot
 
-        client = anthropic.Anthropic()
-        message = client.messages.create(
+        envelope = _run_oneshot(
             model=DEFAULT_MODEL_OPUS,
-            max_tokens=4096,
-            messages=[
-                {
-                    "role": "user",
-                    "content": _EXTRACTION_PROMPT + markdown_text,
-                }
-            ],
+            system="You extract structured profiles from resume text. Return valid JSON only.",
+            user_message=_EXTRACTION_PROMPT + markdown_text,
+            timeout=120,
         )
 
-        response_text = message.content[0].text.strip()
+        response_text = envelope.get("result", "").strip()
 
         # Strip any accidental code fences
         if response_text.startswith("```"):
             lines = response_text.splitlines()
-            # Remove first and last fence lines
             response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         extracted = json.loads(response_text)

@@ -12,13 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _NOW = datetime.now().isoformat()
-
 
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None = None) -> None:
     """Insert a minimal job row for scoring tests."""
@@ -48,7 +46,6 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None = 
     )
     conn.commit()
 
-
 class _TrackingConnection:
     """Wraps a sqlite3.Connection to count SQL queries matching a pattern."""
 
@@ -63,7 +60,6 @@ class _TrackingConnection:
 
     def __getattr__(self, name: str):
         return getattr(self._conn, name)
-
 
 def _make_tracking_connection_factory(calls_out: list[str]):
     """Return a standalone_connection replacement that tracks dedup SELECT calls.
@@ -81,7 +77,6 @@ def _make_tracking_connection_factory(calls_out: list[str]):
 
     return _factory
 
-
 # ---------------------------------------------------------------------------
 # Config shared across tests
 # ---------------------------------------------------------------------------
@@ -98,11 +93,9 @@ _TEST_CONFIG = {
     "sources": {},
 }
 
-
 # ---------------------------------------------------------------------------
 # run_haiku_scoring batch fetch tests
 # ---------------------------------------------------------------------------
-
 
 def test_haiku_batch_fetch(migrated_db):
     """run_haiku_scoring issues exactly 1 SELECT WHERE dedup_key IN for 3 keys."""
@@ -124,7 +117,6 @@ def test_haiku_batch_fetch(migrated_db):
         patch.object(sr, "should_exclude", return_value=(False, "")),
         patch.object(sr, "load_scoring_profile", return_value={}),
     ):
-        mock_anthropic.Anthropic.return_value = MagicMock()
         sr.run_haiku_scoring(keys, _TEST_CONFIG, db_path)
 
     # Should be exactly 1 batch IN query, not 3 individual queries
@@ -134,7 +126,6 @@ def test_haiku_batch_fetch(migrated_db):
     assert "IN" in select_calls[0], (
         f"Expected WHERE dedup_key IN (...) but got: {select_calls[0]}"
     )
-
 
 def test_haiku_missing_key_skipped(migrated_db, caplog):
     """run_haiku_scoring logs a warning for a missing key and processes only existing ones."""
@@ -158,7 +149,6 @@ def test_haiku_missing_key_skipped(migrated_db, caplog):
         patch.object(sr, "load_scoring_profile", return_value={}),
         caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),
     ):
-        mock_anthropic.Anthropic.return_value = MagicMock()
         sr.run_haiku_scoring(["key-exists", "key-missing"], _TEST_CONFIG, db_path)
 
     assert "key-exists" in scored_keys
@@ -166,7 +156,6 @@ def test_haiku_missing_key_skipped(migrated_db, caplog):
     assert any("not found in DB" in r.message for r in caplog.records), (
         f"Expected 'not found in DB' warning. Got: {[r.message for r in caplog.records]}"
     )
-
 
 def test_haiku_empty_keys(migrated_db):
     """run_haiku_scoring returns ([], 0) immediately for empty key list without DB queries."""
@@ -189,11 +178,9 @@ def test_haiku_empty_keys(migrated_db):
     assert result == ([], 0)
     assert not db_touched, "DB should not be accessed for empty key list"
 
-
 # ---------------------------------------------------------------------------
 # run_sonnet_evaluation batch fetch tests
 # ---------------------------------------------------------------------------
-
 
 def test_sonnet_batch_fetch(migrated_db):
     """run_sonnet_evaluation issues exactly 1 SELECT WHERE dedup_key IN for 3 keys."""
@@ -215,7 +202,6 @@ def test_sonnet_batch_fetch(migrated_db):
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "evaluate_job_sonnet", MagicMock()),
     ):
-        mock_anthropic.Anthropic.return_value = MagicMock()
         sr.run_sonnet_evaluation(keys, _TEST_CONFIG, db_path)
 
     assert len(select_calls) == 1, (
@@ -224,7 +210,6 @@ def test_sonnet_batch_fetch(migrated_db):
     assert "IN" in select_calls[0], (
         f"Expected WHERE dedup_key IN (...) but got: {select_calls[0]}"
     )
-
 
 def test_sonnet_missing_key_skipped(migrated_db, caplog):
     """run_sonnet_evaluation logs a warning for a missing key and evaluates only existing ones."""
@@ -248,7 +233,6 @@ def test_sonnet_missing_key_skipped(migrated_db, caplog):
         patch.object(sr, "evaluate_job_sonnet", MagicMock()),
         caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),
     ):
-        mock_anthropic.Anthropic.return_value = MagicMock()
         sr.run_sonnet_evaluation(["skey-exists", "skey-missing"], _TEST_CONFIG, db_path)
 
     assert "skey-exists" in evaluated_keys
@@ -256,7 +240,6 @@ def test_sonnet_missing_key_skipped(migrated_db, caplog):
     assert any("not found in DB" in r.message for r in caplog.records), (
         f"Expected 'not found in DB' warning. Got: {[r.message for r in caplog.records]}"
     )
-
 
 def test_sonnet_empty_keys(migrated_db):
     """run_sonnet_evaluation returns 0 immediately for empty queue without DB queries."""

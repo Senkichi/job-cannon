@@ -12,7 +12,6 @@ from job_finder.config import COMPANY_DENYLIST, get_company_denylist
 
 logger = logging.getLogger(__name__)
 
-
 def should_exclude(
     job_row: dict,
     exclusions: dict,

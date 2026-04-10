@@ -21,11 +21,6 @@ import threading
 from datetime import datetime
 from typing import Optional
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
 from job_finder.config import DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.db import upsert_job, log_run
 from job_finder.models import Job
@@ -49,7 +44,6 @@ logger = logging.getLogger(__name__)
 # inside a `with _budget_alert_lock:` block to prevent data races.
 _budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
-
 
 def run_ingestion(db_path: str, config: dict) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
@@ -129,7 +123,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 logger.warning("Failed to log SerpAPI run: %s", e)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
-    if new_job_keys and anthropic is not None:
+    if new_job_keys:
         sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
         summary["haiku_scored"] = haiku_scored_count
         summary["sonnet_queue"] = sonnet_queue
@@ -161,7 +155,6 @@ def run_ingestion(db_path: str, config: dict) -> dict:
     )
 
     return summary
-
 
 def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[Job]:
     """Fetch jobs from Gmail with run-level email_parse_log tracking.
@@ -227,7 +220,6 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
 
         return []
 
-
 def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
     """Fetch jobs from SerpAPI with error isolation.
 
@@ -270,7 +262,6 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
         summary["serpapi_errors"].append(error_msg)
         logger.warning("SerpAPI ingestion failed: %s", error_msg)
         return []
-
 
 def _score_and_persist(
     job: Job, scorer: JobScorer, conn, summary: dict, new_job_keys: list[str]
@@ -345,7 +336,6 @@ def _score_and_persist(
             "Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e
         )
 
-
 def _log_to_email_parse_log(
     conn: sqlite3.Connection,
     message_id: str,
@@ -374,7 +364,6 @@ def _log_to_email_parse_log(
         conn.commit()
     except Exception as e:
         logger.warning("Failed to write to email_parse_log: %s", e)
-
 
 def _check_budget_alert(config: dict, db_path: str) -> None:
     """Check monthly AI spend and fire budget alert notification if thresholds crossed.

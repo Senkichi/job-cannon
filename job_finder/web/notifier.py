@@ -20,7 +20,6 @@ _NOTIFY_LOCK = threading.Lock()
 _NOTIFY_SEEN: dict[tuple[str, str], datetime] = {}
 _NOTIFY_COOLDOWN_HOURS = 24
 
-
 def _can_notify(dedup_key: str, notification_type: str) -> bool:
     """Return True if the cooldown has elapsed since last notification for this (key, type) pair.
 
@@ -44,7 +43,6 @@ def _can_notify(dedup_key: str, notification_type: str) -> bool:
         _NOTIFY_SEEN[cache_key] = now
         return True
 
-
 def send_notification(title: str, body: str, url: str | None = None) -> None:
     """Send a Windows 11 toast notification in a daemon thread.
 
@@ -66,7 +64,6 @@ def send_notification(title: str, body: str, url: str | None = None) -> None:
     t = threading.Thread(target=_send, daemon=True)
     t.start()
 
-
 def _build_app_url(config: dict, path: str) -> str:
     """Build a localhost URL from server config.
 
@@ -82,7 +79,6 @@ def _build_app_url(config: dict, path: str) -> str:
     port = server.get("port", DEFAULT_SERVER_PORT)
     return f"http://{host}:{port}{path}"
 
-
 def _is_enabled(config: dict, notification_type: str) -> bool:
     """Check if a notification type is enabled in config.
 
@@ -96,7 +92,6 @@ def _is_enabled(config: dict, notification_type: str) -> bool:
         True if the notification type is enabled.
     """
     return config.get("notifications", {}).get(notification_type, True)
-
 
 def notify_high_score(
     job_title: str,
@@ -125,7 +120,6 @@ def notify_high_score(
         f"{job_title} at {company} ({score:.0f}/100)",
         url=url,
     )
-
 
 def notify_pipeline_change(
     detection_type: str,
@@ -168,7 +162,6 @@ def notify_pipeline_change(
         f"{job_title} at {company}",
         url=url,
     )
-
 
 def notify_budget_alert(percent: float, config: dict) -> None:
     """Notify when budget reaches 80% or 100%.

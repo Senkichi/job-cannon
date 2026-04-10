@@ -20,12 +20,10 @@ from job_finder.web.db_helpers import get_db
 
 costs_bp = Blueprint("costs", __name__, url_prefix="/costs")
 
-
 def _get_db():
     """Get DB connection using app config DB_PATH."""
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     return get_db(db_path)
-
 
 @costs_bp.route("/", strict_slashes=False)
 def index():

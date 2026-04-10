@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
-
 def _get_ats_context(conn):
     """Query ATS scan stat card data for the Dashboard.
 
@@ -53,7 +52,6 @@ def _get_ats_context(conn):
         "ats_tracked_count": (counts["ats_tracked"] or 0) if counts else 0,
     }
 
-
 def _get_rejection_context(conn):
     """Query rejection insights context for the Dashboard.
 
@@ -76,7 +74,6 @@ def _get_rejection_context(conn):
         "latest_report": latest_report,
         "unreviewed_rejection_count": unreviewed_count,
     }
-
 
 @dashboard_bp.route("/", strict_slashes=False)
 def index():
@@ -127,7 +124,6 @@ def index():
         ats_tracked_count=ats_ctx["ats_tracked_count"],
     )
 
-
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
 def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
@@ -144,7 +140,6 @@ def cost_detail():
         cost_stats=cost_stats,
         budget_cap=budget_cap,
     )
-
 
 @dashboard_bp.route("/rejection-analysis", methods=["POST"], strict_slashes=False)
 def rejection_analysis():

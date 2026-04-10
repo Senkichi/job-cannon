@@ -24,8 +24,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import anthropic
-
 from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
 from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
@@ -121,7 +119,6 @@ _STRATEGY_DESCRIPTIONS = {
     ),
 }
 
-
 # ---------------------------------------------------------------------------
 # System prompt with closed-world constraint + distilled writing guidelines
 # ---------------------------------------------------------------------------
@@ -212,7 +209,6 @@ _SYSTEM_PROMPT = (
     + _RESUME_GUIDELINES
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper: accepted preferences query
 # ---------------------------------------------------------------------------
@@ -235,13 +231,11 @@ def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
         logger.debug("Failed to load resume preferences (non-fatal)", exc_info=True)
         return []
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def generate_resume_single(
-    client: Any,
     job_row: dict,
     profile: dict,
     conn: sqlite3.Connection,
@@ -348,7 +342,6 @@ def generate_resume_single(
         user_message += f"- Contact line: {contact_hint}\n"
 
     result, _cost = call_claude(
-        client=client,
         model=model,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
@@ -382,7 +375,6 @@ def generate_resume_single(
         logger.warning("generate_resume_single: inline validation failed: %s", e)
 
     return result
-
 
 # ---------------------------------------------------------------------------
 # Background thread function
@@ -441,8 +433,7 @@ def _generate_resume_background(
                 generation_type = "multi"
             else:
                 # Single-pass generation
-                client = anthropic.Anthropic()
-                resume_data = generate_resume_single(client, job_row, profile, conn, config)
+                resume_data = generate_resume_single(job_row, profile, conn, config)
                 generation_type = "single"
 
                 if resume_data is None:
@@ -553,7 +544,6 @@ def _generate_resume_background(
                 "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
             )
 
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -573,7 +563,6 @@ def _format_education(profile: dict) -> str:
         if ed.get("thesis"):
             text += f" | Thesis: {ed['thesis']}"
     return text
-
 
 def _format_profile_positions(profile: dict) -> str:
     """Format positions from profile into a readable text block for the prompt."""

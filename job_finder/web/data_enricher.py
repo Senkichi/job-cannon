@@ -63,16 +63,13 @@ FIELD_TIER_CEILINGS = {
     "salary_max": "haiku",
 }
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
 def enrich_job(
     job_row: dict,
     serpapi_key: Optional[str] = None,
-    anthropic_client: Any = None,
     conn: Any = None,
     config: Optional[dict] = None,
 ) -> dict:
@@ -196,12 +193,12 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Tier 2: haiku — Extract structured data from accumulated fragments
         # ---------------------------------------------------------------
-        if start_idx <= TIER_ORDER.index("haiku") and anthropic_client is not None:
+        if start_idx <= TIER_ORDER.index("haiku"):
             try:
                 # Compose search text from all fragments collected so far
                 search_input = _compose_fragment_text(fragments, title, company)
                 haiku_result = extract_with_haiku(
-                    search_input, job_row, anthropic_client, conn, config
+                    search_input, job_row, conn, config
                 )
                 if haiku_result:
                     for k, v in haiku_result.items():
@@ -274,7 +271,7 @@ def enrich_job(
 
         if (
             start_idx <= TIER_ORDER.index("sonnet")
-            and anthropic_client is not None
+           
             and jd_still_missing
         ):
             try:
@@ -282,7 +279,7 @@ def enrich_job(
                 gate_ok = cost_gate(conn, config, "sonnet")
                 if gate_ok:
                     sonnet_result = extract_with_sonnet(
-                        fragments, job_row, anthropic_client, conn, config
+                        fragments, job_row, conn, config
                     )
                     if sonnet_result:
                         enriched = _filter_non_none(sonnet_result)
@@ -300,7 +297,6 @@ def enrich_job(
     except Exception as e:
         logger.warning("enrich_job failed for '%s': %s", job_row.get("title"), e)
         return {}
-
 
 def run_enrichment_backfill(
     db_path: str,
@@ -351,11 +347,9 @@ def run_enrichment_backfill(
 
         return enriched_count
 
-
 # ---------------------------------------------------------------------------
 # Private helpers: tier logic utilities
 # ---------------------------------------------------------------------------
-
 
 def _find_missing_fields(job_row: dict) -> list:
     """Return list of missing scoring-relevant field names.
@@ -373,11 +367,9 @@ def _find_missing_fields(job_row: dict) -> list:
         missing.append("salary_min")
     return missing
 
-
 def _filter_non_none(d: dict) -> dict:
     """Return a new dict with None values removed."""
     return {k: v for k, v in d.items() if v is not None}
-
 
 def _start_tier_index(current_tier: Optional[str]) -> int:
     """Return the index in TIER_ORDER to start from based on current_tier.
@@ -399,7 +391,6 @@ def _start_tier_index(current_tier: Optional[str]) -> int:
     except ValueError:
         return 0
 
-
 def _parse_source_urls(source_urls_json: Optional[str]) -> list:
     """Parse source_urls JSON field into a list of URL strings.
 
@@ -416,7 +407,6 @@ def _parse_source_urls(source_urls_json: Optional[str]) -> list:
         return [u for u in urls if isinstance(u, str)]
     except (json.JSONDecodeError, TypeError):
         return []
-
 
 def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
     """Compose a single text string from all accumulated fragments.
@@ -437,7 +427,6 @@ def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
     if parts:
         return "\n\n".join(parts)
     return f"Job posting: {title} at {company}"
-
 
 def _resolve_from_fragments(
     fragments: dict,
@@ -467,7 +456,6 @@ def _resolve_from_fragments(
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)
-
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     """Persist enriched fields + enrichment_tier atomically in a single UPDATE.

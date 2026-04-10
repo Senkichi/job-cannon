@@ -4,10 +4,9 @@ import json
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 @pytest.fixture
 def tmp_db_path():
@@ -17,7 +16,6 @@ def tmp_db_path():
     yield path
     if os.path.exists(path):
         os.remove(path)
-
 
 @pytest.fixture
 def sample_db_with_jobs():
@@ -135,7 +133,6 @@ def sample_db_with_jobs():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def app_config():
     """Return a dict with test configuration values."""
@@ -144,7 +141,6 @@ def app_config():
         "scoring": {"min_score": 5.0},
         "polling": {"interval_minutes": 30},
     }
-
 
 @pytest.fixture
 def app(tmp_db_path):
@@ -178,12 +174,10 @@ def app(tmp_db_path):
     application.config["TESTING"] = True
     return application
 
-
 @pytest.fixture
 def client(app):
     """Flask test client from the shared app fixture."""
     return app.test_client()
-
 
 @pytest.fixture
 def migrated_db():
@@ -207,7 +201,6 @@ def migrated_db():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
-
 
 @pytest.fixture(scope="class")
 def migrated_db_class():
@@ -240,7 +233,6 @@ def migrated_db_class():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
-
 
 @pytest.fixture
 def migrated_db_with_jobs():
@@ -319,7 +311,6 @@ def migrated_db_with_jobs():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def sample_resume_data():
     """Return a structured resume dict for use across resume test classes.
@@ -364,23 +355,24 @@ def sample_resume_data():
         ],
     }
 
+@pytest.fixture(autouse=True)
+def mock_run_oneshot():
+    """Auto-mock _run_oneshot so no test accidentally invokes the real Claude CLI.
+
+    Returns a generic CLI envelope with score=75.  Individual test classes
+    override call_claude at the module-import level for more specific behavior.
+    """
+    envelope = {
+        "is_error": False,
+        "result": json.dumps({"score": 75, "summary": "Good match"}),
+        "structured_output": {"score": 75, "summary": "Good match"},
+        "usage": {"input_tokens": 100, "output_tokens": 50},
+        "total_cost_usd": 0.001,
+    }
+    with patch("job_finder.web.claude_client._run_oneshot", return_value=envelope) as mock:
+        yield mock
 
 @pytest.fixture
 def mock_anthropic_client():
-    """Return a MagicMock mimicking anthropic.Anthropic() client.
-
-    mock.messages.create() returns a response with:
-    - content[0].text: JSON string '{"score": 75, "summary": "Good match"}'
-    - usage.input_tokens: 100
-    - usage.output_tokens: 50
-    """
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock()]
-    mock_response.content[0].text = json.dumps({"score": 75, "summary": "Good match"})
-    mock_response.usage.input_tokens = 100
-    mock_response.usage.output_tokens = 50
-
-    mock_client = MagicMock()
-    mock_client.messages.create.return_value = mock_response
-
-    return mock_client
+    """Legacy fixture — returns None. The Claude CLI is used instead of the SDK."""
+    return None

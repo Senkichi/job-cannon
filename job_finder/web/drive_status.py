@@ -25,7 +25,6 @@ from flask import g
 
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
-
 def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
     """Return a structured dict describing current Google Drive readiness.
 
@@ -51,7 +50,6 @@ def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
     result = _compute_drive_status(config, token_path)
     g.drive_status = result
     return result
-
 
 def _compute_drive_status(config: dict, token_path: str) -> dict:
     """Internal: compute Drive status without caching."""

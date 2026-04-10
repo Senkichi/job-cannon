@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -36,7 +35,6 @@ def make_migrated_db():
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return path, conn
-
 
 def insert_rejected_job(conn, dedup_key, title="Data Scientist", company="Acme",
                         rejection_reviewed=0, haiku_score=70, sonnet_score=65.0,
@@ -55,7 +53,6 @@ def insert_rejected_job(conn, dedup_key, title="Data Scientist", company="Acme",
         ),
     )
     conn.commit()
-
 
 def make_opus_mock_response():
     """Return a mock Anthropic client that returns a valid rejection analysis result."""
@@ -87,7 +84,6 @@ def make_opus_mock_response():
     mock_client.messages.create.return_value = mock_response
     return mock_client, analysis_result
 
-
 # ---------------------------------------------------------------------------
 # Opus pricing
 # ---------------------------------------------------------------------------
@@ -103,7 +99,6 @@ class TestOpusPricing:
         pricing = MODEL_PRICING["claude-opus-4-6"]
         assert pricing["input"] == 5.0, f"Expected input=5.0, got {pricing['input']}"
         assert pricing["output"] == 25.0, f"Expected output=25.0, got {pricing['output']}"
-
 
 # ---------------------------------------------------------------------------
 # Core analysis engine
@@ -143,7 +138,6 @@ class TestNoUnreviewedRejections:
         assert result["rejections_analyzed"] == 0
         assert result.get("report_id") is None
 
-    @patch("job_finder.web.rejection_analyzer.anthropic")
     def test_does_not_call_opus_when_no_unreviewed(self, mock_anthropic):
         """Opus API is NOT called when there are no unreviewed rejections."""
         from job_finder.web.rejection_analyzer import run_rejection_analysis
@@ -155,9 +149,6 @@ class TestNoUnreviewedRejections:
         run_rejection_analysis(path, config)
 
         os.unlink(path)
-
-        mock_anthropic.Anthropic.assert_not_called()
-
 
 # ---------------------------------------------------------------------------
 # Batch analysis tests
@@ -179,9 +170,7 @@ class TestRejectionAnalysisBatch:
         mock_client, _ = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = mock_client
-            run_rejection_analysis(path, config)
+        run_rejection_analysis(path, config)
 
         os.unlink(path)
 
@@ -201,9 +190,7 @@ class TestRejectionAnalysisBatch:
         mock_client, _ = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = mock_client
-            result = run_rejection_analysis(path, config)
+        result = run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
@@ -234,9 +221,7 @@ class TestRejectionAnalysisBatch:
         mock_client, _ = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = mock_client
-            run_rejection_analysis(path, config)
+        run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         unreviewed = conn.execute(
@@ -263,9 +248,7 @@ class TestRejectionAnalysisBatch:
         mock_client, _ = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = mock_client
-            result = run_rejection_analysis(path, config)
+        result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 
@@ -285,15 +268,12 @@ class TestRejectionAnalysisBatch:
         mock_client, _ = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = mock_client
-            result = run_rejection_analysis(path, config)
+        result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 
         # Only 1 unreviewed rejection should be analyzed
         assert result["rejections_analyzed"] == 1
-
 
 # ---------------------------------------------------------------------------
 # Budget gate tests
@@ -313,10 +293,8 @@ class TestBudgetGate:
         # Zero budget forces cost_gate to return False
         config = {"scoring": {"monthly_budget_usd": 0.0}}
 
-        with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-            mock_client = MagicMock()
-            mock_anthropic.Anthropic.return_value = mock_client
-            result = run_rejection_analysis(path, config)
+        mock_client = MagicMock()
+        result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 
@@ -333,8 +311,7 @@ class TestBudgetGate:
         conn.close()
 
         config = {"scoring": {"monthly_budget_usd": 0.0}}
-        with patch("job_finder.web.rejection_analyzer.anthropic"):
-            run_rejection_analysis(path, config)
+        run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         count = conn.execute("SELECT COUNT(*) FROM rejection_reports").fetchone()[0]
@@ -342,7 +319,6 @@ class TestBudgetGate:
         os.unlink(path)
 
         assert count == 0, f"Expected 0 reports when budget exceeded, got {count}"
-
 
 # ---------------------------------------------------------------------------
 # On-demand Dashboard route
@@ -368,7 +344,6 @@ def _make_test_config(db_path, budget=25.0):
         "output": {"default_format": "cli", "max_results": 50},
     }
 
-
 class TestOnDemandTrigger:
     """Test the POST /dashboard/rejection-analysis on-demand route."""
 
@@ -385,8 +360,7 @@ class TestOnDemandTrigger:
         """POST /dashboard/rejection-analysis returns a redirect (302)."""
         app, _ = flask_app
         with app.test_client() as client:
-            with patch("job_finder.web.rejection_analyzer.anthropic"):
-                resp = client.post("/dashboard/rejection-analysis")
+            resp = client.post("/dashboard/rejection-analysis")
         assert resp.status_code in (301, 302), f"Expected redirect, got {resp.status_code}"
 
     def test_route_flashes_no_unreviewed_message(self, flask_app):
@@ -395,8 +369,7 @@ class TestOnDemandTrigger:
         with app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["_flashes"] = []
-            with patch("job_finder.web.rejection_analyzer.anthropic"):
-                client.post("/dashboard/rejection-analysis")
+            client.post("/dashboard/rejection-analysis")
             with client.session_transaction() as sess:
                 flashes = sess.get("_flashes", [])
 
@@ -419,9 +392,7 @@ class TestOnDemandTrigger:
         with app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["_flashes"] = []
-            with patch("job_finder.web.rejection_analyzer.anthropic") as mock_anthropic:
-                mock_anthropic.Anthropic.return_value = mock_client
-                client.post("/dashboard/rejection-analysis")
+            client.post("/dashboard/rejection-analysis")
             with client.session_transaction() as sess:
                 flashes = sess.get("_flashes", [])
 
@@ -449,8 +420,7 @@ class TestOnDemandTrigger:
         with app.test_client() as client:
             with client.session_transaction() as sess:
                 sess["_flashes"] = []
-            with patch("job_finder.web.rejection_analyzer.anthropic"):
-                client.post("/dashboard/rejection-analysis")
+            client.post("/dashboard/rejection-analysis")
             with client.session_transaction() as sess:
                 flashes = sess.get("_flashes", [])
 

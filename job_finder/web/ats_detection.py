@@ -37,7 +37,6 @@ _ASHBY_URL = re.compile(
     # NOTE: No re.IGNORECASE — Ashby slugs are case-sensitive
 )
 
-
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Optional[str]]:
     """Extract ATS platform and slug from a list of job source URLs.
 
@@ -77,7 +76,6 @@ def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Option
             return "ashby", m.group(1)
 
     return None, None
-
 
 def derive_slug_candidates(company_name: str) -> list[str]:
     """Generate ATS slug candidates from a company name.

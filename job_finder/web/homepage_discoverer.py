@@ -52,21 +52,17 @@ _COMPANY_SUFFIXES = frozenset([
     "inc.", "llc.", "corp.", "co.", "ltd.",
 ])
 
-
 # ---------------------------------------------------------------------------
 # Custom exceptions
 # ---------------------------------------------------------------------------
-
 
 class SerpAPIQuotaError(Exception):
     """Raised when SerpAPI returns a quota/error response."""
     pass
 
-
 # ---------------------------------------------------------------------------
 # Name normalization helpers
 # ---------------------------------------------------------------------------
-
 
 def _strip_company_suffixes(name: str) -> str:
     """Lowercase name, strip trailing suffix tokens (Inc, LLC, Corp, etc.)."""
@@ -75,18 +71,15 @@ def _strip_company_suffixes(name: str) -> str:
         tokens.pop()
     return " ".join(tokens)
 
-
 def _name_to_slug(name: str) -> str:
     """Convert name_raw to hyphenated slug for Tier 2 fallback."""
     stripped = _strip_company_suffixes(name)
     slug = re.sub(r"[^a-z0-9]+", "-", stripped).strip("-")
     return slug
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
 
 def discover_homepage(
     company_name: str,
@@ -141,7 +134,6 @@ def discover_homepage(
         return _search_serpapi(company_name, api_key)
 
     return None
-
 
 def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
     """Process up to _BATCH_CAP companies with no homepage_url and no prior probe attempt.
@@ -242,11 +234,9 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
         "errors": errors,
     }
 
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
 
 def _try_domain_guess(name_raw: str) -> str | None:
     """Tier 1: single-token companies only (e.g., 'Stripe' -> stripe.com).
@@ -260,7 +250,6 @@ def _try_domain_guess(name_raw: str) -> str | None:
     if len(tokens) != 1:
         return None
     return _try_slug_heuristic(tokens[0])
-
 
 def _try_slug_heuristic(ats_slug: str) -> str | None:
     """Try https://{ats_slug}.com via HEAD + body validation.
@@ -295,7 +284,6 @@ def _try_slug_heuristic(ats_slug: str) -> str | None:
     except Exception as e:
         logger.debug("Slug heuristic failed for %s: %s", url, e)
         return None
-
 
 def _search_serpapi(company_name: str, api_key: str) -> str | None:
     """Tier 3: SerpAPI Google web search for company homepage.
@@ -335,7 +323,6 @@ def _search_serpapi(company_name: str, api_key: str) -> str | None:
 
     logger.debug("SerpAPI search found no valid result for: %s", company_name)
     return None
-
 
 def _validate_url(url: str) -> str | None:
     """HEAD request to validate URL resolves with 200 and HTML content-type.

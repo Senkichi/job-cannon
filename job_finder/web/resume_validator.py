@@ -14,14 +14,11 @@ import json
 import logging
 import sqlite3
 
-import anthropic
-
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude
 from job_finder.web.resume_generator import RESUME_SCHEMA
 
 logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # JSON schema for Sonnet audit output
@@ -67,7 +64,6 @@ VALIDATION_SCHEMA = {
     "required": ["passed", "violations"],
     "additionalProperties": False,
 }
-
 
 # ---------------------------------------------------------------------------
 # System prompt for audit pass
@@ -131,7 +127,6 @@ _FIX_SYSTEM = (
     "Return the complete fixed resume matching the output schema."
 )
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -163,7 +158,6 @@ def validate_resume(
         On any exception, returns {"passed": True, "violations": []} (fail-open).
     """
     try:
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -195,7 +189,6 @@ def validate_resume(
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=_AUDIT_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
@@ -211,7 +204,6 @@ def validate_resume(
     except Exception as e:
         logger.warning("validate_resume: audit failed, returning fail-open result: %s", e)
         return {"passed": True, "violations": []}
-
 
 def fix_resume_violations(
     resume_data: dict,
@@ -242,7 +234,6 @@ def fix_resume_violations(
         return resume_data
 
     try:
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -273,7 +264,6 @@ def fix_resume_violations(
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=_FIX_SYSTEM,
             messages=[{"role": "user", "content": user_message}],

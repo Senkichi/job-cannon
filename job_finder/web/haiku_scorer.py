@@ -62,7 +62,6 @@ _SYSTEM_PROMPT = (
     "Be calibrated: 70+ = strong match worth reviewing, 50-69 = partial match, <50 = poor fit."
 )
 
-
 def _build_comp_context(job_row: JobRow) -> str | None:
     """Build a concise compensation context string from comp_data_json.
 
@@ -107,7 +106,6 @@ def _build_comp_context(job_row: JobRow) -> str | None:
             parts.append(f"{currency} {comp_min:,}-{comp_max:,}")
 
     return "; ".join(parts) if parts else None
-
 
 def build_description_snippet(
     description: str,
@@ -171,9 +169,7 @@ def build_description_snippet(
 
     return (snippet + keyword_summary)[:max_chars]
 
-
 def score_job_haiku(
-    client: Any,
     job_row: JobRow,
     experience_profile: dict,
     conn: Any,
@@ -186,8 +182,6 @@ def score_job_haiku(
     """Score a single job against the candidate profile using Claude Haiku.
 
     Args:
-        client: Anthropic client instance (injected for testability).
-            Ignored when *ctx* is provided.
         job_row: Job record dict with keys: dedup_key, title, company, location,
                  salary_min (optional), salary_max (optional), description (optional).
         experience_profile: Profile dict with target_titles, target_locations,
@@ -200,8 +194,8 @@ def score_job_haiku(
                    Pass 4000 for borderline re-evaluation to expand context.
         purpose: Cost tracking purpose label (default "haiku_score", use "haiku_reeval"
                  for the borderline second-pass call).
-        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
-            the individual client/conn/config parameters are ignored.
+        ctx: ClaudeContext bundling (conn, config).  When supplied,
+            the individual conn/config parameters are ignored.
 
     Returns:
         ScoringResult with status='success' and data dict containing score,
@@ -210,7 +204,6 @@ def score_job_haiku(
     """
     # Resolve context: prefer ctx fields over individual params
     if ctx is not None:
-        client = ctx.client
         conn = ctx.conn
         config = ctx.config
 
@@ -287,7 +280,7 @@ def score_job_haiku(
             output_schema=HAIKU_SCHEMA,
             job_id=job_id,
             purpose=purpose,
-            ctx=ctx or ClaudeContext(client=client, conn=conn, config=config),
+            ctx=ctx or ClaudeContext(conn=conn, config=config),
         )
         logger.debug(
             "Haiku scored '%s' @ '%s': score=%s (cost=$%.5f)",

@@ -20,7 +20,6 @@ import pytest
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.claude_client import MODEL_PRICING
 
-
 # ---------------------------------------------------------------------------
 # Opus Pricing Tests
 # ---------------------------------------------------------------------------
@@ -46,7 +45,6 @@ class TestOpusPricing:
         assert MODEL_PRICING["claude-opus-4-6"]["output"] == 25.0, (
             f"Expected output=25.0, got {MODEL_PRICING['claude-opus-4-6']['output']}"
         )
-
 
 # ---------------------------------------------------------------------------
 # Helper: create migrated DB with a job row
@@ -79,7 +77,6 @@ def _create_test_db_with_job(dedup_key="acme|senior data scientist|remote"):
     conn.commit()
     return path, conn
 
-
 # ---------------------------------------------------------------------------
 # Interview Prep Dedup Tests
 # ---------------------------------------------------------------------------
@@ -104,10 +101,9 @@ class TestInterviewPrepDedup:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            # Should NOT have called the Anthropic API
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        # Should NOT have called the Anthropic API
+        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
 
         # Verify no new row was added
         conn2 = sqlite3.connect(path)
@@ -136,9 +132,8 @@ class TestInterviewPrepDedup:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
 
         os.remove(path)
 
@@ -178,10 +173,8 @@ class TestInterviewPrepDedup:
         mock_response.usage.input_tokens = 500
         mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."):
+            generate_interview_prep_background(dedup_key, path, config)
 
         # Verify a new 'done' row was inserted
         conn2 = sqlite3.connect(path)
@@ -193,7 +186,6 @@ class TestInterviewPrepDedup:
         assert "done" in statuses, f"Expected 'done' status, got: {statuses}"
 
         os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # Interview Prep Content Tests
@@ -236,10 +228,8 @@ class TestInterviewPrepContent:
         mock_response.usage.input_tokens = 800
         mock_response.usage.output_tokens = 1500
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         conn2.row_factory = sqlite3.Row
@@ -304,10 +294,8 @@ class TestInterviewPrepContent:
             captured_kwargs.update(kwargs)
             return mock_response
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.side_effect = capture_create
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+            generate_interview_prep_background(dedup_key, path, config)
 
         assert "claude-opus" in captured_kwargs.get("model", ""), (
             f"Expected Opus model, got: {captured_kwargs.get('model')}"
@@ -351,11 +339,9 @@ class TestInterviewPrepContent:
             connect_calls.append(db_path)
             return original_connect(db_path, **kwargs)
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                with patch("job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect):
-                    generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+            with patch("job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect):
+                generate_interview_prep_background(dedup_key, path, config)
 
         assert len(connect_calls) >= 1, "sqlite3.connect was not called"
         assert path in connect_calls, f"Expected {path} in connect calls: {connect_calls}"
@@ -386,10 +372,8 @@ class TestInterviewPrepContent:
         mock_response.usage.input_tokens = 500
         mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -412,10 +396,8 @@ class TestInterviewPrepContent:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.side_effect = RuntimeError("API failure")
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -459,16 +441,13 @@ class TestInterviewPrepContent:
             fetch_calls.append(company_name)
             return f"Company info for {company_name}"
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", side_effect=track_fetch):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", side_effect=track_fetch):
+            generate_interview_prep_background(dedup_key, path, config)
 
         assert len(fetch_calls) == 1, f"Expected 1 _fetch_company_info call, got {len(fetch_calls)}"
         assert "Acme Corp" in fetch_calls[0] or fetch_calls[0] == "Acme Corp"
 
         os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # Budget Gating Tests
@@ -487,10 +466,9 @@ class TestInterviewPrepBudget:
 
         config = {"scoring": {"monthly_budget_usd": 0.0}}  # Budget at zero
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            # API should NOT be called when budget exceeded
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        # API should NOT be called when budget exceeded
+        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -504,7 +482,6 @@ class TestInterviewPrepBudget:
         assert "budget" in row[1].lower(), f"error_msg should mention budget: {row[1]}"
 
         os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # _fetch_company_info Tests
@@ -553,11 +530,9 @@ class TestFetchCompanyInfo:
         result = _fetch_company_info("Acme Corp", config)
         assert result == "", f"Expected empty string when no key, got: {result!r}"
 
-
 # ---------------------------------------------------------------------------
 # Interview Prep Trigger Wiring Tests (05-01-01 / INTEL-01)
 # ---------------------------------------------------------------------------
-
 
 class TestInterviewPrepTrigger:
     """Verify blueprint routes wire daemon thread trigger for 'applied' status.

@@ -412,7 +412,6 @@ MIGRATIONS = [
     ],
 ]
 
-
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 
@@ -449,7 +448,6 @@ def run_migrations(db_path: str) -> None:
                 conn.commit()
             except sqlite3.OperationalError:
                 pass  # Column already exists — expected on fresh DBs
-
 
 def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
     """Run retroactive dedup merge exactly once (guarded by sentinel in merge_log).
@@ -513,7 +511,6 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
 
     except Exception as e:
         logger.warning("Retroactive dedup failed (non-fatal): %s", e)
-
 
 def _apply_migration(
     conn: sqlite3.Connection, version: int, statements: list

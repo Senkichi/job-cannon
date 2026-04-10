@@ -60,11 +60,9 @@ _ELIGIBLE_TIERS_QUERY = (
 _BORDERLINE_MIN = 40
 _BORDERLINE_MAX = 70
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
 
 def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     """Count eligible jobs, estimate AI cost, and prompt user for confirmation.
@@ -136,12 +134,10 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     response = input("\nProceed with enrichment backfill? [y/N] ").strip().lower()
     return response == "y"
 
-
 def run_enrichment_pass(
     conn: sqlite3.Connection,
     serpapi_key: Optional[str],
     config: dict,
-    client: Any,
     limit: int = 100,
 ) -> tuple[int, set]:
     """Run a single enrichment pass over all eligible jobs.
@@ -183,7 +179,6 @@ def run_enrichment_pass(
         result = enrich_job(
             job_row,
             serpapi_key=serpapi_key,
-            anthropic_client=client,
             conn=conn,
             config=config,
         )
@@ -203,12 +198,10 @@ def run_enrichment_pass(
 
     return enriched_count, tier_advanced_keys
 
-
 def run_passes_to_convergence(
     conn: sqlite3.Connection,
     serpapi_key: Optional[str],
     config: dict,
-    client: Any,
     limit: int = 100,
 ) -> tuple[int, set]:
     """Run enrichment passes until convergence (0 enriched in a pass).
@@ -238,7 +231,7 @@ def run_passes_to_convergence(
     while True:
         pass_num += 1
         enriched_count, tier_advanced_keys = run_enrichment_pass(
-            conn, serpapi_key=serpapi_key, config=config, client=client, limit=limit
+            conn, serpapi_key=serpapi_key, config=config, limit=limit
         )
         print(f"Pass {pass_num}: {enriched_count} jobs enriched")
         total_enriched += enriched_count
@@ -250,11 +243,9 @@ def run_passes_to_convergence(
 
     return total_enriched, cumulative_tier_advanced_keys
 
-
 def run_sonnet_backfill(
     conn: sqlite3.Connection,
     config: dict,
-    client: Any,
 ) -> int:
     """Evaluate jobs that have jd_full but no sonnet_score using Sonnet.
 
@@ -287,7 +278,7 @@ def run_sonnet_backfill(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = evaluate_job_sonnet(client, job_row, profile, conn, config)
+        result = evaluate_job_sonnet(job_row, profile, conn, config)
 
         if result is None:
             logger.debug("Sonnet eval returned None for '%s'", dedup_key)
@@ -308,11 +299,9 @@ def run_sonnet_backfill(
     print(f"Sonnet backfill complete: {evaluated_count} jobs evaluated.")
     return evaluated_count
 
-
 def run_borderline_rescore(
     conn: sqlite3.Connection,
     config: dict,
-    client: Any,
     tier_advanced_keys: set,
 ) -> int:
     """Re-score borderline Haiku jobs (40-70) whose enrichment tier advanced.
@@ -358,7 +347,7 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = score_job_haiku(client, job_row, profile, conn, config)
+        result = score_job_haiku(job_row, profile, conn, config)
 
         if result is None:
             logger.debug("Haiku re-score returned None for '%s'", dedup_key)
@@ -375,7 +364,6 @@ def run_borderline_rescore(
     print(f"Borderline re-score complete: {rescored_count} jobs re-scored.")
     return rescored_count
 
-
 def main() -> None:
     """CLI entry point for enrichment backfill.
 
@@ -383,7 +371,6 @@ def main() -> None:
     like stale_detector.py), instantiates Anthropic client. Runs convergence
     passes, then Sonnet backfill, then borderline re-score.
     """
-    import anthropic as _anthropic
 
     from job_finder.config import load_config
 
@@ -397,21 +384,20 @@ def main() -> None:
 
     # Open own connection (thread-safe, not Flask g.db)
     with standalone_connection(db_path) as conn:
-        client = _anthropic.Anthropic()
 
         print("\n=== Phase 1: Convergence Enrichment Passes ===")
         total_enriched, tier_advanced_keys = run_passes_to_convergence(
-            conn, serpapi_key=serpapi_key, config=config, client=client
+            conn, serpapi_key=serpapi_key, config=config
         )
         print(f"\nTotal enriched across all passes: {total_enriched}")
         print(f"Jobs with tier advancement: {len(tier_advanced_keys)}")
 
         print("\n=== Phase 2: Sonnet Backfill ===")
-        sonnet_count = run_sonnet_backfill(conn, config=config, client=client)
+        sonnet_count = run_sonnet_backfill(conn, config=config)
 
         print("\n=== Phase 3: Borderline Re-score ===")
         rescore_count = run_borderline_rescore(
-            conn, config=config, client=client, tier_advanced_keys=tier_advanced_keys
+            conn, config=config, tier_advanced_keys=tier_advanced_keys
         )
 
         # Final tier distribution summary
@@ -432,7 +418,6 @@ def main() -> None:
         print(f"  Enriched: {total_enriched}")
         print(f"  Sonnet evaluated: {sonnet_count}")
         print(f"  Borderline re-scored: {rescore_count}")
-
 
 if __name__ == "__main__":
     main()

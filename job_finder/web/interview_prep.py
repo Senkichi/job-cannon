@@ -14,7 +14,6 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
 import requests
 
 from job_finder.config import DEFAULT_MODEL_OPUS
@@ -68,13 +67,11 @@ INTERVIEW_PREP_SCHEMA = {
     "additionalProperties": False,
 }
 
-
 # ---------------------------------------------------------------------------
 # SerpAPI company brief fetcher
 # ---------------------------------------------------------------------------
 
 SERPAPI_BASE_URL = "https://serpapi.com/search.json"
-
 
 def _fetch_company_info(company_name: str, config: dict) -> str:
     """Fetch company info from SerpAPI for interview prep context.
@@ -121,7 +118,6 @@ def _fetch_company_info(company_name: str, config: dict) -> str:
         logger.warning("_fetch_company_info failed for '%s': %s", company_name, e)
         return ""
 
-
 # ---------------------------------------------------------------------------
 # Background interview prep generation
 # ---------------------------------------------------------------------------
@@ -148,7 +144,6 @@ def generate_interview_prep_background(
     """
     with standalone_connection(db_path) as conn:
         _run_prep_generation(conn, dedup_key, config)
-
 
 def _run_prep_generation(
     conn: sqlite3.Connection,
@@ -231,13 +226,11 @@ def _run_prep_generation(
         )
 
         # --- Call Opus ---
-        client = anthropic.Anthropic()
         messages = [
             {"role": "user", "content": "Generate the interview preparation for this job application."}
         ]
 
         result, cost_usd = call_claude(
-            client=client,
             model=opus_model,
             system=system_prompt,
             messages=messages,
@@ -295,7 +288,6 @@ def _run_prep_generation(
         )
         conn.commit()
 
-
 def _build_system_prompt(
     title: str,
     company: str,
@@ -343,7 +335,6 @@ Generate comprehensive interview preparation with all four required sections:
 
 Be specific, practical, and tailored to both the role and the candidate's actual experience."""
 
-
 def _format_profile_for_prompt(profile: dict) -> str:
     """Format experience profile for inclusion in Opus prompt."""
     if not profile:
@@ -386,7 +377,6 @@ def _format_profile_for_prompt(profile: dict) -> str:
                 lines.append(f"    Thesis: {ed['thesis']}")
 
     return "\n".join(lines) if lines else "(No profile data)"
-
 
 def _format_fit_analysis(fit_analysis: dict) -> str:
     """Format AI fit analysis for inclusion in Opus prompt."""

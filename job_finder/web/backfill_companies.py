@@ -50,11 +50,9 @@ _FUZZY_THRESHOLD = 85
 # Minimum normalized name length for fuzzy matching (short names are unreliable)
 _MIN_NAME_LEN = 4
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
 
 def fuzzy_match_company(
     raw_name: str,
@@ -98,7 +96,6 @@ def fuzzy_match_company(
         return best_id, best_score
 
     return None, 0
-
 
 def cleanup_denylist_companies(conn: sqlite3.Connection, config: dict | None = None) -> dict:
     """Remove denylist placeholder company records and unlink their jobs.
@@ -155,7 +152,6 @@ def cleanup_denylist_companies(conn: sqlite3.Connection, config: dict | None = N
 
     return {"companies_deleted": companies_deleted, "jobs_unlinked": jobs_unlinked}
 
-
 def find_duplicate_companies(
     conn: sqlite3.Connection,
 ) -> list[tuple[int, int, str]]:
@@ -187,7 +183,6 @@ def find_duplicate_companies(
                     duplicates.append((ids[i], ids[j], norm_name))
 
     return duplicates
-
 
 def find_fuzzy_false_positives(
     conn: sqlite3.Connection,
@@ -244,7 +239,6 @@ def find_fuzzy_false_positives(
 
     return results
 
-
 def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
     """Check reachability of DDG-populated homepage URLs in the companies table.
 
@@ -296,7 +290,6 @@ def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
 
     return results
 
-
 def verify_all_linkable_jobs_linked(conn: sqlite3.Connection) -> dict:
     """Verify that all non-denylist jobs with a company name are linked to a company record.
 
@@ -345,7 +338,6 @@ def verify_all_linkable_jobs_linked(conn: sqlite3.Connection) -> dict:
         "unlinked_denylist": unlinked_denylist,
         "unlinked_details": unlinked_details,
     }
-
 
 def link_jobs_to_companies(
     conn: sqlite3.Connection,
@@ -444,7 +436,6 @@ def link_jobs_to_companies(
 
     return linked_count, new_company_ids, matched_count
 
-
 def run_ats_probing(db_path: str, config: dict) -> dict:
     """Run ATS probing on companies with pending probe status.
 
@@ -470,7 +461,6 @@ def run_ats_probing(db_path: str, config: dict) -> dict:
     )
 
     return result
-
 
 def run_ddg_enrichment(
     conn: sqlite3.Connection,
@@ -557,7 +547,6 @@ def run_ddg_enrichment(
     print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
     return enriched_count
 
-
 def main() -> None:
     """CLI entry point for company backfill.
 
@@ -611,7 +600,6 @@ def main() -> None:
         print(f"ATS hits:                {ats_result.get('hits', 0)}")
         print(f"ATS misses:              {ats_result.get('misses', 0)}")
         print(f"DDG enriched:            {ddg_count}")
-
 
 if __name__ == "__main__":
     main()

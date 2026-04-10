@@ -34,11 +34,9 @@ _TRANSIENT_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 # HTTP status codes that indicate permanent miss (no retry)
 _PERMANENT_MISS_CODES: frozenset[int] = frozenset({404, 410})
 
-
 # ---------------------------------------------------------------------------
 # Retry state machine helpers (DEBT-01 / Phase 14)
 # ---------------------------------------------------------------------------
-
 
 def _compute_retry_after(retry_count: int) -> str:
     """Compute UTC ISO timestamp for next retry based on current retry_count.
@@ -62,7 +60,6 @@ def _compute_retry_after(retry_count: int) -> str:
     # correct comparison with datetime('now') in SQL WHERE clauses
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
-
 def _is_transient_error(exc_or_status) -> bool:
     """Return True if the given exception or status code indicates a transient error.
 
@@ -79,7 +76,6 @@ def _is_transient_error(exc_or_status) -> bool:
         requests.exceptions.Timeout,
         requests.exceptions.ConnectionError,
     ))
-
 
 def _handle_scan_error(
     conn: sqlite3.Connection,
@@ -146,7 +142,6 @@ def _handle_scan_error(
             company_name, new_retry_count, _MAX_RETRIES, retry_after, error_detail,
         )
 
-
 def _reset_retry_state(
     conn: sqlite3.Connection,
     company_id: int,
@@ -172,7 +167,6 @@ def _reset_retry_state(
         (now, company_id),
     )
     conn.commit()
-
 
 def probe_single_company(
     company_id: int,
@@ -317,7 +311,6 @@ def probe_single_company(
         conn.commit()
         return {"status": "miss"}
 
-
 def _probe_lever_with_result(slug: str) -> bool:
     """Return True if Lever slug has at least one active posting. Let transient exceptions propagate."""
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
@@ -326,7 +319,6 @@ def _probe_lever_with_result(slug: str) -> bool:
         data = r.json()
         return isinstance(data, list) and len(data) > 0
     return False
-
 
 def _probe_lever(slug: str) -> bool:
     """Return True if slug has at least one active Lever posting.
@@ -353,7 +345,6 @@ def _probe_lever(slug: str) -> bool:
         logger.debug("_probe_lever('%s') failed: %s", slug, e)
         return False
 
-
 def _probe_greenhouse(slug: str) -> bool:
     """Return True if slug is a valid Greenhouse board token.
 
@@ -372,7 +363,6 @@ def _probe_greenhouse(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_greenhouse('%s') failed: %s", slug, e)
         return False
-
 
 def _probe_ashby(slug: str) -> bool:
     """Return True if slug is a valid Ashby job board name.

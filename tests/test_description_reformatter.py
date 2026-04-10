@@ -20,11 +20,9 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def mock_anthropic_client():
@@ -44,7 +42,6 @@ def mock_anthropic_client():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client
-
 
 @pytest.fixture
 def temp_db_path():
@@ -83,7 +80,6 @@ def temp_db_path():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def db_with_unformatted_jobs(temp_db_path):
     """DB with 3 jobs: 2 unformatted (reformatted=0) and 1 already formatted (reformatted=1)."""
@@ -119,7 +115,6 @@ def db_with_unformatted_jobs(temp_db_path):
     conn.close()
     return temp_db_path
 
-
 @pytest.fixture
 def db_with_null_description(temp_db_path):
     """DB with one job that has NULL description."""
@@ -133,11 +128,9 @@ def db_with_null_description(temp_db_path):
     conn.close()
     return temp_db_path
 
-
 # ---------------------------------------------------------------------------
 # Tests for reformat_description
 # ---------------------------------------------------------------------------
-
 
 class TestReformatDescription:
     def test_reformat_description_calls_haiku_and_returns_sectioned_text(
@@ -153,7 +146,7 @@ class TestReformatDescription:
                 {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"},
                 0.0002,
             )
-            result = reformat_description(pipe_description, mock_anthropic_client)
+            result = reformat_description(pipe_description)
 
         mock_call.assert_called_once()
         # Result should be the reformatted text (different from input)
@@ -170,7 +163,7 @@ class TestReformatDescription:
 
         with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
             mock_call.side_effect = Exception("API error")
-            result = reformat_description(original, mock_anthropic_client)
+            result = reformat_description(original)
 
         assert result == original
 
@@ -178,14 +171,14 @@ class TestReformatDescription:
         """reformat_description returns None unchanged when description is None."""
         from job_finder.web.description_reformatter import reformat_description
 
-        result = reformat_description(None, MagicMock())
+        result = reformat_description(None)
         assert result is None
 
     def test_reformat_description_returns_original_when_empty(self):
         """reformat_description returns empty string unchanged."""
         from job_finder.web.description_reformatter import reformat_description
 
-        result = reformat_description("", MagicMock())
+        result = reformat_description("")
         assert result == ""
 
     def test_reformat_description_skips_already_formatted_description(self):
@@ -202,7 +195,7 @@ class TestReformatDescription:
 
         mock_client = MagicMock()
         with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
-            result = reformat_description(already_formatted, mock_client)
+            result = reformat_description(already_formatted)
 
         # Should return original without calling Haiku
         mock_call.assert_not_called()
@@ -242,11 +235,9 @@ class TestReformatDescription:
         mock_call.assert_called_once()
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Tests for run_description_reformat_pass
 # ---------------------------------------------------------------------------
-
 
 class TestRunDescriptionReformatPass:
     def test_processes_only_unformatted_jobs(self, db_with_unformatted_jobs):

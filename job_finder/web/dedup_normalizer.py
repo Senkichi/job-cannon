@@ -135,11 +135,9 @@ _STATUS_PRECEDENCE = {
     "withdrawn": 0,
 }
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
 
 def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
@@ -161,7 +159,6 @@ def normalize_company(company: str) -> str:
         prev = normalized
         normalized = _COMPANY_SUFFIXES.sub("", normalized).strip()
     return normalized
-
 
 def normalize_title(title: str) -> str:
     """Normalize a job title for dedup key generation.
@@ -188,7 +185,6 @@ def normalize_title(title: str) -> str:
     normalized = " ".join(normalized.split()).lower()
     return normalized
 
-
 def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     """Backward-compat wrapper. Prefer Job.normalized_dedup_key().
 
@@ -202,7 +198,6 @@ def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     """
     from job_finder.models import Job
     return Job.normalized_dedup_key(company, title, location)
-
 
 def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     """Merge duplicate jobs in the database using normalized dedup_keys.
@@ -314,11 +309,9 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
 
     return merged_count
 
-
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
 
 def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     """Merge data from duplicate rows into canonical row data.
@@ -401,7 +394,6 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
         "fit_analysis": fit_analysis,
     }
 
-
 def _merge_locations(rows: list[dict]) -> list[str]:
     """Collect unique locations from all rows, Remote/Hybrid first."""
     remote_hybrid: list[str] = []
@@ -430,11 +422,9 @@ def _merge_locations(rows: list[dict]) -> list[str]:
 
     return remote_hybrid + other
 
-
 def _build_location_string(locations_raw: list[str]) -> str:
     """Build a concatenated location string, deduplicating."""
     return ", ".join(dict.fromkeys(locations_raw))
-
 
 def _merge_descriptions(rows: list[dict]) -> Optional[str]:
     """Merge descriptions from all rows.
@@ -454,7 +444,6 @@ def _merge_descriptions(rows: list[dict]) -> Optional[str]:
 
     return merged
 
-
 def _merge_notes(rows: list[dict]) -> str:
     """Merge notes fields by concatenating non-empty unique lines."""
     all_lines: list[str] = []
@@ -467,7 +456,6 @@ def _merge_notes(rows: list[dict]) -> str:
                 all_lines.append(line)
                 seen_lines.add(line)
     return "\n".join(all_lines)
-
 
 def _merge_pipeline_status(rows: list[dict]) -> str:
     """Return the highest-precedence pipeline_status from all rows."""
@@ -482,7 +470,6 @@ def _merge_pipeline_status(rows: list[dict]) -> str:
             best_status = status
 
     return best_status
-
 
 def _update_fk_tables(
     conn: sqlite3.Connection,
@@ -519,7 +506,6 @@ def _update_fk_tables(
         except sqlite3.OperationalError:
             # Table may not exist in test DBs or older schemas — skip
             pass
-
 
 def _update_canonical_key(
     conn: sqlite3.Connection,

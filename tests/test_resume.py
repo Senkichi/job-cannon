@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 class TestDocxFormatter:
     """build_resume_docx produces a valid .docx BytesIO."""
 
@@ -110,7 +109,6 @@ class TestDocxFormatter:
         assert edu["institution"] in full_text, (
             f"Institution '{edu['institution']}' not found in document"
         )
-
 
 class TestDriveUpload:
     """upload_to_drive handles .docx and Google Doc conversion modes."""
@@ -212,7 +210,6 @@ class TestDriveUpload:
         assert "fileid123" in result, (
             f"Expected fallback URL containing file ID, got: {result}"
         )
-
 
 class TestDriveServiceScopeCheck:
     """get_drive_service detects missing drive.file scope and raises ValueError."""
@@ -368,11 +365,9 @@ class TestDriveServiceScopeCheck:
             f"Error should contain re-auth command, got: {exc_info.value}"
         )
 
-
 # =============================================================================
 # Task 1 Tests: drive_status.py -- get_drive_status helper
 # =============================================================================
-
 
 class TestDriveStatus:
     """get_drive_status returns structured dict for all failure modes + happy path."""
@@ -540,7 +535,6 @@ class TestDriveStatus:
             assert mock_load.call_count == 1
             assert result1 is result2
 
-
 # =============================================================================
 # Task 1 Tests: resume_generator.py -- generate_resume_single + background
 # =============================================================================
@@ -589,7 +583,7 @@ class TestSinglePassGeneration:
             "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
         }
 
-        result = generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
+        result = generate_resume_single(job_row, sample_resume_data, conn, config)
         conn.close()
 
         assert result is not None
@@ -626,7 +620,7 @@ class TestSinglePassGeneration:
             "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
         }
 
-        result = generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
+        result = generate_resume_single(job_row, sample_resume_data, conn, config)
         conn.close()
 
         assert result is None, "Expected None when budget exceeded"
@@ -667,7 +661,7 @@ class TestSinglePassGeneration:
 
         with patch("job_finder.web.resume_generator.call_claude") as mock_call:
             mock_call.return_value = (mock_response.content[0].input, 0.05)
-            generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
+            generate_resume_single(job_row, sample_resume_data, conn, config)
 
         conn.close()
 
@@ -681,7 +675,6 @@ class TestSinglePassGeneration:
         assert actual_purpose == "resume_generation", (
             f"Expected purpose='resume_generation', got: {actual_purpose}"
         )
-
 
 class TestClosedWorldConstraint:
     """System prompt includes closed-world constraint."""
@@ -716,7 +709,7 @@ class TestClosedWorldConstraint:
                 "positions": [],
                 "education": [],
             }, 0.01)
-            generate_resume_single(mock_client, job_row, sample_resume_data, conn, config)
+            generate_resume_single(job_row, sample_resume_data, conn, config)
             if mock_call.called:
                 captured_system["system"] = mock_call.call_args.kwargs.get("system") or (
                     mock_call.call_args[0][2] if mock_call.call_args[0] else ""
@@ -739,7 +732,6 @@ class TestClosedWorldConstraint:
         required = RESUME_SCHEMA.get("required", [])
         for key in ["name", "summary", "skills", "positions"]:
             assert key in required, f"RESUME_SCHEMA missing required key: {key}"
-
 
 class TestGenerationHistoryTracking:
     """_generate_resume_background updates resume_generations status transitions."""
@@ -883,7 +875,6 @@ class TestGenerationHistoryTracking:
 
         assert row[0] == "error", f"Expected status='error', got: {row[0]}"
         assert row[1] is not None, "Expected error_msg to be set"
-
 
 # =============================================================================
 # Task 2 Tests: resume blueprint routes (POST /generate, GET /status)
@@ -1096,7 +1087,6 @@ class TestResumeRoutes:
         )
         assert "hx-trigger" not in body, "Error template must NOT have hx-trigger (stops polling)"
 
-
 # =============================================================================
 # Plan 03 Tests: Multi-version synthesis
 # =============================================================================
@@ -1150,7 +1140,7 @@ class TestMultiVersionStrategySelection:
 
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = ({"strategies": strategies_returned, "reasoning": "test"}, 0.001)
-            result = _haiku_select_strategies(mock_client, job_row, conn, config)
+            result = _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
         assert len(result) == 3, f"Expected 3 strategies, got: {len(result)}"
@@ -1183,7 +1173,7 @@ class TestMultiVersionStrategySelection:
 
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = ({"strategies": STRATEGY_POOL[:3], "reasoning": "test"}, 0.001)
-            _haiku_select_strategies(mock_client, job_row, conn, config)
+            _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
         assert mock_call.called, "call_claude was not called"
@@ -1220,13 +1210,12 @@ class TestMultiVersionStrategySelection:
         }
 
         with patch("job_finder.web.resume_multi_version.call_claude", side_effect=Exception("API failure")):
-            result = _haiku_select_strategies(mock_client, job_row, conn, config)
+            result = _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
         assert result == STRATEGY_POOL[:3], (
             f"Expected fallback to first 3 STRATEGY_POOL items, got: {result}"
         )
-
 
 class TestParallelVariantGeneration:
     """generate_resume_multi parallel ThreadPoolExecutor behavior."""
@@ -1285,9 +1274,7 @@ class TestParallelVariantGeneration:
                 0.01,
             )
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
-                    mock_anthropic.Anthropic.return_value = MagicMock()
-                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+                                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Should be called: 1 (strategy) + 3 (variants) + 1 (synthesis) = 5 times
         assert mock_call.call_count >= 5, (
@@ -1337,9 +1324,7 @@ class TestParallelVariantGeneration:
 
         with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_anthropic:
-                    mock_anthropic.Anthropic.return_value = MagicMock()
-                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+                                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Filter out strategy-selection and synthesis system prompts; keep variant generation prompts
         variant_prompts = [p for p in system_prompts if "STRATEGY EMPHASIS" in p]
@@ -1350,7 +1335,6 @@ class TestParallelVariantGeneration:
         assert len(set(variant_prompts)) == 3, (
             "Each variant should use a different strategy (duplicate system prompts found)"
         )
-
 
 class TestThreadSafety:
     """_generate_single_variant opens its own SQLite connection."""
@@ -1417,7 +1401,6 @@ class TestThreadSafety:
             f"Expected connection to {tmp_db_path}, got connections to: {connect_calls}"
         )
 
-
 class TestPartialFailure:
     """Partial failure: 1 variant fails, synthesis uses remaining 2."""
 
@@ -1474,9 +1457,7 @@ class TestPartialFailure:
                 mock_strat.return_value = STRATEGY_POOL[:3]
                 with patch("job_finder.web.resume_multi_version._synthesize_variants") as mock_synth:
                     mock_synth.return_value = sample_resume
-                    with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                        mock_ant.Anthropic.return_value = MagicMock()
-                        result = generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+                    result = generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # _synthesize_variants should have been called with 2 variants (not 3)
         assert mock_synth.called, "_synthesize_variants must be called even with partial failure"
@@ -1520,11 +1501,8 @@ class TestPartialFailure:
         with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=RuntimeError("all fail")):
             with patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat:
                 mock_strat.return_value = STRATEGY_POOL[:3]
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    with pytest.raises(RuntimeError, match="All resume variants failed"):
-                        generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
-
+                with pytest.raises(RuntimeError, match="All resume variants failed"):
+                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
 class TestSynthesisPass:
     """_synthesize_variants merges variants into a RESUME_SCHEMA-conforming dict."""
@@ -1584,9 +1562,7 @@ class TestSynthesisPass:
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (expected_result, 0.05)
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    result = _synthesize_variants(tmp_db_path, variants, job_row, config)
+                                    result = _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         required_keys = RESUME_SCHEMA.get("required", [])
         for key in required_keys:
@@ -1638,9 +1614,7 @@ class TestSynthesisPass:
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (synth_result, 0.05)
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+                                    _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         assert mock_call.called, "call_claude not called in _synthesize_variants"
         purpose = mock_call.call_args.kwargs.get("purpose") or mock_call.call_args[0][7]
@@ -1708,9 +1682,7 @@ class TestSynthesisPass:
 
         with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_multi_version.anthropic") as mock_ant:
-                    mock_ant.Anthropic.return_value = MagicMock()
-                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+                                    _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         messages = captured_messages.get("messages", [])
         assert messages, "No messages passed to call_claude from _synthesize_variants"
@@ -1721,7 +1693,6 @@ class TestSynthesisPass:
         assert "UNIQUE_VARIANT_2_SUMMARY" in user_content, (
             "Variant 2 content not included in synthesis prompt"
         )
-
 
 class TestScoreThresholdDispatch:
     """_generate_resume_background dispatches single vs multi based on sonnet_score."""
@@ -1898,7 +1869,6 @@ class TestScoreThresholdDispatch:
 
         assert row[0] == "multi", f"Expected generation_type='multi', got: {row[0]}"
 
-
 # =============================================================================
 # Plan 04 Tests: Quick Apply route
 # =============================================================================
@@ -2074,9 +2044,8 @@ class TestQuickApply:
                 with patch("job_finder.web.blueprints.resume.get_drive_service"):
                     with patch("job_finder.web.blueprints.resume.upload_to_drive", return_value="https://docs.google.com/doc/new456"):
                         with patch("job_finder.web.blueprints.resume.load_profile", return_value={}):
-                            with patch("job_finder.web.blueprints.resume.anthropic.Anthropic"):
-                                with app.test_client() as client:
-                                    resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
+                            with app.test_client() as client:
+                                resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
 
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
         body = resp.data.decode()
@@ -2199,7 +2168,6 @@ class TestQuickApply:
         assert "google.com/search" in body, (
             "Response should contain Google search fallback URL"
         )
-
 
 class TestQuickApplyResponse:
     """_quick_apply_response.html contains expected JS tab-opening and confirmation links."""
@@ -2334,7 +2302,6 @@ class TestQuickApplyResponse:
         assert "window.open" in body, "Response must contain window.open for tab opening"
         assert "linkedin.com/jobs/9999" in body, "Response must contain app_url in window.open"
 
-
 # =============================================================================
 # Phase 08 Plan 01 Tests: Interview prep trigger helper and Quick Apply wiring
 # =============================================================================
@@ -2457,7 +2424,6 @@ class TestInterviewPrepTrigger:
         # Verify dedup_key and new_status="applied" were passed
         args, kwargs = call_kwargs
         assert args[0] == "acme|senior-ds|remote" or kwargs.get("dedup_key") == "acme|senior-ds|remote"
-
 
 # =============================================================================
 # Plan 04 Tests: Settings Resume & Drive section
@@ -2642,7 +2608,6 @@ class TestSettingsResumeFormat:
         assert "Resume" in body and "Drive" in body, (
             "Settings page must have Resume & Drive section"
         )
-
 
 # =============================================================================
 # Task 1 (Phase 08-02) Tests: Preference injection into resume generation paths
@@ -2985,11 +2950,9 @@ class TestPreferenceInjection:
             "Expected preference text in variant path user_message"
         )
 
-
 # ---------------------------------------------------------------------------
 # Style Guide injection tests (Phase 17-03)
 # ---------------------------------------------------------------------------
-
 
 class TestStyleGuideInjection:
     """Tests that style guide directives are injected into resume prompts."""
@@ -3166,7 +3129,6 @@ class TestStyleGuideInjection:
         )
         assert "bullets" in user_message, "Expected bullet_style value in variant prompt"
 
-
 class TestResumeGuidelines:
     """_RESUME_GUIDELINES constant exists and is integrated into _SYSTEM_PROMPT."""
 
@@ -3263,11 +3225,9 @@ class TestResumeGuidelines:
             "Original 'CRITICAL CONSTRAINT' language must be retained in _SYSTEM_PROMPT"
         )
 
-
 # =============================================================================
 # Phase 33 Plan 01 Tests: Validation badge display in resume history
 # =============================================================================
-
 
 class TestValidationBadge:
     """Resume history entries show colored validation badge from validation_report JSON."""
@@ -3430,11 +3390,9 @@ class TestValidationBadge:
         )
         assert "text-amber-400" in body, "Expected amber color for warning violation"
 
-
 # =============================================================================
 # Phase 33 Plan 04 Tests: Validation badge in status polling done fragment
 # =============================================================================
-
 
 class TestStatusPollingBadge:
     """Status polling done fragment shows colored validation badge from validation_report JSON."""

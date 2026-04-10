@@ -13,7 +13,6 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
 try:
     import fitz  # PyMuPDF -- optional; guarded so app starts without it
 except ImportError:
@@ -69,7 +68,6 @@ CONFLICT_SCHEMA = {
     "required": ["conflicts"],
     "additionalProperties": False,
 }
-
 
 @resume_review_bp.route("/upload-pdf", methods=["POST"], strict_slashes=False)
 def upload_pdf():
@@ -139,7 +137,6 @@ def upload_pdf():
 
     return redirect(url_for("resume_review.conflict_review", upload_id=upload_id))
 
-
 def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list:
     """Call Haiku to compare PDF resume text against the profile and return conflict list.
 
@@ -154,7 +151,6 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         Returns [] on error.
     """
     try:
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -182,7 +178,6 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -198,7 +193,6 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
     except Exception as e:
         logger.warning("_compare_conflicts: failed to compare conflicts: %s", e)
         return []
-
 
 @resume_review_bp.route("/review/<int:upload_id>", strict_slashes=False)
 def conflict_review(upload_id: int):
@@ -238,7 +232,6 @@ def conflict_review(upload_id: int):
         upload_id=upload_id,
         upload=row,
     )
-
 
 @resume_review_bp.route("/save-conflicts/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def save_conflicts(upload_id: int):
@@ -330,7 +323,6 @@ def save_conflicts(upload_id: int):
     flash("Changes saved successfully.", "success")
     return redirect(url_for("profile.index"))
 
-
 @resume_review_bp.route("/extract-style/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def extract_style(upload_id: int):
     """Trigger Sonnet style extraction from an uploaded resume PDF.
@@ -378,7 +370,6 @@ def extract_style(upload_id: int):
 
     flash("Style guide extracted successfully.", "success")
     return redirect(url_for("profile.index"))
-
 
 @resume_review_bp.route("/save-style-guide", methods=["POST"], strict_slashes=False)
 def save_style_guide_route():

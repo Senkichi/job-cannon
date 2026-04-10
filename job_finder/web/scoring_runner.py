@@ -1,11 +1,7 @@
 """Scoring runner -- Haiku batch scoring and Sonnet deep evaluation orchestration."""
 
 import logging
-
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
+import shutil
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.db import JOBS_ALL_COLUMNS
@@ -32,7 +28,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
 def run_haiku_scoring(
     new_job_keys: list[str],
     config: dict,
@@ -57,13 +52,12 @@ def run_haiku_scoring(
     if not new_job_keys:
         return [], 0
 
-    if anthropic is None:
-        logger.debug("anthropic not installed -- skipping Haiku scoring")
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found -- skipping Haiku scoring")
         return [], 0
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
     sonnet_queue: list[str] = []
     haiku_scored = 0
 
@@ -92,7 +86,6 @@ def run_haiku_scoring(
                         enriched = enrich_job(
                             job_row,
                             serpapi_key=serpapi_key,
-                            anthropic_client=client,
                             conn=conn,
                             config=config,
                         )
@@ -130,7 +123,7 @@ def run_haiku_scoring(
                 # Pass score_job_haiku as scorer_fn so test patches on
                 # scoring_runner.score_job_haiku are captured.
                 result = score_and_persist_haiku(
-                    conn, job_row, config, client, profile,
+                    conn, job_row, config, profile,
                     scorer_fn=score_job_haiku,
                 )
                 if result is None:
@@ -174,7 +167,6 @@ def run_haiku_scoring(
     )
     return sonnet_queue, haiku_scored
 
-
 def run_sonnet_evaluation(
     sonnet_queue: list[str],
     config: dict,
@@ -197,8 +189,8 @@ def run_sonnet_evaluation(
     if not sonnet_queue:
         return 0
 
-    if anthropic is None:
-        logger.debug("anthropic not installed -- skipping Sonnet evaluation")
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found -- skipping Sonnet evaluation")
         return 0
 
     if evaluate_job_sonnet is None:
@@ -206,7 +198,6 @@ def run_sonnet_evaluation(
         return 0
 
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
     sonnet_evaluated = 0
 
     with standalone_connection(db_path) as conn:
@@ -240,7 +231,7 @@ def run_sonnet_evaluation(
                 # Pass evaluate_job_sonnet as evaluator_fn so test patches on
                 # scoring_runner.evaluate_job_sonnet are captured.
                 result = score_and_persist_sonnet(
-                    conn, job_row, config, client, profile,
+                    conn, job_row, config, profile,
                     evaluator_fn=evaluate_job_sonnet,
                 )
                 if result is None:

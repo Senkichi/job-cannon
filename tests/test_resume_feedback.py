@@ -20,7 +20,6 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -37,7 +36,6 @@ def db_with_migrations():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
-
 
 @pytest.fixture
 def db_with_resume_gen(db_with_migrations):
@@ -66,7 +64,6 @@ def db_with_resume_gen(db_with_migrations):
     conn.commit()
     yield path, conn
 
-
 @pytest.fixture
 def mock_drive_service():
     """Mock Drive API service with files().get() and files().export_media()."""
@@ -90,7 +87,6 @@ def mock_drive_service():
         return None, True
 
     return service, text_content, mock_request
-
 
 @pytest.fixture
 def mock_anthropic_client_prefs():
@@ -122,7 +118,6 @@ def mock_anthropic_client_prefs():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client, prefs_result
-
 
 # ---------------------------------------------------------------------------
 # TestDrivePoll
@@ -216,7 +211,6 @@ class TestDrivePoll:
             fileId="FILE_ID_123", fields="id,modifiedTime,mimeType"
         )
 
-
 # ---------------------------------------------------------------------------
 # TestSkipNonGoogleDocs
 # ---------------------------------------------------------------------------
@@ -255,7 +249,6 @@ class TestSkipNonGoogleDocs:
         text, modified_time = poll_resume_for_changes(service, "PDF_FILE_ID", "2026-03-01T00:00:00Z")
         assert text is None
 
-
 # ---------------------------------------------------------------------------
 # TestPreferenceExtraction
 # ---------------------------------------------------------------------------
@@ -275,8 +268,7 @@ class TestPreferenceExtraction:
         config = {"scoring": {"monthly_budget_usd": 25.0}}
         diff_text = "+Led growth by 25%\n-spearheaded growth by 25%\n"
 
-        with patch("job_finder.web.resume_feedback.anthropic.Anthropic", return_value=mock_client):
-            preferences = _extract_preferences(diff_text, conn, "acme|job|remote", config)
+        preferences = _extract_preferences(diff_text, conn, "acme|job|remote", config)
 
         assert isinstance(preferences, list)
         assert len(preferences) > 0
@@ -371,7 +363,6 @@ class TestPreferenceExtraction:
         path, conn = db_with_migrations
         count = _store_preferences(conn, "job1", [])
         assert count == 0
-
 
 # ---------------------------------------------------------------------------
 # TestDriveFeedbackPoll (integration: run_drive_feedback_poll)
@@ -562,7 +553,6 @@ class TestDriveFeedbackPoll:
 
         assert isinstance(result, dict)
 
-
 # ---------------------------------------------------------------------------
 # TestConsolidation
 # ---------------------------------------------------------------------------
@@ -636,8 +626,7 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.anthropic.Anthropic", return_value=mock_client):
-            result = run_preference_consolidation(path, config)
+        result = run_preference_consolidation(path, config)
 
         assert result["consolidated"] is True
         assert result["original_count"] == 12
@@ -674,8 +663,7 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.anthropic.Anthropic", return_value=mock_client):
-            run_preference_consolidation(path, config)
+        run_preference_consolidation(path, config)
 
         # Verify old preferences have applied_at set
         verify_conn = sqlite3.connect(path)
@@ -727,8 +715,7 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.anthropic.Anthropic", return_value=mock_client):
-            result = run_preference_consolidation(path, config)
+        result = run_preference_consolidation(path, config)
 
         # Verify new consolidated preferences were inserted
         verify_conn = sqlite3.connect(path)
@@ -766,7 +753,6 @@ class TestConsolidation:
 
         # Should return without consolidating (budget exceeded)
         assert result.get("consolidated") is False or "budget" in str(result).lower()
-
 
 # ---------------------------------------------------------------------------
 # TestSchedulerJobs

@@ -33,7 +33,6 @@ from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
 
-
 def _setup_file_logging() -> None:
     """Attach RotatingFileHandler to root logger if not already attached.
 
@@ -63,9 +62,7 @@ def _setup_file_logging() -> None:
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-
 logger = logging.getLogger(__name__)
-
 
 def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     """Create and configure the Flask application.
@@ -97,11 +94,6 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     # Activate cross-project API telemetry, budget enforcement, and key injection.
     # Replaces the old JF_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY env var promotion.
     # Key now sourced from ~/.anthropic-telemetry/config.toml (never in os.environ).
-    try:
-        import anthropic_telemetry
-        anthropic_telemetry.activate("job-cannon")
-    except Exception as _e:
-        logging.getLogger(__name__).warning("anthropic-telemetry not available: %s", _e)
 
     # --- Database setup ---
     run_migrations(app.config["DB_PATH"])

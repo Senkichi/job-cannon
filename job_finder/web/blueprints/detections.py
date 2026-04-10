@@ -18,7 +18,6 @@ _DETECTION_TYPE_TO_STATUS = {
     "confirmation": "applied",
 }
 
-
 @detections_bp.route("/<int:detection_id>/confirm", methods=["POST"], strict_slashes=False)
 def confirm(detection_id: int):
     """Confirm a pipeline detection: apply the status change and resolve the record.
@@ -80,7 +79,6 @@ def confirm(detection_id: int):
         company=company,
         new_status=new_status,
     )
-
 
 @detections_bp.route("/<int:detection_id>/dismiss", methods=["POST"], strict_slashes=False)
 def dismiss(detection_id: int):

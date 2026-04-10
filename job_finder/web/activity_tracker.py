@@ -41,7 +41,6 @@ ACTION_SCHEDULED_EXPIRY_CHECK = "scheduled_expiry_check"
 ACTION_SAVE_JD = "save_jd"
 ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 
-
 # ---------------------------------------------------------------------------
 # Core helper
 # ---------------------------------------------------------------------------

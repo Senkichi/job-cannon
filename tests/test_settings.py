@@ -17,7 +17,6 @@ import yaml
 
 from job_finder.config import load_config
 
-
 @pytest.fixture
 def settings_app(tmp_db_path, tmp_path):
     """Create a test Flask app with a temp config file and temp DB."""
@@ -54,11 +53,9 @@ def settings_app(tmp_db_path, tmp_path):
 
     settings_mod._CONFIG_PATH = original_path
 
-
 @pytest.fixture
 def settings_client(settings_app):
     return settings_app.test_client()
-
 
 class TestSettingsWipeGuard:
     def test_settings_save_blocks_wiping_target_titles(self, settings_client, settings_app):
@@ -135,7 +132,6 @@ class TestSettingsWipeGuard:
         assert "Principal Data Scientist" in config["profile"]["target_titles"]
         assert config["profile"]["min_salary"] == 200000
 
-
 def test_settings_index_has_resume_quality_section(settings_app):
     client = settings_app.test_client()
     resp = client.get("/settings/")
@@ -146,7 +142,6 @@ def test_settings_index_has_resume_quality_section(settings_app):
     assert b"guideline fields populated" in resp.data
     assert b"available for migration" in resp.data
 
-
 def test_settings_migrate_shows_spinner_indicator(settings_app):
     """Settings page migrate button has HTMX loading indicator markup."""
     client = settings_app.test_client()
@@ -156,14 +151,12 @@ def test_settings_migrate_shows_spinner_indicator(settings_app):
     assert b"migrate-spinner" in resp.data
     assert b"hx-disabled-elt" in resp.data
 
-
 def test_migrate_style_guide_route_returns_200(settings_app):
     client = settings_app.test_client()
     with patch("job_finder.web.blueprints.guidelines.migrate_style_guide") as mock_migrate:
         mock_migrate.return_value = {"bullet_style": "dashes", "summary_formula": "test"}
         resp = client.post("/settings/migrate-style-guide")
     assert resp.status_code == 200
-
 
 class TestGuidelinesImport:
     """Tests for the Update Guidelines section: preview and apply routes."""
@@ -198,11 +191,10 @@ class TestGuidelinesImport:
         client = settings_app.test_client()
         with patch("job_finder.web.blueprints.guidelines.merge_guidelines_into_guide") as mock_merge:
             mock_merge.return_value = merged_result
-            with patch("job_finder.web.blueprints.guidelines.anthropic.Anthropic"):
-                resp = client.post(
-                    "/settings/preview-guidelines-merge",
-                    data={"guidelines_text": "Use dashes for bullets"},
-                )
+            resp = client.post(
+                "/settings/preview-guidelines-merge",
+                data={"guidelines_text": "Use dashes for bullets"},
+            )
         assert resp.status_code == 200
         assert b"merged_guide_json" in resp.data
         assert b"guidelines-diff-container" in resp.data

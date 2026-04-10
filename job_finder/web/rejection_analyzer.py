@@ -22,8 +22,6 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
-
 from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
@@ -103,7 +101,6 @@ _SYSTEM_PROMPT = (
     "End with concrete actionable recommendations linking to profile improvements."
 )
 
-
 # ---------------------------------------------------------------------------
 # Core analysis function
 # ---------------------------------------------------------------------------
@@ -127,7 +124,6 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
     """
     with standalone_connection(db_path) as conn:
         return _run_analysis(conn, config)
-
 
 def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     """Internal: run analysis within an open connection."""
@@ -192,10 +188,8 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     )
 
     # Single Opus call for ALL rejections
-    client = anthropic.Anthropic()
     try:
         result, cost_usd = call_claude(
-            client=client,
             model=opus_model,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],

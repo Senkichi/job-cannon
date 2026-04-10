@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 _scheduler_lock = threading.Lock()
 
-
 # ---------------------------------------------------------------------------
 # Job closure factories -- reduce per-job boilerplate
 # ---------------------------------------------------------------------------
@@ -53,7 +52,6 @@ def _make_simple_job(app, name, import_func):
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
     return wrapper
-
 
 def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
                       *, guard=None):
@@ -108,7 +106,6 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
                     },
                 )
     return wrapper
-
 
 def init_scheduler(app) -> None:
     """Initialize and start the background scheduler.
@@ -398,7 +395,6 @@ def init_scheduler(app) -> None:
         _scheduler = scheduler
         logger.info("Scheduler started: Gmail + SerpAPI polling every 30 minutes")
 
-
 def run_sync_now(app) -> dict:
     """Trigger an immediate ingestion run (for the Sync Now button).
 
@@ -451,14 +447,12 @@ def run_sync_now(app) -> dict:
 
     return summary
 
-
 def get_scheduler() -> BackgroundScheduler | None:
     """Return the running scheduler instance (or None if not started).
 
     Used for status checks and monitoring.
     """
     return _scheduler
-
 
 def reset_scheduler() -> None:
     """Reset the scheduler singleton (test helper only).

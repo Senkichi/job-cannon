@@ -60,16 +60,13 @@ _ATS_DOMAINS = [
     "jobs.ashbyhq.com",
 ]
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-
 def _find_careers_url_with_haiku(
     homepage_url: str,
     homepage_html: str,
-    client: Any,
     conn: sqlite3.Connection,
     config: dict,
 ) -> str | None:
@@ -103,7 +100,6 @@ def _find_careers_url_with_haiku(
 
     try:
         result, cost = call_claude(
-            client=client,
             model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
@@ -134,7 +130,6 @@ def _find_careers_url_with_haiku(
         logger.debug("Haiku careers URL fallback failed for '%s': %s", homepage_url, e)
         return None
 
-
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
 
@@ -163,13 +158,11 @@ def _fetch_job_description(url: str) -> str:
         logger.debug("Failed to fetch job description from '%s': %s", url, e)
         return ""
 
-
 def _extract_jobs_with_haiku(
     careers_url: str,
     careers_html: str,
     target_titles: list[str],
     exclusions: list[str],
-    client: Any,
     conn: sqlite3.Connection,
     config: dict,
 ) -> list[dict]:
@@ -206,7 +199,6 @@ def _extract_jobs_with_haiku(
 
     try:
         result, cost = call_claude(
-            client=client,
             model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
@@ -263,15 +255,12 @@ def _extract_jobs_with_haiku(
         logger.debug("Haiku job extraction failed for '%s': %s", careers_url, e)
         return []
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
 def find_careers_url(
     homepage_url: str,
-    client: Any = None,
     conn: Optional[sqlite3.Connection] = None,
     config: Optional[dict] = None,
 ) -> str | None:
@@ -352,18 +341,16 @@ def find_careers_url(
     logger.debug("find_careers_url('%s'): no careers link found", homepage_url)
 
     # Haiku fallback: if heuristic found nothing and client is available
-    if client is not None and conn is not None and config is not None:
+    if conn is not None and config is not None:
         logger.debug("find_careers_url('%s'): trying Haiku fallback", homepage_url)
-        return _find_careers_url_with_haiku(homepage_url, resp.text, client, conn, config)
+        return _find_careers_url_with_haiku(homepage_url, resp.text, conn, config)
 
     return None
-
 
 def scrape_careers_page(
     careers_url: str,
     target_titles: list[str],
     exclusions: list[str],
-    client: Any = None,
     conn: Optional[sqlite3.Connection] = None,
     config: Optional[dict] = None,
 ) -> list[dict]:
@@ -462,10 +449,10 @@ def scrape_careers_page(
             job["description"] = ""
 
     # Haiku fallback when HTML parsing found no matching jobs
-    if not results and client is not None and conn is not None and config is not None:
+    if not results and conn is not None and config is not None:
         logger.debug("scrape_careers_page('%s'): trying Haiku fallback", careers_url)
         results = _extract_jobs_with_haiku(
-            careers_url, resp.text, target_titles, exclusions, client, conn, config
+            careers_url, resp.text, target_titles, exclusions, conn, config
         )
 
     return results

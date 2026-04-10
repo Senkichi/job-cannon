@@ -15,8 +15,6 @@ import json
 import logging
 import sqlite3
 
-import anthropic
-
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude
 
@@ -74,7 +72,6 @@ FIELD_LABELS = {
     "role_archetype": "Role archetype",
 }
 
-
 def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
     """Load style guide from JSON file.
 
@@ -93,7 +90,6 @@ def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
         logger.warning("load_style_guide: failed to load '%s': %s", path, e)
         return {}
 
-
 def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """Save style guide dict to JSON file.
 
@@ -103,7 +99,6 @@ def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """
     with open(path, "w", encoding="utf-8") as f:
         json.dump(guide, f, indent=2, ensure_ascii=False)
-
 
 def _build_style_guide_directives(guide: dict) -> list[str]:
     """Convert a style guide dict to a list of formatted prompt directive strings.
@@ -136,7 +131,6 @@ def _build_style_guide_directives(guide: dict) -> list[str]:
 
     return directives
 
-
 def extract_style_guide(
     raw_text: str,
     existing_guide: dict,
@@ -159,7 +153,6 @@ def extract_style_guide(
         None on error (caller must handle failure).
     """
     try:
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -198,7 +191,6 @@ def extract_style_guide(
             )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -215,11 +207,9 @@ def extract_style_guide(
         logger.warning("extract_style_guide: failed: %s", e)
         return None
 
-
 def merge_guidelines_into_guide(
     guidelines_text: str,
     existing_guide: dict,
-    client,
     model: str,
     conn: sqlite3.Connection,
     config: dict,
@@ -275,7 +265,6 @@ def merge_guidelines_into_guide(
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -292,7 +281,6 @@ def merge_guidelines_into_guide(
     except Exception as e:
         logger.warning("merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
         return None
-
 
 def migrate_style_guide(
     config: dict,
@@ -321,7 +309,6 @@ def migrate_style_guide(
 
         existing_guide = load_style_guide(style_guide_path)
 
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -331,7 +318,6 @@ def migrate_style_guide(
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
-            client=client,
             model=model,
             conn=conn,
             config=config,
