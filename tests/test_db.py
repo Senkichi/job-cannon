@@ -9,11 +9,9 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def migrated_conn():
@@ -31,7 +29,6 @@ def migrated_conn():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
-
 
 def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
                 location="Remote", pipeline_status="discovered",
@@ -51,11 +48,9 @@ def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
     )
     conn.commit()
 
-
 # ---------------------------------------------------------------------------
 # Tests: load_job_context (DEBT-05)
 # ---------------------------------------------------------------------------
-
 
 class TestLoadJobContext:
     """Tests for load_job_context shared helper (DEBT-05)."""
@@ -230,11 +225,9 @@ class TestLoadJobContext:
         )
         assert row["validation_report"] is None
 
-
 # ---------------------------------------------------------------------------
 # Tests: update_pipeline_status evidence parameter (Phase 30 infrastructure)
 # ---------------------------------------------------------------------------
-
 
 class TestUpdatePipelineStatusEvidence:
     """Tests for evidence parameter on update_pipeline_status() (Phase 30 INFRA-01)."""

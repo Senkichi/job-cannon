@@ -14,7 +14,6 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, call, patch
 
-
 class TestSendNotification(unittest.TestCase):
     """Test send_notification fires in a daemon thread."""
 
@@ -108,7 +107,6 @@ class TestSendNotification(unittest.TestCase):
             mock_thread.assert_called_once()
             assert mock_thread.call_args.kwargs.get("daemon") is True
 
-
 class TestFallbackGraceful(unittest.TestCase):
     """Test graceful fallback when win11toast is not importable."""
 
@@ -171,7 +169,6 @@ class TestFallbackGraceful(unittest.TestCase):
                     captured_target[0]()
                 except Exception as e:
                     self.fail(f"Thread target raised exception: {e}")
-
 
 class TestToggleGating(unittest.TestCase):
     """Test that each notification type respects its config toggle."""
@@ -251,7 +248,6 @@ class TestToggleGating(unittest.TestCase):
             notify_budget_alert(85.0, config)
             mock_send.assert_not_called()
 
-
 class TestHighScoreURL(unittest.TestCase):
     """Test URL construction for high-score notifications."""
 
@@ -302,7 +298,6 @@ class TestHighScoreURL(unittest.TestCase):
             assert "Acme Corp" in body
             assert "82" in body  # score should appear
 
-
 class TestBudgetAlertURL(unittest.TestCase):
     """Test URL construction for budget alert notifications."""
 
@@ -352,7 +347,6 @@ class TestBudgetAlertURL(unittest.TestCase):
         # 100% should say "reached", 80% should say "at 80%"
         assert "reached" in bodies[100.0] or "100" in bodies[100.0]
         assert "80" in bodies[80.0]
-
 
 class TestPipelineChangeLabels(unittest.TestCase):
     """Test that detection_type maps to human-readable labels."""
@@ -449,7 +443,6 @@ class TestPipelineChangeLabels(unittest.TestCase):
             assert url is not None
             assert "/jobs/" in url
 
-
 class TestNotifierDedup:
     """Tests for 24-hour notification cooldown guard."""
 
@@ -537,7 +530,6 @@ class TestNotifierDedup:
             notify_budget_alert(100.0, config)
             # Budget alert has no dedup guard — both calls should send
             assert mock_send.call_count == 2
-
 
 class TestNotifierIntegration(unittest.TestCase):
     """Integration tests for thread daemon behavior."""

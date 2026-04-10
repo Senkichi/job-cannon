@@ -257,25 +257,41 @@ class TestPreferenceExtraction:
     """Tests for _extract_preferences() and _store_preferences()."""
 
     def test_extract_preferences_calls_sonnet(
-        self, db_with_migrations, mock_anthropic_client_prefs
+        self, db_with_migrations
     ):
         """_extract_preferences calls Sonnet with diff text and returns prefs list."""
         from job_finder.web.resume_feedback import _extract_preferences
 
         path, conn = db_with_migrations
-        mock_client, prefs_result = mock_anthropic_client_prefs
+
+        prefs_result = {
+            "phrasing_preferences": [
+                {
+                    "preference": "Use 'spearheaded' instead of 'led'",
+                    "example_before": "Led growth by 25%",
+                    "example_after": "Spearheaded growth by 25%",
+                }
+            ],
+            "content_changes": [
+                {
+                    "change_type": "addition",
+                    "description": "Added quantified metric: 25% revenue growth",
+                }
+            ],
+            "structural_preferences": ["Move education section after skills"],
+        }
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
         diff_text = "+Led growth by 25%\n-spearheaded growth by 25%\n"
 
-        preferences = _extract_preferences(diff_text, conn, "acme|job|remote", config)
+        with patch("job_finder.web.resume_feedback.call_claude") as mock_call:
+            mock_call.return_value = (prefs_result, 0.01)
+            preferences = _extract_preferences(diff_text, conn, "acme|job|remote", config)
 
         assert isinstance(preferences, list)
         assert len(preferences) > 0
         # Should call Sonnet
-        assert mock_client.messages.create.called
-        call_kwargs = mock_client.messages.create.call_args
-        assert "sonnet" in str(call_kwargs).lower()
+        assert mock_call.called
 
     def test_extract_preferences_skips_when_budget_exceeded(
         self, db_with_migrations
@@ -593,13 +609,12 @@ class TestConsolidation:
         assert result["count"] == 5
 
     def test_consolidation_triggered_when_count_exceeds_threshold(
-        self, db_with_migrations, mock_anthropic_client_prefs
+        self, db_with_migrations
     ):
         """run_preference_consolidation consolidates when count > 10."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
         path, conn = db_with_migrations
-        mock_client, _ = mock_anthropic_client_prefs
 
         # Mock Sonnet to return a consolidated list
         consolidated_result = {
@@ -613,7 +628,6 @@ class TestConsolidation:
             "content_changes": [],
             "structural_preferences": [],
         }
-        mock_client.messages.create.return_value.content[0].input = consolidated_result
 
         # Insert a job
         conn.execute(
@@ -626,19 +640,19 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        result = run_preference_consolidation(path, config)
+        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+            result = run_preference_consolidation(path, config)
 
         assert result["consolidated"] is True
         assert result["original_count"] == 12
 
     def test_consolidation_marks_old_preferences_with_applied_at(
-        self, db_with_migrations, mock_anthropic_client_prefs
+        self, db_with_migrations
     ):
         """Consolidation sets applied_at on old preferences (marks them superseded)."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
         path, conn = db_with_migrations
-        mock_client, _ = mock_anthropic_client_prefs
 
         consolidated_result = {
             "phrasing_preferences": [
@@ -651,7 +665,6 @@ class TestConsolidation:
             "content_changes": [],
             "structural_preferences": [],
         }
-        mock_client.messages.create.return_value.content[0].input = consolidated_result
 
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
@@ -663,7 +676,8 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        run_preference_consolidation(path, config)
+        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+            run_preference_consolidation(path, config)
 
         # Verify old preferences have applied_at set
         verify_conn = sqlite3.connect(path)
@@ -679,13 +693,12 @@ class TestConsolidation:
             )
 
     def test_consolidation_inserts_new_consolidated_preferences(
-        self, db_with_migrations, mock_anthropic_client_prefs
+        self, db_with_migrations
     ):
         """Consolidation inserts new canonical preferences after merging."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
         path, conn = db_with_migrations
-        mock_client, _ = mock_anthropic_client_prefs
 
         consolidated_result = {
             "phrasing_preferences": [
@@ -703,7 +716,6 @@ class TestConsolidation:
             ],
             "structural_preferences": ["Education section last"],
         }
-        mock_client.messages.create.return_value.content[0].input = consolidated_result
 
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
@@ -715,7 +727,8 @@ class TestConsolidation:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        result = run_preference_consolidation(path, config)
+        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+            result = run_preference_consolidation(path, config)
 
         # Verify new consolidated preferences were inserted
         verify_conn = sqlite3.connect(path)
@@ -731,14 +744,16 @@ class TestConsolidation:
 
     def test_consolidation_skips_when_budget_exceeded(self, db_with_migrations):
         """run_preference_consolidation skips Sonnet if budget exceeded."""
+        from datetime import datetime, timezone
         from job_finder.web.resume_feedback import run_preference_consolidation
 
         path, conn = db_with_migrations
-        # Exceed budget
+        # Exceed budget — use current-month timestamp so cost_gate sees it
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, "2026-03-01T00:00:00Z"),
+            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, now_ts),
         )
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
@@ -752,7 +767,8 @@ class TestConsolidation:
         result = run_preference_consolidation(path, config)
 
         # Should return without consolidating (budget exceeded)
-        assert result.get("consolidated") is False or "budget" in str(result).lower()
+        assert result.get("consolidated") is False
+        assert result.get("budget_exceeded") is True
 
 # ---------------------------------------------------------------------------
 # TestSchedulerJobs

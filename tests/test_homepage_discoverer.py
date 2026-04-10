@@ -16,7 +16,6 @@ import tempfile
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build mock response objects
 # ---------------------------------------------------------------------------
@@ -32,7 +31,6 @@ def _mock_response(url, text, status_code=200, content_type="text/html; charset=
     resp.iter_content.return_value = iter([text.encode("utf-8") if text else b""])
     return resp
 
-
 def _mock_head_response(url, status_code=200, content_type="text/html; charset=utf-8"):
     """Create a mock requests.Response for HEAD requests."""
     resp = MagicMock()
@@ -41,7 +39,6 @@ def _mock_head_response(url, status_code=200, content_type="text/html; charset=u
     resp.headers = {"Content-Type": content_type}
     resp.raise_for_status = MagicMock()
     return resp
-
 
 def _serpapi_response(organic_results=None, error=None):
     """Create a mock requests.Response for SerpAPI JSON."""
@@ -55,7 +52,6 @@ def _serpapi_response(organic_results=None, error=None):
     resp.json.return_value = data
     resp.raise_for_status = MagicMock()
     return resp
-
 
 # ---------------------------------------------------------------------------
 # Tests: name normalization helpers
@@ -90,7 +86,6 @@ class TestNameNormalization:
     def test_name_to_slug_special_chars(self):
         from job_finder.web.homepage_discoverer import _name_to_slug
         assert _name_to_slug("O'Reilly Media") == "o-reilly-media"
-
 
 # ---------------------------------------------------------------------------
 # Tests: discover_homepage (three-tier)
@@ -257,7 +252,6 @@ class TestDiscoverHomepage:
             result = discover_homepage("Acme", "greenhouse", "acme", [])
 
         assert result is None
-
 
 # ---------------------------------------------------------------------------
 # Tests: run_homepage_discovery

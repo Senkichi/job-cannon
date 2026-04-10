@@ -778,7 +778,7 @@ class TestEnrichJobBackwardCompat:
     """Old call patterns and error handling still work."""
 
     def test_enrich_job_backward_compatible_signature(self, sparse_job_row, temp_db):
-        """Old call pattern (job_row, serpapi_key, anthropic_client, conn, config) still works."""
+        """Call pattern (job_row, serpapi_key, conn, config) works with keyword args."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = '[]'
@@ -791,11 +791,9 @@ class TestEnrichJobBackwardCompat:
             mock_serp.return_value = {"jd_full": "SerpAPI JD."}
             mock_ddg.return_value = None
 
-            # Old-style positional call
             result = enrich_job(
                 sparse_job_row,
                 "test-serp-key",
-                None,
                 temp_db,
                 {"scoring": {}},
             )
@@ -921,7 +919,7 @@ class TestPipelineIntegration:
             call_order.append("enrich_job")
             return {}
 
-        def mock_score(client, job_row, profile, conn, config):
+        def mock_score(job_row, profile, conn, config, **kwargs):
             call_order.append("score_job_haiku")
             return {"score": 50, "summary": "OK"}
 

@@ -23,7 +23,6 @@ if "google_auth_oauthlib" not in sys.modules:
     sys.modules["google_auth_oauthlib"] = _mock_oauthlib
     sys.modules["google_auth_oauthlib.flow"] = _mock_oauthlib.flow
 
-
 class TestCheckTokenScopes:
     """_check_token_scopes reads actual granted scopes from token.json."""
 
@@ -76,7 +75,6 @@ class TestCheckTokenScopes:
             result = _check_token_scopes(token_path)
 
         assert result == set()
-
 
 class TestAuthenticateUpgradeDetection:
     """authenticate() detects Gmail-only tokens and forces re-auth."""
@@ -189,7 +187,6 @@ class TestAuthenticateUpgradeDetection:
             f"Should print upgrade message, got: {captured.out}"
         )
 
-
 class TestAuthenticateScopeChecklist:
     """authenticate() prints scope checklist after successful auth."""
 
@@ -243,7 +240,6 @@ class TestAuthenticateScopeChecklist:
             f"Should show checkmarks, got: {captured.out}"
         )
 
-
 class TestValidateDriveApi:
     """_validate_drive_api tests Drive API access."""
 
@@ -287,7 +283,6 @@ class TestValidateDriveApi:
         assert "console.cloud.google.com" in captured.out, (
             f"Should print Console link on 403, got: {captured.out}"
         )
-
 
 class TestEnsureDriveFolder:
     """_ensure_drive_folder auto-creates folder and saves folder_id to config.yaml."""

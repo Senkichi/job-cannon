@@ -202,9 +202,9 @@ class TestReformatDescription:
         assert result == already_formatted
 
     def test_reformat_description_with_conn_records_cost(
-        self, mock_anthropic_client, temp_db_path
+        self, temp_db_path
     ):
-        """reformat_description records cost via client.record_cost when conn provided."""
+        """reformat_description records cost via call_claude when conn provided."""
         from job_finder.web.description_reformatter import reformat_description
 
         conn = sqlite3.connect(temp_db_path)
@@ -227,7 +227,6 @@ class TestReformatDescription:
             )
             result = reformat_description(
                 original,
-                mock_anthropic_client,
                 conn=conn,
                 config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
             )
@@ -253,7 +252,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
             )
 
@@ -273,7 +271,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -299,7 +296,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": "Reformatted text"}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_null_description,
-                "fake-api-key",
                 config={},
             )
 
@@ -321,7 +317,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -337,7 +332,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": "same as input"}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -361,7 +355,6 @@ class TestRunDescriptionReformatPass:
             mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 

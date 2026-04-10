@@ -11,7 +11,6 @@ import pytest
 
 from job_finder.sources.serpapi_source import SerpAPISource
 
-
 # ---------------------------------------------------------------------------
 # Shared sample response matching current SerpAPI Google Jobs API schema
 # ---------------------------------------------------------------------------
@@ -57,17 +56,14 @@ SAMPLE_SERPAPI_RESULT = {
     "share_link": "https://www.google.com/search?q=senior+data+scientist+acme&ibp=htl;jobs#fpstate=tldetail&htivrt=jobs&htidocid=job123",
 }
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _TEST_API_KEY = "test-key-does-not-matter"  # noqa: S105 -- test placeholder, not a real credential
 
-
 def _make_source() -> SerpAPISource:
     return SerpAPISource(api_key=_TEST_API_KEY)
-
 
 def _result_with(**overrides) -> dict:
     """Return a copy of SAMPLE_SERPAPI_RESULT with the given keys overridden."""
@@ -76,14 +72,12 @@ def _result_with(**overrides) -> dict:
     result.update(overrides)
     return result
 
-
 def _result_with_salary(salary_str: str) -> dict:
     """Return result with a specific salary string in detected_extensions."""
     import copy
     result = copy.deepcopy(SAMPLE_SERPAPI_RESULT)
     result["detected_extensions"]["salary"] = salary_str
     return result
-
 
 # ---------------------------------------------------------------------------
 # Tests: TestSerpAPIFormatAudit

@@ -16,7 +16,6 @@ import tempfile
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Unit tests for log_activity()
 # ---------------------------------------------------------------------------
@@ -148,7 +147,6 @@ class TestLogActivity:
         # Must succeed without Flask context
         log_activity(db_path, ACTION_SYNC, metadata={"context": "none"})
 
-
 # ---------------------------------------------------------------------------
 # Tests for ACTION_* constants
 # ---------------------------------------------------------------------------
@@ -246,7 +244,6 @@ class TestActionConstants:
         assert ACTION_EXTRACT_STYLE == "extract_style"
         assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
         assert ACTION_SAVE_JD == "save_jd"
-
 
 # ---------------------------------------------------------------------------
 # Integration tests for call site wiring

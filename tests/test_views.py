@@ -10,14 +10,12 @@ Tests cover:
 
 import pytest
 
-
 class TestRootRedirect:
     def test_root_redirects_to_jobs(self, client):
         """GET / should redirect to /jobs (Job Board is default landing)."""
         response = client.get("/")
         assert response.status_code == 302
         assert "/jobs" in response.headers["Location"]
-
 
 class TestBlueprintRoutes:
     def test_jobs_returns_200(self, client):
@@ -46,7 +44,6 @@ class TestBlueprintRoutes:
         response = client.get("/settings")
         assert response.status_code == 200
 
-
 class TestBaseTemplate:
     def test_htmx_script_loaded(self, client):
         """Base template includes HTMX CDN script tag."""
@@ -68,11 +65,9 @@ class TestBaseTemplate:
         response = client.get("/jobs")
         assert b'class="dark"' in response.data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures for Job Board tests
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_jobs(tmp_db_path):
@@ -149,17 +144,14 @@ def app_with_jobs(tmp_db_path):
 
     return application
 
-
 @pytest.fixture
 def jobs_client(app_with_jobs):
     """Test client for the app that has sample jobs."""
     return app_with_jobs.test_client()
 
-
 # ---------------------------------------------------------------------------
 # Job Board route tests
 # ---------------------------------------------------------------------------
-
 
 class TestJobBoardRoutes:
     def test_jobs_index_returns_200_with_table(self, jobs_client):
@@ -401,11 +393,9 @@ class TestJobBoardRoutes:
         # Status dropdown must use visible bg-slate-700 (not near-invisible bg-slate-800)
         assert 'bg-slate-700' in data
 
-
 # ---------------------------------------------------------------------------
 # HTMX Reactivity tests (Phase 35)
 # ---------------------------------------------------------------------------
-
 
 class TestJobBoardReactivity:
     """Tests for HTMX reactivity: HX-Trigger headers on scoring/archive routes."""
@@ -472,11 +462,9 @@ class TestJobBoardReactivity:
         assert 'hx-target="#status-cell-' in html
         assert 'hx-disable-elt="this"' in html
 
-
 # ---------------------------------------------------------------------------
 # Archived Jobs Section tests (Phase 41)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_archived_job(tmp_db_path):
@@ -510,7 +498,6 @@ def app_with_archived_job(tmp_db_path):
         "output": {"default_format": "cli", "max_results": 50},
     }
     return create_app(config=test_config)
-
 
 class TestArchivedSection:
     """Tests for collapsible archived jobs section and /jobs/archived-table route."""
@@ -565,11 +552,9 @@ class TestArchivedSection:
         assert "toggleArchived" in html
         assert "dataset.loaded" in html
 
-
 # ---------------------------------------------------------------------------
 # Fixtures for batch score tests
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_migrations(tmp_db_path):
@@ -594,12 +579,10 @@ def app_with_migrations(tmp_db_path):
     application.config["TESTING"] = True
     return application
 
-
 @pytest.fixture
 def migrated_client(app_with_migrations):
     """Test client for the migrated app."""
     return app_with_migrations.test_client()
-
 
 @pytest.fixture
 def app_with_unscored_jobs(tmp_db_path):
@@ -674,17 +657,14 @@ def app_with_unscored_jobs(tmp_db_path):
 
     return application
 
-
 @pytest.fixture
 def unscored_client(app_with_unscored_jobs):
     """Test client for the app with unscored jobs."""
     return app_with_unscored_jobs.test_client()
 
-
 # ---------------------------------------------------------------------------
 # Batch Score Route tests
 # ---------------------------------------------------------------------------
-
 
 class TestBatchScoreHaikuStart:
     def test_haiku_start_returns_progress_fragment_when_unscored_exist(
@@ -734,7 +714,6 @@ class TestBatchScoreHaikuStart:
         assert session["session_type"] == "haiku"
         assert session["status"] in ("running", "done", "cancelled")
 
-
 class TestBatchScoreSonnetStart:
     def test_sonnet_start_returns_progress_when_qualifying_jobs_exist(
         self, unscored_client
@@ -763,7 +742,6 @@ class TestBatchScoreSonnetStart:
         assert response.status_code == 200
         data = response.data.decode()
         assert "Sonnet" in data
-
 
 class TestBatchScoreStatus:
     def test_status_returns_progress_when_running(self, app_with_unscored_jobs):
@@ -833,7 +811,6 @@ class TestBatchScoreStatus:
         assert "hx-trigger" not in data
         assert "batch-score-" in data  # correct fragment container
 
-
 class TestBatchScoreCancel:
     def test_cancel_sets_status_to_cancelling(self, app_with_unscored_jobs):
         """POST /dashboard/batch-score/cancel/<id> sets status='cancelling' in DB."""
@@ -883,11 +860,9 @@ class TestBatchScoreCancel:
         # Cancel response keeps polling until background thread sets status='cancelled'
         assert "batch-score-" in data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures and tests for source count badge in accordion expand
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_multi_source_job(tmp_db_path):
@@ -965,12 +940,10 @@ def app_with_multi_source_job(tmp_db_path):
 
     return application
 
-
 @pytest.fixture
 def multi_source_client(app_with_multi_source_job):
     """Test client for the app with a multi-source job."""
     return app_with_multi_source_job.test_client()
-
 
 class TestSourceCountBadge:
     def test_multi_source_job_shows_source_count_badge_in_accordion(
@@ -1011,11 +984,9 @@ class TestSourceCountBadge:
         # Enrichment sparkle indicator should appear for multi-source jobs
         assert "&#10024;" in data or "sparkle" in data.lower() or "sources" in data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures and tests for Companies page
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_companies(tmp_db_path):
@@ -1061,12 +1032,10 @@ def app_with_companies(tmp_db_path):
 
     return application
 
-
 @pytest.fixture
 def companies_client(app_with_companies):
     """Test client for the app with sample companies."""
     return app_with_companies.test_client()
-
 
 class TestCompaniesPage:
 
@@ -1162,11 +1131,9 @@ class TestCompaniesPage:
         assert "/companies" in data
         assert "Companies" in data
 
-
 # ---------------------------------------------------------------------------
 # Tests for Settings ATS section
 # ---------------------------------------------------------------------------
-
 
 class TestSettingsAtsScanSection:
 
@@ -1248,11 +1215,9 @@ class TestSettingsAtsScanSection:
         finally:
             settings_mod._CONFIG_PATH = original_path
 
-
 # ---------------------------------------------------------------------------
 # Tests for Dashboard ATS stat card
 # ---------------------------------------------------------------------------
-
 
 class TestDashboardAtsStat:
 
@@ -1283,11 +1248,9 @@ class TestDashboardAtsStat:
         response = app.test_client().get("/dashboard")
         assert response.status_code == 200
 
-
 # ---------------------------------------------------------------------------
 # Tests for /dashboard/cost-detail HTMX route (SCORE-07)
 # ---------------------------------------------------------------------------
-
 
 class TestCostDetailRoute:
 
@@ -1306,11 +1269,9 @@ class TestCostDetailRoute:
         assert "This Week" in data
         assert "Projected/mo" in data
 
-
 # ---------------------------------------------------------------------------
 # Profile Editor with Learned Preferences tests (05-UI-01 / UI-05)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_preferences(tmp_db_path):
@@ -1384,7 +1345,6 @@ def app_with_preferences(tmp_db_path):
     conn.close()
 
     return application
-
 
 class TestProfileEditor:
     """GET /profile renders Learned Preferences section with accepted resume preferences.
@@ -1464,11 +1424,9 @@ class TestProfileEditor:
             f"got {response.status_code}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Drive status UI integration tests (Plan 09-02)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_sonnet_job(tmp_db_path):
@@ -1526,7 +1484,6 @@ def app_with_sonnet_job(tmp_db_path):
     conn.close()
 
     return application
-
 
 class TestDriveStatusJobsRoutes:
     """Drive status is wired into expand/paste-jd/rescore routes and affects UI."""
@@ -1662,7 +1619,6 @@ class TestDriveStatusJobsRoutes:
         # Drive status must be visible in the response
         assert "python -m job_finder.gmail_auth" in data
 
-
 class TestDriveStatusSettingsRoute:
     """Drive status indicator on Settings page."""
 
@@ -1715,11 +1671,9 @@ class TestDriveStatusSettingsRoute:
         data = response.data.decode()
         assert "python -m job_finder.gmail_auth" in data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures for UX Polish tests (Phase 15)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_jd_full_job(tmp_db_path):
@@ -1778,17 +1732,14 @@ def app_with_jd_full_job(tmp_db_path):
 
     return app
 
-
 @pytest.fixture
 def jd_full_client(app_with_jd_full_job):
     """Test client for the app with a jd_full job."""
     return app_with_jd_full_job.test_client()
 
-
 # ---------------------------------------------------------------------------
 # UX Polish tests (Phase 15)
 # ---------------------------------------------------------------------------
-
 
 class TestUXPolish:
     """Tests for Phase 15 UX polish: spinners, OOB score, jd_full display."""
@@ -1888,7 +1839,6 @@ class TestUXPolish:
         response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
         assert response.status_code == 200
         data = response.data.decode()
-
 
 class TestDashboardUserActivity:
     """Tests for get_recent_activity() DB function and dashboard User Activity section."""
@@ -1998,11 +1948,9 @@ class TestDashboardUserActivity:
         assert response.status_code == 200
         assert b"User Activity" in response.data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures for Data Quality tests (Phase 34)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_entity_job(tmp_db_path):
@@ -2059,12 +2007,10 @@ def app_with_entity_job(tmp_db_path):
     conn.close()
     return app
 
-
 @pytest.fixture
 def entity_client(app_with_entity_job):
     """Test client for the app with HTML entity job."""
     return app_with_entity_job.test_client()
-
 
 @pytest.fixture
 def app_with_html_tag_job(tmp_db_path):
@@ -2125,17 +2071,14 @@ def app_with_html_tag_job(tmp_db_path):
     conn.close()
     return app
 
-
 @pytest.fixture
 def html_tag_client(app_with_html_tag_job):
     """Test client for the app with entity-encoded HTML tag job."""
     return app_with_html_tag_job.test_client()
 
-
 # ---------------------------------------------------------------------------
 # Data Quality tests (Phase 34)
 # ---------------------------------------------------------------------------
-
 
 class TestDataQuality:
     """Tests for Phase 34 data quality: HTML entity handling and jd_full display."""
@@ -2254,11 +2197,9 @@ class TestDataQuality:
         # Full JD section must NOT appear (no jd_full)
         assert "Job Description (full)" not in data
 
-
 # ---------------------------------------------------------------------------
 # Fixtures for button disable/spinner tests (Phase 35, Plan 02)
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def client_with_scored_job(tmp_db_path):
@@ -2315,11 +2256,9 @@ def client_with_scored_job(tmp_db_path):
 
     return application.test_client()
 
-
 # ---------------------------------------------------------------------------
 # Button disable and spinner tests (Phase 35, Plan 02)
 # ---------------------------------------------------------------------------
-
 
 class TestButtonDisableAndSpinner:
     """Every HTMX action button must have hx-disable-elt and spinner indicator."""
@@ -2369,7 +2308,6 @@ class TestButtonDisableAndSpinner:
         button_section = html[button_start:detail_idx + 50]
         assert 'hx-disable-elt="this"' in button_section, "View Full Detail missing hx-disable-elt"
 
-
 class TestSmoothScroll:
     """Smoke tests for smooth scroll JS on job board (UI-02)."""
 
@@ -2393,11 +2331,9 @@ class TestSmoothScroll:
         # Collapse branch also has scrollIntoView
         assert data.count("scrollIntoView") >= 2
 
-
 # ---------------------------------------------------------------------------
 # Save JD tests (Phase 36, Plan 01)
 # ---------------------------------------------------------------------------
-
 
 class TestSaveJD:
     """Tests for POST /jobs/<key>/save-jd route (UI-01)."""
@@ -2514,11 +2450,9 @@ class TestSaveJD:
         data = response.data.decode()
         assert "preventDefault" in data
 
-
 # ---------------------------------------------------------------------------
 # Gap closure tests (Phase 35, Plan 03)
 # ---------------------------------------------------------------------------
-
 
 class TestGapClosureFixes:
     """Tests for UAT gap fixes: event bubbling, CSS-safe selectors, resume wrapper."""
@@ -2700,11 +2634,9 @@ class TestGapClosureFixes:
             "conflicting with OOB score cell approach)"
         )
 
-
 # ---------------------------------------------------------------------------
 # Tests for ATS scan exception handler separation (QUAL-01)
 # ---------------------------------------------------------------------------
-
 
 class TestScanExceptionSeparation:
     """Verify that template rendering errors are distinct from scan logic errors."""
@@ -2752,11 +2684,9 @@ class TestScanExceptionSeparation:
             with pytest.raises(jinja2.TemplateSyntaxError):
                 client.post("/companies/scan")
 
-
 # ---------------------------------------------------------------------------
 # Tests for date filter HTMX trigger (UI-01)
 # ---------------------------------------------------------------------------
-
 
 class TestDateFilterHtmxTrigger:
     """Verify date filter inputs have input event triggers for clearing."""

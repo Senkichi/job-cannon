@@ -101,8 +101,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")):
                 _run_batch_haiku_bg(path, session_id, _MOCK_CONFIG)
@@ -134,8 +133,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
-                 patch(_SCORE_SONNET_PATCH, score_mock), \
+            with patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}):
                 _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
 
@@ -165,8 +163,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())  # non-None → scored
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
@@ -206,8 +203,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
@@ -237,8 +233,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock()), \
-                 patch(_SCORE_SONNET_PATCH, score_mock), \
+            with patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch("job_finder.web.activity_tracker.log_activity"):
                 _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)

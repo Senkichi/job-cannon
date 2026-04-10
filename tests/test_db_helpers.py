@@ -8,7 +8,6 @@ import pytest
 
 from job_finder.web.db_helpers import safe_json_load
 
-
 class TestSafeJsonLoad:
     """Tests for safe_json_load pure function.
 

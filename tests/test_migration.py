@@ -10,7 +10,6 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations, MIGRATIONS
 
-
 class TestMigrationOnEmptyDB:
     """Tests for migration on a fresh empty database."""
 
@@ -141,7 +140,6 @@ class TestMigrationOnEmptyDB:
             f"Expected version {len(MIGRATIONS)} after migration, got: {version_after}"
         )
 
-
 class TestMigrationPreservesData:
     """Tests for migration on a DB with existing job rows."""
 
@@ -207,7 +205,6 @@ class TestMigrationPreservesData:
             )
             assert notes == "", f"Expected '', got: {notes}"
 
-
 class TestMigration5:
     """Tests for Migration 5 (Phase 5 Intelligence tables)."""
 
@@ -264,7 +261,6 @@ class TestMigration5:
         conn.close()
         assert "last_drive_polled_at" in cols, "last_drive_polled_at missing from resume_generations"
 
-
 class TestMigrationIdempotency:
     """Tests for idempotent migration behavior."""
 
@@ -288,7 +284,6 @@ class TestMigrationIdempotency:
         count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         conn.close()
         assert count == 3, f"Expected 3 rows after double migration, got: {count}"
-
 
 class TestMigration6:
     """Tests for Migration 6 (Phase 6 Data Quality schema additions)."""
@@ -401,7 +396,6 @@ class TestMigration6:
             "idx_batch_score_sessions_status index missing"
         )
 
-
 def test_migration_count_is_thirteen():
     """v1.1 adds 4 migrations (9-12), Phase 19 cleanup adds Migration 13.
 
@@ -412,7 +406,6 @@ def test_migration_count_is_thirteen():
     """
     from job_finder.web.db_migrate import MIGRATIONS
     assert len(MIGRATIONS) == 17
-
 
 class TestMigration13:
     """Tests for Migration 13 (drop dead ATS retry columns from jobs table).
@@ -456,7 +449,6 @@ class TestMigration13:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version >= 13, f"Expected user_version >= 13 (Migration 13 applied), got: {version}"
 
-
 class TestMigration12:
     """Tests for Migration 12 (ATS retry columns on companies table)."""
 
@@ -467,7 +459,6 @@ class TestMigration12:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)").fetchall()}
         conn.close()
         assert "retry_count" in cols, "retry_count column missing from companies after Migration 12"
-
 
 class TestMigration14:
     """Tests for Migration 14 (expiry_checked_at on jobs, validation_report on resume_generations).
@@ -545,7 +536,6 @@ class TestMigration14:
         assert row[0] == 0, f"Expected retry_count=0, got: {row[0]}"
         assert row[1] is None, f"Expected retry_after=None, got: {row[1]}"
         assert row[2] is None, f"Expected miss_reason=None, got: {row[2]}"
-
 
 class TestMigration7:
     """Tests for Migration 7 (Phase 7 Company Tracking schema additions)."""
@@ -681,11 +671,9 @@ class TestMigration7:
         assert row[0] == "pending", f"Expected 'pending', got: {row[0]}"
         assert row[1] == 1, f"Expected scan_enabled=1, got: {row[1]}"
 
-
 # ---------------------------------------------------------------------------
 # Consolidated migration tests (relocated from domain test files, Phase 24)
 # ---------------------------------------------------------------------------
-
 
 class TestMigration2:
     """Verify Migration 2 adds AI scoring columns and indexes to jobs table.
@@ -760,7 +748,6 @@ class TestMigration2:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version == len(MIGRATIONS)
 
-
 class TestMigration3:
     """Integration tests for Migration 3 (pipeline_detections table).
 
@@ -819,7 +806,6 @@ class TestMigration3:
         assert "idx_pipeline_detections_status" in index_names
         assert "idx_pipeline_detections_job_id" in index_names
         assert "idx_pipeline_detections_message_id" in index_names
-
 
 class TestMigration4:
     """Migration 4 adds status tracking columns to resume_generations."""
@@ -930,7 +916,6 @@ class TestMigration4:
         # Second run must not raise
         run_migrations(tmp_db_path)
 
-
 class TestMigration5InterviewPrep:
     """Verify Migration 5 creates all Phase 5 tables and columns (from test_interview_prep.py)."""
 
@@ -1017,7 +1002,6 @@ class TestMigration5InterviewPrep:
         }
         conn.close()
         assert "idx_interview_preps_job_id" in indexes, "Missing idx_interview_preps_job_id"
-
 
 class TestMigration5Reporting:
     """Verify Migration 5 creates required tables and columns for Phase 5 (from test_rejection_analyzer.py)."""

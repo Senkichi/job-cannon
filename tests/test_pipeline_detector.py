@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -37,7 +36,6 @@ def _insert_job(conn, dedup_key, title, company, pipeline_status="reviewing",
         ),
     )
     conn.commit()
-
 
 # ---------------------------------------------------------------------------
 # Unit tests: _classify_email
@@ -126,7 +124,6 @@ class TestClassifyEmail:
         )
         assert result is None
 
-
 # ---------------------------------------------------------------------------
 # Unit tests: _company_in_email
 # ---------------------------------------------------------------------------
@@ -199,7 +196,6 @@ class TestCompanyInEmail:
         )
         assert result is True
 
-
 # ---------------------------------------------------------------------------
 # Unit tests: _title_in_email
 # ---------------------------------------------------------------------------
@@ -244,7 +240,6 @@ class TestTitleInEmail:
             "",
         ) is True
 
-
 # ---------------------------------------------------------------------------
 # Unit tests: _sender_is_ats
 # ---------------------------------------------------------------------------
@@ -283,7 +278,6 @@ class TestSenderIsAts:
     def test_empty_string(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
         assert _sender_is_ats("") is False
-
 
 # ---------------------------------------------------------------------------
 # Unit tests: score_match
@@ -375,7 +369,6 @@ class TestScoreMatch:
         score, signals = score_match(email, job)
         assert "ats_domain" not in signals
 
-
 # ---------------------------------------------------------------------------
 # Unit tests: _extract_snippet
 # ---------------------------------------------------------------------------
@@ -406,7 +399,6 @@ class TestExtractSnippet:
         from job_finder.web.pipeline_detector import _extract_snippet
         snippet = _extract_snippet("", "rejection")
         assert snippet == ""
-
 
 # ---------------------------------------------------------------------------
 # Integration tests: get_pending_detections and resolve_detection (db.py helpers)
@@ -524,7 +516,6 @@ class TestDbHelpers:
             (detection_id,),
         ).fetchone()
         assert row[0] == "dismissed"
-
 
 # ---------------------------------------------------------------------------
 # Integration tests: _process_email (high-confidence and low-confidence)
@@ -734,11 +725,9 @@ class TestProcessEmail:
         ).fetchone()[0]
         assert count == 0
 
-
 # ---------------------------------------------------------------------------
 # Edge-case tests: score_match, _company_in_email, _title_in_email (DEBT-06)
 # ---------------------------------------------------------------------------
-
 
 class TestEdgeCases:
     """Edge cases for scoring and matching helpers — prevents false-positive auto-status updates.
@@ -868,11 +857,9 @@ class TestEdgeCases:
         # ATS domain should NOT contribute to score when detection_type is None
         assert "ats_domain" not in signals
 
-
 # ---------------------------------------------------------------------------
 # Tests: update_pipeline_status duplicate event guard
 # ---------------------------------------------------------------------------
-
 
 class TestUpdatePipelineStatusDedup:
     """Test that update_pipeline_status skips event insertion if status already matches."""

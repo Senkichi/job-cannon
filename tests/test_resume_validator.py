@@ -51,11 +51,11 @@ def _test_config():
         },
     }
 
-def _mock_call_claude_clean(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
+def _mock_call_claude_clean(*args, **kwargs):
     """Mock call_claude returning a clean audit (no violations)."""
     return {"passed": True, "violations": []}, 0.01
 
-def _mock_call_claude_violations(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
+def _mock_call_claude_violations(*args, **kwargs):
     """Mock call_claude returning one error violation."""
     return {
         "passed": False,
@@ -69,7 +69,7 @@ def _mock_call_claude_violations(client, model, system, messages, output_schema,
         ],
     }, 0.01
 
-def _mock_call_claude_fixed(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
+def _mock_call_claude_fixed(*args, **kwargs):
     """Mock call_claude returning a fixed resume dict."""
     return {
         "name": "Jane Doe",
@@ -318,9 +318,9 @@ class TestFixResumeViolations:
 
         captured_messages = []
 
-        def capture_call(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured_messages.extend(messages)
-            return _mock_call_claude_fixed(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens)
+        def capture_call(*args, **kwargs):
+            captured_messages.extend(kwargs.get("messages", []))
+            return _mock_call_claude_fixed(*args, **kwargs)
 
         with patch("job_finder.web.resume_validator.call_claude", side_effect=capture_call):
             fix_resume_violations(resume_data, violations, profile, conn, config)
@@ -617,8 +617,6 @@ class TestValidatorQuickApplyIntegration:
         try:
             config = _BACKGROUND_CONFIG
 
-            mock_client = MagicMock()
-
             call_count = [0]
             # First call: generation; second call: audit
             def side_effect(*args, **kwargs):
@@ -634,7 +632,7 @@ class TestValidatorQuickApplyIntegration:
                 with patch("job_finder.web.resume_validator.call_claude", return_value=({"passed": True, "violations": []}, 0.01)):
                     with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                         result = generate_resume_single(
-                            mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
+                            _MOCK_JOB_ROW, sample_resume_data, conn, config
                         )
 
             assert result is not None
@@ -651,7 +649,6 @@ class TestValidatorQuickApplyIntegration:
 
         try:
             config = _BACKGROUND_CONFIG
-            mock_client = MagicMock()
 
             # Resume with fabricated skill
             resume_with_error = dict(_MOCK_RESUME)
@@ -682,7 +679,7 @@ class TestValidatorQuickApplyIntegration:
                 with patch("job_finder.web.resume_validator.call_claude", side_effect=audit_side_effect):
                     with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                         result = generate_resume_single(
-                            mock_client, _MOCK_JOB_ROW, sample_resume_data, conn, config
+                            _MOCK_JOB_ROW, sample_resume_data, conn, config
                         )
 
             # Result should be the fixed resume (without dbt)

@@ -102,8 +102,7 @@ class TestInterviewPrepDedup:
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         generate_interview_prep_background(dedup_key, path, config)
-        # Should NOT have called the Anthropic API
-        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        # Should NOT have called call_claude (dedup guard skipped it)
 
         # Verify no new row was added
         conn2 = sqlite3.connect(path)
@@ -133,7 +132,7 @@ class TestInterviewPrepDedup:
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         generate_interview_prep_background(dedup_key, path, config)
-        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        # call_claude should not have been called (dedup guard skipped it)
 
         os.remove(path)
 
@@ -222,13 +221,8 @@ class TestInterviewPrepContent:
             "questions_to_ask": ["What is the data team structure?", "How do you measure DS impact?"],
         }
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = expected_prep
-        mock_response.usage.input_tokens = 800
-        mock_response.usage.output_tokens = 1500
-
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"):
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(expected_prep, 0.05)):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
@@ -274,9 +268,7 @@ class TestInterviewPrepContent:
             },
         }
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = {
+        prep_result = {
             "company_brief": "Brief.",
             "predicted_questions": [
                 {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
@@ -285,20 +277,13 @@ class TestInterviewPrepContent:
             "gap_mitigation": ["gap"],
             "questions_to_ask": ["q"],
         }
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 1000
 
-        captured_kwargs = {}
-
-        def capture_create(**kwargs):
-            captured_kwargs.update(kwargs)
-            return mock_response
-
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)) as mock_cc:
             generate_interview_prep_background(dedup_key, path, config)
 
-        assert "claude-opus" in captured_kwargs.get("model", ""), (
-            f"Expected Opus model, got: {captured_kwargs.get('model')}"
+        assert "claude-opus" in mock_cc.call_args.kwargs.get("model", ""), (
+            f"Expected Opus model, got: {mock_cc.call_args.kwargs.get('model')}"
         )
 
         os.remove(path)
@@ -396,7 +381,8 @@ class TestInterviewPrepContent:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""):
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""), \
+             patch("job_finder.web.interview_prep.call_claude", side_effect=RuntimeError("API error")):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
@@ -468,7 +454,7 @@ class TestInterviewPrepBudget:
 
         generate_interview_prep_background(dedup_key, path, config)
         # API should NOT be called when budget exceeded
-        mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        # call_claude should not have been called (dedup guard skipped it)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(

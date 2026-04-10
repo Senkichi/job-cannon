@@ -22,11 +22,9 @@ import pytest
 
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def valid_profile():
@@ -49,7 +47,6 @@ def valid_profile():
         "resume_preferences": {"summary_style": "concise", "emphasis": ["causal inference"]},
     }
 
-
 @pytest.fixture
 def tmp_profile_path():
     """Temp file path for profile JSON (cleaned up after test)."""
@@ -60,11 +57,9 @@ def tmp_profile_path():
     if os.path.exists(path):
         os.remove(path)
 
-
 # ---------------------------------------------------------------------------
 # validate_profile — warning detection tests
 # ---------------------------------------------------------------------------
-
 
 class TestValidateProfile:
     def test_position_with_no_achievements_raises_warning(self):
@@ -152,11 +147,9 @@ class TestValidateProfile:
         messages = [w["message"] for w in warnings]
         assert any("TestCo" in m and "no skills tagged" in m for m in messages)
 
-
 # ---------------------------------------------------------------------------
 # load_profile / save_profile
 # ---------------------------------------------------------------------------
-
 
 class TestLoadSaveProfile:
     def test_load_profile_returns_empty_structure_when_file_missing(self, tmp_profile_path):
@@ -519,11 +512,9 @@ class TestLoadSaveProfile:
         assert loaded["education"][0]["degree"] == "M.S. Statistics"
         assert loaded["education"][1]["institution"] == "MIT"
 
-
 # ---------------------------------------------------------------------------
 # Profile Editor routes
 # ---------------------------------------------------------------------------
-
 
 class TestProfileEditorRoutes:
     def test_get_profile_returns_200(self, client):
@@ -582,11 +573,9 @@ class TestProfileEditorRoutes:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-
 # ---------------------------------------------------------------------------
 # PDF Upload routes
 # ---------------------------------------------------------------------------
-
 
 class TestPdfUpload:
     """Tests for POST /profile/upload-pdf route."""
@@ -752,11 +741,9 @@ class TestPdfUpload:
         messages = [msg for category, msg in flashes]
         assert any("no file" in msg.lower() or "please select" in msg.lower() for msg in messages)
 
-
 # ---------------------------------------------------------------------------
 # Conflict review routes (Plan 17-02)
 # ---------------------------------------------------------------------------
-
 
 class TestConflictReview:
     """Tests for GET /profile/review/<id> and POST /profile/save-conflicts/<id>."""
@@ -964,11 +951,9 @@ class TestConflictReview:
         assert "Apache Spark" not in updated_profile["skills"]
         assert updated_profile["skills"] == ["Python", "SQL"]
 
-
 # ---------------------------------------------------------------------------
 # import_markdown route template variable completeness (Plan 18-01 regression)
 # ---------------------------------------------------------------------------
-
 
 class TestImportMarkdown:
     """Regression tests: POST /profile/import passes uploads and style_guide to template."""
@@ -1058,11 +1043,9 @@ class TestImportMarkdown:
         assert resp.status_code == 200
         assert b"upload-pdf-form" in resp.data
 
-
 # ---------------------------------------------------------------------------
 # Phase 17 activity instrumentation (Plan 19-03)
 # ---------------------------------------------------------------------------
-
 
 class TestPhase17ActivityInstrumentation:
     """Verify Phase 17 profile routes call log_activity()."""
@@ -1206,11 +1189,9 @@ class TestPhase17ActivityInstrumentation:
         from job_finder.web.activity_tracker import ACTION_EXTRACT_STYLE
         assert call_action == ACTION_EXTRACT_STYLE
 
-
 # ---------------------------------------------------------------------------
 # Profile recommendation routes (Plan 43-02)
 # ---------------------------------------------------------------------------
-
 
 _REC_APP_CONFIG = {
     "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
@@ -1236,7 +1217,6 @@ _CANNED_REC_RESULT = {
         }
     ]
 }
-
 
 class TestProfileRecommendations:
     """Tests for GET /profile/recommendation, POST /profile/recommendations-all,

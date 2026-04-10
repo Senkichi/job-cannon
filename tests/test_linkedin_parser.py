@@ -8,7 +8,6 @@ Covers:
 import pytest
 from job_finder.parsers.linkedin_parser import parse_linkedin_alert, _is_meta_email
 
-
 class TestNotificationFilter:
     """LinkedIn notification emails are rejected before parsing (DQ-04)."""
 

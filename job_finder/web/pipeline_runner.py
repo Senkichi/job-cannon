@@ -133,12 +133,6 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         if sonnet_queue:
             sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
             summary["sonnet_evaluated"] = sonnet_evaluated
-    elif new_job_keys and anthropic is None:
-        logger.debug(
-            "anthropic package not installed -- skipping AI scoring for %d new jobs",
-            len(new_job_keys),
-        )
-
     # --- Budget alert notification (check after AI scoring completes) ---
     _check_budget_alert(config, db_path)
 
