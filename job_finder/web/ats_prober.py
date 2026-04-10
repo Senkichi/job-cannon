@@ -34,11 +34,9 @@ _TRANSIENT_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 # HTTP status codes that indicate permanent miss (no retry)
 _PERMANENT_MISS_CODES: frozenset[int] = frozenset({404, 410})
 
-
 # ---------------------------------------------------------------------------
 # Retry state machine helpers (DEBT-01 / Phase 14)
 # ---------------------------------------------------------------------------
-
 
 def _compute_retry_after(retry_count: int) -> str:
     """Compute UTC ISO timestamp for next retry based on current retry_count.
@@ -62,7 +60,6 @@ def _compute_retry_after(retry_count: int) -> str:
     # correct comparison with datetime('now') in SQL WHERE clauses
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
-
 def _is_transient_error(exc_or_status) -> bool:
     """Return True if the given exception or status code indicates a transient error.
 
@@ -79,7 +76,6 @@ def _is_transient_error(exc_or_status) -> bool:
         requests.exceptions.Timeout,
         requests.exceptions.ConnectionError,
     ))
-
 
 def _handle_scan_error(
     conn: sqlite3.Connection,
@@ -146,7 +142,6 @@ def _handle_scan_error(
             company_name, new_retry_count, _MAX_RETRIES, retry_after, error_detail,
         )
 
-
 def _reset_retry_state(
     conn: sqlite3.Connection,
     company_id: int,
@@ -172,7 +167,6 @@ def _reset_retry_state(
         (now, company_id),
     )
     conn.commit()
-
 
 def probe_single_company(
     company_id: int,
@@ -230,7 +224,6 @@ def probe_single_company(
                     "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
                     (company_id,),
                 )
-                conn.commit()
                 _reset_retry_state(conn, company_id, now)
                 try:
                     data = resp.json()
@@ -282,7 +275,6 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
-                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_greenhouse(slug_candidate):
@@ -294,7 +286,6 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
-                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_ashby(slug_candidate):
@@ -306,7 +297,6 @@ def probe_single_company(
                            WHERE id = ?""",
                         (slug_candidate, company_id),
                     )
-                    conn.commit()
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
@@ -321,16 +311,21 @@ def probe_single_company(
         conn.commit()
         return {"status": "miss"}
 
-
 def _probe_lever_with_result(slug: str) -> bool:
-    """Return True if Lever slug has at least one active posting.
+    """Return True if Lever slug has at least one active posting. Let transient exceptions propagate."""
+    url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+    r = requests.get(url, timeout=_PROBE_TIMEOUT)
+    if r.status_code == 200:
+        data = r.json()
+        return isinstance(data, list) and len(data) > 0
+    return False
+
+def _probe_lever(slug: str) -> bool:
+    """Return True if slug has at least one active Lever posting.
 
     IMPORTANT (Research Pitfall 2): Lever returns HTTP 200 with empty list
     for invalid slugs AND for valid slugs with no current postings. Only
     cache as 'hit' when response is 200 AND list has at least one posting.
-
-    Transient exceptions (Timeout, ConnectionError) propagate to the caller so
-    the surrounding probe loop can record error state appropriately.
 
     Args:
         slug: Lever company slug to probe.
@@ -339,32 +334,16 @@ def _probe_lever_with_result(slug: str) -> bool:
         True if the slug is confirmed active on Lever (non-empty postings list).
     """
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-    r = requests.get(url, timeout=_PROBE_TIMEOUT)
-    if r.status_code == 200:
-        data = r.json()
-        # Per Research Pitfall 2: empty list is NOT a confirmed hit
-        return isinstance(data, list) and len(data) > 0
-    return False
-
-
-def _probe_lever(slug: str) -> bool:
-    """Return True if slug has at least one active Lever posting; False on any error.
-
-    Wraps :func:`_probe_lever_with_result` and swallows all exceptions so batch
-    scan loops can call this without extra try/except blocks.
-
-    Args:
-        slug: Lever company slug to probe.
-
-    Returns:
-        True if the slug is confirmed active on Lever, False on miss or error.
-    """
     try:
-        return _probe_lever_with_result(slug)
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            # Per Research Pitfall 2: empty list is NOT a confirmed hit
+            return isinstance(data, list) and len(data) > 0
+        return False
     except Exception as e:
         logger.debug("_probe_lever('%s') failed: %s", slug, e)
         return False
-
 
 def _probe_greenhouse(slug: str) -> bool:
     """Return True if slug is a valid Greenhouse board token.
@@ -384,7 +363,6 @@ def _probe_greenhouse(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_greenhouse('%s') failed: %s", slug, e)
         return False
-
 
 def _probe_ashby(slug: str) -> bool:
     """Return True if slug is a valid Ashby job board name.
@@ -406,37 +384,3 @@ def _probe_ashby(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_ashby('%s') failed: %s", slug, e)
         return False
-
-
-def _probe_greenhouse_with_result(slug: str) -> bool:
-    """Return True if slug is a valid Greenhouse board token.
-
-    Transient exceptions (Timeout, ConnectionError, HTTPError) propagate to
-    the caller for retry handling. Mirrors _probe_lever_with_result pattern.
-
-    Args:
-        slug: Greenhouse board token to probe.
-
-    Returns:
-        True if the slug resolves to a valid Greenhouse job board.
-    """
-    url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
-    r = requests.get(url, timeout=_PROBE_TIMEOUT)
-    return r.status_code == 200
-
-
-def _probe_ashby_with_result(slug: str) -> bool:
-    """Return True if slug is a valid Ashby job board name.
-
-    Transient exceptions (Timeout, ConnectionError, HTTPError) propagate to
-    the caller for retry handling. Mirrors _probe_lever_with_result pattern.
-
-    Args:
-        slug: Ashby job board name to probe.
-
-    Returns:
-        True if the slug resolves to a valid Ashby job board.
-    """
-    url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
-    r = requests.get(url, timeout=_PROBE_TIMEOUT)
-    return r.status_code == 200

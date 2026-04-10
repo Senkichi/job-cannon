@@ -22,7 +22,6 @@ from scoring_evaluator import (
     select_stratified_sample,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -55,7 +54,6 @@ def _create_scored_db(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
 
-
 def _insert_job(
     conn: sqlite3.Connection,
     dedup_key: str,
@@ -72,7 +70,6 @@ def _insert_job(
     )
     conn.commit()
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -85,7 +82,6 @@ def scored_conn():
     _create_scored_db(conn)
     yield conn
     conn.close()
-
 
 @pytest.fixture
 def populated_db(scored_conn):
@@ -110,7 +106,6 @@ def populated_db(scored_conn):
     for dedup_key, title, company, score in jobs:
         _insert_job(scored_conn, dedup_key, title, company, score)
     return scored_conn
-
 
 # ---------------------------------------------------------------------------
 # Stratified sample tests
@@ -178,7 +173,6 @@ class TestStratifiedSample:
         sample = select_stratified_sample(scored_conn, [])
         band_a_count = sum(1 for j in sample if (j.get("haiku_score") or 0) >= 70)
         assert band_a_count <= 15, f"Band A should be limited to 15, got {band_a_count}"
-
 
 # ---------------------------------------------------------------------------
 # Ground truth matching tests
@@ -261,7 +255,6 @@ class TestGroundTruthMatching:
             matched = gather_ground_truth(scored_conn, config, skip_drive=False)
 
         assert len(set(matched)) == len(matched), "Duplicates in ground truth result"
-
 
 # ---------------------------------------------------------------------------
 # Profile quality guard tests

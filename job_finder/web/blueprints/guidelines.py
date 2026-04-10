@@ -5,19 +5,10 @@ import json
 import logging
 from pathlib import Path
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
 from flask import Blueprint, current_app, request
 
-from job_finder.web.ai_route_responses import (
-    render_htmx_error_fragment,
-    tier_unavailable_message,
-)
+from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.db_helpers import get_db
-from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.resume_style_guide import (
     FIELD_LABELS,
     STYLE_GUIDE_SCHEMA,
@@ -30,7 +21,6 @@ from job_finder.web.resume_style_guide import (
 logger = logging.getLogger(__name__)
 
 guidelines_bp = Blueprint("guidelines", __name__, url_prefix="/settings")
-
 
 @guidelines_bp.route("/migrate-style-guide", methods=["POST"], strict_slashes=False)
 def migrate_style_guide_route():
@@ -70,7 +60,6 @@ def migrate_style_guide_route():
             200,
         )
 
-
 @guidelines_bp.route("/preview-guidelines-merge", methods=["POST"], strict_slashes=False)
 def preview_guidelines_merge():
     """Preview a field-by-field diff of merging updated guidelines into the style guide.
@@ -93,23 +82,16 @@ def preview_guidelines_merge():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config["DB_PATH"]
         conn = get_db(db_path)
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
-
-        if not tier_has_configured_provider("sonnet", config, client, conn):
-            return render_htmx_error_fragment(
-                "guidelines-diff-container",
-                tier_unavailable_message("sonnet", "Guidelines preview"),
-            )
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
-            client=client,
+            model=model,
             conn=conn,
             config=config,
             mode="merge_updates",
@@ -204,11 +186,12 @@ def preview_guidelines_merge():
 
     except Exception as exc:
         logger.warning("preview_guidelines_merge: %s", exc, exc_info=True)
-        return render_htmx_error_fragment(
-            "guidelines-diff-container",
-            f"Preview failed: {exc}. Check logs for details.",
+        return (
+            f'<div id="guidelines-diff-container" class="text-xs text-red-400">'
+            f"Preview failed: {exc}. Check logs for details."
+            f"</div>",
+            200,
         )
-
 
 @guidelines_bp.route("/apply-guidelines-merge", methods=["POST"], strict_slashes=False)
 def apply_guidelines_merge():

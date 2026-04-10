@@ -12,11 +12,9 @@ from datetime import datetime
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def app_with_detection_db(migrated_db_with_jobs):
@@ -45,13 +43,11 @@ def app_with_detection_db(migrated_db_with_jobs):
     # Yield both the app and the DB connection so tests can inspect DB state
     yield application, db_path, conn
 
-
 @pytest.fixture
 def client_with_db(app_with_detection_db):
     """Return (test_client, db_path, conn) for detection blueprint tests."""
     app, db_path, conn = app_with_detection_db
     return app.test_client(), db_path, conn
-
 
 def _insert_pending_detection(conn, job_id, detection_type="rejection", confidence=0.5):
     """Helper: insert a pending pipeline_detection record. Returns the detection id."""
@@ -79,11 +75,9 @@ def _insert_pending_detection(conn, job_id, detection_type="rejection", confiden
     conn.commit()
     return cursor.lastrowid
 
-
 # ---------------------------------------------------------------------------
 # Tests: confirm action
 # ---------------------------------------------------------------------------
-
 
 class TestConfirmAction:
     def test_confirm_sets_detection_status_confirmed(self, client_with_db):
@@ -174,7 +168,6 @@ class TestConfirmAction:
         assert event is not None
         assert event["to_status"] == "rejected"
 
-
 class TestConfirmMissingDetection:
     def test_confirm_missing_detection_returns_404(self, client_with_db):
         """POST /detections/999/confirm returns 404 when detection does not exist."""
@@ -184,11 +177,9 @@ class TestConfirmMissingDetection:
 
         assert response.status_code == 404
 
-
 # ---------------------------------------------------------------------------
 # Tests: dismiss action
 # ---------------------------------------------------------------------------
-
 
 class TestDismissAction:
     def test_dismiss_sets_detection_status_dismissed(self, client_with_db):
@@ -245,11 +236,9 @@ class TestDismissAction:
 
         assert response.status_code == 404
 
-
 # ---------------------------------------------------------------------------
 # Tests: dashboard display
 # ---------------------------------------------------------------------------
-
 
 class TestDashboardPendingCount:
     def test_dashboard_shows_pending_review_stat_card(self, client_with_db):
@@ -290,7 +279,6 @@ class TestDashboardPendingCount:
         # Should not appear in the Pending Review card section
         # (it may appear elsewhere from budget warning, so check section context)
         assert "pending_count" not in body  # template var should not leak
-
 
 class TestDashboardReviewQueueCards:
     def test_dashboard_shows_detection_card_markup(self, client_with_db):

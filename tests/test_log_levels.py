@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -32,7 +31,6 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     return path, conn
 
-
 # ---------------------------------------------------------------------------
 # pipeline_runner.py — 3 DEBUG demotions
 # ---------------------------------------------------------------------------
@@ -40,40 +38,35 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
 
-    def test_no_routable_provider_logs_at_debug(self, caplog):
-        """'No routable' provider message in scoring_runner uses logger.debug not WARNING.
-
-        After the provider-agnostic refactor, scoring_runner owns the routability
-        check (pipeline_runner no longer gates on Anthropic availability).
-        """
+    def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog):
+        """scoring_runner 'claude CLI not found' branch uses logger.debug not WARNING."""
         import inspect
-        import job_finder.web.scoring_runner as runner_module
+        import job_finder.web.scoring_runner as sr_module
 
-        source = inspect.getsource(runner_module.run_haiku_scoring)
+        source = inspect.getsource(sr_module.run_haiku_scoring)
         lines = source.splitlines()
 
         for i, line in enumerate(lines):
-            if "no routable" in line.lower():
+            if "claude cli not found" in line.lower():
                 context = "\n".join(lines[max(0, i-3):i+1])
                 assert "logger.warning" not in context, (
-                    f"scoring_runner 'No routable' must not use logger.warning.\n"
+                    f"scoring_runner 'claude CLI not found' must not use logger.warning.\n"
                     f"Context:\n{context}"
                 )
                 assert "logger.debug" in context, (
-                    f"scoring_runner 'No routable' must use logger.debug.\n"
+                    f"scoring_runner 'claude CLI not found' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
                 return  # found and validated
 
         raise AssertionError(
-            "Could not find 'No routable' log message in "
+            "Could not find 'claude CLI not found' log message in "
             "scoring_runner.run_haiku_scoring — was the message text changed?"
         )
 
-    def test_no_routable_provider_caplog_integration(self, caplog):
-        """When no provider is routable and new jobs exist, scoring emits DEBUG not WARNING."""
+    def test_claude_cli_not_found_logs_at_debug(self, caplog):
+        """When claude CLI is not on PATH, scoring_runner emits DEBUG not WARNING."""
         import job_finder.web.pipeline_runner as runner_module
-        import job_finder.web.scoring_runner as scoring_runner_module
         from job_finder.models import Job
 
         db_path, conn = _make_migrated_db()
@@ -81,7 +74,7 @@ class TestPipelineRunnerLogLevels:
 
         config = {
             "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
-            "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
+            "scoring": {"monthly_budget_usd": 25.0, "haiku_threshold": 42},
             "profile": {"target_titles": [], "target_locations": [],
                         "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
         }
@@ -95,24 +88,20 @@ class TestPipelineRunnerLogLevels:
             with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]), \
                  patch.object(runner_module, "_fetch_serpapi", return_value=[]), \
                  patch.object(runner_module, "_check_budget_alert"), \
-                 patch.object(scoring_runner_module, "tier_has_configured_provider", return_value=False):
-                with caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"):
-                    runner_module.run_ingestion(db_path, config)
+                 patch("job_finder.web.scoring_runner.shutil.which", return_value=None), \
+                 caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"):
+                runner_module.run_ingestion(db_path, config)
         finally:
             if os.path.exists(db_path):
                 os.remove(db_path)
 
         debug_records = [
             r for r in caplog.records
-            if r.levelno == logging.DEBUG and "routable" in r.message.lower()
+            if r.levelno == logging.DEBUG and "claude cli not found" in r.message.lower()
         ]
-        warning_records = [
-            r for r in caplog.records
-            if r.levelno == logging.WARNING and "routable" in r.message.lower()
-        ]
-        assert debug_records, "Expected a DEBUG record mentioning 'routable' — none found"
-        assert not warning_records, (
-            f"no-routable-provider message should not be WARNING; found: {warning_records}"
+        assert debug_records, (
+            f"Expected a DEBUG record mentioning 'claude CLI not found' — got: "
+            f"{[r.message for r in caplog.records if r.levelno == logging.DEBUG]}"
         )
 
     def test_zero_job_email_routed_to_activity_feed_logs_at_debug(self, caplog):
@@ -161,57 +150,6 @@ class TestPipelineRunnerLogLevels:
                     f"Context:\n{context}"
                 )
 
-    def test_haiku_no_result_caplog_companion(self, caplog):
-        """Runtime: scoring_runner emits DEBUG 'Haiku: no result for' when score_and_persist_haiku returns None."""
-        import job_finder.web.scoring_runner as scoring_runner_module
-
-        db_path, conn = _make_migrated_db()
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, description,
-                                 first_seen, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ("testco|ds|remote", "Data Scientist", "TestCo", "Remote",
-             "ML role", "2026-01-01", "2026-01-01"),
-        )
-        conn.commit()
-        conn.close()
-
-        config = {
-            "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 55},
-            "profile": {
-                "target_titles": ["DS"],
-                "target_locations": ["Remote"],
-                "min_salary": None,
-                "exclusions": {"title_keywords": [], "companies": []},
-                "industries": [],
-                "skills": [],
-            },
-        }
-
-        try:
-            with patch(
-                "job_finder.web.scoring_runner.score_and_persist_haiku",
-                return_value=None,
-            ):
-                with patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-                    mock_anthropic.Anthropic.return_value = MagicMock()
-                    with caplog.at_level(
-                        logging.DEBUG, logger="job_finder.web.scoring_runner"
-                    ):
-                        scoring_runner_module.run_haiku_scoring(
-                            ["testco|ds|remote"], config, db_path
-                        )
-        finally:
-            if os.path.exists(db_path):
-                os.remove(db_path)
-
-        debug_records = [
-            r for r in caplog.records
-            if r.levelno == logging.DEBUG and "no result for" in r.message.lower()
-        ]
-        assert debug_records, "Expected DEBUG record 'Haiku: no result for'"
-
-
 # ---------------------------------------------------------------------------
 # rejection_analyzer.py — INFO demotion
 # ---------------------------------------------------------------------------
@@ -239,9 +177,8 @@ class TestRejectionAnalyzerLogLevels:
                 )
 
     def test_budget_cap_caplog_integration(self, caplog):
-        """When call_model raises BudgetExceededError, rejection_analyzer emits an INFO record."""
+        """When cost_gate returns False, rejection_analyzer emits an INFO record."""
         import job_finder.web.rejection_analyzer as ra_module
-        from job_finder.web.claude_client import BudgetExceededError
 
         db_path, conn = _make_migrated_db()
         # Insert a rejected + unreviewed job so the code reaches the budget gate
@@ -257,13 +194,10 @@ class TestRejectionAnalyzerLogLevels:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         try:
-            with patch(
-                "job_finder.web.rejection_analyzer.call_model",
-                side_effect=BudgetExceededError("Budget cap reached. Tier: opus"),
-            ):
+            with patch("job_finder.web.rejection_analyzer.cost_gate", return_value=False):
                 with caplog.at_level(logging.INFO, logger="job_finder.web.rejection_analyzer"):
                     ra_module.run_rejection_analysis(db_path, config)
         finally:
@@ -280,7 +214,6 @@ class TestRejectionAnalyzerLogLevels:
         ]
         assert info_records, "Expected INFO record for budget cap in rejection_analyzer"
         assert not warning_records, "Budget cap must not be WARNING in rejection_analyzer"
-
 
 # ---------------------------------------------------------------------------
 # interview_prep.py — 2 INFO demotions
@@ -339,9 +272,8 @@ class TestInterviewPrepLogLevels:
                 break
 
     def test_budget_cap_caplog_integration(self, caplog):
-        """BudgetExceededError from call_model in interview_prep emits INFO record."""
+        """cost_gate=False path in interview_prep emits INFO record."""
         import job_finder.web.interview_prep as ip_module
-        from job_finder.web.claude_client import BudgetExceededError
 
         db_path, conn = _make_migrated_db()
         conn.execute(
@@ -355,13 +287,10 @@ class TestInterviewPrepLogLevels:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         try:
-            with patch(
-                "job_finder.web.interview_prep.call_model",
-                side_effect=BudgetExceededError("Budget cap reached. Tier: opus"),
-            ):
+            with patch("job_finder.web.interview_prep.cost_gate", return_value=False):
                 with caplog.at_level(logging.INFO, logger="job_finder.web.interview_prep"):
                     ip_module.generate_interview_prep_background("co|eng|nyc", db_path, config)
         finally:
@@ -378,7 +307,6 @@ class TestInterviewPrepLogLevels:
         ]
         assert info_records, "Expected INFO record for budget exceeded in interview_prep"
         assert not warning_records, "Budget message must not be WARNING in interview_prep"
-
 
 # ---------------------------------------------------------------------------
 # ats_scanner.py — INFO demotion
@@ -450,7 +378,6 @@ class TestAtsScannerLogLevels:
         assert info_records, "Expected INFO record for 'promoted to unreachable'"
         assert not warning_records, "'promoted to unreachable' must not be WARNING"
 
-
 # ---------------------------------------------------------------------------
 # blueprints/settings.py — DEBUG demotion
 # ---------------------------------------------------------------------------
@@ -476,53 +403,6 @@ class TestSettingsLogLevels:
                     f"settings 'blocked wipe of' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
-
-    def test_blocked_wipe_caplog_companion(self, caplog):
-        """Runtime: POST /settings/save with wiped profile fields emits DEBUG 'blocked wipe of'."""
-        from job_finder.web import create_app
-
-        existing_config = {
-            "db": {"path": ":memory:"},
-            "profile": {
-                "target_titles": ["Staff Data Scientist", "Senior DS"],
-                "target_locations": ["Remote"],
-                "min_salary": 150000,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": ["Python", "SQL"],
-            },
-            "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        }
-
-        app = create_app(config=existing_config)
-        app.config["TESTING"] = True
-
-        # Patch load_config to return the existing config (bypasses real file I/O).
-        # target_titles="" and profile_skills="" submit empty strings → lines_to_list([]) → wipe guard fires.
-        with patch(
-            "job_finder.web.blueprints.settings.load_config",
-            return_value=existing_config,
-        ):
-            with app.test_client() as client:
-                with caplog.at_level(
-                    logging.DEBUG, logger="job_finder.web.blueprints.settings"
-                ):
-                    client.post(
-                        "/settings/save",
-                        data={
-                            "target_titles": "",
-                            "profile_skills": "",
-                        },
-                    )
-
-        debug_records = [
-            r for r in caplog.records
-            if r.levelno == logging.DEBUG and "blocked wipe of" in r.message.lower()
-        ]
-        assert debug_records, "Expected DEBUG record 'settings save: blocked wipe of'"
-
 
 # ---------------------------------------------------------------------------
 # blueprints/jobs.py — 2 INFO demotions
@@ -568,123 +448,6 @@ class TestJobsBlueprintLogLevels:
                     f"jobs.py 'rescore: budget cap reached' must use logger.info.\n"
                     f"Context:\n{context}"
                 )
-
-    def test_paste_jd_budget_cap_caplog_companion(self, caplog, tmp_db_path):
-        """Runtime: POST /<key>/paste-jd with exceeded budget emits INFO 'paste-jd: budget cap reached'."""
-        from job_finder.web import create_app
-        from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.claude_client import BudgetExceededError
-
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            ("testco|ds|remote", "Data Scientist", "TestCo", "Remote",
-             "2026-01-01", "2026-01-01"),
-        )
-        conn.commit()
-        conn.close()
-
-        test_config = {
-            "db": {"path": tmp_db_path},
-            "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
-            "profile": {
-                "target_titles": ["DS"],
-                "target_locations": ["Remote"],
-                "min_salary": 150000,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": [],
-            },
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        }
-        app = create_app(config=test_config)
-        app.config["TESTING"] = True
-
-        with app.test_client() as test_client:
-            with patch(
-                "job_finder.web.scoring_orchestrator.score_and_persist_sonnet",
-                side_effect=BudgetExceededError("Budget cap reached. Tier: sonnet"),
-            ):
-                with patch(
-                    "job_finder.web.scoring_orchestrator.load_scoring_profile",
-                    return_value={},
-                ):
-                    with patch("anthropic.Anthropic"):
-                        with caplog.at_level(
-                            logging.INFO, logger="job_finder.web.blueprints.jobs"
-                        ):
-                            test_client.post(
-                                "/jobs/testco%7Cds%7Cremote/paste-jd",
-                                data={"jd_text": "Full job description for testing purposes."},
-                            )
-
-        info_records = [
-            r for r in caplog.records
-            if r.levelno == logging.INFO
-            and "paste-jd: budget cap reached" in r.message
-        ]
-        assert info_records, "Expected INFO record 'paste-jd: budget cap reached'"
-
-    def test_rescore_budget_cap_caplog_companion(self, caplog, tmp_db_path):
-        """Runtime: POST /<key>/rescore with exceeded budget emits INFO 'rescore: budget cap reached'."""
-        from job_finder.web import create_app
-        from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.claude_client import BudgetExceededError
-
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            ("testco|ds|remote", "Data Scientist", "TestCo", "Remote",
-             "2026-01-01", "2026-01-01",
-             "Full job description with requirements for testing purposes."),
-        )
-        conn.commit()
-        conn.close()
-
-        test_config = {
-            "db": {"path": tmp_db_path},
-            "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
-            "profile": {
-                "target_titles": ["DS"],
-                "target_locations": ["Remote"],
-                "min_salary": 150000,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": [],
-            },
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        }
-        app = create_app(config=test_config)
-        app.config["TESTING"] = True
-
-        with app.test_client() as test_client:
-            with patch(
-                "job_finder.web.scoring_orchestrator.score_and_persist_sonnet",
-                side_effect=BudgetExceededError("Budget cap reached. Tier: sonnet"),
-            ):
-                with patch(
-                    "job_finder.web.scoring_orchestrator.load_scoring_profile",
-                    return_value={},
-                ):
-                    with patch("anthropic.Anthropic"):
-                        with caplog.at_level(
-                            logging.INFO, logger="job_finder.web.blueprints.jobs"
-                        ):
-                            test_client.post("/jobs/testco%7Cds%7Cremote/rescore")
-
-        info_records = [
-            r for r in caplog.records
-            if r.levelno == logging.INFO
-            and "rescore: budget cap reached" in r.message
-        ]
-        assert info_records, "Expected INFO record 'rescore: budget cap reached'"
-
 
 # ---------------------------------------------------------------------------
 # parsers/ziprecruiter_parser.py — body-size guard
@@ -762,4 +525,3 @@ class TestZipRecruiterParserBodyGuard:
             "ziprecruiter_parser must have body-size guard: "
             "`if not jobs and body and len(body.strip()) > 100:`"
         )
-

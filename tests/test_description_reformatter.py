@@ -20,26 +20,9 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from job_finder.web.model_provider import ModelResult
-
-
-def _make_model_result(data: dict, cost_usd: float = 0.0002) -> ModelResult:
-    """Helper to create a ModelResult for test mocking."""
-    return ModelResult(
-        data=data,
-        cost_usd=cost_usd,
-        input_tokens=200,
-        output_tokens=100,
-        model="test-model",
-        provider="anthropic",
-        schema_valid=True,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def mock_anthropic_client():
@@ -59,7 +42,6 @@ def mock_anthropic_client():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client
-
 
 @pytest.fixture
 def temp_db_path():
@@ -98,7 +80,6 @@ def temp_db_path():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def db_with_unformatted_jobs(temp_db_path):
     """DB with 3 jobs: 2 unformatted (reformatted=0) and 1 already formatted (reformatted=1)."""
@@ -134,7 +115,6 @@ def db_with_unformatted_jobs(temp_db_path):
     conn.close()
     return temp_db_path
 
-
 @pytest.fixture
 def db_with_null_description(temp_db_path):
     """DB with one job that has NULL description."""
@@ -148,11 +128,9 @@ def db_with_null_description(temp_db_path):
     conn.close()
     return temp_db_path
 
-
 # ---------------------------------------------------------------------------
 # Tests for reformat_description
 # ---------------------------------------------------------------------------
-
 
 class TestReformatDescription:
     def test_reformat_description_calls_haiku_and_returns_sectioned_text(
@@ -163,11 +141,12 @@ class TestReformatDescription:
 
         pipe_description = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result(
-                {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"}
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = (
+                {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"},
+                0.0002,
             )
-            result = reformat_description(pipe_description, mock_anthropic_client)
+            result = reformat_description(pipe_description)
 
         mock_call.assert_called_once()
         # Result should be the reformatted text (different from input)
@@ -182,9 +161,9 @@ class TestReformatDescription:
 
         original = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
             mock_call.side_effect = Exception("API error")
-            result = reformat_description(original, mock_anthropic_client)
+            result = reformat_description(original)
 
         assert result == original
 
@@ -192,14 +171,14 @@ class TestReformatDescription:
         """reformat_description returns None unchanged when description is None."""
         from job_finder.web.description_reformatter import reformat_description
 
-        result = reformat_description(None, MagicMock())
+        result = reformat_description(None)
         assert result is None
 
     def test_reformat_description_returns_original_when_empty(self):
         """reformat_description returns empty string unchanged."""
         from job_finder.web.description_reformatter import reformat_description
 
-        result = reformat_description("", MagicMock())
+        result = reformat_description("")
         assert result == ""
 
     def test_reformat_description_skips_already_formatted_description(self):
@@ -215,17 +194,17 @@ class TestReformatDescription:
         )
 
         mock_client = MagicMock()
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            result = reformat_description(already_formatted, mock_client)
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            result = reformat_description(already_formatted)
 
         # Should return original without calling Haiku
         mock_call.assert_not_called()
         assert result == already_formatted
 
-    def test_reformat_description_with_conn_calls_model(
-        self, mock_anthropic_client, temp_db_path
+    def test_reformat_description_with_conn_records_cost(
+        self, temp_db_path
     ):
-        """reformat_description calls call_model once when conn is provided."""
+        """reformat_description records cost via call_claude when conn provided."""
         from job_finder.web.description_reformatter import reformat_description
 
         conn = sqlite3.connect(temp_db_path)
@@ -241,13 +220,13 @@ class TestReformatDescription:
 
         original = "Build ML models | Deploy pipelines | Monitor performance"
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result(
-                {"text": "About the Role\n\nBuild ML models."}
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = (
+                {"text": "About the Role\n\nBuild ML models."},
+                0.0002,
             )
             result = reformat_description(
                 original,
-                mock_anthropic_client,
                 conn=conn,
                 config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
             )
@@ -255,11 +234,9 @@ class TestReformatDescription:
         mock_call.assert_called_once()
         conn.close()
 
-
 # ---------------------------------------------------------------------------
 # Tests for run_description_reformat_pass
 # ---------------------------------------------------------------------------
-
 
 class TestRunDescriptionReformatPass:
     def test_processes_only_unformatted_jobs(self, db_with_unformatted_jobs):
@@ -271,11 +248,10 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": reformatted_text})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={"scoring": {"models": {"haiku": "claude-haiku-4-5"}}},
             )
 
@@ -291,11 +267,10 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": reformatted_text})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -317,11 +292,10 @@ class TestRunDescriptionReformatPass:
         """run_description_reformat_pass skips jobs where description IS NULL."""
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": "Reformatted text"})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": "Reformatted text"}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_null_description,
-                "fake-api-key",
                 config={},
             )
 
@@ -339,11 +313,10 @@ class TestRunDescriptionReformatPass:
             "Responsibilities\n\n- Build models"
         )
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": reformatted_text})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             count = run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -355,11 +328,10 @@ class TestRunDescriptionReformatPass:
 
         # Mock Haiku to return same text as input (already formatted)
         # This happens when description has 2+ section headers
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": "same as input"})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": "same as input"}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
@@ -373,20 +345,19 @@ class TestRunDescriptionReformatPass:
         # No jobs should remain unprocessed
         assert unprocessed["cnt"] == 0
 
-    def test_reformat_pass_calls_model_per_job(self, db_with_unformatted_jobs):
-        """run_description_reformat_pass calls call_model once per eligible job."""
+    def test_records_cost_per_haiku_call(self, db_with_unformatted_jobs):
+        """run_description_reformat_pass records cost in scoring_costs for each Haiku call."""
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         reformatted_text = "About the Role\n\nReformatted.\n\nRequirements\n\n- Python"
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_call:
-            mock_call.return_value = _make_model_result({"text": reformatted_text})
+        with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
+            mock_call.return_value = ({"text": reformatted_text}, 0.0002)
             run_description_reformat_pass(
                 db_with_unformatted_jobs,
-                "fake-api-key",
                 config={},
             )
 
-        # Check that call_model was called for each reformatted job
+        # Check that call_claude was called for each reformatted job
         # (2 jobs with description_reformatted=0 and non-NULL descriptions)
         assert mock_call.call_count == 2

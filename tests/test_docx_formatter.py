@@ -16,7 +16,6 @@ import io
 
 import pytest
 
-
 def _make_resume_data(**overrides) -> dict:
     """Build a minimal valid resume_data dict for testing."""
     base = {
@@ -45,7 +44,6 @@ def _make_resume_data(**overrides) -> dict:
     }
     base.update(overrides)
     return base
-
 
 class TestBuildResumeDocxOutput:
     """Tests for the output type and structure of build_resume_docx."""
@@ -81,7 +79,6 @@ class TestBuildResumeDocxOutput:
         # Should not raise
         doc = Document(buffer)
         assert doc is not None
-
 
 class TestBuildResumeDocxContent:
     """Tests for the textual content of the generated .docx."""
@@ -161,7 +158,6 @@ class TestBuildResumeDocxContent:
         buffer = build_resume_docx(_make_resume_data())
         text = self._get_full_text(buffer)
         assert "2012" in text
-
 
 class TestBuildResumeDocxEdgeCases:
     """Tests for missing/empty fields."""

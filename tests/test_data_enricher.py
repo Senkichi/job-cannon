@@ -23,40 +23,13 @@ import json
 import sqlite3
 import tempfile
 import os
-from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from job_finder.web.model_provider import ModelResult
-
-# Fake JD text > 200 chars for tests (stub detection rejects JDs < 200 chars)
-_LONG_JD = (
-    "We are looking for a Data Scientist to join our growing team. "
-    "You will build machine learning models, design experiments, and work "
-    "closely with product and engineering teams to drive data-informed decisions. "
-    "Requirements: 3+ years of experience in data science, proficiency in Python "
-    "and SQL, and a strong foundation in statistics and machine learning."
-)
-
-
-def _make_model_result(data: dict, cost_usd: float = 0.0001) -> ModelResult:
-    """Helper to create a ModelResult for test mocking."""
-    return ModelResult(
-        data=data,
-        cost_usd=cost_usd,
-        input_tokens=100,
-        output_tokens=50,
-        model="test-model",
-        provider="anthropic",
-        schema_valid=True,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def sparse_job_row():
@@ -75,7 +48,6 @@ def sparse_job_row():
         "description": "Build ML models",
     }
 
-
 @pytest.fixture
 def rich_job_row():
     """A job row with all scoring-relevant data (no enrichment needed)."""
@@ -84,7 +56,7 @@ def rich_job_row():
         "title": "Staff Data Scientist",
         "company": "Beta Inc",
         "location": "San Francisco, CA",
-        "jd_full": _LONG_JD,
+        "jd_full": "Full job description text here with lots of detail about the role.",
         "salary_min": 200000,
         "salary_max": 280000,
         "source_urls": '[]',
@@ -93,14 +65,13 @@ def rich_job_row():
         "description": "Lead data science.",
     }
 
-
 @pytest.fixture
 def mock_anthropic_client():
     """Mock Anthropic client that returns structured extraction result."""
     mock_response = MagicMock()
     mock_response.content = [MagicMock()]
     mock_response.content[0].text = json.dumps({
-        "jd_full": _LONG_JD,
+        "jd_full": "Data Scientist role at Acme Corp building ML models.",
         "salary_min": 140000,
         "salary_max": 180000,
         "location": "Remote",
@@ -111,7 +82,6 @@ def mock_anthropic_client():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client
-
 
 @pytest.fixture
 def temp_db():
@@ -158,11 +128,9 @@ def temp_db():
     conn.commit()
     return conn
 
-
 # ---------------------------------------------------------------------------
 # Tests for search_serpapi (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestSearchSerpapi:
     def test_search_serpapi_makes_request_with_job_query(self):
@@ -191,7 +159,7 @@ class TestSearchSerpapi:
         assert "serpapi.com" in call_args[0][0] or call_args[1].get("params", {})
 
     def test_search_serpapi_returns_dict_with_job_data(self):
-        """search_serpapi returns (dict, list) 2-tuple with job description when results exist."""
+        """search_serpapi returns dict with job description when results exist."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
         mock_response = MagicMock()
@@ -209,14 +177,13 @@ class TestSearchSerpapi:
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.return_value = mock_response
-            result_dict, apply_urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
-        assert result_dict is not None
-        assert isinstance(result_dict, dict)
-        assert isinstance(apply_urls, list)
+        assert result is not None
+        assert isinstance(result, dict)
 
     def test_search_serpapi_returns_none_when_no_results(self):
-        """search_serpapi returns (None, []) when SerpAPI returns empty jobs_results."""
+        """search_serpapi returns None when SerpAPI returns empty jobs_results."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
         mock_response = MagicMock()
@@ -225,27 +192,23 @@ class TestSearchSerpapi:
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.return_value = mock_response
-            result_dict, apply_urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
-        assert result_dict is None
-        assert apply_urls == []
+        assert result is None
 
     def test_search_serpapi_returns_none_on_request_error(self):
-        """search_serpapi returns (None, []) when requests raises an exception."""
+        """search_serpapi returns None when requests raises an exception."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.side_effect = Exception("Network error")
-            result_dict, apply_urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
-        assert result_dict is None
-        assert apply_urls == []
-
+        assert result is None
 
 # ---------------------------------------------------------------------------
 # Tests for search_duckduckgo (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestSearchDuckDuckGo:
     def test_search_duckduckgo_queries_ddg_api(self):
@@ -312,11 +275,9 @@ class TestSearchDuckDuckGo:
 
         assert result is None
 
-
 # ---------------------------------------------------------------------------
 # Tests for extract_with_haiku (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestExtractWithHaiku:
     def test_extract_with_haiku_sends_search_text_to_haiku(
@@ -333,17 +294,18 @@ class TestExtractWithHaiku:
         search_text = "Data Scientist at Acme Corp builds ML models."
         config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
-            mock_call.return_value = _make_model_result(
-                {"jd_full": _LONG_JD, "salary_min": 140000}
+        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
+            mock_call.return_value = (
+                {"jd_full": "Build ML models.", "salary_min": 140000},
+                0.0001,
             )
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         mock_call.assert_called_once()
         call_kwargs = mock_call.call_args[1]
-        assert call_kwargs.get("tier") == "haiku"
+        assert "haiku" in call_kwargs.get("model", "").lower()
 
     def test_extract_with_haiku_returns_dict_with_job_fields(
         self, mock_anthropic_client, temp_db
@@ -355,12 +317,13 @@ class TestExtractWithHaiku:
         search_text = "Data Scientist at Acme Corp."
         config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
-            mock_call.return_value = _make_model_result(
-                {"jd_full": _LONG_JD, "salary_min": 140000}
+        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
+            mock_call.return_value = (
+                {"jd_full": "Build ML models at Acme.", "salary_min": 140000},
+                0.0001,
             )
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         assert isinstance(result, dict)
@@ -376,84 +339,69 @@ class TestExtractWithHaiku:
         search_text = "Some search text."
         config = {}
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_call:
+        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
             mock_call.side_effect = Exception("API error")
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         assert result == {}
-
 
 # ---------------------------------------------------------------------------
 # Tests for enrich_company_info (preserved)
 # ---------------------------------------------------------------------------
 
-
 class TestEnrichCompanyInfo:
-    def _make_mock_ddgs(self, results):
-        """Helper to create a DDGS context manager mock with given text() results."""
-        mock_ddgs = MagicMock()
-        mock_ddgs.text.return_value = results
-        mock_ctx = MagicMock()
-        mock_ctx.__enter__ = MagicMock(return_value=mock_ddgs)
-        mock_ctx.__exit__ = MagicMock(return_value=False)
-        return mock_ctx
-
     def test_enrich_company_info_calls_duckduckgo(self):
-        """enrich_company_info calls DDGS web search for company details."""
+        """enrich_company_info calls DuckDuckGo for company details."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        results = [{"body": "Acme Corp is a SaaS company with 500 employees."}]
-        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
-            MockDDGS.return_value = self._make_mock_ddgs(results)
+        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
+            mock_ddg.return_value = "Acme Corp is a SaaS company with 500 employees."
             result = enrich_company_info("Acme Corp")
 
-        MockDDGS.assert_called_once()
+        mock_ddg.assert_called_once()
+        # Should include company name in query
+        query = mock_ddg.call_args[0][0]
+        assert "Acme Corp" in query
 
     def test_enrich_company_info_returns_dict(self):
         """enrich_company_info returns dict (possibly empty) with company fields."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        results = [{"body": "Acme Corp employs 500 people in the SaaS industry."}]
-        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
-            MockDDGS.return_value = self._make_mock_ddgs(results)
+        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
+            mock_ddg.return_value = "Acme Corp employs 500 people in the SaaS industry."
             result = enrich_company_info("Acme Corp")
 
         assert isinstance(result, dict)
-        # Keys are optional but should be correct types if present
-        for key in ["company_size", "industry"]:
+        # Keys are optional (DDG reliability is low per research) but should be correct types if present
+        for key in ["company_size", "industry", "funding_stage"]:
             if key in result:
                 assert isinstance(result[key], str)
 
     def test_enrich_company_info_returns_empty_dict_on_ddg_failure(self):
-        """enrich_company_info returns empty dict when DDGS returns no results."""
+        """enrich_company_info returns empty dict when DuckDuckGo returns None."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
-            MockDDGS.return_value = self._make_mock_ddgs([])
+        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
+            mock_ddg.return_value = None
             result = enrich_company_info("Acme Corp")
 
         assert result == {}
 
     def test_enrich_company_info_returns_empty_dict_on_exception(self):
-        """enrich_company_info returns empty dict when DDGS call raises an exception."""
+        """enrich_company_info returns empty dict when DDG call raises an exception."""
         from job_finder.web.company_enricher import enrich_company_info
 
-        with patch("job_finder.web.company_enricher.DDGS") as MockDDGS:
-            mock_ctx = MagicMock()
-            mock_ctx.__enter__ = MagicMock(side_effect=Exception("Network error"))
-            mock_ctx.__exit__ = MagicMock(return_value=False)
-            MockDDGS.return_value = mock_ctx
+        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
+            mock_ddg.side_effect = Exception("Network error")
             result = enrich_company_info("Acme Corp")
 
         assert result == {}
 
-
 # ---------------------------------------------------------------------------
 # Tests for enrich_job tier ordering (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichJobTierOrder:
     """Verify strict cost ordering: free -> DDG -> Haiku -> SerpAPI -> Sonnet."""
@@ -465,78 +413,16 @@ class TestEnrichJobTierOrder:
         sparse_job_row["source_urls"] = '["https://example.com/job/123"]'
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             # Free tier URL fetch succeeds with JD
-            mock_fetch.return_value = _LONG_JD
-            result = enrich_job(sparse_job_row, serpapi_key="key", anthropic_client=None)
+            mock_fetch.return_value = "Full job description from direct URL fetch."
+            result = enrich_job(sparse_job_row, serpapi_key="key")
 
         mock_fetch.assert_called_once()
         # DDG and SerpAPI should not be called if free tier satisfied JD
-        mock_ddg_web.assert_not_called()
+        mock_ddg.assert_not_called()
         mock_serp.assert_not_called()
-
-    def test_linkedin_url_uses_linkedin_extractor(self, sparse_job_row):
-        """LinkedIn URLs use fetch_linkedin_jd() instead of generic fetch_direct_jd()."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = '["https://www.linkedin.com/jobs/view/123456/"]'
-
-        with patch("job_finder.web.data_enricher.fetch_linkedin_jd") as mock_linkedin_fetch, \
-             patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_direct_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web:
-            mock_linkedin_fetch.return_value = _LONG_JD
-            mock_direct_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-
-            enrich_job(sparse_job_row, serpapi_key=None)
-
-        mock_linkedin_fetch.assert_called_once_with("https://www.linkedin.com/jobs/view/123456/")
-        mock_direct_fetch.assert_not_called()
-        mock_ddg_web.assert_not_called()
-
-    def test_glassdoor_url_skipped_in_free_tier(self, sparse_job_row):
-        """Glassdoor URLs are skipped in free tier to avoid guaranteed Cloudflare 403s."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = '["https://www.glassdoor.com/job-listing/j?jl=1010057550349"]'
-
-        with patch("job_finder.web.data_enricher.fetch_linkedin_jd") as mock_linkedin_fetch, \
-             patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_direct_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch:
-            mock_linkedin_fetch.return_value = None
-            mock_direct_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-
-            enrich_job(sparse_job_row, serpapi_key=None)
-
-        mock_linkedin_fetch.assert_not_called()
-        mock_direct_fetch.assert_not_called()
-        mock_ddg_web.assert_called_once()
-
-    def test_glassdoor_skip_continues_to_next_url(self, sparse_job_row):
-        """Glassdoor URL is skipped, and free tier still attempts subsequent URLs."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = json.dumps([
-            "https://www.glassdoor.com/job-listing/j?jl=1010057550349",
-            "https://example.com/job/secondary",
-        ])
-
-        with patch("job_finder.web.data_enricher.fetch_linkedin_jd") as mock_linkedin_fetch, \
-             patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_direct_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web:
-            mock_linkedin_fetch.return_value = None
-            mock_direct_fetch.return_value = _LONG_JD
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-
-            enrich_job(sparse_job_row, serpapi_key=None)
-
-        mock_linkedin_fetch.assert_not_called()
-        mock_direct_fetch.assert_called_once_with("https://example.com/job/secondary")
-        mock_ddg_web.assert_not_called()
 
     def test_ddg_runs_after_free_tier_fails(self, sparse_job_row):
         """DDG only called when free tier doesn't satisfy missing fields."""
@@ -546,62 +432,35 @@ class TestEnrichJobTierOrder:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "Some DDG text about the job."}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_serp.return_value = (None, [])
+            mock_ddg.return_value = "Some DDG text about the job."
+            mock_serp.return_value = None
 
             result = enrich_job(sparse_job_row, serpapi_key=None)
 
-        mock_ddg_web.assert_called_once()
+        mock_ddg.assert_called_once()
 
-    def test_haiku_runs_when_ddg_provides_content(self, sparse_job_row, mock_anthropic_client):
-        """Haiku extraction runs when DDG provides fragments to extract from."""
+    def test_haiku_runs_after_ddg_fails(self, sparse_job_row, mock_anthropic_client):
+        """Haiku extraction only called after DDG fails."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = '[]'
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "Some company info from DuckDuckGo search results."}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {"jd_full": _LONG_JD}
-            mock_serp.return_value = (None, [])
+            mock_ddg.return_value = None
+            mock_haiku.return_value = {"jd_full": "Haiku extracted JD."}
+            mock_serp.return_value = None
 
-            result = enrich_job(sparse_job_row, anthropic_client=mock_anthropic_client)
+            result = enrich_job(sparse_job_row)
 
         mock_haiku.assert_called_once()
-
-    def test_haiku_skipped_when_no_fragments(self, sparse_job_row, mock_anthropic_client):
-        """Haiku extraction is skipped when no tiers produced any content."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = '[]'
-        sparse_job_row["company_id"] = None
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {"jd_full": _LONG_JD}
-            mock_serp.return_value = (None, [])
-
-            result = enrich_job(sparse_job_row, anthropic_client=mock_anthropic_client)
-
-        # Haiku should NOT be called when there are no fragments to extract from
-        mock_haiku.assert_not_called()
 
     def test_serpapi_runs_after_haiku_for_jd_only(self, sparse_job_row):
         """SerpAPI only called when JD still missing after Haiku."""
@@ -611,21 +470,18 @@ class TestEnrichJobTierOrder:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_ddg.return_value = None
             # Haiku only found salary, not JD
             mock_haiku.return_value = {"salary_min": 140000}
-            mock_serp.return_value = ({"jd_full": _LONG_JD}, [])
+            mock_serp.return_value = {"jd_full": "Full JD from SerpAPI."}
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=MagicMock(),
             )
 
         mock_serp.assert_called_once()
@@ -639,7 +495,7 @@ class TestEnrichJobTierOrder:
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = _LONG_JD
+            mock_fetch.return_value = "Full job description from direct URL."
             result = enrich_job(sparse_job_row, serpapi_key="test-key")
 
         mock_serp.assert_not_called()
@@ -660,16 +516,16 @@ class TestEnrichJobTierOrder:
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.query_ats_api") as mock_ats, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web:
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg:
             mock_fetch.return_value = None
-            mock_ats.return_value = {"jd_full": _LONG_JD}
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ats.return_value = {"jd_full": "ATS API returned full JD."}
+            mock_ddg.return_value = None
 
             result = enrich_job(sparse_job_row, conn=temp_db)
 
         mock_ats.assert_called_once()
         # DDG should not be called if ATS satisfied JD
-        mock_ddg_web.assert_not_called()
+        mock_ddg.assert_not_called()
 
     def test_free_tier_careers_scrape_runs_after_ats(self, sparse_job_row, temp_db):
         """Careers page scraper tried when ATS query returns nothing."""
@@ -688,22 +544,20 @@ class TestEnrichJobTierOrder:
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.query_ats_api") as mock_ats, \
              patch("job_finder.web.data_enricher.scrape_careers") as mock_scrape, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web:
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg:
             mock_fetch.return_value = None
             mock_ats.return_value = {}
-            mock_scrape.return_value = {"jd_full": _LONG_JD}
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_scrape.return_value = {"jd_full": "Careers page JD."}
+            mock_ddg.return_value = None
 
             result = enrich_job(sparse_job_row, conn=temp_db)
 
         mock_scrape.assert_called_once()
-        mock_ddg_web.assert_not_called()
-
+        mock_ddg.assert_not_called()
 
 # ---------------------------------------------------------------------------
 # Tests for per-field cost ceilings (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestFieldCeilings:
     """Salary stops at Haiku tier; JD escalates all the way to Sonnet."""
@@ -713,27 +567,24 @@ class TestFieldCeilings:
         from job_finder.web.data_enricher import enrich_job
 
         # Job has JD but no salary
-        sparse_job_row["jd_full"] = _LONG_JD
+        sparse_job_row["jd_full"] = "Full job description already present."
         sparse_job_row["salary_min"] = None
         sparse_job_row["source_urls"] = '[]'
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_ddg.return_value = None
             mock_haiku.return_value = {}  # Haiku couldn't find salary
-            mock_serp.return_value = (None, [])
+            mock_serp.return_value = None
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
             )
 
         # SerpAPI and Sonnet should NOT be called when only salary is missing
@@ -748,36 +599,31 @@ class TestFieldCeilings:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
+             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_ddg.return_value = None
             mock_haiku.return_value = {}
-            mock_serp.return_value = (None, [])
-            mock_sonnet.return_value = {"jd_full": _LONG_JD}
+            mock_serp.return_value = None
+            mock_gate.return_value = True
+            mock_sonnet.return_value = {"jd_full": "Sonnet extracted the JD."}
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
-                conn=MagicMock(),
             )
 
         mock_sonnet.assert_called_once()
-
 
 # ---------------------------------------------------------------------------
 # Tests for Sonnet enrichment (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
 
-
 class TestSonnetEnrichment:
-    """Sonnet enrichment uses all prior fragments and checks tier routability."""
+    """Sonnet enrichment uses all prior fragments and checks cost_gate."""
 
     def test_sonnet_receives_all_fragments(self, sparse_job_row, mock_anthropic_client):
         """Sonnet enrichment prompt includes ALL text fragments from prior tiers."""
@@ -787,197 +633,62 @@ class TestSonnetEnrichment:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
+             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "DDG text about the role"}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_ddg.return_value = "DDG text about the role"
             mock_haiku.return_value = {}  # Haiku failed
-            mock_serp.return_value = (None, [])  # SerpAPI failed
-            mock_sonnet.return_value = {"jd_full": _LONG_JD}
+            mock_serp.return_value = None  # SerpAPI failed
+            mock_gate.return_value = True
+            mock_sonnet.return_value = {"jd_full": "Sonnet JD."}
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
-                conn=MagicMock(),
             )
 
         # Sonnet should have been called with fragments dict containing DDG text
         mock_sonnet.assert_called_once()
         call_args = mock_sonnet.call_args
         fragments = call_args[0][0] if call_args[0] else call_args[1].get("fragments", {})
-        # Assert on actual DDG snippet content, not just the dict key name
-        assert "DDG text about the role" in str(fragments), (
-            f"DDG snippet content must reach Sonnet, got fragments: {fragments}"
-        )
+        # Check that fragments contain DDG content
+        fragments_str = str(fragments)
+        assert "DDG" in fragments_str or "ddg" in fragments_str
 
-    def test_sonnet_blocked_when_not_routable(self, sparse_job_row, mock_anthropic_client, temp_db):
-        """Sonnet enrichment is skipped when tier is not routable."""
+    def test_sonnet_checks_cost_gate(self, sparse_job_row, mock_anthropic_client, temp_db):
+        """Sonnet enrichment checks cost_gate('sonnet') before calling API."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = '[]'
         sparse_job_row["company_id"] = None
 
-        def _tier_check(tier, *args, **kwargs):
-            """Haiku is routable, Sonnet is not."""
-            return tier != "sonnet"
-
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", side_effect=_tier_check):
+             patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
             mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_ddg.return_value = None
             mock_haiku.return_value = {}
-            mock_serp.return_value = (None, [])
+            mock_serp.return_value = None
+            mock_gate.return_value = False  # Budget exceeded
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
                 conn=temp_db,
             )
 
-        # Sonnet should NOT be called when tier is not routable
+        # Sonnet should NOT be called when cost_gate returns False
         mock_sonnet.assert_not_called()
-
-    def test_sonnet_runs_with_client_none_when_tier_routable(self, sparse_job_row):
-        """Sonnet enrichment proceeds with anthropic_client=None when a free provider is routable."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = '[]'
-        sparse_job_row["company_id"] = None
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
-             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {}
-            mock_serp.return_value = (None, [])
-            mock_sonnet.return_value = {"jd_full": _LONG_JD}
-
-            result = enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-                anthropic_client=None,  # NOT a MagicMock — truly absent
-                conn=MagicMock(),
-            )
-
-        mock_sonnet.assert_called_once()
-        assert result.get("jd_full") == _LONG_JD
-
-    def test_sonnet_cascade_exhausted_maps_to_serpapi(self, sparse_job_row, temp_db):
-        """ProviderCascadeExhaustedError from Sonnet maps to enrichment_tier='serpapi'."""
-        from job_finder.web.data_enricher import enrich_job
-        from job_finder.web.model_provider import ProviderCascadeExhaustedError
-
-        sparse_job_row["source_urls"] = '[]'
-        sparse_job_row["company_id"] = None
-
-        temp_db.execute(
-            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (sparse_job_row["dedup_key"], sparse_job_row["title"],
-             sparse_job_row["company"], sparse_job_row["location"],
-             sparse_job_row["source_urls"]),
-        )
-        temp_db.commit()
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
-             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {}
-            mock_serp.return_value = (None, [])
-            mock_sonnet.side_effect = ProviderCascadeExhaustedError("all exhausted")
-
-            enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-                anthropic_client=None,
-                conn=temp_db,
-            )
-
-        row = temp_db.execute(
-            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
-            (sparse_job_row["dedup_key"],),
-        ).fetchone()
-        assert row["enrichment_tier"] == "serpapi", (
-            f"Cascade exhaustion must map to 'serpapi' (retryable), got {row['enrichment_tier']!r}"
-        )
-
-    def test_sonnet_non_routing_failure_maps_to_exhausted(self, sparse_job_row, temp_db):
-        """Non-routing Sonnet failure (e.g. JSONDecodeError) maps to enrichment_tier='exhausted'."""
-        import json as _json
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = '[]'
-        sparse_job_row["company_id"] = None
-
-        temp_db.execute(
-            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (sparse_job_row["dedup_key"], sparse_job_row["title"],
-             sparse_job_row["company"], sparse_job_row["location"],
-             sparse_job_row["source_urls"]),
-        )
-        temp_db.commit()
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
-             patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
-             patch("job_finder.web.data_enricher.tier_has_configured_provider", return_value=True):
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {}
-            mock_serp.return_value = (None, [])
-            mock_sonnet.side_effect = _json.JSONDecodeError("bad json", "", 0)
-
-            enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-                anthropic_client=None,
-                conn=temp_db,
-            )
-
-        row = temp_db.execute(
-            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
-            (sparse_job_row["dedup_key"],),
-        ).fetchone()
-        assert row["enrichment_tier"] == "exhausted", (
-            f"Non-routing failure must map to 'exhausted', got {row['enrichment_tier']!r}"
-        )
-
 
 # ---------------------------------------------------------------------------
 # Tests for enrichment_tier persistence (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichmentTierPersistence:
     """enrichment_tier persisted atomically; resume-from-next-tier; exhausted skip."""
@@ -999,7 +710,7 @@ class TestEnrichmentTierPersistence:
         temp_db.commit()
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch:
-            mock_fetch.return_value = _LONG_JD
+            mock_fetch.return_value = "Full job description from direct URL."
 
             result = enrich_job(sparse_job_row, conn=temp_db)
 
@@ -1011,11 +722,11 @@ class TestEnrichmentTierPersistence:
 
         # Both fields should be set together
         assert row is not None
-        assert row["jd_full"] == _LONG_JD
+        assert row["jd_full"] == "Full job description from direct URL."
         assert row["enrichment_tier"] == "free"
 
     def test_resumes_from_next_tier(self, sparse_job_row, mock_anthropic_client, temp_db):
-        """Job with enrichment_tier='ddg' skips free/DDG tiers on re-enrichment."""
+        """Job with enrichment_tier='ddg' starts at Haiku, not free."""
         from job_finder.web.data_enricher import enrich_job
 
         # Job was previously enriched up to DDG tier
@@ -1025,17 +736,13 @@ class TestEnrichmentTierPersistence:
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.query_ats_api") as mock_ats, \
              patch("job_finder.web.data_enricher.scrape_careers") as mock_scrape, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
+             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku:
             mock_fetch.return_value = None
-            mock_haiku.return_value = {"jd_full": _LONG_JD}
-            mock_serp.return_value = ({"jd_full": _LONG_JD}, [])
+            mock_haiku.return_value = {"jd_full": "Haiku found the JD."}
 
             result = enrich_job(
                 sparse_job_row,
-                serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
                 conn=temp_db,
             )
 
@@ -1043,11 +750,9 @@ class TestEnrichmentTierPersistence:
         mock_fetch.assert_not_called()
         mock_ats.assert_not_called()
         mock_scrape.assert_not_called()
-        mock_ddg_web.assert_not_called()
-        # Haiku is skipped (no fragments from prior tiers to extract from),
-        # so SerpAPI (which searches independently) should be called instead.
-        mock_haiku.assert_not_called()
-        mock_serp.assert_called_once()
+        mock_ddg.assert_not_called()
+        # Haiku should be called (next tier after DDG)
+        mock_haiku.assert_called_once()
 
     def test_exhausted_jobs_skipped(self, sparse_job_row):
         """Job with enrichment_tier='exhausted' returns empty dict immediately."""
@@ -1056,59 +761,24 @@ class TestEnrichmentTierPersistence:
         sparse_job_row["enrichment_tier"] = "exhausted"
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             result = enrich_job(sparse_job_row, serpapi_key="key")
 
         assert result == {}
         mock_fetch.assert_not_called()
-        mock_ddg_web.assert_not_called()
+        mock_ddg.assert_not_called()
         mock_serp.assert_not_called()
-
-
-    def test_agentic_tier_skipped(self, sparse_job_row):
-        """Job with enrichment_tier='agentic' returns empty dict immediately."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["enrichment_tier"] = "agentic"
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            result = enrich_job(sparse_job_row, serpapi_key="key")
-
-        assert result == {}
-        mock_fetch.assert_not_called()
-        mock_ddg_web.assert_not_called()
-        mock_serp.assert_not_called()
-
-    def test_agentic_exhausted_tier_skipped(self, sparse_job_row):
-        """Job with enrichment_tier='agentic_exhausted' returns empty dict immediately."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["enrichment_tier"] = "agentic_exhausted"
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            result = enrich_job(sparse_job_row, serpapi_key="key")
-
-        assert result == {}
-        mock_fetch.assert_not_called()
-        mock_ddg_web.assert_not_called()
-        mock_serp.assert_not_called()
-
 
 # ---------------------------------------------------------------------------
 # Backward compatibility and never-raises (Phase 10 — updated)
 # ---------------------------------------------------------------------------
 
-
 class TestEnrichJobBackwardCompat:
     """Old call patterns and error handling still work."""
 
     def test_enrich_job_backward_compatible_signature(self, sparse_job_row, temp_db):
-        """Old call pattern (job_row, serpapi_key, anthropic_client, conn, config) still works."""
+        """Call pattern (job_row, serpapi_key, conn, config) works with keyword args."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = '[]'
@@ -1116,18 +786,14 @@ class TestEnrichJobBackwardCompat:
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch:
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg:
             mock_fetch.return_value = None
-            mock_serp.return_value = ({"jd_full": _LONG_JD}, [])
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_serp.return_value = {"jd_full": "SerpAPI JD."}
+            mock_ddg.return_value = None
 
-            # Old-style positional call
             result = enrich_job(
                 sparse_job_row,
                 "test-serp-key",
-                None,
                 temp_db,
                 {"scoring": {}},
             )
@@ -1170,17 +836,14 @@ class TestEnrichJobBackwardCompat:
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serpapi, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch:
+             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg:
             mock_fetch.return_value = None
-            mock_serpapi.return_value = (None, [])
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "Some DDG text about the company."}
-            mock_ddg_fetch.return_value = (None, None)
+            mock_serpapi.return_value = None
+            mock_ddg.return_value = "Some DDG text about the company."
 
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key=None,
-                anthropic_client=MagicMock(),
                 conn=temp_db,
                 config={},
             )
@@ -1205,11 +868,9 @@ class TestEnrichJobBackwardCompat:
         assert TIER_ORDER.index("serpapi") < TIER_ORDER.index("sonnet")
         assert TIER_ORDER.index("sonnet") < TIER_ORDER.index("exhausted")
 
-
 # ---------------------------------------------------------------------------
 # Pipeline integration tests (Phase 10 Plan 02 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestPipelineIntegration:
     """Integration tests verifying pipeline_runner wiring and Migration 8 schema.
@@ -1258,7 +919,7 @@ class TestPipelineIntegration:
             call_order.append("enrich_job")
             return {}
 
-        def mock_score(client, job_row, profile, conn, config):
+        def mock_score(job_row, profile, conn, config, **kwargs):
             call_order.append("score_job_haiku")
             return {"score": 50, "summary": "OK"}
 
@@ -1268,9 +929,7 @@ class TestPipelineIntegration:
         }
 
         with patch("job_finder.web.scoring_runner.enrich_job", side_effect=mock_enrich), \
-             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             run_haiku_scoring(
                 ["acme|data-scientist|remote"], config, tmp_db_path
             )
@@ -1434,11 +1093,9 @@ class TestPipelineIntegration:
             f"got: {row['enrichment_tier']!r}"
         )
 
-
 # ---------------------------------------------------------------------------
 # JD direct fetch tests (ported from TestJDFetcher in test_scoring.py — DEBT-03)
 # ---------------------------------------------------------------------------
-
 
 class TestFetchDirectJd:
     """Verify _fetch_direct_jd() handles URL fetch, HTML stripping, length cap, and failures.
@@ -1556,155 +1213,9 @@ class TestFetchDirectJd:
 
         assert result is None
 
-    def test_long_page_with_sign_in_not_rejected(self):
-        """fetch_direct_jd must NOT reject a long legitimate JD page that contains
-        'sign in' in nav/footer. Regression test for the _AUTH_WALL_SIGNATURES
-        false-positive issue where generic short substrings caused false rejections."""
-        from unittest.mock import patch, MagicMock
-        from job_finder.web.enrichment_tiers import fetch_direct_jd
-
-        # Simulate a legitimate 5000-char JD page with "sign in" in a nav remnant
-        jd_body = "A" * 4900
-        page_text = (
-            "<html><body>"
-            "<nav>Sign in | Create account | Log in</nav>"
-            f"<div class='job-description'>{jd_body}</div>"
-            "<footer>Please sign in to apply. Just a moment while we redirect.</footer>"
-            "</body></html>"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = page_text
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_direct_jd("https://example.com/jobs/senior-engineer")
-
-        # The page is long (> 2000 chars) so generic short signals like "sign in"
-        # must NOT cause rejection. Only specific multi-word signatures (e.g.,
-        # "access denied", "sign in or join") should reject long pages.
-        assert result is not None, (
-            "fetch_direct_jd falsely rejected a long legitimate JD page containing "
-            "'sign in' in nav/footer — _AUTH_WALL_SIGNATURES false positive regression"
-        )
-        assert len(result) > 2000
-
-    def test_long_page_with_access_denied_is_rejected(self):
-        """fetch_direct_jd MUST reject a long page containing 'access denied' (a
-        specific full-text auth signature) even when the page is > 2000 chars."""
-        from unittest.mock import patch, MagicMock
-        from job_finder.web.enrichment_tiers import fetch_direct_jd
-
-        page_text = (
-            "<html><body>"
-            "<h1>Access Denied</h1>"
-            "<p>You do not have permission to view this page.</p>"
-            f"<div>{'X' * 3000}</div>"
-            "</body></html>"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = page_text
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_direct_jd("https://example.com/jobs/forbidden")
-
-        assert result is None, (
-            "fetch_direct_jd should reject pages with 'access denied' even when long"
-        )
-
-
-class TestFetchLinkedinJd:
-    """Verify fetch_linkedin_jd() extracts JD text from LinkedIn guest page containers."""
-
-    def test_extracts_primary_show_more_container(self):
-        from job_finder.web.enrichment_tiers import fetch_linkedin_jd
-
-        html = (
-            "<html><body>"
-            "<div class='show-more-less-html__markup'>"
-            "Senior data platform engineer role. Build scalable pipelines."
-            "</div>"
-            "</body></html>"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = html
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_linkedin_jd("https://www.linkedin.com/jobs/view/123/")
-
-        assert result is not None
-        assert "Senior data platform engineer" in result
-
-    def test_extracts_fallback_description_container(self):
-        from job_finder.web.enrichment_tiers import fetch_linkedin_jd
-
-        html = (
-            "<html><body>"
-            "<div class='description__text'>"
-            "Fallback LinkedIn JD text with responsibilities and qualifications."
-            "</div>"
-            "</body></html>"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = html
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_linkedin_jd("https://www.linkedin.com/jobs/view/456/")
-
-        assert result is not None
-        assert "Fallback LinkedIn JD text" in result
-
-    def test_returns_none_when_no_jd_container_found(self):
-        from job_finder.web.enrichment_tiers import fetch_linkedin_jd
-
-        html = "<html><body><div>Sign in to continue</div></body></html>"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = html
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_linkedin_jd("https://www.linkedin.com/jobs/view/789/")
-
-        assert result is None
-
-    def test_caps_result_at_8000_characters(self):
-        from job_finder.web.enrichment_tiers import fetch_linkedin_jd
-
-        long_text = "A" * 20000
-        html = (
-            "<html><body>"
-            f"<div class='show-more-less-html__markup'>{long_text}</div>"
-            "</body></html>"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = html
-        mock_response.raise_for_status.return_value = None
-
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_response):
-            result = fetch_linkedin_jd("https://www.linkedin.com/jobs/view/111/")
-
-        assert result is not None
-        assert len(result) <= 8000
-
-
 # ---------------------------------------------------------------------------
 # Auth-wall guard tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestAuthWallGuard:
     """Verify _fetch_direct_jd() returns None for auth-wall pages.
@@ -1800,11 +1311,9 @@ class TestAuthWallGuard:
 
         assert result is None, "Expected None even for uppercase auth-wall text"
 
-
 # ---------------------------------------------------------------------------
 # Migration 15 tests (Phase 40 Data Quality — DQ-04, DQ-05)
 # ---------------------------------------------------------------------------
-
 
 class TestMigration15:
     """Migration 15 cleans poison data and promotes descriptions."""
@@ -1943,11 +1452,9 @@ class TestMigration15:
         assert row["jd_full"] is not None, "Long description should be promoted to jd_full"
         assert len(row["jd_full"]) > 200
 
-
 # ---------------------------------------------------------------------------
 # Description promotion tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestDescriptionPromotion:
     """Verify enrich_job auto-promotes long descriptions to jd_full.
@@ -2017,8 +1524,7 @@ class TestDescriptionPromotion:
         promo_db.commit()
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd", return_value=None), \
-             patch("job_finder.web.data_enricher.search_ddg_web", return_value={"ddg_urls": [], "ddg_snippet": ""}), \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds", return_value=(None, None)):
+             patch("job_finder.web.data_enricher.search_duckduckgo", return_value=None):
             result = enrich_job(job_row, conn=promo_db)
 
         # jd_full should be set on the job_row dict after promotion
@@ -2046,8 +1552,7 @@ class TestDescriptionPromotion:
         }
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd", return_value=None), \
-             patch("job_finder.web.data_enricher.search_ddg_web", return_value={"ddg_urls": [], "ddg_snippet": ""}), \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds", return_value=(None, None)):
+             patch("job_finder.web.data_enricher.search_duckduckgo", return_value=None):
             result = enrich_job(job_row, conn=promo_db)
 
         # jd_full should remain None (short description not promoted)
@@ -2109,8 +1614,7 @@ class TestDescriptionPromotion:
         promo_db.commit()
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd", return_value=None), \
-             patch("job_finder.web.data_enricher.search_ddg_web", return_value={"ddg_urls": [], "ddg_snippet": ""}), \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds", return_value=(None, None)):
+             patch("job_finder.web.data_enricher.search_duckduckgo", return_value=None):
             enrich_job(job_row, conn=promo_db)
 
         # Verify DB row was updated with jd_full
@@ -2124,248 +1628,3 @@ class TestDescriptionPromotion:
             f"Expected jd_full in DB to match description (truncated to 8000), "
             f"got: {row['jd_full']!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Tests for upgraded DDG tier integration (enrichment pipeline fixes)
-# ---------------------------------------------------------------------------
-
-
-class TestDdgTierUpgrade:
-    """Verify DDG tier now uses search_ddg_web and fetch_ddg_jds."""
-
-    def test_ddg_tier_calls_search_ddg_web(self, sparse_job_row):
-        """DDG tier uses search_ddg_web() instead of old search_duckduckgo()."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_serp.return_value = (None, [])
-
-            enrich_job(sparse_job_row, serpapi_key=None)
-
-        mock_ddg_web.assert_called_once_with("Data Scientist", "Acme Corp")
-
-    def test_ddg_url_fetch_success_returns_at_ddg_tier(self, sparse_job_row, temp_db):
-        """DDG URL fetch success → job returned at 'ddg' tier, SerpAPI not called."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        temp_db.execute(
-            "INSERT INTO jobs (dedup_key, title, company, location, source_urls) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (sparse_job_row["dedup_key"], sparse_job_row["title"],
-             sparse_job_row["company"], sparse_job_row["location"], "[]"),
-        )
-        temp_db.commit()
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {
-                "ddg_urls": ["https://boards.greenhouse.io/acme/jobs/1"],
-                "ddg_snippet": "Some snippet",
-            }
-            mock_ddg_fetch.return_value = (_LONG_JD, "https://boards.greenhouse.io/acme/jobs/1")
-            mock_serp.return_value = (None, [])
-
-            result = enrich_job(sparse_job_row, serpapi_key="key", conn=temp_db)
-
-        assert result.get("jd_full") == _LONG_JD
-        mock_serp.assert_not_called()
-
-        # Verify tier persisted as 'ddg'
-        row = temp_db.execute(
-            "SELECT enrichment_tier FROM jobs WHERE dedup_key = ?",
-            (sparse_job_row["dedup_key"],),
-        ).fetchone()
-        assert row["enrichment_tier"] == "ddg"
-
-    def test_ddg_failure_falls_through_to_haiku(self, sparse_job_row, mock_anthropic_client):
-        """DDG tier failure falls through to Haiku extraction correctly."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": "Some DDG text."}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_haiku.return_value = {"jd_full": _LONG_JD}
-            mock_serp.return_value = (None, [])
-
-            result = enrich_job(
-                sparse_job_row,
-                anthropic_client=mock_anthropic_client,
-            )
-
-        mock_haiku.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Tests for SerpAPI conservation gate
-# ---------------------------------------------------------------------------
-
-
-class TestSerpApiConservation:
-    """SerpAPI conservation: only use paid credits for high-value jobs."""
-
-    def test_low_haiku_score_skips_serpapi(self, sparse_job_row):
-        """Job with haiku_score=30 skips SerpAPI tier."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-        sparse_job_row["haiku_score"] = 30
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_serp.return_value = (None, [])
-
-            enrich_job(sparse_job_row, serpapi_key="test-key")
-
-        mock_serp.assert_not_called()
-
-    def test_high_haiku_score_uses_serpapi(self, sparse_job_row):
-        """Job with haiku_score=50 uses SerpAPI tier."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-        sparse_job_row["haiku_score"] = 50
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_serp.return_value = ({"jd_full": _LONG_JD}, [])
-
-            enrich_job(sparse_job_row, serpapi_key="test-key")
-
-        mock_serp.assert_called_once()
-
-    def test_null_haiku_score_uses_serpapi(self, sparse_job_row):
-        """Job with haiku_score=None uses SerpAPI tier."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-        sparse_job_row["haiku_score"] = None
-
-        with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
-             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
-             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_fetch, \
-             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_fetch.return_value = (None, None)
-            mock_serp.return_value = ({"jd_full": _LONG_JD}, [])
-
-            enrich_job(sparse_job_row, serpapi_key="test-key")
-
-        mock_serp.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Tests for agentic_exhausted TTL reset
-# ---------------------------------------------------------------------------
-
-
-class TestAgenticExhaustedTtlReset:
-    """agentic_exhausted jobs older than 7 days are reset for retry."""
-
-    def test_old_agentic_exhausted_reset(self, tmp_db_path):
-        """Jobs with agentic_exhausted older than 7 days are reset to exhausted."""
-        from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.data_enricher import run_enrichment_backfill
-
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest,
-               enrichment_tier, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "old|ds|remote", "Data Scientist", "Old Corp", "Remote",
-                '["test"]', '["https://example.com"]',
-                "2025-01-01T00:00:00", "2025-12-01T00:00:00",  # last_seen > 30 days ago
-                0, "{}", "unreviewed", "agentic_exhausted", None,
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        result = run_enrichment_backfill(tmp_db_path, limit=0)
-
-        # Verify the job was reset
-        conn = sqlite3.connect(tmp_db_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT enrichment_tier FROM jobs WHERE dedup_key = 'old|ds|remote'"
-        ).fetchone()
-        conn.close()
-
-        assert row["enrichment_tier"] == "exhausted"
-        assert result["reset"] >= 1
-
-    def test_recent_agentic_exhausted_not_reset(self, tmp_db_path):
-        """Recent agentic_exhausted jobs are NOT reset."""
-        from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.data_enricher import run_enrichment_backfill
-
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest,
-               enrichment_tier, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "recent|ds|remote", "Data Scientist", "Recent Corp", "Remote",
-                '["test"]', '["https://example.com"]',
-                "2026-03-01T00:00:00",
-                (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S"),  # last_seen 2 days ago
-                0, "{}", "unreviewed", "agentic_exhausted", None,
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        run_enrichment_backfill(tmp_db_path, limit=0)
-
-        conn = sqlite3.connect(tmp_db_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT enrichment_tier FROM jobs WHERE dedup_key = 'recent|ds|remote'"
-        ).fetchone()
-        conn.close()
-
-        assert row["enrichment_tier"] == "agentic_exhausted"

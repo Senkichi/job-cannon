@@ -24,7 +24,8 @@ import logging
 import re
 from typing import Optional, Any
 
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -48,10 +49,8 @@ _SYSTEM_PROMPT = (
     "factual content — do not add or remove information. Return ONLY the reformatted text."
 )
 
-
 def reformat_description(
     description: Optional[str],
-    client: Any,
     conn: Any = None,
     config: Optional[dict] = None,
 ) -> Optional[str]:
@@ -85,22 +84,26 @@ def reformat_description(
     if header_count >= _ALREADY_FORMATTED_THRESHOLD:
         return description
 
+    model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("haiku", DEFAULT_MODEL_HAIKU)
+    )
+
     try:
-        result_obj = call_model(
-            tier="haiku",
+        result, _cost = call_claude(
+            model=model,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": description[:4000]}],
-            conn=conn,
-            config=config,
             output_schema=None,
+            conn=conn,
             job_id=None,
             purpose="description_reformat",
+            config=config,
             max_tokens=2048,
-            client=client,
         )
-        result = result_obj.data
 
-        # call_model returns ModelResult — extract the text field from result_obj.data
+        # call_claude returns dict — extract the text field
         if isinstance(result, dict):
             reformatted = result.get("text", "")
         else:
@@ -115,10 +118,8 @@ def reformat_description(
         logger.warning("reformat_description failed (returning original): %s", e)
         return description
 
-
 def run_description_reformat_pass(
     db_path: str,
-    anthropic_api_key: str | None = None,
     config: Optional[dict] = None,
 ) -> int:
     """One-time background pass to reformat all job descriptions.
@@ -132,8 +133,6 @@ def run_description_reformat_pass(
 
     Args:
         db_path: Absolute path to the SQLite database file.
-        anthropic_api_key: Anthropic API key (optional; if None, uses
-            anthropic-telemetry auto-injection from config.toml).
         config: Optional application config dict.
 
     Returns:
@@ -148,23 +147,6 @@ def run_description_reformat_pass(
 
     try:
         with standalone_connection(db_path) as conn:
-            from job_finder.web.model_provider import tier_has_configured_provider
-
-            try:
-                import anthropic as _anthropic
-            except ImportError:
-                _anthropic = None
-
-            client = None
-            if _anthropic is not None:
-                try:
-                    client = _anthropic.Anthropic(api_key=anthropic_api_key) if anthropic_api_key else _anthropic.Anthropic()
-                except Exception:
-                    logger.debug("Anthropic client unavailable — will use free providers only")
-
-            if not tier_has_configured_provider("haiku", config, client):
-                logger.debug("No routable haiku provider — skipping description reformat")
-                return 0
 
             rows = conn.execute(
                 "SELECT dedup_key, description FROM jobs "
@@ -179,7 +161,7 @@ def run_description_reformat_pass(
 
                 try:
                     reformatted = reformat_description(
-                        original, client, conn=conn, config=config
+                        original, conn=conn, config=config
                     )
 
                     if reformatted != original and reformatted is not None:

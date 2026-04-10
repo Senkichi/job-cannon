@@ -5,7 +5,6 @@ from datetime import datetime
 
 from job_finder.parsers.indeed_parser import parse_indeed_match_alert
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: realistic email bodies from actual match.indeed.com emails
 # ---------------------------------------------------------------------------
@@ -72,11 +71,9 @@ Salaries estimated if unavailable. When a job posting doesn't include a salary, 
 Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 """
 
-
 # ---------------------------------------------------------------------------
 # Single-job format
 # ---------------------------------------------------------------------------
-
 
 class TestIndeedMatchSingleJob:
     def test_parses_single_job(self):
@@ -125,11 +122,9 @@ class TestIndeedMatchSingleJob:
         jobs = parse_indeed_match_alert(SAMPLE_SINGLE_JOB_WITH_SALARY, email_date=date)
         assert jobs[0].posted_date == date
 
-
 # ---------------------------------------------------------------------------
 # Multi-job format
 # ---------------------------------------------------------------------------
-
 
 class TestIndeedMatchMultiJob:
     def test_parses_multiple_jobs(self):
@@ -217,11 +212,9 @@ class TestIndeedMatchMultiJob:
         assert brand_mgr[0].company == "SGS Consulting"
         assert brand_mgr[0].location == "Remote"
 
-
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
-
 
 class TestIndeedMatchEdgeCases:
     def test_empty_body(self):
@@ -239,11 +232,9 @@ class TestIndeedMatchEdgeCases:
     def test_unrelated_url_returns_empty(self):
         assert parse_indeed_match_alert("Visit https://example.com") == []
 
-
 # ---------------------------------------------------------------------------
 # Salary fix regression: existing _extract_salary_from_text improvements
 # ---------------------------------------------------------------------------
-
 
 class TestHourlySalaryFix:
     """Verify the hourly range fix doesn't break existing salary parsing."""

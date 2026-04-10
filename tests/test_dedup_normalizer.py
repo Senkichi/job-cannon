@@ -22,7 +22,6 @@ import pytest
 
 from job_finder.models import Job
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -152,7 +151,6 @@ def mem_db():
     yield conn
     conn.close()
 
-
 def _insert_job(conn, dedup_key, title, company, location="Remote",
                 pipeline_status="discovered", first_seen=None, last_seen=None,
                 sources=None, source_urls=None, description=None,
@@ -178,7 +176,6 @@ def _insert_job(conn, dedup_key, title, company, location="Remote",
           json.dumps(source_urls), pipeline_status, first_seen, last_seen,
           description, haiku_score, sonnet_score, notes, salary_min, salary_max))
     conn.commit()
-
 
 # ---------------------------------------------------------------------------
 # Tests: normalize_company
@@ -225,7 +222,6 @@ class TestNormalizeCompany:
         from job_finder.web.dedup_normalizer import normalize_company
         assert normalize_company("  Amazon  ") == "amazon"
 
-
 # ---------------------------------------------------------------------------
 # Tests: normalize_title
 # ---------------------------------------------------------------------------
@@ -259,7 +255,6 @@ class TestNormalizeTitle:
         from job_finder.web.dedup_normalizer import normalize_title
         assert normalize_title("  Senior Engineer  ") == "senior engineer"
 
-
 # ---------------------------------------------------------------------------
 # Tests: normalized_dedup_key (location excluded)
 # ---------------------------------------------------------------------------
@@ -290,7 +285,6 @@ class TestNormalizedDedupKey:
         key1 = Job.normalized_dedup_key("Google", "Engineer")
         key2 = Job.normalized_dedup_key("Google", "Manager")
         assert key1 != key2
-
 
 # ---------------------------------------------------------------------------
 # Tests: Job.dedup_key uses normalized_dedup_key
@@ -333,7 +327,6 @@ class TestJobDedupKey:
         job_senior = Job(title="Senior Software Engineer", company="Acme", location="Remote",
                          source="test", source_url="https://example.com/2")
         assert job_sr.dedup_key == job_senior.dedup_key
-
 
 # ---------------------------------------------------------------------------
 # Tests: run_retroactive_dedup
@@ -534,11 +527,9 @@ class TestRunRetroactiveDedup:
         rows = mem_db.execute("SELECT pipeline_status FROM jobs").fetchall()
         assert rows[0]["pipeline_status"] == "offer"
 
-
 # ---------------------------------------------------------------------------
 # Tests: ALLOWED_FK_TABLES allowlist (DEBT-04)
 # ---------------------------------------------------------------------------
-
 
 class TestAllowlist:
     """Verify SQL injection guard on _update_fk_tables (DEBT-04)."""
@@ -608,7 +599,6 @@ class TestAllowlist:
         from job_finder.web.dedup_normalizer import _update_fk_tables
         # Should not raise — all tables are in ALLOWED_FK_TABLES and exist in mem_db
         _update_fk_tables(mem_db, "nonexistent-old-key", "nonexistent-new-key")
-
 
 def _run_with_bad_tables(conn, old_key, new_key, fk_tables):
     """Helper: run the _update_fk_tables assert logic with a custom fk_tables list."""

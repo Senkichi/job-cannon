@@ -3,8 +3,8 @@
 Provides:
     RESUME_SCHEMA        -- JSON schema for structured Sonnet resume output.
     STRATEGY_POOL        -- Pool of resume strategy identifiers for multi-version.
-    generate_resume_single      -- Generate tailored resume dict via Sonnet.
-    generate_resume_background  -- Background thread: full gen + Drive upload.
+    generate_resume_single   -- Generate tailored resume dict via Sonnet.
+    _generate_resume_background  -- Background thread: full gen + Drive upload.
 
 Multi-version synthesis functions live in resume_multi_version.py:
     generate_resume_multi, _haiku_select_strategies,
@@ -24,42 +24,218 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-try:
-    import anthropic
-    _anthropic_available = True
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-    _anthropic_available = False
-
-from job_finder.config import DEFAULT_MULTI_VERSION_THRESHOLD
-from job_finder.web.claude_client import BudgetExceededError
+from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
+from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.model_provider import call_model
 from job_finder.web.docx_formatter import build_resume_docx
 from job_finder.web.drive_uploader import get_drive_service, upload_to_drive
 
-# Re-export content module symbols so all existing callers importing from this
-# module continue to work without modification.
-from job_finder.web.resume_content import (  # noqa: F401
-    RESUME_SCHEMA,
-    STRATEGY_POOL,
-    _STRATEGY_DESCRIPTIONS,
-    _RESUME_GUIDELINES,
-    _SYSTEM_PROMPT,
-    _format_education,
-    _format_profile_positions,
-    _get_accepted_preferences,
-)
-
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# JSON schema for structured Sonnet resume output
+# ---------------------------------------------------------------------------
+
+RESUME_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "contact_line": {"type": "string"},
+        "summary": {
+            "type": "string",
+            "description": "2-3 sentences tailored to JD",
+        },
+        "skills": {"type": "array", "items": {"type": "string"}},
+        "positions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "company": {"type": "string"},
+                    "dates": {"type": "string"},
+                    "achievements": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["title", "company", "dates", "achievements"],
+            },
+        },
+        "education": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "degree": {"type": "string"},
+                    "institution": {"type": "string"},
+                    "year": {"type": "string"},
+                },
+            },
+        },
+    },
+    "required": ["name", "summary", "skills", "positions"],
+    "additionalProperties": False,
+}
+
+# ---------------------------------------------------------------------------
+# Multi-version strategy pool
+# ---------------------------------------------------------------------------
+
+STRATEGY_POOL = [
+    "impact_focused",      # Lead with quantified business outcomes
+    "technical_depth",     # Emphasize technical architecture and system complexity
+    "leadership_scope",    # Emphasize team/org/stakeholder leadership and mentoring
+    "problem_solver",      # Frame as identifying problems and delivering solutions
+    "cross_functional",    # Highlight cross-team collaboration and influence
+]
+
+# Human-readable descriptions for each strategy (used in system prompt additions)
+_STRATEGY_DESCRIPTIONS = {
+    "impact_focused": (
+        "Lead with quantified business outcomes. Every bullet should start with a metric "
+        "or result: revenue impact, user growth, latency reduction, cost savings. "
+        "Frame the candidate as a business-outcome driver."
+    ),
+    "technical_depth": (
+        "Emphasize technical architecture and system complexity. Highlight scale, "
+        "system design decisions, engineering tradeoffs, and technical leadership. "
+        "Frame the candidate as an expert engineer who solves hard problems."
+    ),
+    "leadership_scope": (
+        "Emphasize team, org, and stakeholder leadership. Highlight mentoring, "
+        "cross-functional coordination, influencing direction, and growing others. "
+        "Frame the candidate as a leader who multiplies the team."
+    ),
+    "problem_solver": (
+        "Frame the candidate as someone who identifies problems and delivers solutions. "
+        "Lead each bullet with the problem context, then the solution approach, then result. "
+        "Show initiative, ownership, and end-to-end delivery."
+    ),
+    "cross_functional": (
+        "Highlight cross-team collaboration and influence without authority. "
+        "Emphasize partnerships, alignment across orgs, driving consensus, "
+        "and delivering outcomes that required coordinating multiple stakeholders."
+    ),
+}
+
+# ---------------------------------------------------------------------------
+# System prompt with closed-world constraint + distilled writing guidelines
+# ---------------------------------------------------------------------------
+
+_RESUME_GUIDELINES = (
+    "\n\n"
+    "## RESUME WRITING GUIDELINES\n\n"
+
+    "### SOURCE FIDELITY (highest priority rule)\n"
+    "Never list a skill, tool, or technology the candidate has not actually used. "
+    "Never fabricate achievements, companies, or experiences. "
+    "Do NOT add tools to match the JD — if the JD asks for Looker and the candidate "
+    "uses Tableau, list Tableau. "
+    "Gap mitigation: use the candidate's closest real analog, positioned to address "
+    "the same underlying competency. Every bullet must trace back to profile data.\n\n"
+
+    "### PROFESSIONAL SUMMARY\n"
+    "3-4 sentences maximum. Formula: (1) Role archetype + years + context. "
+    "(2) Strongest achievement with a number. "
+    "(3) 2-3 JD capabilities + value prop for this role. "
+    "Mirror the JD's title/archetype language in the opening. "
+    "Never use the word 'seeking'. Keep to 3-4 rendered lines; cut if longer.\n\n"
+
+    "### SKILLS SECTION\n"
+    "Hard skills and methodologies ONLY. Never list soft skills "
+    "(no 'Cross-Functional Collaboration', 'Stakeholder Communication', 'Team Leadership'). "
+    "Soft skills belong in experience bullets, demonstrated through action. "
+    "Front-load skills to JD priority order. 1-2 lines maximum, pipe-separated.\n\n"
+
+    "### BULLET WRITING FORMULA\n"
+    "Every bullet: Action Verb + What You Did + How/With What + Quantified Impact. "
+    "Lead with strong verbs (Designed, Engineered, Architected, Directed, Built, Led). "
+    "Rotate verbs — never start two consecutive bullets with the same verb. "
+    "Quantify aggressively: user counts, revenue, % improvements, time savings. "
+    "1-2 lines per bullet (3 lines absolute max, rare). "
+    "Every bullet must pass the 'so what?' test — result must be clear.\n"
+    "Anti-patterns to eliminate: (a) 'problem-identified' openers that burn half the "
+    "bullet on context ('Identified lack of...', 'Recognized that...') — lead with action; "
+    "(b) methods-listing without business outcome; "
+    "(c) two bullets both demonstrating the same dimension — vary them; "
+    "(d) soft skill claims as standalone bullets.\n\n"
+
+    "### BULLET COUNT BY SENIORITY\n"
+    "Most recent/current role (Lead/Senior): 4-6 bullets. "
+    "Previous role at same company: 2-3 bullets. "
+    "Prior companies (mid-career): 1-2 bullets each. "
+    "Early career: 1 bullet maximum.\n\n"
+
+    "### CONFIDENTIALITY\n"
+    "Never include specific client name in resume bullets. "
+    "Use generic descriptors: 'a major enterprise client', 'a Fortune 500 financial services client'. "
+    "Client names may exist in profile for context but must never surface in output. "
+    "Omit specific team sizes unless the JD explicitly requires them.\n\n"
+
+    "### TYPOGRAPHY\n"
+    "No bold text within bullet point content (bold reserved for headers, company names, titles). "
+    "No em dash anywhere in the document — restructure using commas or semicolons instead. "
+    "Minimize parentheses; integrate details naturally. "
+    "Do not define well-known acronyms (ITT, DiD, RCT, ROI, KPI, ETL).\n\n"
+
+    "### JD MIRRORING\n"
+    "Use the JD's exact terminology for tools and methodologies. "
+    "Ensure each of the top 5-7 JD keywords appears at least once. "
+    "Never lift full phrases verbatim from the JD. "
+    "Use a JD phrase at most once; never repeat the same JD phrase across the resume. "
+    "The reader should feel alignment, not pattern-matching.\n\n"
+
+    "### PRE-DELIVERY CHECKS\n"
+    "Before finalizing, verify: "
+    "no fabricated skills or tools; "
+    "no client names anywhere in the document; "
+    "all employment dates match profile data exactly; "
+    "professional summary is 3-4 sentences; "
+    "skills section is 1-2 lines; "
+    "most recent role has 4-6 bullets with progressively fewer for earlier roles; "
+    "no em dashes; "
+    "no bold in bullet content; "
+    "every bullet has a quantified result or compelling business outcome.\n"
+)
+
+_SYSTEM_PROMPT = (
+    "You are a professional resume writer. Generate a tailored resume for the candidate "
+    "applying to this specific job. "
+    "CRITICAL CONSTRAINT: You must ONLY use information from the candidate's profile below. "
+    "You may rephrase, reframe, and reorder content, but you must NEVER invent, infer, or add "
+    "achievements, skills, companies, or experiences not present in the profile. "
+    "Every bullet point must trace back to the profile data."
+    + _RESUME_GUIDELINES
+)
+
+# ---------------------------------------------------------------------------
+# Helper: accepted preferences query
+# ---------------------------------------------------------------------------
+
+def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
+    """Return accepted, unconsumed preference texts for resume prompt injection.
+
+    Reads from resume_preferences_detected WHERE accepted=1 AND applied_at IS NULL.
+    Returns empty list gracefully if table does not exist (test DBs, older schemas).
+    """
+    try:
+        rows = conn.execute(
+            "SELECT preference_text FROM resume_preferences_detected "
+            "WHERE accepted = 1 AND applied_at IS NULL "
+            "ORDER BY preference_type, detected_at"
+        ).fetchall()
+        return [row[0] if isinstance(row, tuple) else row["preference_text"] for row in rows]
+    except Exception:
+        # Table may not exist in test DBs or older schemas — degrade gracefully
+        logger.debug("Failed to load resume preferences (non-fatal)", exc_info=True)
+        return []
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def generate_resume_single(
-    client: Any,
     job_row: dict,
     profile: dict,
     conn: sqlite3.Connection,
@@ -77,6 +253,21 @@ def generate_resume_single(
     Returns:
         Structured resume dict matching RESUME_SCHEMA, or None if budget exceeded.
     """
+    # Budget gate -- callers decide what to do on False
+    if not cost_gate(conn, config, "sonnet"):
+        logger.info(
+            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
+            job_row.get("title"),
+            job_row.get("company"),
+        )
+        return None
+
+    model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("sonnet", DEFAULT_MODEL_SONNET)
+    )
+
     # Build fit_analysis context from job_row if present
     fit_analysis = job_row.get("fit_analysis")
     priority_skills: list[str] = []
@@ -150,35 +341,17 @@ def generate_resume_single(
     if contact_hint:
         user_message += f"- Contact line: {contact_hint}\n"
 
-    try:
-        result_obj = call_model(
-            tier="sonnet",
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
-            output_schema=RESUME_SCHEMA,
-            job_id=job_row.get("dedup_key"),
-            purpose="resume_generation",
-            max_tokens=4096,
-            client=client,
-        )
-    except BudgetExceededError:
-        logger.info(
-            "generate_resume_single: budget exceeded for '%s' @ '%s' -- returning None",
-            job_row.get("title"),
-            job_row.get("company"),
-        )
-        return None
-    except Exception as exc:
-        logger.error(
-            "generate_resume_single: call_model failed for '%s' @ '%s': %s",
-            job_row.get("title"),
-            job_row.get("company"),
-            exc,
-        )
-        raise
-    result = result_obj.data
+    result, _cost = call_claude(
+        model=model,
+        system=_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
+        output_schema=RESUME_SCHEMA,
+        conn=conn,
+        job_id=job_row.get("dedup_key"),
+        purpose="resume_generation",
+        config=config,
+        max_tokens=4096,
+    )
 
     logger.debug(
         "generate_resume_single: generated resume for '%s' @ '%s'",
@@ -203,12 +376,11 @@ def generate_resume_single(
 
     return result
 
-
 # ---------------------------------------------------------------------------
 # Background thread function
 # ---------------------------------------------------------------------------
 
-def generate_resume_background(
+def _generate_resume_background(
     db_path: str,
     gen_id: int,
     job_row: dict,
@@ -244,8 +416,7 @@ def generate_resume_background(
             multi_threshold = (
                 config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
             )
-            raw_score = job_row.get("sonnet_score")
-            sonnet_score = float(raw_score) if raw_score is not None else 0.0
+            sonnet_score = float(job_row.get("sonnet_score") or 0.0)
             use_multi = sonnet_score >= multi_threshold
 
             if use_multi:
@@ -254,21 +425,15 @@ def generate_resume_background(
                 # Deferred import avoids circular import at module load time
                 from job_finder.web.resume_multi_version import generate_resume_multi
                 logger.info(
-                    "generate_resume_background: using multi-version synthesis for gen_id=%s "
+                    "_generate_resume_background: using multi-version synthesis for gen_id=%s "
                     "(sonnet_score=%.1f >= threshold=%d)",
                     gen_id, sonnet_score, multi_threshold,
                 )
                 resume_data = generate_resume_multi(db_path, job_row, profile, config)
                 generation_type = "multi"
             else:
-                # Single-pass generation — best-effort Anthropic client
-                client = None
-                if anthropic is not None:
-                    try:
-                        client = anthropic.Anthropic()
-                    except Exception:
-                        pass
-                resume_data = generate_resume_single(client, job_row, profile, conn, config)
+                # Single-pass generation
+                resume_data = generate_resume_single(job_row, profile, conn, config)
                 generation_type = "single"
 
                 if resume_data is None:
@@ -278,7 +443,7 @@ def generate_resume_background(
                         ("Monthly budget exceeded", gen_id),
                     )
                     conn.commit()
-                    logger.info("generate_resume_background: budget exceeded for gen_id=%s", gen_id)
+                    logger.info("_generate_resume_background: budget exceeded for gen_id=%s", gen_id)
                     return
 
             # --- Validate generated resume ---
@@ -304,7 +469,7 @@ def generate_resume_background(
                 )
                 if has_errors:
                     logger.info(
-                        "generate_resume_background: %d error violations, running fix pass for gen_id=%s",
+                        "_generate_resume_background: %d error violations, running fix pass for gen_id=%s",
                         sum(1 for v in validation_report["violations"] if v.get("severity") == "error"),
                         gen_id,
                     )
@@ -329,7 +494,7 @@ def generate_resume_background(
                     conn.commit()
             except Exception as e:
                 logger.warning(
-                    "generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
+                    "_generate_resume_background: validation failed for gen_id=%s: %s", gen_id, e
                 )
 
             # Format as .docx
@@ -344,10 +509,6 @@ def generate_resume_background(
             # Upload to Drive
             drive_service = get_drive_service()
             folder_id = config.get("drive", {}).get("folder_id", "")
-            if not folder_id:
-                raise ValueError(
-                    "drive.folder_id is not configured — set it in Settings before generating resumes."
-                )
             convert_to_gdoc = config.get("drive", {}).get("convert_to_gdoc", True)
 
             doc_url = upload_to_drive(
@@ -365,7 +526,7 @@ def generate_resume_background(
             )
             conn.commit()
             logger.info(
-                "generate_resume_background: done for gen_id=%s, type=%s, url=%s",
+                "_generate_resume_background: done for gen_id=%s, type=%s, url=%s",
                 gen_id, generation_type, doc_url,
             )
 
@@ -378,12 +539,52 @@ def generate_resume_background(
                 )
                 conn.commit()
             except Exception:
-                logger.exception("generate_resume_background: failed to update error state for gen_id=%s", gen_id)
+                logger.exception("_generate_resume_background: failed to update error state for gen_id=%s", gen_id)
             logger.warning(
-                "generate_resume_background: error for gen_id=%s: %s", gen_id, e
+                "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
             )
 
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
-# Backward-compatible alias -- tests and older callers that imported the private name
-# still work; new code should use generate_resume_background.
-_generate_resume_background = generate_resume_background
+def _format_education(profile: dict) -> str:
+    """Format education from profile into a readable text block for the prompt."""
+    education = profile.get("education", [])
+    if not education:
+        return "\n  Not specified"
+
+    text = ""
+    for ed in education:
+        degree = ed.get("degree", "")
+        institution = ed.get("institution", "")
+        graduation = ed.get("graduation", "")
+        text += f"\n  - {degree} — {institution} ({graduation})"
+        if ed.get("thesis"):
+            text += f" | Thesis: {ed['thesis']}"
+    return text
+
+def _format_profile_positions(profile: dict) -> str:
+    """Format positions from profile into a readable text block for the prompt."""
+    positions = profile.get("positions", [])
+    if not positions:
+        return "\n  None listed"
+
+    text = ""
+    for pos in positions:
+        p_title = pos.get("title", "")
+        p_company = pos.get("company", "")
+        start = pos.get("start_date", "")
+        end = pos.get("end_date", "Present") or "Present"
+        achievements = pos.get("achievements", [])
+        skills = pos.get("skills", [])
+
+        achievements_text = (
+            "\n".join(f"  - {a}" for a in achievements) if achievements else "  None listed"
+        )
+        text += (
+            f"\n  Role: {p_title} at {p_company} ({start} - {end})\n"
+            f"  Skills: {', '.join(skills)}\n"
+            f"  Achievements:\n{achievements_text}"
+        )
+    return text

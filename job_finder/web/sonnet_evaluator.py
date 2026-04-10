@@ -21,10 +21,10 @@ Exports:
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
-from job_finder.web.claude_client import BudgetExceededError
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_SONNET
+from job_finder.web.claude_client import BudgetExceededError, ClaudeContext, call_claude
 from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
@@ -76,34 +76,11 @@ SONNET_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Extended schema that accepts optional eval_blocks from enhanced prompts.
-# eval_blocks are structured evaluation criteria that, when present, trigger
-# calibration bypass in the orchestrator.
-SONNET_SCHEMA_WITH_EVAL_BLOCKS = {
-    **SONNET_SCHEMA,
-    "properties": {
-        **SONNET_SCHEMA["properties"],
-        "eval_blocks": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "criterion": {"type": "string"},
-                    "score": {"type": "integer"},
-                    "rationale": {"type": "string"},
-                },
-                "required": ["criterion", "score", "rationale"],
-            },
-            "description": "Optional structured evaluation criteria blocks",
-        },
-    },
-}
-
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
 
-_BASE_SYSTEM_PROMPT = (
+_SYSTEM_PROMPT = (
     "You are a senior career advisor evaluating job fit. Analyze the full job description "
     "against the candidate's experience profile. Be specific about strengths (cite concrete "
     "experience), gaps (be honest but constructive), and resume priority skills (what to "
@@ -111,78 +88,13 @@ _BASE_SYSTEM_PROMPT = (
     "immediately; 65-79 = good fit worth applying; 50-64 = partial fit; <50 = poor fit."
 )
 
-_FEWSHOT_EXAMPLES = (
-    "\n\n## Calibration Examples\n\n"
-    "### Example 1: Score 15 (Poor fit)\n"
-    "Junior Marketing Coordinator role requiring social media management, content creation, "
-    "and 1-2 years marketing experience. Candidate is a Senior Data Scientist with 10+ years "
-    "in analytics. Complete domain mismatch, wrong seniority direction.\n\n"
-    "### Example 2: Score 38 (Weak fit)\n"
-    "Data Engineer role requiring extensive Spark, Kafka, and Airflow experience with AWS "
-    "infrastructure. Candidate has strong SQL and Python but minimal distributed systems or "
-    "data pipeline engineering experience. Adjacent field but significant skill gaps.\n\n"
-    "### Example 3: Score 62 (Partial fit)\n"
-    "Product Analytics Manager at a fintech startup requiring team management, A/B testing, "
-    "and financial domain knowledge. Candidate has analytics experience and A/B testing but "
-    "in healthcare, not finance. No direct reports experience.\n\n"
-    "### Example 4: Score 78 (Good fit)\n"
-    "Senior Data Scientist at a healthcare company requiring Python, ML, statistical modeling, "
-    "and healthcare analytics. Candidate has all technical skills and healthcare domain "
-    "experience but is targeting a more senior title (Lead/Staff level).\n\n"
-    "### Example 5: Score 91 (Exceptional fit)\n"
-    "Staff Data Scientist / Analytics Lead at a health tech SaaS company, remote, $160K-200K. "
-    "Requires experimentation design, causal inference, team leadership, Python, SQL. "
-    "Candidate matches on every dimension: skills, seniority, domain, location, salary.\n"
-)
-
-_DISTRIBUTION_INSTRUCTIONS = (
-    "\n\n## Expected Score Distribution\n\n"
-    "When scoring a diverse batch of jobs, expect approximately:\n"
-    "- ~30% should score 0-30 (poor/no fit)\n"
-    "- ~30% should score 30-55 (weak/partial fit)\n"
-    "- ~25% should score 55-75 (partial/good fit)\n"
-    "- ~15% should score 75-100 (good/exceptional fit)\n\n"
-    "If your scores cluster above 60 for most jobs, you are inflating. Most jobs in a "
-    "general search will NOT be a strong fit for a specific candidate.\n"
-)
-
-# Production default: fewshot examples are included by default (PRMT-01)
-_SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT + _FEWSHOT_EXAMPLES
-
-# Per-model prompt variants for cascade config (PRMT-02)
-PROMPT_VARIANTS: dict[str, str] = {
-    "fewshot": _SYSTEM_PROMPT,  # same as default — fewshot IS the default now
-    "fewshot-distribution": _SYSTEM_PROMPT + _DISTRIBUTION_INSTRUCTIONS,
-}
-
-
-def _build_sonnet_system_prompt(job_archetype: str | None = None) -> str:
-    """Build the Sonnet system prompt, optionally including archetype context.
-
-    Args:
-        job_archetype: Classified archetype key, or None.
-
-    Returns:
-        Complete system prompt string.
-    """
-    prompt = _SYSTEM_PROMPT
-    if job_archetype:
-        prompt += (
-            f"\n\n## Job Archetype\n\n"
-            f"This job has been classified as **{job_archetype.replace('_', ' ')}**. "
-            f"Weight your evaluation to emphasize skills and experience relevant to this "
-            f"archetype category."
-        )
-    return prompt
-
-
 def evaluate_job_sonnet(
-    client: Any,
     job_row: JobRow,
     experience_profile: dict,
     conn: Any,
     config: dict,
-    job_archetype: str | None = None,
+    *,
+    ctx: ClaudeContext | None = None,
 ) -> ScoringResult:
     """Evaluate a job against the candidate profile using Claude Sonnet.
 
@@ -190,28 +102,41 @@ def evaluate_job_sonnet(
     analysis.
 
     Args:
-        client: Anthropic client instance (injected for testability).
         job_row: Job record dict. Must include jd_full (str or None), plus
                  title, company, location, salary_min, salary_max.
         experience_profile: Experience profile dict (from experience_profile.json).
         conn: Open SQLite connection for cost recording.
-        config: Application config dict (reads profile section for candidate preferences).
+            Ignored when *ctx* is provided.
+        config: Application config dict (reads scoring.models.sonnet and
+                profile section for candidate preferences).
+            Ignored when *ctx* is provided.
+        ctx: ClaudeContext bundling (conn, config).  When supplied,
+            the individual conn/config parameters are ignored.
 
     Returns:
         ScoringResult with status='success' and data dict containing score,
         summary, fit_analysis. On failure: status='skipped' (jd_full absent),
         status='budget_exceeded', or status='error', with data=None.
     """
-    from job_finder.web.data_enricher import is_stub_jd
+    # Resolve context: prefer ctx fields over individual params
+    if ctx is not None:
+        conn = ctx.conn
+        config = ctx.config
+
     jd_full = job_row.get("jd_full")
-    if is_stub_jd(jd_full, job_row.get("title", ""), job_row.get("company", "")):
+    if not jd_full:
         logger.debug(
-            "Sonnet eval skipped for '%s' @ '%s': jd_full is absent or stub (%d chars)",
+            "Sonnet eval skipped for '%s' @ '%s': jd_full is absent",
             job_row.get("title"),
             job_row.get("company"),
-            len(jd_full) if jd_full else 0,
         )
         return ScoringResult(data=None, status="skipped")
+
+    model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("sonnet", DEFAULT_MODEL_SONNET)
+    )
 
     # Build salary string
     salary_min = job_row.get("salary_min")
@@ -283,24 +208,16 @@ def evaluate_job_sonnet(
     )
 
     try:
-        system_prompt = _build_sonnet_system_prompt(job_archetype=job_archetype)
-        result_obj = call_model(
-            tier="sonnet",
-            system=system_prompt,
+        result, _cost = call_claude(
+            model=model,
+            system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=SONNET_SCHEMA,
             job_id=job_row.get("dedup_key"),
             purpose="sonnet_eval",
             max_tokens=2048,
-            client=client,
+            ctx=ctx or ClaudeContext(conn=conn, config=config),
         )
-        result = result_obj.data
-        # Inject provider into data dict for attribution threading (ATTR-03).
-        # Using data dict avoids changing ScoringResult NamedTuple fields
-        # which would break positional unpacking in callers.
-        result = {**result, "provider": result_obj.provider}
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",
             job_row.get("title"),

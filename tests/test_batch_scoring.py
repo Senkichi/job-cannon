@@ -9,11 +9,9 @@ import tempfile
 import os
 from unittest.mock import MagicMock, patch
 
-import anthropic
 import pytest
 
 from job_finder.web.db_migrate import run_migrations
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,7 +26,6 @@ def _make_db():
     conn.row_factory = sqlite3.Row
     return path, conn
 
-
 def _insert_session(conn, status="running", session_type="haiku", total=0):
     """Insert a batch_score_sessions row and return its id."""
     from job_finder.json_utils import utc_now_iso
@@ -40,7 +37,6 @@ def _insert_session(conn, status="running", session_type="haiku", total=0):
     conn.commit()
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-
 def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
     """Insert a job with haiku_score IS NULL (unscored)."""
     from job_finder.json_utils import utc_now_iso
@@ -51,7 +47,6 @@ def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
         (dedup_key, title, company, now, now),
     )
     conn.commit()
-
 
 def _insert_sonnet_eligible_job(conn, dedup_key, title="Engineer", company="Acme", haiku_score=75):
     """Insert a job eligible for Sonnet (haiku_score set, no sonnet_score, jd_full present)."""
@@ -65,13 +60,11 @@ def _insert_sonnet_eligible_job(conn, dedup_key, title="Engineer", company="Acme
     )
     conn.commit()
 
-
 def _get_session(conn, session_id):
     """Fetch a session row by id."""
     return conn.execute(
         "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
     ).fetchone()
-
 
 # ---------------------------------------------------------------------------
 # Test fixtures / common patches
@@ -82,12 +75,10 @@ _MOCK_CONFIG = {}
 # score_and_persist_* and load_scoring_profile are imported inside the bg functions
 # via `from job_finder.web.scoring_orchestrator import ...`, so patch at source module.
 # should_exclude is a top-level import in batch_scoring, so patch there.
-_ANTHROPIC_PATCH = "anthropic.Anthropic"
 _SCORE_HAIKU_PATCH = "job_finder.web.scoring_orchestrator.score_and_persist_haiku"
 _SCORE_SONNET_PATCH = "job_finder.web.scoring_orchestrator.score_and_persist_sonnet"
 _LOAD_PROFILE_PATCH = "job_finder.web.scoring_orchestrator.load_scoring_profile"
 _SHOULD_EXCLUDE_PATCH = "job_finder.web.blueprints.batch_scoring.should_exclude"
-
 
 # ---------------------------------------------------------------------------
 # BATCH-04: Pre-loop cancellation check
@@ -110,8 +101,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")):
                 _run_batch_haiku_bg(path, session_id, _MOCK_CONFIG)
@@ -143,8 +133,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
-                 patch(_SCORE_SONNET_PATCH, score_mock), \
+            with patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}):
                 _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
 
@@ -174,8 +163,7 @@ class TestCancellationPreLoop:
 
             score_mock = MagicMock(return_value=MagicMock())  # non-None → scored
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
@@ -192,7 +180,6 @@ class TestCancellationPreLoop:
             conn.close()
             if os.path.exists(path):
                 os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # BATCH-05: Deferred in-memory counters
@@ -216,8 +203,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
-                 patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_HAIKU_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
@@ -247,8 +233,7 @@ class TestDeferredCounters:
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_ANTHROPIC_PATCH, return_value=MagicMock(spec=anthropic.Anthropic)), \
-                 patch(_SCORE_SONNET_PATCH, score_mock), \
+            with patch(_SCORE_SONNET_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch("job_finder.web.activity_tracker.log_activity"):
                 _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
@@ -262,7 +247,6 @@ class TestDeferredCounters:
             conn.close()
             if os.path.exists(path):
                 os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # Dead code removal

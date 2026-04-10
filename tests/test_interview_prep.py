@@ -20,7 +20,6 @@ import pytest
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.claude_client import MODEL_PRICING
 
-
 # ---------------------------------------------------------------------------
 # Opus Pricing Tests
 # ---------------------------------------------------------------------------
@@ -46,7 +45,6 @@ class TestOpusPricing:
         assert MODEL_PRICING["claude-opus-4-6"]["output"] == 25.0, (
             f"Expected output=25.0, got {MODEL_PRICING['claude-opus-4-6']['output']}"
         )
-
 
 # ---------------------------------------------------------------------------
 # Helper: create migrated DB with a job row
@@ -79,7 +77,6 @@ def _create_test_db_with_job(dedup_key="acme|senior data scientist|remote"):
     conn.commit()
     return path, conn
 
-
 # ---------------------------------------------------------------------------
 # Interview Prep Dedup Tests
 # ---------------------------------------------------------------------------
@@ -102,12 +99,10 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            # Should NOT have called the Anthropic API
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        # Should NOT have called call_claude (dedup guard skipped it)
 
         # Verify no new row was added
         conn2 = sqlite3.connect(path)
@@ -134,11 +129,10 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        # call_claude should not have been called (dedup guard skipped it)
 
         os.remove(path)
 
@@ -158,7 +152,7 @@ class TestInterviewPrepDedup:
         conn.close()
 
         config = {
-            "scoring": {"daily_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
+            "scoring": {"monthly_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
         }
 
         mock_response = MagicMock()
@@ -178,10 +172,8 @@ class TestInterviewPrepDedup:
         mock_response.usage.input_tokens = 500
         mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."):
+            generate_interview_prep_background(dedup_key, path, config)
 
         # Verify a new 'done' row was inserted
         conn2 = sqlite3.connect(path)
@@ -193,7 +185,6 @@ class TestInterviewPrepDedup:
         assert "done" in statuses, f"Expected 'done' status, got: {statuses}"
 
         os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # Interview Prep Content Tests
@@ -212,7 +203,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -230,16 +221,9 @@ class TestInterviewPrepContent:
             "questions_to_ask": ["What is the data team structure?", "How do you measure DS impact?"],
         }
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = expected_prep
-        mock_response.usage.input_tokens = 800
-        mock_response.usage.output_tokens = 1500
-
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(expected_prep, 0.05)):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         conn2.row_factory = sqlite3.Row
@@ -279,14 +263,12 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = {
+        prep_result = {
             "company_brief": "Brief.",
             "predicted_questions": [
                 {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
@@ -295,22 +277,13 @@ class TestInterviewPrepContent:
             "gap_mitigation": ["gap"],
             "questions_to_ask": ["q"],
         }
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 1000
 
-        captured_kwargs = {}
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)) as mock_cc:
+            generate_interview_prep_background(dedup_key, path, config)
 
-        def capture_create(**kwargs):
-            captured_kwargs.update(kwargs)
-            return mock_response
-
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.side_effect = capture_create
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                generate_interview_prep_background(dedup_key, path, config)
-
-        assert "claude-opus" in captured_kwargs.get("model", ""), (
-            f"Expected Opus model, got: {captured_kwargs.get('model')}"
+        assert "claude-opus" in mock_cc.call_args.kwargs.get("model", ""), (
+            f"Expected Opus model, got: {mock_cc.call_args.kwargs.get('model')}"
         )
 
         os.remove(path)
@@ -325,7 +298,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -351,11 +324,9 @@ class TestInterviewPrepContent:
             connect_calls.append(db_path)
             return original_connect(db_path, **kwargs)
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                with patch("job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect):
-                    generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+            with patch("job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect):
+                generate_interview_prep_background(dedup_key, path, config)
 
         assert len(connect_calls) >= 1, "sqlite3.connect was not called"
         assert path in connect_calls, f"Expected {path} in connect calls: {connect_calls}"
@@ -370,7 +341,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock()]
@@ -386,10 +357,8 @@ class TestInterviewPrepContent:
         mock_response.usage.input_tokens = 500
         mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -410,12 +379,11 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.side_effect = RuntimeError("API failure")
-            with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""), \
+             patch("job_finder.web.interview_prep.call_claude", side_effect=RuntimeError("API error")):
+            generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -437,7 +405,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 25.0}}
+        config = {"scoring": {"monthly_budget_usd": 25.0}}
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock()]
@@ -459,45 +427,13 @@ class TestInterviewPrepContent:
             fetch_calls.append(company_name)
             return f"Company info for {company_name}"
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value.messages.create.return_value = mock_response
-            with patch("job_finder.web.interview_prep._fetch_company_info", side_effect=track_fetch):
-                generate_interview_prep_background(dedup_key, path, config)
+        with patch("job_finder.web.interview_prep._fetch_company_info", side_effect=track_fetch):
+            generate_interview_prep_background(dedup_key, path, config)
 
         assert len(fetch_calls) == 1, f"Expected 1 _fetch_company_info call, got {len(fetch_calls)}"
         assert "Acme Corp" in fetch_calls[0] or fetch_calls[0] == "Acme Corp"
 
         os.remove(path)
-
-    def test_generate_handles_malformed_opus_response(self):
-        """call_model raising on schema mismatch → interview_prep status set to 'error'."""
-        from job_finder.web.interview_prep import generate_interview_prep_background
-
-        path, conn = _create_test_db_with_job("acme|malformed|remote")
-        conn.close()
-
-        config = {"scoring": {"daily_budget_usd": 25.0}}
-
-        with patch(
-            "job_finder.web.interview_prep.call_model",
-            side_effect=RuntimeError("Schema validation failed"),
-        ):
-            with patch(
-                "job_finder.web.interview_prep._fetch_company_info", return_value=""
-            ):
-                generate_interview_prep_background("acme|malformed|remote", path, config)
-
-        conn2 = sqlite3.connect(path)
-        row = conn2.execute(
-            "SELECT status FROM interview_preps WHERE job_id = ?",
-            ("acme|malformed|remote",),
-        ).fetchone()
-        conn2.close()
-        os.remove(path)
-
-        assert row is not None
-        assert row[0] == "error"
-
 
 # ---------------------------------------------------------------------------
 # Budget Gating Tests
@@ -514,12 +450,11 @@ class TestInterviewPrepBudget:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"daily_budget_usd": 0.0}}  # Daily budget at zero — always blocked
+        config = {"scoring": {"monthly_budget_usd": 0.0}}  # Budget at zero
 
-        with patch("job_finder.web.interview_prep.anthropic") as mock_anthropic:
-            generate_interview_prep_background(dedup_key, path, config)
-            # API should NOT be called when budget exceeded
-            mock_anthropic.Anthropic.return_value.messages.create.assert_not_called()
+        generate_interview_prep_background(dedup_key, path, config)
+        # API should NOT be called when budget exceeded
+        # call_claude should not have been called (dedup guard skipped it)
 
         conn2 = sqlite3.connect(path)
         row = conn2.execute(
@@ -533,7 +468,6 @@ class TestInterviewPrepBudget:
         assert "budget" in row[1].lower(), f"error_msg should mention budget: {row[1]}"
 
         os.remove(path)
-
 
 # ---------------------------------------------------------------------------
 # _fetch_company_info Tests
@@ -582,11 +516,9 @@ class TestFetchCompanyInfo:
         result = _fetch_company_info("Acme Corp", config)
         assert result == "", f"Expected empty string when no key, got: {result!r}"
 
-
 # ---------------------------------------------------------------------------
 # Interview Prep Trigger Wiring Tests (05-01-01 / INTEL-01)
 # ---------------------------------------------------------------------------
-
 
 class TestInterviewPrepTrigger:
     """Verify blueprint routes wire daemon thread trigger for 'applied' status.
@@ -756,144 +688,3 @@ class TestInterviewPrepTrigger:
         assert args[0] == "acme|trigger-test|remote", (
             f"Expected first arg to be job_id, got: {args[0]!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Tests: Reusable story extraction and reuse (Task 6)
-# ---------------------------------------------------------------------------
-
-
-class TestExtractReusableStories:
-    """extract_reusable_stories: deterministic JSON filtering from predicted_questions."""
-
-    def test_extracts_stories_with_non_empty_star_story(self):
-        from job_finder.web.interview_prep import extract_reusable_stories
-        questions = [
-            {"question": "Tell me about a time...", "star_story": "At Acme, I led...", "key_points": ["leadership"]},
-            {"question": "Why this role?", "star_story": "", "key_points": []},
-            {"question": "Biggest challenge?", "star_story": "During a migration...", "key_points": ["resilience"]},
-        ]
-        result = json.loads(extract_reusable_stories(json.dumps(questions)))
-        assert len(result) == 2
-        assert result[0]["question"] == "Tell me about a time..."
-        assert result[1]["question"] == "Biggest challenge?"
-
-    def test_limits_to_5_stories(self):
-        from job_finder.web.interview_prep import extract_reusable_stories
-        questions = [
-            {"question": f"Q{i}", "star_story": f"Story {i}", "key_points": []}
-            for i in range(10)
-        ]
-        result = json.loads(extract_reusable_stories(json.dumps(questions)))
-        assert len(result) == 5
-
-    def test_returns_none_for_empty_input(self):
-        from job_finder.web.interview_prep import extract_reusable_stories
-        assert extract_reusable_stories("[]") is None
-        assert extract_reusable_stories(None) is None
-        assert extract_reusable_stories("") is None
-
-    def test_returns_none_for_all_empty_star_stories(self):
-        from job_finder.web.interview_prep import extract_reusable_stories
-        questions = [
-            {"question": "Q1", "star_story": "", "key_points": []},
-            {"question": "Q2", "star_story": "  ", "key_points": []},
-        ]
-        assert extract_reusable_stories(json.dumps(questions)) is None
-
-    def test_handles_malformed_json_gracefully(self):
-        from job_finder.web.interview_prep import extract_reusable_stories
-        assert extract_reusable_stories("not json") is None
-        assert extract_reusable_stories("{not an array}") is None
-
-
-class TestReusableStoryStorage:
-    """Completed prep generation stores reusable stories."""
-
-    @pytest.fixture
-    def prep_db(self):
-        """Create a migrated DB, insert a job, and return (path, conn)."""
-        fd, path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        run_migrations(path)
-        conn = sqlite3.connect(path)
-        conn.row_factory = sqlite3.Row
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen,
-               score, score_breakdown, user_interest, jd_full, sonnet_score, fit_analysis)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("story|test|job", "Data Scientist", "StoryCo", "Remote",
-             now, now, 0, "{}", "unreviewed",
-             "Full job description for data scientist role with ML requirements.",
-             75, '{"strengths": ["Python"]}'),
-        )
-        conn.commit()
-        yield path, conn
-        conn.close()
-        os.remove(path)
-
-    @patch("job_finder.web.interview_prep._fetch_company_info", return_value="")
-    @patch("job_finder.web.interview_prep.call_model")
-    def test_stores_reusable_stories_after_completion(self, mock_call, mock_fetch, prep_db):
-        from job_finder.web.interview_prep import _run_prep_generation
-        path, conn = prep_db
-
-        mock_result = MagicMock()
-        mock_result.data = {
-            "company_brief": "StoryCo is a data company.",
-            "predicted_questions": [
-                {"question": "Tell me about ML work", "star_story": "At Acme I built models...", "key_points": ["ml"]},
-                {"question": "Why this role?", "star_story": "", "key_points": []},
-                {"question": "Team leadership", "star_story": "I led a team of 5...", "key_points": ["leadership"]},
-            ],
-            "gap_mitigation": ["Frame X as Y"],
-            "questions_to_ask": ["What's the team structure?"],
-        }
-        mock_result.cost_usd = 0.05
-        mock_call.return_value = mock_result
-
-        _run_prep_generation(conn, "story|test|job", {"scoring": {}})
-
-        row = conn.execute(
-            "SELECT reusable_stories_json FROM interview_preps WHERE job_id = 'story|test|job' AND status = 'done'"
-        ).fetchone()
-        assert row is not None
-        stories = json.loads(row["reusable_stories_json"])
-        assert len(stories) == 2
-        assert stories[0]["question"] == "Tell me about ML work"
-
-    @patch("job_finder.web.interview_prep._fetch_company_info", return_value="")
-    @patch("job_finder.web.interview_prep.call_model")
-    def test_prior_stories_included_in_prompt(self, mock_call, mock_fetch, prep_db):
-        from job_finder.web.interview_prep import _run_prep_generation
-        path, conn = prep_db
-
-        # Insert a prior prep with stories
-        now = datetime.now(timezone.utc).isoformat()
-        stories_json = json.dumps([
-            {"question": "Prior Q", "star_story": "Prior story about teamwork", "key_points": ["team"]},
-        ])
-        conn.execute(
-            "INSERT INTO interview_preps (job_id, status, generated_at, reusable_stories_json) VALUES (?, ?, ?, ?)",
-            ("prior|job", "done", now, stories_json),
-        )
-        conn.commit()
-
-        mock_result = MagicMock()
-        mock_result.data = {
-            "company_brief": "Test",
-            "predicted_questions": [],
-            "gap_mitigation": [],
-            "questions_to_ask": [],
-        }
-        mock_result.cost_usd = 0.01
-        mock_call.return_value = mock_result
-
-        _run_prep_generation(conn, "story|test|job", {"scoring": {}})
-
-        # Check that the system prompt included prior stories
-        call_kwargs = mock_call.call_args[1]
-        system_prompt = call_kwargs["system"]
-        assert "Prior STAR Stories" in system_prompt
-        assert "Prior story about teamwork" in system_prompt

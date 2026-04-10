@@ -15,12 +15,8 @@ import json
 import logging
 import sqlite3
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_SONNET
+from job_finder.web.claude_client import call_claude
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +72,6 @@ FIELD_LABELS = {
     "role_archetype": "Role archetype",
 }
 
-
 def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
     """Load style guide from JSON file.
 
@@ -95,7 +90,6 @@ def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
         logger.warning("load_style_guide: failed to load '%s': %s", path, e)
         return {}
 
-
 def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """Save style guide dict to JSON file.
 
@@ -105,7 +99,6 @@ def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """
     with open(path, "w", encoding="utf-8") as f:
         json.dump(guide, f, indent=2, ensure_ascii=False)
-
 
 def _build_style_guide_directives(guide: dict) -> list[str]:
     """Convert a style guide dict to a list of formatted prompt directive strings.
@@ -138,7 +131,6 @@ def _build_style_guide_directives(guide: dict) -> list[str]:
 
     return directives
 
-
 def extract_style_guide(
     raw_text: str,
     existing_guide: dict,
@@ -161,12 +153,11 @@ def extract_style_guide(
         None on error (caller must handle failure).
     """
     try:
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         if existing_guide:
             system = (
@@ -199,29 +190,27 @@ def extract_style_guide(
                 f"Extract the formatting and style preferences from this resume."
             )
 
-        result_obj = call_model(
-            tier="sonnet",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=STYLE_GUIDE_SCHEMA,
+            conn=conn,
             job_id=None,
             purpose="resume_style_extraction",
+            config=config,
             max_tokens=1024,
-            client=client,
         )
-        return result_obj.data
+        return result
 
     except Exception as e:
         logger.warning("extract_style_guide: failed: %s", e)
         return None
 
-
 def merge_guidelines_into_guide(
     guidelines_text: str,
     existing_guide: dict,
-    client,
+    model: str,
     conn: sqlite3.Connection,
     config: dict,
     mode: str = "populate_new",
@@ -233,6 +222,7 @@ def merge_guidelines_into_guide(
         guidelines_text: Raw text of the resume generation guidelines document.
         existing_guide: Current style guide dict (may be empty).
         client: Anthropic client instance (injected for testability).
+        model: Full model identifier, e.g. "claude-sonnet-4-6".
         conn: Open SQLite connection for cost recording.
         config: Application YAML config dict.
         mode: Merge mode — "populate_new" only fills missing/empty fields;
@@ -274,25 +264,23 @@ def merge_guidelines_into_guide(
             f"Merge the guidelines into the style guide."
         )
 
-        result_obj = call_model(
-            tier="sonnet",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=STYLE_GUIDE_SCHEMA,
+            conn=conn,
             job_id=None,
             purpose=purpose,
+            config=config,
             max_tokens=2048,
-            client=client,
         )
 
-        return result_obj.data
+        return result
 
     except Exception as e:
         logger.warning("merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
         return None
-
 
 def migrate_style_guide(
     config: dict,
@@ -321,17 +309,16 @@ def migrate_style_guide(
 
         existing_guide = load_style_guide(style_guide_path)
 
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
-            client=client,
+            model=model,
             conn=conn,
             config=config,
             mode="populate_new",

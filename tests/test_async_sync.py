@@ -12,7 +12,6 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
-
 class TestAsyncSync:
     """Tests for async sync start/status routes and duplicate guard."""
 

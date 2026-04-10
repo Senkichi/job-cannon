@@ -25,14 +25,13 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     DEFAULT_MODEL_HAIKU,
     DEFAULT_MODEL_SONNET,
+    DEFAULT_MONTHLY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
-from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
-
 
 def _setup_file_logging() -> None:
     """Attach RotatingFileHandler to root logger if not already attached.
@@ -42,14 +41,9 @@ def _setup_file_logging() -> None:
     """
     root_logger = logging.getLogger()
 
-    # Guard: skip if already configured (RotatingFileHandler presence means full
-    # setup was done in a previous call — don't add any duplicate handlers).
+    # Guard: skip if a RotatingFileHandler is already attached
     if any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
         return
-
-    # Root logger defaults to WARNING, blocking INFO messages before they reach handlers.
-    # Set to DEBUG so handler-level filtering (INFO) controls what lands in the file.
-    root_logger.setLevel(logging.DEBUG)
 
     os.makedirs("logs", exist_ok=True)
 
@@ -68,22 +62,9 @@ def _setup_file_logging() -> None:
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    # Only add a StreamHandler if one isn't already attached (e.g., by pytest
-    # or a previous partial setup).  RotatingFileHandler IS a StreamHandler
-    # subclass, so exclude it explicitly when checking.
-    if not any(
-        type(h) is logging.StreamHandler for h in root_logger.handlers
-    ):
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(logging.INFO)
-        stream_handler.setFormatter(formatter)
-        root_logger.addHandler(stream_handler)
-
-
 logger = logging.getLogger(__name__)
 
-
-def create_app(config_path: str = "config.yaml", *, config: dict = None) -> Flask:
+def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     """Create and configure the Flask application.
 
     Args:
@@ -108,25 +89,11 @@ def create_app(config_path: str = "config.yaml", *, config: dict = None) -> Flas
 
     app.config["JF_CONFIG"] = cfg
     app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
-    # NOTE: Ephemeral dev-only behavior — a random key is generated on each startup
-    # when FLASK_SECRET_KEY is not set in the environment. This intentionally breaks
-    # session persistence across restarts (acceptable for a single-user local app).
-    # Set FLASK_SECRET_KEY in .env for persistent sessions.
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # Activate cross-project API telemetry, budget enforcement, and key injection.
     # Replaces the old JF_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY env var promotion.
     # Key now sourced from ~/.anthropic-telemetry/config.toml (never in os.environ).
-    try:
-        import anthropic_telemetry
-        anthropic_telemetry.activate("job-cannon")
-    except ImportError:
-        # Package not installed — silently skip; telemetry is optional.
-        pass
-    except Exception as _e:
-        # Package installed but activate() failed (bad config, network error, etc.).
-        # Log as warning so the failure is visible without crashing app startup.
-        logging.getLogger(__name__).warning("anthropic-telemetry activate() failed: %s", _e)
 
     # --- Database setup ---
     run_migrations(app.config["DB_PATH"])
@@ -151,7 +118,7 @@ def create_app(config_path: str = "config.yaml", *, config: dict = None) -> Flas
 
     # --- Jinja2 globals: centralized config defaults ---
     app.jinja_env.globals["DEFAULT_HAIKU_THRESHOLD"] = DEFAULT_HAIKU_THRESHOLD
-    app.jinja_env.globals["DEFAULT_DAILY_BUDGET_USD"] = DEFAULT_DAILY_BUDGET_USD
+    app.jinja_env.globals["DEFAULT_MONTHLY_BUDGET_USD"] = DEFAULT_MONTHLY_BUDGET_USD
     app.jinja_env.globals["DEFAULT_MIN_SCORE_THRESHOLD"] = DEFAULT_MIN_SCORE_THRESHOLD
     app.jinja_env.globals["DEFAULT_MULTI_VERSION_THRESHOLD"] = DEFAULT_MULTI_VERSION_THRESHOLD
     app.jinja_env.globals["DEFAULT_LOOKBACK_DAYS"] = DEFAULT_LOOKBACK_DAYS

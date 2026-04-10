@@ -1,9 +1,8 @@
 """Enrichment backfill script for job-finder.
 
-Runs the multi-tier enrichment pipeline (free → DDG → Haiku → SerpAPI → Sonnet
-→ agentic → agentic_exhausted) on all non-exhausted jobs in a convergence loop.
-Estimates and confirms AI costs before any API calls. Queues newly-enriched jobs
-for Sonnet evaluation. Re-scores borderline Haiku jobs whose enrichment tier
+Runs the 7-tier enrichment pipeline on all non-exhausted jobs in a convergence
+loop. Estimates and confirms AI costs before any API calls. Queues newly-enriched
+jobs for Sonnet evaluation. Re-scores borderline Haiku jobs whose enrichment tier
 advanced.
 
 Usage:
@@ -33,12 +32,10 @@ from typing import Any, Optional
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD, DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.db import persist_haiku_score, persist_sonnet_score
-from job_finder.web.claude_client import BudgetExceededError, MODEL_PRICING
+from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.scoring_orchestrator import load_scoring_profile
-from job_finder.web.scoring_types import unwrap_scoring_result
 from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
 from job_finder.web.haiku_scorer import score_job_haiku
 
@@ -54,38 +51,29 @@ _HAIKU_OUTPUT_TOKENS = 200
 _SONNET_INPUT_TOKENS = 2000
 _SONNET_OUTPUT_TOKENS = 500
 
-# Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers).
-# PRIMARY GATE: 'agentic' and 'agentic_exhausted' are excluded here so that
-# run_enrichment_pass() never fetches those rows, and enrich_job() is never
-# called for them from this path. The secondary defense is the guard inside
-# enrich_job() itself (for direct callers that bypass this query gate).
+# Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
 _ELIGIBLE_TIERS_QUERY = (
-    "enrichment_tier IS NULL OR enrichment_tier NOT IN "
-    "('exhausted', 'agentic', 'agentic_exhausted', 'serpapi', 'sonnet')"
+    "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')"
 )
 
 # Borderline score range for re-scoring after tier advancement
 _BORDERLINE_MIN = 40
 _BORDERLINE_MAX = 70
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
-def estimate_and_confirm(conn: sqlite3.Connection, config: dict, client: Any = None) -> bool:
+def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     """Count eligible jobs, estimate AI cost, and prompt user for confirmation.
 
     Counts jobs at each enrichment tier that would be processed. Computes
     estimated cost using MODEL_PRICING constants (rough per-job estimates).
-    When free providers are configured for haiku/sonnet tiers, the Anthropic
-    estimate is labeled as an upper bound.
+    Prints a tier breakdown and total cost estimate, then prompts.
 
     Args:
         conn: Open SQLite connection.
         config: Application config dict.
-        client: Anthropic client instance (or None).
 
     Returns:
         True if user enters 'y' or 'Y', False otherwise (including empty Enter).
@@ -136,45 +124,20 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict, client: Any = N
     )
     total_estimate = haiku_cost + sonnet_cost
 
-    # Check if any locally-usable haiku/sonnet provider is non-Anthropic
-    haiku_has_free = tier_has_configured_provider("haiku", config, client) and (
-        config.get("providers", {}).get("haiku", {}).get("provider", "anthropic") != "anthropic"
-        or any(
-            e.get("provider") != "anthropic"
-            for e in config.get("providers", {}).get("haiku", {}).get("fallback_chain", [])
-        )
-    )
-    sonnet_has_free = tier_has_configured_provider("sonnet", config, client) and (
-        config.get("providers", {}).get("sonnet", {}).get("provider", "anthropic") != "anthropic"
-        or any(
-            e.get("provider") != "anthropic"
-            for e in config.get("providers", {}).get("sonnet", {}).get("fallback_chain", [])
-        )
-    )
-
-    if haiku_has_free or sonnet_has_free:
-        print(f"\nAnthropic fallback upper bound:")
-        print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
-        print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
-        print(f"  TOTAL UPPER BOUND: ${total_estimate:.4f}")
-        print(f"\nConfigured free-provider path: $0 in the app budget model for these tiers.")
-    else:
-        print(f"\nEstimated AI cost:")
-        print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
-        print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
-        print(f"  TOTAL ESTIMATE:   ${total_estimate:.4f}")
+    print(f"\nEstimated AI cost:")
+    print(f"  Haiku  (~{haiku_jobs} jobs): ${haiku_cost:.4f}")
+    print(f"  Sonnet (~{sonnet_jobs} jobs): ${sonnet_cost:.4f}")
+    print(f"  TOTAL ESTIMATE:   ${total_estimate:.4f}")
     print("\nNote: Actual cost depends on how many jobs need AI tiers.")
     print("=" * 60)
 
     response = input("\nProceed with enrichment backfill? [y/N] ").strip().lower()
     return response == "y"
 
-
 def run_enrichment_pass(
     conn: sqlite3.Connection,
     serpapi_key: Optional[str],
     config: dict,
-    client: Any,
     limit: int = 100,
 ) -> tuple[int, set]:
     """Run a single enrichment pass over all eligible jobs.
@@ -216,7 +179,6 @@ def run_enrichment_pass(
         result = enrich_job(
             job_row,
             serpapi_key=serpapi_key,
-            anthropic_client=client,
             conn=conn,
             config=config,
         )
@@ -236,12 +198,10 @@ def run_enrichment_pass(
 
     return enriched_count, tier_advanced_keys
 
-
 def run_passes_to_convergence(
     conn: sqlite3.Connection,
     serpapi_key: Optional[str],
     config: dict,
-    client: Any,
     limit: int = 100,
 ) -> tuple[int, set]:
     """Run enrichment passes until convergence (0 enriched in a pass).
@@ -260,7 +220,7 @@ def run_passes_to_convergence(
     Returns:
         Tuple of (total_enriched, cumulative_tier_advanced_keys).
     """
-    if not estimate_and_confirm(conn, config, client=client):
+    if not estimate_and_confirm(conn, config):
         print("Aborted by user.")
         return 0, set()
 
@@ -271,7 +231,7 @@ def run_passes_to_convergence(
     while True:
         pass_num += 1
         enriched_count, tier_advanced_keys = run_enrichment_pass(
-            conn, serpapi_key=serpapi_key, config=config, client=client, limit=limit
+            conn, serpapi_key=serpapi_key, config=config, limit=limit
         )
         print(f"Pass {pass_num}: {enriched_count} jobs enriched")
         total_enriched += enriched_count
@@ -283,11 +243,9 @@ def run_passes_to_convergence(
 
     return total_enriched, cumulative_tier_advanced_keys
 
-
 def run_sonnet_backfill(
     conn: sqlite3.Connection,
     config: dict,
-    client: Any,
 ) -> int:
     """Evaluate jobs that have jd_full but no sonnet_score using Sonnet.
 
@@ -320,14 +278,14 @@ def run_sonnet_backfill(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        scoring_result = evaluate_job_sonnet(client, job_row, profile, conn, config)
-        result = unwrap_scoring_result(scoring_result)
+        result = evaluate_job_sonnet(job_row, profile, conn, config)
 
         if result is None:
             logger.debug("Sonnet eval returned None for '%s'", dedup_key)
             continue
 
         score = result.get("score")
+        summary = result.get("summary")
         fit_analysis = result.get("fit_analysis")
 
         # Persist to DB
@@ -341,11 +299,9 @@ def run_sonnet_backfill(
     print(f"Sonnet backfill complete: {evaluated_count} jobs evaluated.")
     return evaluated_count
 
-
 def run_borderline_rescore(
     conn: sqlite3.Connection,
     config: dict,
-    client: Any,
     tier_advanced_keys: set,
 ) -> int:
     """Re-score borderline Haiku jobs (40-70) whose enrichment tier advanced.
@@ -391,12 +347,7 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        try:
-            scoring_result = score_job_haiku(client, job_row, profile, conn, config)
-        except BudgetExceededError:
-            logger.warning("Budget exhausted during borderline re-score — aborting remaining jobs")
-            break
-        result = unwrap_scoring_result(scoring_result)
+        result = score_job_haiku(job_row, profile, conn, config)
 
         if result is None:
             logger.debug("Haiku re-score returned None for '%s'", dedup_key)
@@ -413,7 +364,6 @@ def run_borderline_rescore(
     print(f"Borderline re-score complete: {rescored_count} jobs re-scored.")
     return rescored_count
 
-
 def main() -> None:
     """CLI entry point for enrichment backfill.
 
@@ -421,10 +371,6 @@ def main() -> None:
     like stale_detector.py), instantiates Anthropic client. Runs convergence
     passes, then Sonnet backfill, then borderline re-score.
     """
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        _anthropic = None
 
     from job_finder.config import load_config
 
@@ -436,37 +382,22 @@ def main() -> None:
     if not serpapi_key:
         print("Warning: SerpAPI key not configured — SerpAPI tier will be skipped.")
 
-    # Best-effort Anthropic client creation (two-step pattern)
-    client = None
-    if _anthropic is not None:
-        try:
-            client = _anthropic.Anthropic()
-        except Exception:
-            logger.debug("Anthropic client unavailable — will use free providers only")
-
-    # Check that at least one tier is routable before proceeding
-    haiku_ok = tier_has_configured_provider("haiku", config, client)
-    sonnet_ok = tier_has_configured_provider("sonnet", config, client)
-    if not haiku_ok and not sonnet_ok:
-        print("Error: No routable haiku or sonnet provider — cannot run backfill.")
-        return
-
     # Open own connection (thread-safe, not Flask g.db)
     with standalone_connection(db_path) as conn:
 
         print("\n=== Phase 1: Convergence Enrichment Passes ===")
         total_enriched, tier_advanced_keys = run_passes_to_convergence(
-            conn, serpapi_key=serpapi_key, config=config, client=client
+            conn, serpapi_key=serpapi_key, config=config
         )
         print(f"\nTotal enriched across all passes: {total_enriched}")
         print(f"Jobs with tier advancement: {len(tier_advanced_keys)}")
 
         print("\n=== Phase 2: Sonnet Backfill ===")
-        sonnet_count = run_sonnet_backfill(conn, config=config, client=client)
+        sonnet_count = run_sonnet_backfill(conn, config=config)
 
         print("\n=== Phase 3: Borderline Re-score ===")
         rescore_count = run_borderline_rescore(
-            conn, config=config, client=client, tier_advanced_keys=tier_advanced_keys
+            conn, config=config, tier_advanced_keys=tier_advanced_keys
         )
 
         # Final tier distribution summary
@@ -487,7 +418,6 @@ def main() -> None:
         print(f"  Enriched: {total_enriched}")
         print(f"  Sonnet evaluated: {sonnet_count}")
         print(f"  Borderline re-scored: {rescore_count}")
-
 
 if __name__ == "__main__":
     main()

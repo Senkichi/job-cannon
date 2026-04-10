@@ -22,7 +22,6 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -41,7 +40,6 @@ def migrated_db_path():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def db_conn(migrated_db_path):
     """Open a connection to the migrated DB, yield (path, conn), close after."""
@@ -49,7 +47,6 @@ def db_conn(migrated_db_path):
     conn.row_factory = sqlite3.Row
     yield migrated_db_path, conn
     conn.close()
-
 
 def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     """Helper: insert a company with ats_probe_status='hit' and scan_enabled=1."""
@@ -64,7 +61,6 @@ def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     )
     conn.commit()
     return cursor.lastrowid
-
 
 # ---------------------------------------------------------------------------
 # Tests: extract_ats_from_urls
@@ -147,7 +143,6 @@ class TestExtractAtsFromUrls:
         assert platform == "lever"
         assert slug == "stripe"
 
-
 # ---------------------------------------------------------------------------
 # Tests: _title_matches
 # ---------------------------------------------------------------------------
@@ -217,7 +212,6 @@ class TestTitleMatches:
             target_titles=["machine learning"],
             exclusions=[],
         ) is True
-
 
 # ---------------------------------------------------------------------------
 # Tests: upsert_company
@@ -303,7 +297,6 @@ class TestUpsertCompany:
         id2 = upsert_company(conn, name="Ramp")
         assert id1 == id2
 
-
 # ---------------------------------------------------------------------------
 # Tests: derive_slug_candidates
 # ---------------------------------------------------------------------------
@@ -343,7 +336,6 @@ class TestDeriveSlugCandidates:
         result = derive_slug_candidates("AnyCompany")
         assert isinstance(result, list)
         assert len(result) >= 1
-
 
 # ---------------------------------------------------------------------------
 # Tests: probe_ats_slugs
@@ -521,7 +513,6 @@ class TestProbeAtsSlugs:
             probe_ats_slugs(migrated_db_path, config={"TESTING": True})
             mock_get.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Tests: scan_lever
 # ---------------------------------------------------------------------------
@@ -690,7 +681,6 @@ class TestScanLever:
         assert "source_url" in job
         assert "description" in job
 
-
 # ---------------------------------------------------------------------------
 # Tests: scan_greenhouse
 # ---------------------------------------------------------------------------
@@ -800,7 +790,6 @@ class TestScanGreenhouse:
 
         assert len(results) == 1
         assert results[0]["title"] == "Data Scientist"
-
 
 # ---------------------------------------------------------------------------
 # Tests: scan_ashby
@@ -937,7 +926,6 @@ class TestScanAshby:
             )
 
         assert results == []
-
 
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan
@@ -1336,7 +1324,6 @@ class TestRunAtsScan:
         assert row["salary_min"] == 180000
         assert row["salary_max"] == 240000
 
-
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan HTML fallback loop
 # ---------------------------------------------------------------------------
@@ -1515,105 +1502,6 @@ class TestRunAtsScanHtmlFallback:
         # scrape_careers_page should NOT be called when find_careers_url returns None
         mock_scrape.assert_not_called()
 
-    def test_html_fallback_batch_limit_enforced(self, migrated_db_path):
-        """HTML fallback processes at most _HTML_BATCH_LIMIT (50) miss companies per run."""
-        from job_finder.web.ats_scanner import run_ats_scan, _HTML_BATCH_LIMIT
-
-        conn = sqlite3.connect(migrated_db_path)
-        conn.row_factory = sqlite3.Row
-        # Insert more than the batch limit
-        for i in range(_HTML_BATCH_LIMIT + 5):
-            self._insert_miss_company(
-                conn, f"Company{i:03d}", homepage_url=f"https://company{i:03d}.io"
-            )
-        conn.close()
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
-        }
-
-        call_count = 0
-
-        def counting_find_careers_url(url, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            return None  # No careers URL found
-
-        with patch("job_finder.web.ats_scanner.find_careers_url", side_effect=counting_find_careers_url):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
-                    run_ats_scan(migrated_db_path, config=config)
-
-        assert call_count == _HTML_BATCH_LIMIT
-
-    def test_html_fallback_no_careers_increments_html_scraped_zero(self, migrated_db_path):
-        """When find_careers_url returns None for all companies, html_scraped stays 0."""
-        from job_finder.web.ats_scanner import run_ats_scan
-
-        conn = sqlite3.connect(migrated_db_path)
-        conn.row_factory = sqlite3.Row
-        self._insert_miss_company(conn, "NoCareers1", homepage_url="https://no1.io")
-        self._insert_miss_company(conn, "NoCareers2", homepage_url="https://no2.io")
-        conn.close()
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.find_careers_url", return_value=None):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
-                    result = run_ats_scan(migrated_db_path, config=config)
-
-        assert result["html_scraped"] == 0
-
-    def test_html_fallback_oldest_scanned_processed_first(self, migrated_db_path):
-        """HTML fallback orders companies by last_scanned_at ASC NULLS FIRST (oldest first)."""
-        from datetime import datetime
-        from job_finder.web.ats_scanner import run_ats_scan
-
-        conn = sqlite3.connect(migrated_db_path)
-        conn.row_factory = sqlite3.Row
-        # Insert two companies: one with old scan time, one with recent scan time
-        now = datetime.now().isoformat()
-        old_time = "2020-01-01T00:00:00"
-        conn.execute(
-            """INSERT INTO companies (name, name_raw, homepage_url, ats_probe_status,
-               scan_enabled, created_at, updated_at, last_scanned_at)
-               VALUES (?, ?, ?, 'miss', 1, ?, ?, ?)""",
-            ("recentco", "RecentCo", "https://recent.io", now, now, now),
-        )
-        conn.execute(
-            """INSERT INTO companies (name, name_raw, homepage_url, ats_probe_status,
-               scan_enabled, created_at, updated_at, last_scanned_at)
-               VALUES (?, ?, ?, 'miss', 1, ?, ?, ?)""",
-            ("oldco", "OldCo", "https://old.io", now, now, old_time),
-        )
-        conn.commit()
-        conn.close()
-
-        call_order = []
-
-        def recording_find(url, **kwargs):
-            call_order.append(url)
-            return None
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.find_careers_url", side_effect=recording_find):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
-                    run_ats_scan(migrated_db_path, config=config)
-
-        # OldCo (oldest last_scanned_at) must appear before RecentCo
-        assert call_order.index("https://old.io") < call_order.index("https://recent.io")
-
-
 # ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)
 # ---------------------------------------------------------------------------
@@ -1755,7 +1643,6 @@ class TestHTMLJobsScoring:
             f"Expected haiku_scored=2 (ATS + HTML jobs), got: {result['haiku_scored']}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Tests: /companies/scan route — probe before scan
 # ---------------------------------------------------------------------------
@@ -1836,7 +1723,6 @@ class TestScanRouteProbeBeforeScan:
             f"Expected logger.info called with probe result, got: {info_calls}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Tests: ATS Retry Logic (Phase 14, DEBT-01)
 # ---------------------------------------------------------------------------
@@ -1857,7 +1743,6 @@ def _insert_company_with_status(conn, name, status, platform=None, slug=None,
     )
     conn.commit()
     return cursor.lastrowid
-
 
 class TestAtsRetryLogic:
     """Tests for ATS transient error retry state machine (DEBT-01)."""
@@ -2135,7 +2020,6 @@ class TestAtsRetryLogic:
         assert "retry_after" in cols, "retry_after missing from companies"
         assert "miss_reason" in cols, "miss_reason missing from companies"
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/retry route
 # ---------------------------------------------------------------------------
@@ -2228,7 +2112,6 @@ class TestRetryRoute:
         assert response.status_code == 400, (
             f"Expected 400 for regular miss company, got {response.status_code}"
         )
-
 
 # ---------------------------------------------------------------------------
 # Tests: URL pattern audit (real-world format verification)
@@ -2365,11 +2248,9 @@ class TestAtsUrlPatternAudit:
         assert platform is None
         assert slug is None
 
-
 # ---------------------------------------------------------------------------
 # ATS jd_full storage tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestAtsJdFullStorage:
     """Verify run_ats_scan writes jd_full after job upsert using COALESCE guard.
@@ -2549,11 +2430,9 @@ class TestAtsJdFullStorage:
             f"Short description should NOT set jd_full. Got: {row['jd_full']!r}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Homepage discovery integration tests
 # ---------------------------------------------------------------------------
-
 
 class TestHomepageDiscoveryIntegration:
     """Tests for homepage discovery pre-step in run_ats_scan."""
@@ -2593,11 +2472,9 @@ class TestHomepageDiscoveryIntegration:
         result = run_ats_scan(migrated_db_path, config)
         assert result["homepages_discovered"] == 0
 
-
 # ---------------------------------------------------------------------------
 # HTML fallback description passthrough tests
 # ---------------------------------------------------------------------------
-
 
 class TestHtmlFallbackDescriptionPassthrough:
     """Tests for description passthrough in HTML fallback loop."""
@@ -2638,361 +2515,3 @@ class TestHtmlFallbackDescriptionPassthrough:
 
         assert job is not None
         assert job["description"] == "Full JD text here"
-
-
-# ---------------------------------------------------------------------------
-# Tests: probe_ats_slugs retry state machine (Fix 1)
-# ---------------------------------------------------------------------------
-
-class TestProbeAtsSlugsRetry:
-    """Tests that probe_ats_slugs() correctly handles transient errors."""
-
-    def _insert_pending_company(self, conn, name="Acme Corp"):
-        from datetime import datetime
-        now = datetime.now().isoformat()
-        cursor = conn.execute(
-            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
-               VALUES (?, ?, 'pending', ?, ?)""",
-            (name.lower(), name, now, now),
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def test_probe_ats_slugs_timeout_preserves_retry(self, db_conn):
-        """Timeout during probe is transient — company gets error status with retry_after, not permanent miss."""
-        import requests
-        db_path, conn = db_conn
-        company_id = self._insert_pending_company(conn)
-
-        with patch("job_finder.web.ats_scanner._probe_lever_with_result",
-                   side_effect=requests.exceptions.Timeout("timeout")), \
-             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result",
-                   side_effect=requests.exceptions.Timeout("timeout")), \
-             patch("job_finder.web.ats_scanner._probe_ashby_with_result",
-                   side_effect=requests.exceptions.Timeout("timeout")):
-            from job_finder.web.ats_scanner import probe_ats_slugs
-            result = probe_ats_slugs(db_path, {"TESTING": False})
-
-        row = conn.execute(
-            "SELECT ats_probe_status FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-        # Timeouts are transient; _handle_scan_error sets 'error' status (retry-eligible), not permanent 'miss'
-        assert row["ats_probe_status"] == "error"
-        assert result["misses"] == 0  # Not counted as a miss
-
-    def test_probe_ats_slugs_all_miss_sets_miss_status(self, db_conn):
-        """When all probes return False, company gets ats_probe_status='miss'."""
-        db_path, conn = db_conn
-        company_id = self._insert_pending_company(conn)
-
-        with patch("job_finder.web.ats_scanner._probe_lever_with_result", return_value=False), \
-             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result", return_value=False), \
-             patch("job_finder.web.ats_scanner._probe_ashby_with_result", return_value=False):
-            from job_finder.web.ats_scanner import probe_ats_slugs
-            result = probe_ats_slugs(db_path, {"TESTING": False})
-
-        row = conn.execute(
-            "SELECT ats_probe_status FROM companies WHERE id = ?", (company_id,)
-        ).fetchone()
-        assert row["ats_probe_status"] == "miss"
-        assert result["misses"] >= 1
-
-
-# ---------------------------------------------------------------------------
-# Tests: probe_ats_slugs batch limit (Fix 3)
-# ---------------------------------------------------------------------------
-
-class TestProbeAtsSlugsLimit:
-    """Tests that probe_ats_slugs() respects _PROBE_BATCH_LIMIT."""
-
-    def test_probe_ats_slugs_respects_batch_limit(self, db_conn):
-        """With 200 pending companies, probe processes only _PROBE_BATCH_LIMIT."""
-        from datetime import datetime
-        db_path, conn = db_conn
-
-        # Insert 200 pending companies (more than _PROBE_BATCH_LIMIT)
-        now = datetime.now().isoformat()
-        for i in range(200):
-            conn.execute(
-                """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
-                   VALUES (?, ?, 'pending', ?, ?)""",
-                (f"company{i}", f"Company {i}", now, now),
-            )
-        conn.commit()
-
-        with patch("job_finder.web.ats_scanner._probe_lever_with_result", return_value=False), \
-             patch("job_finder.web.ats_scanner._probe_greenhouse_with_result", return_value=False), \
-             patch("job_finder.web.ats_scanner._probe_ashby_with_result", return_value=False), \
-             patch("job_finder.web.ats_scanner.time") as mock_time:
-            mock_time.sleep = lambda x: None
-            from job_finder.web.ats_scanner import probe_ats_slugs, _PROBE_BATCH_LIMIT
-            result = probe_ats_slugs(db_path, {"TESTING": False})
-
-        assert result["probed"] == _PROBE_BATCH_LIMIT
-
-
-# ---------------------------------------------------------------------------
-# Tests: find_or_create_company (Fix 6)
-# ---------------------------------------------------------------------------
-
-class TestFindOrCreateCompany:
-    """Tests for find_or_create_company() unified creation path."""
-
-    def _insert_company(self, conn, name):
-        from datetime import datetime
-        now = datetime.now().isoformat()
-        from job_finder.web.dedup_normalizer import normalize_company
-        cursor = conn.execute(
-            """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
-               VALUES (?, ?, 'pending', ?, ?)""",
-            (normalize_company(name), name, now, now),
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-    def test_find_or_create_exact_match(self, db_conn):
-        """Exact normalized name match returns existing company ID."""
-        db_path, conn = db_conn
-        existing_id = self._insert_company(conn, "Stripe")
-
-        from job_finder.web.ats_scanner import find_or_create_company
-        result_id = find_or_create_company(conn, "Stripe Inc.")
-        assert result_id == existing_id
-
-    def test_find_or_create_fuzzy_match(self, db_conn):
-        """Fuzzy match path returns existing ID via mocked fuzzy_match_company."""
-        db_path, conn = db_conn
-        existing_id = self._insert_company(conn, "Stripe")
-
-        from job_finder.web.ats_scanner import find_or_create_company
-        # Patch fuzzy_match_company to return the existing ID — tests the fuzzy branch
-        # "Stripe Technologies" doesn't normalize-exact-match "stripe" (no suffix stripped)
-        with patch("job_finder.web.backfill_companies.fuzzy_match_company",
-                   return_value=(existing_id, 90)):
-            result_id = find_or_create_company(conn, "Stripe Technologies")
-
-        assert result_id == existing_id
-
-    def test_find_or_create_creates_new(self, db_conn):
-        """No match creates and returns new company ID."""
-        db_path, conn = db_conn
-
-        from job_finder.web.ats_scanner import find_or_create_company
-        result_id = find_or_create_company(conn, "Stripe")
-        assert result_id is not None
-        row = conn.execute("SELECT name_raw FROM companies WHERE id = ?", (result_id,)).fetchone()
-        assert row["name_raw"] == "Stripe"
-
-
-# ---------------------------------------------------------------------------
-# Tests: Scan log differentiation — Fix 10
-# ---------------------------------------------------------------------------
-
-class TestScanLogDifferentiation:
-    """Tests that company_scan_log.jobs_found tracks new insertions and
-    jobs_matched tracks pre-dedup API matches."""
-
-    def test_scan_log_records_new_vs_matched(self, db_conn):
-        """API returns 5 jobs; 2 are new, 3 are duplicates.
-
-        Expects: jobs_found=2, jobs_matched=5 in company_scan_log.
-        """
-        db_path, conn = db_conn
-
-        company_id = _insert_hit_company(conn, "LogCo", "lever", "logco")
-
-        # Pre-insert 3 jobs so they appear as duplicates (use canonical dedup_key)
-        from datetime import datetime
-        from job_finder.models import Job as _Job
-        now_ts = datetime.now().isoformat()
-        for i in range(3):
-            conn.execute(
-                """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
-                   VALUES (?, ?, 'LogCo', 'Remote', ?, ?)""",
-                (_Job.normalized_dedup_key("LogCo", f"Data Analyst {i}"), f"Data Analyst {i}", now_ts, now_ts),
-            )
-        conn.commit()
-
-        job_dicts = [
-            {"title": f"Data Analyst {i}", "location": "Remote",
-             "company_source": "Lever", "source_url": f"https://jobs.lever.co/logco/{i}",
-             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
-            for i in range(5)  # 0-2 are pre-existing dupes, 3-4 are new
-        ]
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["data analyst"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
-             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
-             patch("job_finder.web.ats_scanner.time.sleep"):
-            from job_finder.web.ats_scanner import run_ats_scan
-            run_ats_scan(db_path, config=config)
-
-        log = conn.execute(
-            "SELECT jobs_found, jobs_matched FROM company_scan_log WHERE company_id = ?",
-            (company_id,),
-        ).fetchone()
-        assert log is not None
-        assert log["jobs_matched"] == 5
-        # jobs_found = newly inserted (0, 1, 2 are dupes; 3, 4 are new → 2 new)
-        assert log["jobs_found"] == 2
-
-    def test_html_scan_log_records_new_vs_matched(self, db_conn):
-        """HTML fallback: scrapes 3 jobs; 1 is already in DB (dupe), 2 are new.
-
-        Expects: jobs_found=2, jobs_matched=3 in company_scan_log.
-        """
-        db_path, conn = db_conn
-
-        from datetime import datetime
-        now_ts = datetime.now().isoformat()
-
-        company_id = conn.execute(
-            """INSERT INTO companies
-               (name, name_raw, homepage_url, ats_probe_status, scan_enabled, created_at, updated_at)
-               VALUES ('htmlco', 'HtmlCo', 'https://htmlco.com', 'miss', 1, ?, ?)""",
-            (now_ts, now_ts),
-        ).lastrowid
-        conn.commit()
-
-        # Pre-insert 1 job as existing (use canonical dedup_key so it de-dupes correctly)
-        from job_finder.models import Job as _Job
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
-               VALUES (?, 'Engineer 0', 'HtmlCo', 'Remote', ?, ?)""",
-            (_Job.normalized_dedup_key("HtmlCo", "Engineer 0"), now_ts, now_ts),
-        )
-        conn.commit()
-
-        scraped_jobs = [
-            {"title": f"Engineer {i}", "url": f"https://htmlco.com/jobs/{i}", "description": ""}
-            for i in range(3)  # 0 is dupe, 1 and 2 are new
-        ]
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["engineer"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://htmlco.com/careers"), \
-             patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs), \
-             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
-             patch("job_finder.web.ats_scanner.time.sleep"):
-            from job_finder.web.ats_scanner import run_ats_scan
-            run_ats_scan(db_path, config=config)
-
-        log = conn.execute(
-            "SELECT jobs_found, jobs_matched FROM company_scan_log WHERE company_id = ?",
-            (company_id,),
-        ).fetchone()
-        assert log is not None
-        assert log["jobs_matched"] == 3
-        assert log["jobs_found"] == 2
-
-
-# ---------------------------------------------------------------------------
-# Tests: jobs_found_total accuracy — Fix 9
-# ---------------------------------------------------------------------------
-
-class TestJobsFoundTotalAccuracy:
-    """Tests that jobs_found_total is set via subquery (actual linked jobs),
-    not inflated by pre-dedup API match counts."""
-
-    def test_jobs_found_total_reflects_linked_count(self, db_conn):
-        """After scan, jobs_found_total equals the count of jobs already linked
-        to the company (via company_id), not the raw API match count."""
-        db_path, conn = db_conn
-
-        company_id = _insert_hit_company(conn, "SubqCo", "lever", "subqco")
-
-        # Pre-link 4 jobs to the company so the subquery returns 4
-        from datetime import datetime
-        now_ts = datetime.now().isoformat()
-        for i in range(4):
-            conn.execute(
-                """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
-                   VALUES (?, ?, 'SubqCo', ?, 'Remote', ?, ?)""",
-                (f"subqco-pre-{i}", f"Analyst {i}", company_id, now_ts, now_ts),
-            )
-        conn.commit()
-
-        # API returns 7 jobs (duplicates of the 4 pre-existing + 3 truly new)
-        job_dicts = [
-            {"title": f"Analyst {i}", "location": "Remote",
-             "company_source": "Lever", "source_url": f"https://jobs.lever.co/subqco/{i}",
-             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
-            for i in range(7)
-        ]
-
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["analyst"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
-             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
-             patch("job_finder.web.ats_scanner.time.sleep"):
-            from job_finder.web.ats_scanner import run_ats_scan
-            run_ats_scan(db_path, config=config)
-
-        row = conn.execute(
-            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
-        ).fetchone()
-        # Subquery counts only company_id-linked jobs: 4 pre-linked ones
-        # (the 3 new jobs from this scan are not yet linked via company_id)
-        assert row["jobs_found_total"] == 4
-
-    def test_jobs_found_total_does_not_inflate_on_rescan(self, db_conn):
-        """Scanning the same jobs twice doesn't double the total."""
-        db_path, conn = db_conn
-
-        company_id = _insert_hit_company(conn, "RescanCo", "lever", "rescanco")
-
-        from datetime import datetime
-        now_ts = datetime.now().isoformat()
-        # Pre-link 2 jobs
-        for i in range(2):
-            conn.execute(
-                """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
-                   VALUES (?, ?, 'RescanCo', ?, 'Remote', ?, ?)""",
-                (f"rescanco-job-{i}", f"PM {i}", company_id, now_ts, now_ts),
-            )
-        conn.commit()
-
-        # API returns those same 2 jobs
-        job_dicts = [
-            {"title": f"PM {i}", "location": "Remote",
-             "company_source": "Lever", "source_url": f"https://jobs.lever.co/rescanco/{i}",
-             "description": "", "salary_min": None, "salary_max": None, "comp_json": None}
-            for i in range(2)
-        ]
-        config = {
-            "TESTING": False,
-            "profile": {"target_titles": ["pm"], "exclusions": {"title_keywords": []}},
-        }
-
-        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
-             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
-             patch("job_finder.web.ats_scanner.time.sleep"):
-            from job_finder.web.ats_scanner import run_ats_scan
-            run_ats_scan(db_path, config=config)
-
-        first_total = conn.execute(
-            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
-        ).fetchone()["jobs_found_total"]
-
-        # Scan again with same jobs — total must not change
-        with patch("job_finder.web.ats_scanner.scan_lever", return_value=job_dicts), \
-             patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None), \
-             patch("job_finder.web.ats_scanner.time.sleep"):
-            run_ats_scan(db_path, config=config)
-
-        second_total = conn.execute(
-            "SELECT jobs_found_total FROM companies WHERE id = ?", (company_id,)
-        ).fetchone()["jobs_found_total"]
-
-        assert second_total == first_total

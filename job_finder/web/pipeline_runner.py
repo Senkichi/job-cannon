@@ -1,6 +1,6 @@
 """Ingestion pipeline runner for the Flask web app.
 
-Orchestrates Gmail + SerpAPI + Thordata ingestion with:
+Orchestrates Gmail + SerpAPI ingestion with:
 - Run-level tracking via email_parse_log (prevents redundant log entries)
 - Per-source error isolation (Gmail failure does not stop SerpAPI)
 - Per-job error isolation (one bad job does not halt persistence)
@@ -12,54 +12,29 @@ Orchestrates Gmail + SerpAPI + Thordata ingestion with:
 Thread-safety: Creates a NEW sqlite3 connection per call. This function runs
 in the APScheduler background thread -- it must NOT share a connection with
 the Flask request thread.
-
-Private helpers live in ingestion_runner.py and are re-exported here so that
-existing patch paths (job_finder.web.pipeline_runner.*) continue to work
-without any test changes.
 """
 
+import json
 import logging
+import sqlite3
 import threading
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import Optional
 
-if TYPE_CHECKING:
-    pass
-
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
-from job_finder.config import DEFAULT_LOOKBACK_DAYS
+from job_finder.config import DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.db import upsert_job, log_run
+from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_runner import run_haiku_scoring, run_sonnet_evaluation
+
+# ats_scanner import is lazy (inside _score_and_persist) to avoid circular import:
+# ats_scanner → dedup_normalizer → pipeline_runner → ats_scanner (partial)
 
 try:
     from job_finder.sources.gmail_source import GmailSource
 except ImportError:
     GmailSource = None  # type: ignore[assignment,misc]
-
-# Re-export all helpers from ingestion_runner so existing patch paths work:
-#   patch("job_finder.web.pipeline_runner._fetch_gmail", ...)  ← still valid
-#   patch("job_finder.web.pipeline_runner.GmailSource", ...)   ← still valid (imported above)
-#   patch("job_finder.web.pipeline_runner.anthropic", ...)     ← still valid (imported above)
-#   patch("job_finder.web.pipeline_runner.upsert_job", ...)    ← still valid (imported above)
-from job_finder.web.ingestion_runner import (  # noqa: E402
-    _collect_dataforseo_results,
-    _fetch_gmail,
-    _fetch_scaleserp,
-    _fetch_serpapi,
-    _fetch_thordata,
-    _log_to_email_parse_log,
-    _prune_stale_data,
-    _score_and_persist,
-    _submit_dataforseo_tasks,
-    _touch_existing_job,
-    _upsert_job_company,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +44,6 @@ logger = logging.getLogger(__name__)
 # inside a `with _budget_alert_lock:` block to prevent data races.
 _budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
-
 
 def run_ingestion(db_path: str, config: dict) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
@@ -87,11 +61,8 @@ def run_ingestion(db_path: str, config: dict) -> dict:
             - gmail_errors: list[str]
             - serpapi_fetched: int
             - serpapi_errors: list[str]
-            - thordata_fetched: int
-            - thordata_errors: list[str]
             - jobs_new: int
             - jobs_updated: int
-            - jobs_touch_only: int
             - jobs_scored: int
             - job_errors: list[str]
             - haiku_scored: int
@@ -106,15 +77,8 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         "gmail_errors": [],
         "serpapi_fetched": 0,
         "serpapi_errors": [],
-        "thordata_fetched": 0,
-        "thordata_errors": [],
-        "scaleserp_fetched": 0,
-        "scaleserp_errors": [],
-        "dataforseo_fetched": 0,
-        "dataforseo_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
-        "jobs_touch_only": 0,
         "jobs_scored": 0,
         "job_errors": [],
         "haiku_scored": 0,
@@ -129,71 +93,18 @@ def run_ingestion(db_path: str, config: dict) -> dict:
     scorer = JobScorer(config)
 
     with standalone_connection(db_path) as runner_conn:
-        # --- Phase 1: Submit DataForSEO tasks (non-blocking ~2s) ---
-        # Tasks are submitted first so DataForSEO's 60-120s server-side processing
-        # overlaps with Gmail's ~70s fetch, cutting total ingestion time by ~60s.
-        dataforseo_task_ids, dataforseo_source = _submit_dataforseo_tasks(config, summary)
-
-        # --- Phase 2: Fetch other sources (DataForSEO processes server-side) ---
+        # --- Gmail ingestion ---
         gmail_jobs = _fetch_gmail(config, runner_conn, summary)
-        serpapi_jobs = _fetch_serpapi(config, summary)
-        thordata_jobs = _fetch_thordata(config, summary)
-        scaleserp_jobs = _fetch_scaleserp(config, summary)
 
-        # --- Phase 3: Collect DataForSEO results (tasks likely complete by now) ---
-        dataforseo_jobs = _collect_dataforseo_results(
-            dataforseo_source, dataforseo_task_ids, summary
-        )
+        # --- SerpAPI ingestion ---
+        serpapi_jobs = _fetch_serpapi(config, summary)
 
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + dataforseo_jobs
+        all_jobs = gmail_jobs + serpapi_jobs
 
-        # --- Batch pre-check: skip scoring for already-known, non-archived jobs ---
-        existing_statuses: dict[str, str] = {}
-        candidate_keys = [job.dedup_key for job in all_jobs]
-        if candidate_keys:
-            # SQLite SQLITE_MAX_VARIABLE_NUMBER default is 999; chunk for safety
-            for i in range(0, len(candidate_keys), 900):
-                chunk = candidate_keys[i : i + 900]
-                placeholders = ",".join("?" * len(chunk))
-                rows = runner_conn.execute(
-                    f"SELECT dedup_key, pipeline_status FROM jobs WHERE dedup_key IN ({placeholders})",
-                    chunk,
-                ).fetchall()
-                for r in rows:
-                    existing_statuses[r[0]] = r[1]
-
-        skipped = 0
-        full_scoring_count = 0
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
-            if (
-                job.dedup_key in existing_statuses
-                and existing_statuses[job.dedup_key] != "archived"
-                and job.salary_min is None
-                and job.salary_max is None
-            ):
-                # Known, non-archived job with no new salary data — lightweight touch only
-                try:
-                    _touch_existing_job(job, runner_conn, summary)
-                    skipped += 1
-                except Exception as e:
-                    logger.warning(
-                        "Touch-update failed for '%s': %s — falling back to full scoring",
-                        job.dedup_key,
-                        e,
-                    )
-                    _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
-                    full_scoring_count += 1
-            else:
-                _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
-                full_scoring_count += 1
-
-        logger.info(
-            "Pre-dedup: %d known (touch-only), %d routed to full scoring",
-            skipped,
-            full_scoring_count,
-        )
+            _score_and_persist(job, scorer, runner_conn, summary, new_job_keys)
 
         # --- Log run totals to runs table ---
         jobs_new = summary["jobs_new"]
@@ -211,66 +122,27 @@ def run_ingestion(db_path: str, config: dict) -> dict:
             except Exception as e:
                 logger.warning("Failed to log SerpAPI run: %s", e)
 
-        if summary["thordata_fetched"] > 0 or summary["thordata_errors"]:
-            try:
-                log_run(runner_conn, "thordata", summary["thordata_fetched"], jobs_new, jobs_scored)
-            except Exception as e:
-                logger.warning("Failed to log Thordata run: %s", e)
-
-        if summary["scaleserp_fetched"] > 0 or summary["scaleserp_errors"]:
-            try:
-                log_run(runner_conn, "scaleserp", summary["scaleserp_fetched"], jobs_new, jobs_scored)
-            except Exception as e:
-                logger.warning("Failed to log ScaleSerp run: %s", e)
-
-        if summary["dataforseo_fetched"] > 0 or summary["dataforseo_errors"]:
-            try:
-                log_run(runner_conn, "dataforseo", summary["dataforseo_fetched"], jobs_new, jobs_scored)
-            except Exception as e:
-                logger.warning("Failed to log DataForSEO run: %s", e)
-
-        # --- Prune stale data (TTL housekeeping) ---
-        gmail_lookback = config.get("sources", {}).get("gmail", {}).get(
-            "lookback_days", DEFAULT_LOOKBACK_DAYS
-        )
-        _prune_stale_data(runner_conn, gmail_lookback)
-
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
-    # Scoring functions now self-gate on tier_has_configured_provider() —
-    # no need to check Anthropic availability at the pipeline level.
     if new_job_keys:
-        try:
-            sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
-            summary["haiku_scored"] = haiku_scored_count
-            summary["sonnet_queue"] = sonnet_queue
-            summary["sonnet_queued"] = len(sonnet_queue)
-        except Exception as e:
-            logger.error("Haiku scoring failed (non-fatal): %s", e)
-            sonnet_queue = []
+        sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
+        summary["haiku_scored"] = haiku_scored_count
+        summary["sonnet_queue"] = sonnet_queue
+        summary["sonnet_queued"] = len(sonnet_queue)
 
         # Run Sonnet evaluation for jobs above threshold
         if sonnet_queue:
-            try:
-                sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
-                summary["sonnet_evaluated"] = sonnet_evaluated
-            except Exception as e:
-                logger.error("Sonnet evaluation failed (non-fatal): %s", e)
-
+            sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
+            summary["sonnet_evaluated"] = sonnet_evaluated
     # --- Budget alert notification (check after AI scoring completes) ---
     _check_budget_alert(config, db_path)
 
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
-    total_fetched = (
-        summary["gmail_fetched"] + summary["serpapi_fetched"]
-        + summary["thordata_fetched"] + summary["scaleserp_fetched"]
-        + summary["dataforseo_fetched"]
-    )
+    total_fetched = summary["gmail_fetched"] + summary["serpapi_fetched"]
     logger.info(
-        "Ingestion complete: %d fetched, %d new, %d touch-only, %d haiku-scored, %d sonnet-evaluated in %.1fs",
+        "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
         total_fetched,
         summary["jobs_new"],
-        summary["jobs_touch_only"],
         summary["haiku_scored"],
         summary["sonnet_evaluated"],
         summary["duration_seconds"],
@@ -278,22 +150,229 @@ def run_ingestion(db_path: str, config: dict) -> dict:
 
     return summary
 
+def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[Job]:
+    """Fetch jobs from Gmail with run-level email_parse_log tracking.
+
+    Uses a run-level log entry (not per-message) to track that Gmail was polled.
+    Per-message dedup is handled by upsert_job's dedup_key logic.
+
+    Args:
+        config: Full config dict.
+        conn: SQLite connection for email_parse_log writes.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects parsed from Gmail.
+    """
+    gmail_config = config.get("sources", {}).get("gmail", {})
+    if not gmail_config.get("enabled", True):
+        logger.debug("Gmail source disabled in config.")
+        return []
+
+    run_id = f"gmail_run_{datetime.now().isoformat()}"
+    lookback_days = gmail_config.get("lookback_days", DEFAULT_LOOKBACK_DAYS)
+
+    try:
+        source = GmailSource()
+        jobs = source.fetch_jobs(lookback_days=lookback_days)
+        summary["gmail_fetched"] = len(jobs)
+
+        # Log parse failure activity feed entries
+        # (per locked decision: "Non-meta emails that parse to zero jobs create
+        # an activity feed entry")
+        for failure in getattr(source, "parse_failures", []):
+            try:
+                fail_sender = failure.get("sender", "unknown")
+                domain = (
+                    fail_sender.split("@")[-1].replace(".", "_")
+                    if "@" in fail_sender
+                    else fail_sender
+                )
+                conn.execute(
+                    "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)"
+                    " VALUES (?, ?, 0, 0, 0)",
+                    (datetime.now().isoformat(), f"{domain}_parse_failure"),
+                )
+                conn.commit()
+                logger.debug("Zero-job email routed to activity feed: %s", fail_sender)
+            except Exception as e:
+                logger.warning("Failed to log parse failure to runs: %s", e)
+
+        # Log the run to email_parse_log
+        _log_to_email_parse_log(conn, run_id, "gmail", len(jobs), None)
+
+        logger.info("Gmail: fetched %d jobs", len(jobs))
+        return jobs
+
+    except Exception as e:
+        error_msg = str(e)
+        summary["gmail_errors"].append(error_msg)
+        logger.warning("Gmail ingestion failed: %s", error_msg)
+
+        # Log the failure
+        _log_to_email_parse_log(conn, run_id, "gmail", 0, error_msg)
+
+        return []
+
+def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
+    """Fetch jobs from SerpAPI with error isolation.
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects from SerpAPI.
+    """
+    serpapi_config = config.get("sources", {}).get("serpapi", {})
+    if not serpapi_config.get("enabled", False):
+        logger.debug("SerpAPI source disabled in config.")
+        return []
+
+    api_key = serpapi_config.get("api_key", "")
+    if not api_key:
+        msg = "SerpAPI key not configured"
+        summary["serpapi_errors"].append(msg)
+        logger.warning(msg)
+        return []
+
+    queries = serpapi_config.get("queries", [])
+    if not queries:
+        logger.debug("No SerpAPI queries configured.")
+        return []
+
+    try:
+        from job_finder.sources.serpapi_source import SerpAPISource
+
+        source = SerpAPISource(api_key)
+        jobs = source.fetch_jobs(queries)
+        summary["serpapi_fetched"] = len(jobs)
+
+        logger.info("SerpAPI: fetched %d jobs", len(jobs))
+        return jobs
+
+    except Exception as e:
+        error_msg = str(e)
+        summary["serpapi_errors"].append(error_msg)
+        logger.warning("SerpAPI ingestion failed: %s", error_msg)
+        return []
+
+def _score_and_persist(
+    job: Job, scorer: JobScorer, conn, summary: dict, new_job_keys: list[str]
+) -> None:
+    """Score a single job and persist it. Errors are logged but not re-raised.
+
+    Per-job error isolation: if scoring or persistence fails for one job,
+    processing continues for the remaining jobs.
+
+    Args:
+        job: Job object to score and persist.
+        scorer: Initialized JobScorer instance.
+        conn: Open sqlite3 connection.
+        summary: Mutable summary dict to update.
+        new_job_keys: Mutable list; new job dedup_keys are appended here.
+    """
+    try:
+        # Score the job (updates job.score and job.score_breakdown in place)
+        scored_job = scorer.score_jobs([job])
+        if scored_job:
+            job = scored_job[0]
+            summary["jobs_scored"] += 1
+
+        # Persist (upsert handles dedup by dedup_key)
+        is_new = upsert_job(conn, job)
+        if is_new:
+            summary["jobs_new"] += 1
+            new_job_keys.append(job.dedup_key)
+        else:
+            summary["jobs_updated"] += 1
+
+        # Company auto-population: create/update company record for every job
+        # Non-fatal: company upsert failure does not crash ingestion
+        # Lazy import to avoid circular: ats_scanner → dedup_normalizer → pipeline_runner
+        try:
+            from job_finder.web.ats_detection import extract_ats_from_urls
+            from job_finder.web.ats_scanner import upsert_company
+        except ImportError:
+            extract_ats_from_urls = None  # type: ignore[assignment]
+            upsert_company = None  # type: ignore[assignment]
+        if upsert_company is not None:
+            try:
+                # job.source_url is a single URL string; wrap in list for extract_ats_from_urls
+                source_url = job.source_url or ""
+                source_urls = [source_url] if source_url else []
+                ats_platform, ats_slug = extract_ats_from_urls(source_urls)
+                probe_status = "hit" if ats_slug else "pending"
+                company_id = upsert_company(
+                    conn,
+                    name=job.company,
+                    ats_platform=ats_platform,
+                    ats_slug=ats_slug,
+                    ats_probe_status=probe_status,
+                )
+                if company_id:
+                    conn.execute(
+                        "UPDATE jobs SET company_id = ? WHERE dedup_key = ?",
+                        (company_id, job.dedup_key),
+                    )
+                    conn.commit()
+            except Exception as company_err:
+                logger.debug(
+                    "Company upsert failed for '%s' (non-fatal): %s",
+                    job.company,
+                    company_err,
+                )
+
+    except Exception as e:
+        error_msg = f"{job.title} @ {job.company}: {e}"
+        summary["job_errors"].append(error_msg)
+        logger.warning(
+            "Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e
+        )
+
+def _log_to_email_parse_log(
+    conn: sqlite3.Connection,
+    message_id: str,
+    sender: str,
+    jobs_found: int,
+    error: Optional[str],
+) -> None:
+    """Insert a record into email_parse_log.
+
+    Uses INSERT OR IGNORE so re-runs with the same message_id don't fail.
+
+    Args:
+        conn: Active SQLite connection.
+        message_id: Unique ID for this log entry (run-level or message-level).
+        sender: Source label (e.g., "gmail", "no-reply@ziprecruiter.com").
+        jobs_found: Number of jobs parsed from this email/run.
+        error: Error message if parsing failed, else None.
+    """
+    try:
+        conn.execute(
+            """INSERT OR IGNORE INTO email_parse_log
+               (message_id, sender, processed_at, jobs_found, error)
+               VALUES (?, ?, ?, ?, ?)""",
+            (message_id, sender, datetime.now().isoformat(), jobs_found, error),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning("Failed to write to email_parse_log: %s", e)
 
 def _check_budget_alert(config: dict, db_path: str) -> None:
-    """Check daily AI spend and fire budget alert notification if thresholds crossed.
+    """Check monthly AI spend and fire budget alert notification if thresholds crossed.
 
     Tracks the last notified threshold level via module-level variable to avoid
     repeated notifications within a single app session. Resets on app restart.
 
     Args:
-        config: Full JF_CONFIG dict (reads scoring.daily_budget_usd and
+        config: Full JF_CONFIG dict (reads scoring.monthly_budget_usd and
                 notifications.budget_alert toggle).
         db_path: Path to the SQLite database file.
     """
     global _last_budget_pct_notified
 
-    from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
-    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
+    budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
     if not budget_cap or budget_cap <= 0:
         return
 
@@ -302,11 +381,11 @@ def _check_budget_alert(config: dict, db_path: str) -> None:
             from job_finder.web.claude_client import get_cost_stats
             stats = get_cost_stats(conn)
 
-        daily_spend = stats.get("today", 0.0)
-        if daily_spend <= 0:
+        monthly_spend = stats.get("month", 0.0)
+        if monthly_spend <= 0:
             return
 
-        pct = (daily_spend / budget_cap) * 100
+        pct = (monthly_spend / budget_cap) * 100
 
         from job_finder.web.notifier import notify_budget_alert
 

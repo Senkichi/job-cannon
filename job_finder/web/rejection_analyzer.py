@@ -22,10 +22,8 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
-
-from job_finder.web.claude_client import BudgetExceededError
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_OPUS
+from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -103,7 +101,6 @@ _SYSTEM_PROMPT = (
     "End with concrete actionable recommendations linking to profile improvements."
 )
 
-
 # ---------------------------------------------------------------------------
 # Core analysis function
 # ---------------------------------------------------------------------------
@@ -115,7 +112,7 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
 
     Args:
         db_path: Path to the SQLite database file.
-        config: Application config dict (reads scoring.daily_budget_usd and
+        config: Application config dict (reads scoring.monthly_budget_usd and
                 scoring.models.opus).
 
     Returns:
@@ -127,7 +124,6 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
     """
     with standalone_connection(db_path) as conn:
         return _run_analysis(conn, config)
-
 
 def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     """Internal: run analysis within an open connection."""
@@ -147,6 +143,16 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     if not rows:
         logger.info("Rejection analysis: no unreviewed rejections found, skipping")
         return {"rejections_analyzed": 0, "report_id": None, "cost_usd": 0.0}
+
+    # Budget gate before making Opus call
+    if not cost_gate(conn, config, "opus"):
+        logger.info("Rejection analysis: monthly budget cap reached, skipping Opus call")
+        return {
+            "rejections_analyzed": 0,
+            "report_id": None,
+            "cost_usd": 0.0,
+            "budget_exceeded": True,
+        }
 
     # Build batch input for Opus
     job_summaries = []
@@ -174,11 +180,17 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
         indent=2,
     )
 
+    # Determine Opus model from config
+    opus_model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("opus", DEFAULT_MODEL_OPUS)
+    )
+
     # Single Opus call for ALL rejections
-    client = anthropic.Anthropic()
     try:
-        result_obj = call_model(
-            tier="opus",
+        result, cost_usd = call_claude(
+            model=opus_model,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
             output_schema=REJECTION_ANALYSIS_SCHEMA,
@@ -187,18 +199,7 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
             purpose="opus_rejection_analysis",
             config=config,
             max_tokens=4096,
-            client=client,
         )
-        result = result_obj.data
-        cost_usd = result_obj.cost_usd
-    except BudgetExceededError:
-        logger.info("Rejection analysis: monthly budget cap reached, skipping Opus call")
-        return {
-            "rejections_analyzed": 0,
-            "report_id": None,
-            "cost_usd": 0.0,
-            "budget_exceeded": True,
-        }
     except Exception as exc:
         logger.error(
             "Rejection analysis Opus call failed (%d rejections): %s",

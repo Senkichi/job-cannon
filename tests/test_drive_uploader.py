@@ -14,7 +14,6 @@ Covers:
 import io
 from unittest.mock import MagicMock, patch
 
-
 def _make_creds(
     scopes=None,
     expired=False,
@@ -27,9 +26,7 @@ def _make_creds(
     creds.refresh_token = refresh_token
     return creds
 
-
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
-
 
 class TestGetDriveServiceErrors:
     """Tests for error conditions in get_drive_service."""
@@ -86,7 +83,6 @@ class TestGetDriveServiceErrors:
             except ValueError as exc:
                 assert "refresh" in str(exc).lower() or "failed" in str(exc).lower()
 
-
 class TestGetDriveServiceSuccess:
     """Tests for the happy path of get_drive_service."""
 
@@ -107,7 +103,6 @@ class TestGetDriveServiceSuccess:
             service = get_drive_service(token_path=str(token_file))
 
         assert service is mock_service
-
 
 class TestUploadToDrive:
     """Tests for upload_to_drive."""

@@ -14,16 +14,11 @@ import json
 import logging
 import sqlite3
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_SONNET
+from job_finder.web.claude_client import call_claude
 from job_finder.web.resume_generator import RESUME_SCHEMA
 
 logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # JSON schema for Sonnet audit output
@@ -69,7 +64,6 @@ VALIDATION_SCHEMA = {
     "required": ["passed", "violations"],
     "additionalProperties": False,
 }
-
 
 # ---------------------------------------------------------------------------
 # System prompt for audit pass
@@ -133,7 +127,6 @@ _FIX_SYSTEM = (
     "Return the complete fixed resume matching the output schema."
 )
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -165,12 +158,11 @@ def validate_resume(
         On any exception, returns {"passed": True, "violations": []} (fail-open).
     """
     try:
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         # Build a compact profile summary for Sonnet to cross-reference
         profile_skills = profile.get("skills", [])
@@ -196,24 +188,22 @@ def validate_resume(
             "Audit the generated resume and report any violations."
         )
 
-        result_obj = call_model(
-            tier="sonnet",
+        result, _cost = call_claude(
+            model=model,
             system=_AUDIT_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=VALIDATION_SCHEMA,
+            conn=conn,
             job_id=None,
             purpose="resume_validation",
+            config=config,
             max_tokens=2048,
-            client=client,
         )
-        return result_obj.data
+        return result
 
     except Exception as e:
         logger.warning("validate_resume: audit failed, returning fail-open result: %s", e)
         return {"passed": True, "violations": []}
-
 
 def fix_resume_violations(
     resume_data: dict,
@@ -244,12 +234,11 @@ def fix_resume_violations(
         return resume_data
 
     try:
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         profile_skills = profile.get("skills", [])
 
@@ -274,19 +263,18 @@ def fix_resume_violations(
             "Return the complete fixed resume."
         )
 
-        result_obj = call_model(
-            tier="sonnet",
+        result, _cost = call_claude(
+            model=model,
             system=_FIX_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=RESUME_SCHEMA,
+            conn=conn,
             job_id=None,
             purpose="resume_fix",
+            config=config,
             max_tokens=4096,
-            client=client,
         )
-        return result_obj.data
+        return result
 
     except Exception as e:
         logger.warning("fix_resume_violations: fix pass failed, returning original resume: %s", e)
