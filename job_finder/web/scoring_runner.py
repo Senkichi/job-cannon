@@ -1,19 +1,13 @@
 """Scoring runner -- Haiku batch scoring and Sonnet deep evaluation orchestration."""
 
 import logging
-
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
+import shutil
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
-from job_finder.web.claude_client import BudgetExceededError
+from job_finder.db import JOBS_ALL_COLUMNS
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
-from job_finder.web.model_provider import tier_has_configured_provider
 from job_finder.web.scoring_orchestrator import (
     load_scoring_profile,
     score_and_persist_haiku,
@@ -33,7 +27,6 @@ except ImportError:
     enrich_company_info = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
-
 
 def run_haiku_scoring(
     new_job_keys: list[str],
@@ -59,16 +52,8 @@ def run_haiku_scoring(
     if not new_job_keys:
         return [], 0
 
-    # Best-effort Anthropic client creation (two-step pattern)
-    client = None
-    if anthropic is not None:
-        try:
-            client = anthropic.Anthropic()
-        except Exception:
-            logger.debug("Anthropic client unavailable — will use free providers only")
-
-    if not tier_has_configured_provider("haiku", config, client):
-        logger.debug("No routable haiku provider — skipping Haiku scoring")
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found -- skipping Haiku scoring")
         return [], 0
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
@@ -93,17 +78,14 @@ def run_haiku_scoring(
                     continue
 
                 # --- Enrichment FIRST (before scoring) ---
-                from job_finder.web.data_enricher import is_stub_jd
                 if enrich_job is not None and (
-                    is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", ""))
-                    or job_row.get("salary_min") is None
+                    not job_row.get("jd_full") or job_row.get("salary_min") is None
                 ):
                     try:
                         serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
                         enriched = enrich_job(
                             job_row,
                             serpapi_key=serpapi_key,
-                            anthropic_client=client,
                             conn=conn,
                             config=config,
                         )
@@ -134,11 +116,6 @@ def run_haiku_scoring(
                         job_row.get("company"),
                         reason,
                     )
-                    if job_row.get("pipeline_status") == "discovered":
-                        update_pipeline_status(
-                            conn, dedup_key, "dismissed",
-                            source="exclusion_filter", evidence=reason,
-                        )
                     continue
 
                 # --- Haiku scoring + borderline re-eval + DB persistence ---
@@ -146,7 +123,7 @@ def run_haiku_scoring(
                 # Pass score_job_haiku as scorer_fn so test patches on
                 # scoring_runner.score_job_haiku are captured.
                 result = score_and_persist_haiku(
-                    conn, job_row, config, client, profile,
+                    conn, job_row, config, profile,
                     scorer_fn=score_job_haiku,
                 )
                 if result is None:
@@ -162,7 +139,9 @@ def run_haiku_scoring(
 
                 if score >= threshold:
                     sonnet_queue.append(dedup_key)
-                    # Fire high-score notification
+
+                # Fire high-score notification for jobs at or above threshold
+                if score >= threshold:
                     try:
                         from job_finder.web.notifier import notify_high_score
                         notify_high_score(
@@ -175,12 +154,6 @@ def run_haiku_scoring(
                     except Exception:
                         logger.debug("notification dispatch failed for job %s", dedup_key, exc_info=True)
 
-            except BudgetExceededError:
-                logger.warning(
-                    "Budget exceeded during Haiku scoring — aborting batch after %d scored",
-                    haiku_scored,
-                )
-                break  # Exit the job loop; return partial count to caller
             except Exception as e:
                 logger.warning(
                     "Haiku scoring error for job '%s': %s -- continuing", dedup_key, e
@@ -193,7 +166,6 @@ def run_haiku_scoring(
         threshold,
     )
     return sonnet_queue, haiku_scored
-
 
 def run_sonnet_evaluation(
     sonnet_queue: list[str],
@@ -217,20 +189,12 @@ def run_sonnet_evaluation(
     if not sonnet_queue:
         return 0
 
-    if evaluate_job_sonnet is None:
-        logger.warning("Sonnet evaluation module not available -- skipping")
+    if not shutil.which("claude"):
+        logger.debug("claude CLI not found -- skipping Sonnet evaluation")
         return 0
 
-    # Best-effort Anthropic client creation (two-step pattern)
-    client = None
-    if anthropic is not None:
-        try:
-            client = anthropic.Anthropic()
-        except Exception:
-            logger.debug("Anthropic client unavailable — will use free providers only")
-
-    if not tier_has_configured_provider("sonnet", config, client):
-        logger.debug("No routable sonnet provider — skipping Sonnet evaluation")
+    if evaluate_job_sonnet is None:
+        logger.warning("Sonnet evaluation module not available -- skipping")
         return 0
 
     profile = load_scoring_profile(config)
@@ -253,11 +217,10 @@ def run_sonnet_evaluation(
                     continue
 
                 # Job should already have jd_full from enrich_job (ran before Haiku scoring).
-                # If still missing or a stub after full enrichment pipeline, skip Sonnet eval.
-                from job_finder.web.data_enricher import is_stub_jd
-                if is_stub_jd(job_row.get("jd_full"), job_row.get("title", ""), job_row.get("company", "")):
+                # If still missing after full enrichment pipeline, skip Sonnet eval.
+                if not job_row.get("jd_full"):
                     logger.info(
-                        "No JD available for '%s' @ '%s' after enrichment (stub or missing), skipping Sonnet eval",
+                        "No JD available for '%s' @ '%s' after enrichment, skipping Sonnet eval",
                         job_row.get("title"),
                         job_row.get("company"),
                     )
@@ -268,7 +231,7 @@ def run_sonnet_evaluation(
                 # Pass evaluate_job_sonnet as evaluator_fn so test patches on
                 # scoring_runner.evaluate_job_sonnet are captured.
                 result = score_and_persist_sonnet(
-                    conn, job_row, config, client, profile,
+                    conn, job_row, config, profile,
                     evaluator_fn=evaluate_job_sonnet,
                 )
                 if result is None:

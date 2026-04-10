@@ -10,11 +10,6 @@ import json
 import logging
 import shutil
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
 from flask import (
     Blueprint,
     current_app,
@@ -23,9 +18,8 @@ from flask import (
     url_for,
 )
 
-from job_finder.web.ai_route_responses import tier_unavailable_message
-from job_finder.web.model_provider import call_model
-from job_finder.web.model_provider import tier_has_configured_provider
+from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
 from job_finder.web.blueprints.profile import _get_all_skills
@@ -75,7 +69,6 @@ _SAFE_EDITABLE_FIELDS = {
     "resume_preferences.emphasis",
 }
 
-
 @profile_recs_bp.route("/recommendation", strict_slashes=False)
 def recommendation():
     """GET /profile/recommendation -- Haiku-generated fix guidance for a single warning.
@@ -104,21 +97,11 @@ def recommendation():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
-
-        if not tier_has_configured_provider("haiku", config, client, conn):
-            return render_template(
-                "profile/_recommendation.html",
-                field=field,
-                guidance=tier_unavailable_message("haiku", "Recommendations"),
-                actions=[],
-                error=True,
-            )
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("haiku", DEFAULT_MODEL_HAIKU)
+        )
 
         system = (
             "You are a profile improvement advisor. Given a profile validation warning "
@@ -140,8 +123,8 @@ def recommendation():
             f"Suggest how to fix this warning."
         )
 
-        result_obj = call_model(
-            tier="haiku",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=RECOMMENDATION_SCHEMA,
@@ -150,9 +133,7 @@ def recommendation():
             purpose="profile_recommendation",
             config=config,
             max_tokens=512,
-            client=client,
         )
-        result = result_obj.data
 
         recs = result.get("recommendations", [])
         rec = recs[0] if recs else {}
@@ -175,7 +156,6 @@ def recommendation():
             error=True,
         )
 
-
 @profile_recs_bp.route("/recommendations-all", methods=["POST"], strict_slashes=False)
 def recommendations_all():
     """POST /profile/recommendations-all -- Batch Haiku recommendations for all current warnings.
@@ -197,20 +177,11 @@ def recommendations_all():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
-
-        if not tier_has_configured_provider("haiku", config, client, conn):
-            return render_template(
-                "profile/_recommendations_all.html",
-                recommendations=[],
-                warnings=warnings,
-                error_message=tier_unavailable_message("haiku", "Recommendations"),
-            )
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("haiku", DEFAULT_MODEL_HAIKU)
+        )
 
         system = (
             "You are a profile improvement advisor. Given a set of profile validation warnings "
@@ -235,8 +206,8 @@ def recommendations_all():
             f"Provide a recommendation for each warning above."
         )
 
-        result_obj = call_model(
-            tier="haiku",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=RECOMMENDATION_SCHEMA,
@@ -245,9 +216,7 @@ def recommendations_all():
             purpose="profile_recommendations_batch",
             config=config,
             max_tokens=1024,
-            client=client,
         )
-        result = result_obj.data
 
         recommendations = result.get("recommendations", [])
 
@@ -255,7 +224,6 @@ def recommendations_all():
             "profile/_recommendations_all.html",
             recommendations=recommendations,
             warnings=warnings,
-            error_message=None,
         )
 
     except Exception as exc:
@@ -264,9 +232,7 @@ def recommendations_all():
             "profile/_recommendations_all.html",
             recommendations=[],
             warnings=[],
-            error_message="Could not generate recommendations. Please try again.",
         )
-
 
 @profile_recs_bp.route("/apply-fix", methods=["POST"], strict_slashes=False)
 def apply_fix():

@@ -4,7 +4,6 @@ import threading
 
 from job_finder.constants import PIPELINE_STATUSES, VALID_PIPELINE_STATUSES  # noqa: F401 — re-exported
 
-
 def trigger_interview_prep_if_applied(
     dedup_key: str,
     new_status: str,

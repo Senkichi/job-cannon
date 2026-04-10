@@ -8,7 +8,6 @@ import pytest
 
 from job_finder.web.exclusion_filter import should_exclude
 
-
 class TestExclusionFilter:
     """Tests for should_exclude() pure string-matching function."""
 

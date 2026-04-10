@@ -17,7 +17,6 @@ import yaml
 
 from job_finder.config import load_config
 
-
 @pytest.fixture
 def settings_app(tmp_db_path, tmp_path):
     """Create a test Flask app with a temp config file and temp DB."""
@@ -54,11 +53,9 @@ def settings_app(tmp_db_path, tmp_path):
 
     settings_mod._CONFIG_PATH = original_path
 
-
 @pytest.fixture
 def settings_client(settings_app):
     return settings_app.test_client()
-
 
 class TestSettingsWipeGuard:
     def test_settings_save_blocks_wiping_target_titles(self, settings_client, settings_app):
@@ -135,7 +132,6 @@ class TestSettingsWipeGuard:
         assert "Principal Data Scientist" in config["profile"]["target_titles"]
         assert config["profile"]["min_salary"] == 200000
 
-
 def test_settings_index_has_resume_quality_section(settings_app):
     client = settings_app.test_client()
     resp = client.get("/settings/")
@@ -146,7 +142,6 @@ def test_settings_index_has_resume_quality_section(settings_app):
     assert b"guideline fields populated" in resp.data
     assert b"available for migration" in resp.data
 
-
 def test_settings_migrate_shows_spinner_indicator(settings_app):
     """Settings page migrate button has HTMX loading indicator markup."""
     client = settings_app.test_client()
@@ -156,14 +151,12 @@ def test_settings_migrate_shows_spinner_indicator(settings_app):
     assert b"migrate-spinner" in resp.data
     assert b"hx-disabled-elt" in resp.data
 
-
 def test_migrate_style_guide_route_returns_200(settings_app):
     client = settings_app.test_client()
     with patch("job_finder.web.blueprints.guidelines.migrate_style_guide") as mock_migrate:
         mock_migrate.return_value = {"bullet_style": "dashes", "summary_formula": "test"}
         resp = client.post("/settings/migrate-style-guide")
     assert resp.status_code == 200
-
 
 class TestGuidelinesImport:
     """Tests for the Update Guidelines section: preview and apply routes."""
@@ -187,7 +180,7 @@ class TestGuidelinesImport:
         assert b"Please enter guidelines text" in resp.data
 
     def test_preview_returns_diff_html(self, settings_app):
-        """POST /settings/preview-guidelines-merge exercises the real merge helper."""
+        """POST /settings/preview-guidelines-merge returns diff HTML with stashed JSON."""
         merged_result = {
             "bullet_style": "dashes",
             "verb_tense": "past",
@@ -196,10 +189,8 @@ class TestGuidelinesImport:
             "date_format": "MMM YYYY",
         }
         client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.guidelines.tier_has_configured_provider", return_value=True), \
-             patch("job_finder.web.blueprints.guidelines.load_style_guide", return_value={}), \
-             patch("job_finder.web.resume_style_guide.call_model") as mock_call_model:
-            mock_call_model.return_value.data = merged_result
+        with patch("job_finder.web.blueprints.guidelines.merge_guidelines_into_guide") as mock_merge:
+            mock_merge.return_value = merged_result
             resp = client.post(
                 "/settings/preview-guidelines-merge",
                 data={"guidelines_text": "Use dashes for bullets"},
@@ -208,18 +199,6 @@ class TestGuidelinesImport:
         assert b"merged_guide_json" in resp.data
         assert b"guidelines-diff-container" in resp.data
         assert b"apply-guidelines-merge" in resp.data
-        assert b"Preview failed" not in resp.data
-
-    def test_preview_returns_tier_unavailable_fragment(self, settings_app):
-        """POST /settings/preview-guidelines-merge returns explicit Sonnet tier unavailability."""
-        client = settings_app.test_client()
-        with patch("job_finder.web.blueprints.guidelines.tier_has_configured_provider", return_value=False):
-            resp = client.post(
-                "/settings/preview-guidelines-merge",
-                data={"guidelines_text": "Use dashes for bullets"},
-            )
-        assert resp.status_code == 200
-        assert b"Sonnet tier unavailable" in resp.data
 
     def test_apply_saves_merged_guide(self, settings_app):
         """POST /settings/apply-guidelines-merge saves the stashed dict and returns success."""

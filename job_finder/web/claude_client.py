@@ -1,15 +1,21 @@
-"""Anthropic Claude API client wrapper with cost recording and budget gating.
+"""Claude Code CLI oneshot wrapper with cost recording and budget gating.
+
+Dispatches all Anthropic model calls through ``claude -p`` CLI subprocesses
+instead of the ``anthropic`` Python SDK.  Each call is a strictly configured
+oneshot: minimal context (temp-dir cwd), defined output (--json-schema),
+no tools, no session persistence.
 
 Provides:
+- _run_oneshot: Low-level CLI subprocess executor.
 - compute_cost: Calculate USD cost from token counts and model pricing.
 - record_cost: Insert a cost row into scoring_costs and return cost_usd.
-- cost_gate: Check whether a model tier is allowed given the daily budget.
+- cost_gate: Check whether a model tier is allowed given the monthly budget.
 - get_cost_stats: Aggregate cost data by time period and feature/purpose.
-- call_claude: Convenience wrapper for API calls with automatic cost recording.
-- ClaudeContext: Dataclass bundling the (client, conn, config) triple for call_claude.
+- call_claude: Convenience wrapper for CLI oneshots with automatic cost recording.
+- ClaudeContext: Dataclass bundling the (conn, config) pair for call_claude.
 - BudgetExceededError: Raised by call_claude when the budget cap is exceeded.
 
-Model pricing (per million tokens):
+Model pricing (per million tokens) — informational, for cost tracking:
   claude-haiku-4-5:  $1.00 input / $5.00 output
   claude-sonnet-4-6: $3.00 input / $15.00 output
 """
@@ -17,16 +23,14 @@ Model pricing (per million tokens):
 import json
 import logging
 import sqlite3
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
-
-try:
-    import anthropic as _anthropic
-except ImportError:
-    _anthropic = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -44,22 +48,21 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 
 
 class BudgetExceededError(Exception):
-    """Raised when a non-Haiku Claude call is blocked by the daily budget cap."""
+    """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
 
 
 @dataclass(frozen=True, slots=True)
 class ClaudeContext:
-    """Invariant triple threaded through every call_claude invocation.
+    """Invariant pair threaded through every call_claude invocation.
 
-    Bundles the Anthropic client, database connection, and app config that
-    every caller assembles identically.  Passing a single ClaudeContext
-    instead of three separate parameters reduces call_claude's argument
-    count and eliminates repeated parameter threading.
+    Bundles the database connection and app config that every caller
+    assembles identically.  The ``client`` field is accepted for backward
+    compatibility but ignored — the CLI handles its own authentication.
     """
 
-    client: Any
     conn: sqlite3.Connection
     config: dict
+    client: Any = None  # ignored — kept for backward compat
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +105,6 @@ def record_cost(
     model: str,
     input_tokens: int,
     output_tokens: int,
-    provider: str = "anthropic",
 ) -> float:
     """Insert a cost row into scoring_costs and return cost_usd.
 
@@ -113,8 +115,6 @@ def record_cost(
         model: Model identifier used for the call.
         input_tokens: Number of input tokens consumed.
         output_tokens: Number of output tokens generated.
-        provider: Provider name for attribution (default "anthropic").
-            Pass "gemini" or "ollama" for non-Anthropic calls.
 
     Returns:
         Computed cost in USD.
@@ -122,13 +122,11 @@ def record_cost(
     cost_usd = compute_cost(model, input_tokens, output_tokens)
     timestamp = utc_now_iso()
     conn.execute(
-        "INSERT INTO scoring_costs "
-        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider),
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp),
     )
     conn.commit()
-    logger.info("record_cost: purpose=%s model=%s cost=%.6f job_id=%s", purpose, model, cost_usd, job_id)
     return cost_usd
 
 
@@ -144,16 +142,15 @@ def cost_gate(
     config: dict,
     model_tier: str = "sonnet",
 ) -> bool:
-    """Check whether a model tier call is allowed under the daily budget.
+    """Check whether a model tier call is allowed under daily and monthly budgets.
 
     Haiku calls are always allowed regardless of spend.
-    Sonnet/Opus calls are blocked when today's spend >= daily budget cap.
-    Monthly spend is tracked for display only; Anthropic's console manages
-    any account-level monthly cap.
+    Sonnet/Opus calls are blocked when daily or monthly spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        config: Application config dict (reads scoring.daily_budget_usd).
+        config: Application config dict (reads scoring.monthly_budget_usd,
+            scoring.daily_budget_usd).
         model_tier: "haiku" or "sonnet" (or "opus"). Defaults to "sonnet".
 
     Returns:
@@ -163,9 +160,22 @@ def cost_gate(
         return True
 
     scoring_cfg = config.get("scoring", {})
+    monthly_cap: float = scoring_cfg.get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
     daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
     now = datetime.now(timezone.utc)
+
+    # Monthly check
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0.0) "
+        "FROM scoring_costs WHERE timestamp >= ?",
+        (month_start,),
+    ).fetchone()
+    if (row[0] if row else 0.0) >= monthly_cap:
+        return False
+
+    # Daily check
     day_start = now.strftime("%Y-%m-%dT00:00:00Z")
     row = conn.execute(
         "SELECT COALESCE(SUM(cost_usd), 0.0) "
@@ -191,18 +201,18 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         month (float): Total spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
         by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose.
-        budget_cap (float): The daily budget cap (matches enforcement in cost_gate).
+        budget_cap (float): The monthly budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        budget_cap: Override the default daily budget cap.  When None,
-            uses DEFAULT_DAILY_BUDGET_USD.
+        budget_cap: Override the default monthly budget cap.  When None,
+            uses DEFAULT_MONTHLY_BUDGET_USD from config.
 
     Returns:
         Stats dict as described above.
     """
     if budget_cap is None:
-        budget_cap = DEFAULT_DAILY_BUDGET_USD
+        budget_cap = DEFAULT_MONTHLY_BUDGET_USD
     now = datetime.now(timezone.utc)
 
     today_start = now.strftime("%Y-%m-%dT00:00:00Z")
@@ -314,36 +324,114 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
-def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
-    """Return per-provider cost breakdown scoped to the current calendar month.
+# ---------------------------------------------------------------------------
+# CLI model aliases — map full SDK model names to short CLI aliases
+# ---------------------------------------------------------------------------
 
-    Args:
-        conn: Open SQLite connection with scoring_costs table.
+_CLI_MODEL_ALIASES: dict[str, str] = {
+    "claude-haiku-4-5": "haiku",
+    "claude-sonnet-4-6": "sonnet",
+    "claude-opus-4-6": "opus",
+}
 
-    Returns:
-        List of dicts with keys: provider (str), calls (int), spend (float).
-        Sorted descending by spend.
-    """
-    now = datetime.now(timezone.utc)
-    month_start = now.strftime("%Y-%m-01T00:00:00Z")
-
-    rows = conn.execute(
-        "SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
-        "FROM scoring_costs "
-        "WHERE timestamp >= ? "
-        "GROUP BY provider "
-        "ORDER BY spend DESC",
-        (month_start,),
-    ).fetchall()
-
-    return [
-        {"provider": row[0], "calls": int(row[1]), "spend": float(row[2])}
-        for row in rows
-    ]
+_CREDIT_PATTERNS: tuple[str, ...] = (
+    "credit balance", "spending limit", "insufficient credits",
+    "credit balance too low", "out of credits",
+)
 
 
 # ---------------------------------------------------------------------------
-# Main API call wrapper
+# CLI oneshot executor
+# ---------------------------------------------------------------------------
+
+def _run_oneshot(
+    model: str,
+    system: str,
+    user_message: str,
+    json_schema: dict | None = None,
+    timeout: float = 120,
+) -> dict:
+    """Run a ``claude -p`` oneshot and return the parsed JSON envelope.
+
+    Each call is strictly configured: temp-dir cwd (no CLAUDE.md), no tools,
+    no session persistence, user prompt piped via stdin.
+
+    Args:
+        model: Model identifier (e.g. "claude-haiku-4-5" or "haiku").
+        system: System prompt string.
+        user_message: User message string (piped via stdin to avoid
+            Windows command-line length limits).
+        json_schema: JSON schema dict for structured output, or None
+            for freeform text responses.
+        timeout: Subprocess timeout in seconds. Defaults to 120.
+
+    Returns:
+        Parsed CLI JSON envelope dict.
+
+    Raises:
+        FileNotFoundError: If ``claude`` CLI is not on PATH.
+        TimeoutError: If the subprocess exceeds *timeout*.
+        RuntimeError: On non-zero exit code or CLI-reported error.
+        BudgetExceededError: On credit-exhaustion errors from the CLI.
+    """
+    cli_model = _CLI_MODEL_ALIASES.get(model, model)
+
+    cmd: list[str] = [
+        "claude", "-p",
+        "--model", cli_model,
+        "--output-format", "json",
+        "--no-session-persistence",
+        "--tools", "",
+        "--system-prompt", system,
+    ]
+
+    if json_schema is not None:
+        cmd.extend(["--json-schema", json.dumps(json_schema)])
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            result = subprocess.run(
+                cmd,
+                input=user_message,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
+                cwd=tmpdir,
+            )
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(
+            f"Claude CLI timed out after {timeout}s (model={cli_model})"
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            "claude CLI not found on PATH. "
+            "Install: npm install -g @anthropic-ai/claude-code"
+        )
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()[:300] if result.stderr else "unknown error"
+        raise RuntimeError(f"Claude CLI failed (rc={result.returncode}): {stderr}")
+
+    try:
+        envelope = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            f"Invalid JSON from Claude CLI: {result.stdout[:300]}"
+        )
+
+    if envelope.get("is_error"):
+        error_msg = str(envelope.get("result", "unknown error"))[:300]
+        if any(p in error_msg.lower() for p in _CREDIT_PATTERNS):
+            raise BudgetExceededError(error_msg)
+        raise RuntimeError(f"Claude CLI error: {error_msg}")
+
+    return envelope
+
+
+# ---------------------------------------------------------------------------
+# Main call wrapper
 # ---------------------------------------------------------------------------
 
 def call_claude(
@@ -361,50 +449,47 @@ def call_claude(
     *,
     ctx: ClaudeContext | None = None,
 ) -> tuple[dict, float]:
-    """Call Claude API with cost gating and automatic cost recording.
+    """Run a Claude CLI oneshot with budget gating and cost recording.
 
-    Accepts the Anthropic client, database connection, and config either as
-    individual parameters (legacy) or bundled in a ``ClaudeContext`` via the
-    keyword-only ``ctx`` argument.  When ``ctx`` is provided its fields take
-    precedence over the corresponding positional parameters.
+    Dispatches to ``_run_oneshot()`` which invokes ``claude -p`` as a
+    subprocess.  The ``client`` parameter is accepted for backward
+    compatibility but ignored — the CLI handles its own authentication.
 
     Args:
-        client: Anthropic client instance (injected for testability).
-            Ignored when *ctx* is provided.
+        client: Ignored. Kept for backward compatibility with callers
+            that still pass an Anthropic client object.
         model: Full model identifier, e.g. "claude-haiku-4-5".
         system: System prompt string.
         messages: List of message dicts [{role, content}].
         output_schema: JSON schema dict for structured output (or None).
         conn: Open SQLite connection for cost recording.
-            Ignored when *ctx* is provided.
         job_id: Job dedup_key for cost attribution (nullable).
         purpose: Feature label for cost attribution.
         config: Application config dict.
-            Ignored when *ctx* is provided.
-        max_tokens: Maximum output tokens. Defaults to 1024.
-        timeout: Request timeout in seconds.  Defaults to _DEFAULT_API_TIMEOUT_SECONDS (120).
-        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
-            the individual client/conn/config parameters are ignored.
+        max_tokens: Ignored by CLI (no --max-tokens flag). Kept for
+            interface compatibility.
+        timeout: Subprocess timeout in seconds. Defaults to 120.
+        ctx: ClaudeContext bundling (conn, config). When supplied,
+            the individual conn/config parameters are ignored.
 
     Returns:
         Tuple of (parsed_json_result: dict, cost_usd: float).
 
     Raises:
         BudgetExceededError: If cost_gate blocks the call.
+        ValueError: If conn is None.
     """
-    # Resolve context: prefer ctx fields over individual params
     if ctx is not None:
-        client = ctx.client
         conn = ctx.conn
         config = ctx.config
 
-    # Ensure config is a dict (callers may pass None for optional configs)
     if config is None:
         config = {}
 
-    # Determine model tier for gating — derived from MODEL_PRICING where possible,
-    # falls back to substring match for versioned aliases (e.g. claude-haiku-4-5-20260301).
-    matching_pricing_key = next((k for k in MODEL_PRICING if model.startswith(k)), None)
+    # Determine model tier for budget gating
+    matching_pricing_key = next(
+        (k for k in MODEL_PRICING if model.startswith(k)), None
+    )
     if matching_pricing_key:
         tier = "haiku" if "haiku" in matching_pricing_key else "sonnet"
     else:
@@ -412,97 +497,56 @@ def call_claude(
 
     if conn is None:
         raise ValueError("call_claude requires a database connection (conn is None)")
-    if client is None:
-        raise ValueError("call_claude requires an Anthropic client (client is None)")
 
-    import traceback as _tb
-    _caller_frames = ''.join(_tb.format_stack(limit=6)[-5:-1]).strip()
     logger.info(
-        "call_claude START: purpose=%s model=%s job_id=%s tier=%s\ncaller:\n%s",
-        purpose, model, job_id, tier, _caller_frames,
+        "call_claude START: purpose=%s model=%s job_id=%s tier=%s",
+        purpose, model, job_id, tier,
     )
 
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
-            f"Daily budget cap reached. Sonnet calls paused. Model: {model}"
+            f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
         )
 
     effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT_SECONDS
 
-    # Build API call kwargs
-    call_kwargs: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": messages,
-        "timeout": effective_timeout,
-    }
+    # Extract user message from messages list
+    user_message = ""
+    if messages:
+        user_message = messages[-1].get("content", "")
 
-    # Add structured output config if schema provided
-    if output_schema is not None:
-        call_kwargs["tools"] = [
-            {
-                "name": "output",
-                "description": "Structured output",
-                "input_schema": output_schema,
-            }
-        ]
-        call_kwargs["tool_choice"] = {"type": "tool", "name": "output"}
+    # Run CLI oneshot
+    envelope = _run_oneshot(
+        model=model,
+        system=system,
+        user_message=user_message,
+        json_schema=output_schema,
+        timeout=effective_timeout,
+    )
 
-    # Make the API call with timeout-specific error surfacing.
-    # anthropic.APITimeoutError is a transient failure (retryable); separate from
-    # permanent APIStatusError (4xx/5xx) so callers can react differently.
-    try:
-        response = client.messages.create(**call_kwargs)
-    except Exception as exc:
-        logger.warning(
-            "call_claude API error: purpose=%s model=%s job_id=%s error=%s",
-            purpose, model, job_id, exc,
-        )
-        if _anthropic is not None and isinstance(exc, _anthropic.APITimeoutError):
-            raise TimeoutError(
-                f"Claude API request timed out after {effective_timeout}s "
-                f"(model={model}, purpose={purpose})"
-            ) from exc
-        # Convert Anthropic account-level spend cap (403 PermissionDeniedError) to
-        # BudgetExceededError only when the error text indicates credit exhaustion.
-        # Other 403s (suspended account, model access restriction, org feature gates)
-        # must propagate as-is so the real reason surfaces in logs.
-        if _anthropic is not None and isinstance(exc, _anthropic.PermissionDeniedError):
-            msg = str(exc).lower()
-            _credit_patterns = ("credit balance", "spending limit", "insufficient credits",
-                                "credit balance too low", "out of credits")
-            if any(p in msg for p in _credit_patterns):
-                raise BudgetExceededError(str(exc)) from exc
-        raise
-
-    # Extract token counts and record cost before parsing content,
-    # so cost data is always tracked even if content parsing fails.
-    input_tokens: int = response.usage.input_tokens
-    output_tokens: int = response.usage.output_tokens
+    # Extract token counts and record cost
+    usage = envelope.get("usage", {})
+    input_tokens: int = usage.get("input_tokens", 0)
+    output_tokens: int = usage.get("output_tokens", 0)
     cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens)
 
-    # Guard against empty response content
-    if not response.content:
-        raise RuntimeError("Claude returned empty response content")
-
-    # Parse response content
-    content = response.content[0]
-    if output_schema is not None and hasattr(content, "input"):
-        result = content.input
-    else:
-        if not hasattr(content, "text"):
-            raise RuntimeError(
-                f"Unexpected content block type '{type(content).__name__}': no .text attribute"
-            )
-        text = content.text
-        try:
-            result = json.loads(text)
-        except (json.JSONDecodeError, AttributeError):
-            if output_schema is not None:
+    # Parse result — structured_output when schema was provided,
+    # otherwise parse the text result as JSON with fallback.
+    if output_schema is not None:
+        result = envelope.get("structured_output")
+        if result is None:
+            raw = envelope.get("result", "")
+            try:
+                result = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
                 raise ValueError(
-                    "Structured output expected but got unparseable text"
+                    "Structured output expected but not found in CLI response"
                 )
-            result = {"text": str(text)}
+    else:
+        raw = envelope.get("result", "")
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            result = {"text": str(raw)}
 
     return result, cost_usd

@@ -17,7 +17,6 @@ ATS URL redirect detection (Research Pitfall 6):
 """
 
 import logging
-import re
 import sqlite3
 import time
 from typing import Any, Optional
@@ -25,20 +24,6 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-
-# _HEADERS, _TIMEOUT, _NOISE_TAGS imported from enrichment_tiers — these are
-# genuinely shared infrastructure constants. Importing underscore-prefixed names
-# from a sibling module is an intentional pragmatic choice for this single-codebase
-# local app, consistent with the existing pattern in agentic_enricher.py.
-# Auth-wall detection delegates to the canonical helpers in enrichment_tiers.
-from job_finder.web.enrichment_tiers import (
-    _HEADERS,
-    _TIMEOUT,
-    _NOISE_TAGS,
-    _FULL_TEXT_AUTH_SIGNATURES,
-    is_short_auth_page,
-    is_chrome_or_login_page,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -48,22 +33,23 @@ logger = logging.getLogger(__name__)
 
 _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", "/openings"]
 
-# Subdomains that indicate a careers/jobs page directly
-_CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.")
-
-# Meta-refresh content pattern: "0;url=https://..." or "0; URL=..."
-_META_REFRESH_RE = re.compile(r"url\s*=\s*([^\s\"'>]+)", re.IGNORECASE)
-
 _HAIKU_HTML_CHARS = 3000  # Truncate HTML sent to Haiku (~1000 tokens)
 
-# _HEADERS, _TIMEOUT, _NOISE_TAGS are imported from enrichment_tiers above.
-# Definitions removed to eliminate duplication (was copy-pasted across 3 modules).
+_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobFinder/1.0)"}
+
+_TIMEOUT = 10
 
 _JD_DELAY = 1.0  # seconds between job page fetches (rate limiting)
 _MAX_JD_CHARS = 8000  # cap extracted JD text
 
-# _AUTH_WALL_SIGNATURES removed — auth detection now uses is_short_auth_page()
-# and is_chrome_or_login_page() from enrichment_tiers (the canonical source).
+_NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
+
+_AUTH_WALL_SIGNATURES = [
+    "we're signing you in",
+    "sign in or join",
+    "please verify you are a human",
+    "access denied",
+]
 
 # ATS domain patterns to detect redirects (Research Pitfall 6)
 _ATS_DOMAINS = [
@@ -74,16 +60,13 @@ _ATS_DOMAINS = [
     "jobs.ashbyhq.com",
 ]
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-
 def _find_careers_url_with_haiku(
     homepage_url: str,
     homepage_html: str,
-    client: Any,
     conn: sqlite3.Connection,
     config: dict,
 ) -> str | None:
@@ -102,7 +85,8 @@ def _find_careers_url_with_haiku(
     Returns:
         Absolute URL to the careers page, or None if not found.
     """
-    from job_finder.web.model_provider import call_model
+    from job_finder.config import DEFAULT_MODEL_HAIKU
+    from job_finder.web.claude_client import call_claude
 
     truncated_html = homepage_html[:_HAIKU_HTML_CHARS]
 
@@ -115,21 +99,20 @@ def _find_careers_url_with_haiku(
     ]
 
     try:
-        result_obj = call_model(
-            tier="haiku",
+        result, cost = call_claude(
+            model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
-            conn=conn,
-            config=config,
             output_schema=None,
+            conn=conn,
             job_id=None,
             purpose="careers_scrape",
+            config=config,
             max_tokens=256,
-            client=client,
         )
 
-        # call_model returns ModelResult — when no output_schema, result_obj.data has "text" key
-        url_text = result_obj.data.get("text", "").strip()
+        # call_claude returns (dict, float) — when no output_schema, result has "text" key
+        url_text = result.get("text", "").strip()
         if not url_text or url_text.lower() == "none":
             return None
 
@@ -146,7 +129,6 @@ def _find_careers_url_with_haiku(
     except Exception as e:
         logger.debug("Haiku careers URL fallback failed for '%s': %s", homepage_url, e)
         return None
-
 
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
@@ -167,29 +149,20 @@ def _fetch_job_description(url: str) -> str:
         for tag in soup.find_all(_NOISE_TAGS):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        # Delegate auth-wall detection to canonical helpers from enrichment_tiers.
-        # is_short_auth_page covers short login/CAPTCHA pages; is_chrome_or_login_page
-        # covers cookie banners, LinkedIn walls, and wrong page types.
-        # _FULL_TEXT_AUTH_SIGNATURES covers specific multi-word auth phrases
-        # (e.g. "access denied") safe for full-text scan on any page length.
-        if is_short_auth_page(text) or is_chrome_or_login_page(text):
-            logger.debug("Auth-wall or chrome page detected for job page '%s'", url)
-            return ""
-        if any(sig in text.lower() for sig in _FULL_TEXT_AUTH_SIGNATURES):
-            logger.debug("Auth-wall signature detected for job page '%s'", url)
+        text_lower = text.lower()
+        if any(sig in text_lower for sig in _AUTH_WALL_SIGNATURES):
+            logger.debug("Auth-wall detected for job page '%s'", url)
             return ""
         return text[:_MAX_JD_CHARS] if text.strip() else ""
     except Exception as e:
         logger.debug("Failed to fetch job description from '%s': %s", url, e)
         return ""
 
-
 def _extract_jobs_with_haiku(
     careers_url: str,
     careers_html: str,
     target_titles: list[str],
     exclusions: list[str],
-    client: Any,
     conn: sqlite3.Connection,
     config: dict,
 ) -> list[dict]:
@@ -211,7 +184,8 @@ def _extract_jobs_with_haiku(
         List of dicts with title, url, description keys. May be empty.
     """
     import json as _json
-    from job_finder.web.model_provider import call_model
+    from job_finder.config import DEFAULT_MODEL_HAIKU
+    from job_finder.web.claude_client import call_claude
 
     truncated_html = careers_html[:_HAIKU_HTML_CHARS]
 
@@ -224,21 +198,20 @@ def _extract_jobs_with_haiku(
     ]
 
     try:
-        result_obj = call_model(
-            tier="haiku",
+        result, cost = call_claude(
+            model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
-            conn=conn,
-            config=config,
             output_schema=None,
+            conn=conn,
             job_id=None,
             purpose="careers_scrape",
+            config=config,
             max_tokens=1024,
-            client=client,
         )
 
         # Parse Haiku response — expect JSON array
-        text = result_obj.data.get("text", "").strip()
+        text = result.get("text", "").strip()
         # Handle markdown code blocks
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -248,7 +221,7 @@ def _extract_jobs_with_haiku(
 
         # Apply keyword filter and resolve URLs
         try:
-            from job_finder.web.ats_platforms import _title_matches
+            from job_finder.web.ats_scanner import _title_matches
         except ImportError:
             def _title_matches(title, target_titles, exclusions):
                 title_lower = title.lower()
@@ -282,15 +255,12 @@ def _extract_jobs_with_haiku(
         logger.debug("Haiku job extraction failed for '%s': %s", careers_url, e)
         return []
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
 def find_careers_url(
     homepage_url: str,
-    client: Any = None,
     conn: Optional[sqlite3.Connection] = None,
     config: Optional[dict] = None,
 ) -> str | None:
@@ -317,7 +287,6 @@ def find_careers_url(
     """
     try:
         resp = requests.get(homepage_url, timeout=_TIMEOUT, headers=_HEADERS)
-        resp.raise_for_status()
     except Exception as e:
         logger.debug("find_careers_url('%s') request failed: %s", homepage_url, e)
         return None
@@ -333,15 +302,6 @@ def find_careers_url(
         )
         return None
 
-    # If the final URL already lands on a careers/jobs subdomain (non-ATS),
-    # return it directly — no need to scrape for a link.
-    if any(parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
-        logger.debug(
-            "find_careers_url('%s'): final URL is careers subdomain '%s'",
-            homepage_url, final_url,
-        )
-        return final_url
-
     # Parse homepage HTML for careers links
     try:
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -349,76 +309,48 @@ def find_careers_url(
         logger.debug("find_careers_url('%s') HTML parse error: %s", homepage_url, e)
         return None
 
-    # Check <meta http-equiv="refresh" content="0; url=..."> redirects
-    meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.IGNORECASE)})
-    if meta_refresh:
-        content = meta_refresh.get("content", "")
-        m = _META_REFRESH_RE.search(str(content))
-        if m:
-            refresh_url = m.group(1).strip().strip("'\"")
-            refresh_url = urljoin(homepage_url, refresh_url)
-            refresh_parsed = urlparse(refresh_url)
-            # Only follow if it's not an ATS redirect and looks like a careers destination
-            if not any(ats_domain in refresh_parsed.netloc for ats_domain in _ATS_DOMAINS):
-                if any(refresh_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS) or \
-                   any(pattern in refresh_parsed.path.lower() for pattern in _CAREERS_PATTERNS):
-                    logger.debug(
-                        "find_careers_url('%s'): meta-refresh to careers URL '%s'",
-                        homepage_url, refresh_url,
-                    )
-                    return refresh_url
-
     # Search all <a href="..."> for careers-pattern matches
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
         if not href:
             continue
 
+        # Check if href matches any careers pattern
         href_lower = href.lower()
-
-        # Check for absolute links pointing to careers subdomains (non-ATS)
-        if href_lower.startswith("http"):
-            href_parsed = urlparse(href_lower)
-            if any(href_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS) and \
-               not any(ats_domain in href_parsed.netloc for ats_domain in _ATS_DOMAINS):
-                logger.debug(
-                    "find_careers_url('%s'): found careers subdomain link '%s'",
-                    homepage_url, href,
-                )
-                return href
-
-        # Match path-based careers patterns
         for pattern in _CAREERS_PATTERNS:
+            # Match: href starts with pattern OR contains the pattern as a path segment
             if href_lower == pattern or href_lower.startswith(pattern + "/") or href_lower.startswith(pattern + "?"):
+                # Resolve relative URL to absolute
                 absolute_url = urljoin(homepage_url, href)
                 logger.debug(
                     "find_careers_url('%s'): found careers link '%s'",
-                    homepage_url, absolute_url,
+                    homepage_url,
+                    absolute_url,
                 )
                 return absolute_url
 
+            # Also match absolute URLs that contain the pattern in path
             if href_lower.startswith("http") and pattern in urlparse(href_lower).path:
                 logger.debug(
                     "find_careers_url('%s'): found absolute careers link '%s'",
-                    homepage_url, href,
+                    homepage_url,
+                    href,
                 )
                 return href
 
     logger.debug("find_careers_url('%s'): no careers link found", homepage_url)
 
     # Haiku fallback: if heuristic found nothing and client is available
-    if client is not None and conn is not None and config is not None:
+    if conn is not None and config is not None:
         logger.debug("find_careers_url('%s'): trying Haiku fallback", homepage_url)
-        return _find_careers_url_with_haiku(homepage_url, resp.text, client, conn, config)
+        return _find_careers_url_with_haiku(homepage_url, resp.text, conn, config)
 
     return None
-
 
 def scrape_careers_page(
     careers_url: str,
     target_titles: list[str],
     exclusions: list[str],
-    client: Any = None,
     conn: Optional[sqlite3.Connection] = None,
     config: Optional[dict] = None,
 ) -> list[dict]:
@@ -450,7 +382,6 @@ def scrape_careers_page(
     """
     try:
         resp = requests.get(careers_url, timeout=_TIMEOUT, headers=_HEADERS)
-        resp.raise_for_status()
     except Exception as e:
         logger.debug("scrape_careers_page('%s') request failed: %s", careers_url, e)
         return []
@@ -518,10 +449,10 @@ def scrape_careers_page(
             job["description"] = ""
 
     # Haiku fallback when HTML parsing found no matching jobs
-    if not results and client is not None and conn is not None and config is not None:
+    if not results and conn is not None and config is not None:
         logger.debug("scrape_careers_page('%s'): trying Haiku fallback", careers_url)
         results = _extract_jobs_with_haiku(
-            careers_url, resp.text, target_titles, exclusions, client, conn, config
+            careers_url, resp.text, target_titles, exclusions, conn, config
         )
 
     return results

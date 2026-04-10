@@ -4,10 +4,11 @@ import logging
 import time as _time
 from datetime import datetime
 
-from flask import Blueprint, current_app, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, make_response, redirect, render_template, request, url_for
 
 from job_finder.db import (
     get_distinct_locations,
+    get_distinct_sources,
     get_filtered_jobs,
     get_job,
     get_pipeline_events,
@@ -35,30 +36,45 @@ logger = logging.getLogger(__name__)
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
 
+def _safe_float(raw: str, param_name: str) -> float | None:
+    """Coerce a query-string value to float, or abort 400 on malformed input."""
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
+
+def _safe_int(raw: str, param_name: str) -> int | None:
+    """Coerce a query-string value to int, or abort 400 on malformed input."""
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        abort(400, description=f"Invalid value for {param_name}: {raw!r}")
 
 def _get_filter_kwargs() -> dict:
-    """Extract filter query parameters from request.args."""
+    """Extract and coerce filter query parameters from request.args."""
     args = request.args
+
+    # Multi-select status: getlist returns [] when absent, or [""] for a blank submit
     statuses = [s for s in args.getlist("status") if s]
+
     return {
         "status": statuses if len(statuses) > 1 else (statuses[0] if statuses else None),
         "location": args.get("location") or None,
-        "posted_within": args.get("posted_within") or None,
-        "freshness": args.get("freshness") or None,
+        "min_score": _safe_float(args.get("min_score", ""), "min_score"),
+        "max_score": _safe_float(args.get("max_score", ""), "max_score"),
+        "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
+        "source": args.get("source") or None,
+        "date_from": args.get("date_from") or None,
+        "date_to": args.get("date_to") or None,
         "sort_by": args.get("sort_by", "score"),
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,
-        "hide_stale": args.get("hide_stale", "on") == "on",
-        "show_hidden": args.get("show_hidden") == "on",
+        "hide_stale": args.get("hide_stale") == "on",
     }
-
-
-def _get_hidden_count(conn) -> int:
-    row = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE pipeline_status IN ('archived', 'withdrawn', 'dismissed', 'rejected')"
-    ).fetchone()
-    return row[0] if row else 0
-
 
 def relative_date(iso_str):
     """Format date as 'Mar 3 (1w ago)' — absolute then relative.
@@ -103,26 +119,22 @@ def relative_date(iso_str):
 
     return f"{abs_part} ({rel})"
 
-
 @jobs_bp.record_once
 def _register_filters(state):
     """Register the relative_date Jinja2 filter when blueprint is registered."""
     state.app.jinja_env.filters["relative_date"] = relative_date
 
-
 @jobs_bp.route("/", strict_slashes=False)
 def index():
     """Job Board landing page -- full page render with filter bar."""
-    from job_finder.utils.business_days import business_days_ago
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
     filters = _get_filter_kwargs()
     jobs = get_filtered_jobs(conn, **filters)
     locations = get_distinct_locations(conn)
+    sources = get_distinct_sources(conn)
     stale_count = _get_stale_count(conn)
-    hidden_count = _get_hidden_count(conn)
-    freshness_cutoff = business_days_ago(3).isoformat()
     archived_count = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
     ).fetchone()[0]
@@ -133,12 +145,10 @@ def index():
         filters=request.args,
         pipeline_statuses=PIPELINE_STATUSES,
         locations=locations,
+        sources=sources,
         stale_count=stale_count,
-        hidden_count=hidden_count,
-        freshness_cutoff=freshness_cutoff,
         archived_count=archived_count,
     )
-
 
 @jobs_bp.route("/table", strict_slashes=False)
 def table():
@@ -157,7 +167,6 @@ def table():
         pipeline_statuses=PIPELINE_STATUSES,
     )
 
-
 @jobs_bp.route("/archived-table", strict_slashes=False)
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
@@ -171,7 +180,6 @@ def archived_table():
         jobs=jobs,
         pipeline_statuses=PIPELINE_STATUSES,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
 def expand(dedup_key: str):
@@ -211,7 +219,6 @@ def expand(dedup_key: str):
         drive_status=drive_status,
     )
 
-
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
@@ -227,7 +234,6 @@ def collapse(dedup_key: str):
         "jobs/_row_collapse_response.html",
         job=job,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)
 def update_status(dedup_key: str):
@@ -293,7 +299,6 @@ def update_status(dedup_key: str):
 
     return resp
 
-
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
@@ -311,7 +316,6 @@ def detail_inline(dedup_key: str):
         events=events,
         pipeline_statuses=PIPELINE_STATUSES,
     )
-
 
 @jobs_bp.route("/<path:dedup_key>/paste-jd", methods=["POST"], strict_slashes=False)
 def paste_jd(dedup_key: str):
@@ -369,36 +373,20 @@ def paste_jd(dedup_key: str):
     # Attempt Sonnet evaluation (budget-gated)
     error = None
     try:
-        from job_finder.web.claude_client import BudgetExceededError
-        from job_finder.web.model_provider import tier_has_configured_provider
+        from job_finder.web.claude_client import cost_gate
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
-        try:
-            import anthropic as _anthropic
-        except ImportError:
-            _anthropic = None
-
         config = current_app.config.get("JF_CONFIG", {})
-        client = None
-        if _anthropic is not None:
-            try:
-                client = _anthropic.Anthropic()
-            except Exception:
-                pass
+        if cost_gate(conn, config, "sonnet"):
+            profile = load_scoring_profile(config)
 
-        if not tier_has_configured_provider("sonnet", config, client):
-            error = "Sonnet tier unavailable"
-            raise ImportError("No routable sonnet provider")
+            # Refresh job row with jd_full
+            job = get_job(conn, dedup_key)
+            score_and_persist_sonnet(conn, job, config, profile)
+        else:
+            logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+            error = "Budget cap reached. Sonnet scoring skipped."
 
-        profile = load_scoring_profile(config)
-
-        # Refresh job row with jd_full
-        job = get_job(conn, dedup_key)
-        score_and_persist_sonnet(conn, job, config, client, profile)
-
-    except BudgetExceededError:
-        logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-        error = "Budget cap reached. Sonnet scoring skipped."
     except ImportError as e:
         logger.warning("paste-jd: Sonnet evaluator not available: %s", e)
         error = "Scoring unavailable. JD saved for later."
@@ -408,8 +396,6 @@ def paste_jd(dedup_key: str):
 
     # Return updated expanded row + OOB score cell (updates compact row in-place)
     ctx = load_job_context(conn, dedup_key)
-    if ctx is None:
-        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -421,7 +407,6 @@ def paste_jd(dedup_key: str):
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
-
 
 @jobs_bp.route("/<path:dedup_key>/rescore", methods=["POST"], strict_slashes=False)
 def rescore(dedup_key: str):
@@ -456,49 +441,33 @@ def rescore(dedup_key: str):
     error = None
     t0 = _time.time()
     try:
-        from job_finder.web.claude_client import BudgetExceededError
-        from job_finder.web.model_provider import tier_has_configured_provider
+        from job_finder.web.claude_client import cost_gate
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
 
-        try:
-            import anthropic as _anthropic
-        except ImportError:
-            _anthropic = None
-
         config = current_app.config.get("JF_CONFIG", {})
-        client = None
-        if _anthropic is not None:
-            try:
-                client = _anthropic.Anthropic()
-            except Exception:
-                pass
+        if cost_gate(conn, config, "sonnet"):
+            profile = load_scoring_profile(config)
 
-        if not tier_has_configured_provider("sonnet", config, client):
-            error = "Sonnet tier unavailable"
-            raise ImportError("No routable sonnet provider")
+            result = score_and_persist_sonnet(conn, job, config, profile)
+            if result:
+                try:
+                    log_activity(
+                        db_path,
+                        ACTION_RESCORE,
+                        entity_id=dedup_key,
+                        metadata={
+                            "old_score": old_score,
+                            "new_score": result.get("score"),
+                            "duration_seconds": round(_time.time() - t0, 2),
+                            "status": "success",
+                        },
+                    )
+                except Exception:
+                    pass
+        else:
+            logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
+            error = "Budget cap reached. Sonnet scoring skipped."
 
-        profile = load_scoring_profile(config)
-
-        result = score_and_persist_sonnet(conn, job, config, client, profile)
-        if result:
-            try:
-                log_activity(
-                    db_path,
-                    ACTION_RESCORE,
-                    entity_id=dedup_key,
-                    metadata={
-                        "old_score": old_score,
-                        "new_score": result.get("score"),
-                        "duration_seconds": round(_time.time() - t0, 2),
-                        "status": "success",
-                    },
-                )
-            except Exception:
-                pass
-
-    except BudgetExceededError:
-        logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-        error = "Budget cap reached. Sonnet scoring skipped."
     except ImportError as e:
         logger.warning("rescore: Sonnet evaluator not available: %s", e)
         error = "Re-scoring failed. Try again later."
@@ -527,8 +496,6 @@ def rescore(dedup_key: str):
             pass
 
     ctx = load_job_context(conn, dedup_key)
-    if ctx is None:
-        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -541,7 +508,6 @@ def rescore(dedup_key: str):
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
 
-
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
@@ -551,7 +517,6 @@ def score_cell(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_score_cell.html", job=job)
-
 
 @jobs_bp.route("/<path:dedup_key>/interview-prep/status", strict_slashes=False)
 def interview_prep_status(dedup_key: str):
@@ -603,7 +568,6 @@ def interview_prep_status(dedup_key: str):
 
     return "", 200
 
-
 @jobs_bp.route("/<path:dedup_key>/save-jd", methods=["POST"], strict_slashes=False)
 def save_jd(dedup_key: str):
     """HTMX POST -- save jd_full without triggering scoring."""
@@ -652,8 +616,6 @@ def save_jd(dedup_key: str):
         logger.debug("log_activity failed in save_jd", exc_info=True)
 
     ctx = load_job_context(conn, dedup_key)
-    if ctx is None:
-        return "", 404
     return render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -664,19 +626,15 @@ def save_jd(dedup_key: str):
         drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
 
-
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
-    if not request.headers.get("HX-Request"):
-        return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
     return render_template("jobs/_jd_edit_form.html", job=job)
-
 
 @jobs_bp.route("/<path:dedup_key>", strict_slashes=False)
 def detail(dedup_key: str):

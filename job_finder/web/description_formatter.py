@@ -36,7 +36,6 @@ _bullet_re = re.compile(r'^\s*[-*]\s')
 # Matches any HTML tag
 _html_tag_re = re.compile(r'<[a-zA-Z/][^>]*>')
 
-
 def _strip_html_to_text(text: str) -> str:
     """Strip HTML tags from text, preserving structure via newlines and bullet markers.
 
@@ -61,14 +60,12 @@ def _strip_html_to_text(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-
 def _is_header(line: str) -> bool:
     """Check if a line is a section header (markdown or plain text)."""
     stripped = line.strip()
     if _md_header_re.match(stripped):
         return True
     return bool(_plain_header_re.match(stripped))
-
 
 def _header_text(line: str) -> str:
     """Extract display text from a header line (strips markdown #)."""
@@ -77,7 +74,6 @@ def _header_text(line: str) -> str:
     if md:
         return md.group(1).strip()
     return stripped
-
 
 def _merge_orphaned_words(lines: list[str]) -> list[str]:
     """Merge single capitalized words with their lowercase continuations.
@@ -99,7 +95,6 @@ def _merge_orphaned_words(lines: list[str]) -> list[str]:
             merged.append(lines[i])
             i += 1
     return merged
-
 
 def _render_structured_description(value: str) -> Markup:
     """Render a description with headers, paragraphs, and bullet lists."""
@@ -144,7 +139,6 @@ def _render_structured_description(value: str) -> Markup:
         i += 1
 
     return Markup('\n'.join(html_parts))
-
 
 def format_description_filter(value: str) -> str:
     """Format job description text into safe HTML.

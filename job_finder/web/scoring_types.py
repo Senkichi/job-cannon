@@ -16,7 +16,6 @@ Usage:
 
 from typing import Literal, NamedTuple, Optional, TypedDict
 
-
 class JobRow(TypedDict, total=False):
     """Shape of a job record dict as returned by SQLite row_factory.
 
@@ -44,7 +43,6 @@ class JobRow(TypedDict, total=False):
     company_id: str | None
     status: str
 
-
 def format_salary_range(salary_min: int | None, salary_max: int | None) -> str:
     """Format salary_min/salary_max into a human-readable range string.
 
@@ -59,7 +57,6 @@ def format_salary_range(salary_min: int | None, salary_max: int | None) -> str:
         return f"up to ${salary_max:,}"
     return "Not specified"
 
-
 class ScoringResult(NamedTuple):
     """Discriminated return type for score_job_haiku and evaluate_job_sonnet.
 
@@ -71,7 +68,6 @@ class ScoringResult(NamedTuple):
 
     data: dict | None
     status: Literal["success", "budget_exceeded", "error", "skipped"]
-
 
 def unwrap_scoring_result(scoring_result: ScoringResult) -> Optional[dict]:
     """Unwrap a ScoringResult, returning the data dict on success or None.

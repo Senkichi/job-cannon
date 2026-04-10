@@ -34,7 +34,6 @@ _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _GDOC_MIME = "application/vnd.google-apps.document"
 
-
 def get_drive_service(token_path: str = "token.json"):
     """Build and return an authenticated Google Drive v3 service.
 
@@ -83,7 +82,6 @@ def get_drive_service(token_path: str = "token.json"):
             ) from exc
 
     return build("drive", "v3", credentials=creds)
-
 
 def upload_to_drive(
     service,

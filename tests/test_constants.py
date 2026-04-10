@@ -6,7 +6,6 @@ to the conventions relied upon by validation logic throughout the codebase.
 
 from job_finder.constants import PIPELINE_STATUSES, VALID_PIPELINE_STATUSES
 
-
 class TestPipelineStatuses:
     """Invariants for PIPELINE_STATUSES and VALID_PIPELINE_STATUSES."""
 

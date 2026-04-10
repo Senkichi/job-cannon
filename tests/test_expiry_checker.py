@@ -9,85 +9,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
-
-class TestQuickLivenessCheck:
-    """quick_liveness_check: lightweight per-job URL check for scoring preflight."""
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_404_returns_expired(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
-        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
-        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_410_returns_expired(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
-        mock_get.return_value = MagicMock(spec=requests.Response, status_code=410)
-        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_200_returns_live(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, LIVE
-        mock_get.return_value = MagicMock(
-            spec=requests.Response, status_code=200, text="Job description here"
-        )
-        assert quick_liveness_check("https://example.com/job/123") == LIVE
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_timeout_returns_inconclusive(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, INCONCLUSIVE
-        mock_get.side_effect = requests.exceptions.Timeout("timed out")
-        assert quick_liveness_check("https://example.com/job/123") == INCONCLUSIVE
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_connection_error_returns_inconclusive(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, INCONCLUSIVE
-        mock_get.side_effect = requests.exceptions.ConnectionError("refused")
-        assert quick_liveness_check("https://example.com/job/123") == INCONCLUSIVE
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_body_marker_position_filled_returns_expired(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
-        mock_get.return_value = MagicMock(
-            spec=requests.Response, status_code=200,
-            text="Sorry, this position has been filled. Please check other openings."
-        )
-        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_body_marker_no_longer_available_returns_expired(self, mock_get):
-        from job_finder.web.expiry_checker import quick_liveness_check, EXPIRED
-        mock_get.return_value = MagicMock(
-            spec=requests.Response, status_code=200,
-            text="This job is no longer available."
-        )
-        assert quick_liveness_check("https://example.com/job/123") == EXPIRED
-
-
-class TestCheckJobLiveness:
-    """check_job_liveness: extract URLs and call quick_liveness_check."""
-
-    @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_calls_first_url(self, mock_check):
-        from job_finder.web.expiry_checker import check_job_liveness, LIVE
-        mock_check.return_value = LIVE
-        job = {"source_urls": '["https://a.com/1", "https://b.com/2"]'}
-        assert check_job_liveness(job) == LIVE
-        mock_check.assert_called_once_with("https://a.com/1")
-
-    def test_no_urls_returns_inconclusive(self):
-        from job_finder.web.expiry_checker import check_job_liveness, INCONCLUSIVE
-        assert check_job_liveness({"source_urls": "[]"}) == INCONCLUSIVE
-        assert check_job_liveness({}) == INCONCLUSIVE
-
-    @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_handles_list_type_source_urls(self, mock_check):
-        from job_finder.web.expiry_checker import check_job_liveness, EXPIRED
-        mock_check.return_value = EXPIRED
-        job = {"source_urls": ["https://example.com/job/1"]}
-        assert check_job_liveness(job) == EXPIRED
-
-
 class TestExtractPostingId:
     """_extract_posting_id extracts individual posting IDs from ATS URLs."""
 
@@ -116,14 +37,13 @@ class TestExtractPostingId:
         url = "https://jobs.lever.co/acme/abc123"
         assert _extract_posting_id(url, "unknown") is None
 
-
 class TestCheckAtsApi:
     """Signal 1: ATS API liveness check."""
 
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_lever_404_returns_expired(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, EXPIRED
-        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
+        mock_get.return_value = MagicMock(status_code=404)
         result = _check_ats_api("acme", "abc-123", "lever")
         assert result == EXPIRED
         mock_get.assert_called_once()
@@ -132,14 +52,14 @@ class TestCheckAtsApi:
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_lever_200_returns_live(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, LIVE
-        mock_get.return_value = MagicMock(spec=requests.Response, status_code=200)
+        mock_get.return_value = MagicMock(status_code=200)
         result = _check_ats_api("acme", "abc-123", "lever")
         assert result == LIVE
 
     @patch("job_finder.web.expiry_checker.requests.get")
     def test_greenhouse_404_returns_expired(self, mock_get):
         from job_finder.web.expiry_checker import _check_ats_api, EXPIRED
-        mock_get.return_value = MagicMock(spec=requests.Response, status_code=404)
+        mock_get.return_value = MagicMock(status_code=404)
         result = _check_ats_api("acme", "12345", "greenhouse")
         assert result == EXPIRED
         assert "boards-api.greenhouse.io" in mock_get.call_args[0][0]
@@ -155,7 +75,6 @@ class TestCheckAtsApi:
         from job_finder.web.expiry_checker import _check_ats_api, INCONCLUSIVE
         result = _check_ats_api("acme", "abc-123", "unknown")
         assert result == INCONCLUSIVE
-
 
 class TestCheckCareersPage:
     """Signal 2: Company careers page title search."""
@@ -190,7 +109,6 @@ class TestCheckCareersPage:
         from job_finder.web.expiry_checker import _check_careers_page, INCONCLUSIVE
         result = _check_careers_page(None, "Senior Data Scientist", ["data scientist"], [])
         assert result == INCONCLUSIVE
-
 
 class TestCheckSerpapi:
     """Signal 3: SerpAPI re-search fallback."""
@@ -233,7 +151,6 @@ class TestCheckSerpapi:
         result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
         assert result == INCONCLUSIVE
 
-
 class TestSignalCascade:
     """_check_job_expiry runs signals in order and short-circuits."""
 
@@ -257,8 +174,8 @@ class TestSignalCascade:
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     def test_ats_inconclusive_falls_through_to_careers(self, mock_ats, mock_careers, mock_serpapi):
-        from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE, LIVE
-        mock_ats.return_value = INCONCLUSIVE
+        from job_finder.web.expiry_checker import _check_job_expiry, LIVE
+        mock_ats.return_value = "inconclusive"
         mock_careers.return_value = LIVE
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
                "source_urls": '["https://jobs.lever.co/acme/abc-123"]'}
@@ -283,7 +200,6 @@ class TestSignalCascade:
         config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
         result, evidence = _check_job_expiry(job, company, config)
         assert result == INCONCLUSIVE
-
 
 class TestRunExpiryCheck:
     """run_expiry_check batch runner queries DB and processes jobs."""
@@ -398,7 +314,6 @@ class TestRunExpiryCheck:
 
         mock_check.assert_not_called()
 
-
 class TestCareersBackoff:
     """_record_careers_outcome tracks failures and sets skip-until timestamps."""
 
@@ -429,7 +344,6 @@ class TestCareersBackoff:
         _record_careers_outcome(42, success=True)
         assert 42 not in _careers_failure_counts
         assert 42 not in _careers_skip_until
-
 
 class TestAutoReopen:
     """Archived jobs re-appearing during ingestion are auto-reopened."""

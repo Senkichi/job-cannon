@@ -4,16 +4,11 @@ import json
 import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import Any
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
-from job_finder.web.claude_client import BudgetExceededError
+from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
+from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.model_provider import call_model
 from job_finder.web.resume_generator import (
     RESUME_SCHEMA,
     STRATEGY_POOL,
@@ -27,9 +22,7 @@ from job_finder.web.resume_generator import (
 
 logger = logging.getLogger(__name__)
 
-
 def _haiku_select_strategies(
-    client: Any,
     job_row: dict,
     conn,
     config: dict,
@@ -46,6 +39,12 @@ def _haiku_select_strategies(
         List of exactly 3 strategy identifier strings from STRATEGY_POOL.
         Falls back to first 3 from STRATEGY_POOL if Haiku call fails.
     """
+    model = (
+        config.get("scoring", {})
+        .get("models", {})
+        .get("haiku", DEFAULT_MODEL_HAIKU)
+    )
+
     # Build strategy descriptions for the prompt
     strategy_list = "\n".join(
         f"- {name}: {_STRATEGY_DESCRIPTIONS.get(name, name)}"
@@ -85,19 +84,18 @@ def _haiku_select_strategies(
     }
 
     try:
-        result_obj = call_model(
-            tier="haiku",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=strategy_schema,
+            conn=conn,
             job_id=job_row.get("dedup_key"),
             purpose="resume_strategy",
+            config=config,
             max_tokens=512,
-            client=client,
         )
-        strategies = result_obj.data.get("strategies", [])
+        strategies = result.get("strategies", [])
         # Validate: ensure we got 3 valid strategy identifiers
         valid = [s for s in strategies if s in STRATEGY_POOL]
         if len(valid) >= 3:
@@ -113,10 +111,8 @@ def _haiku_select_strategies(
         logger.warning("_haiku_select_strategies: Haiku call failed, using fallback: %s", e)
         return STRATEGY_POOL[:3]
 
-
 def _generate_single_variant(
     db_path: str,
-    client_factory: Callable,
     job_row: dict,
     profile: dict,
     strategy: str,
@@ -124,13 +120,12 @@ def _generate_single_variant(
 ) -> dict:
     """Generate one strategy-focused resume variant (thread-safe).
 
-    Opens its own SQLite connection and creates its own Anthropic client for
-    thread safety (per architecture decision: each background thread owns its
-    own connections, following stale_detector.py pattern).
+    Opens its own SQLite connection for thread safety (per architecture
+    decision: each background thread owns its own connections, following
+    stale_detector.py pattern).
 
     Args:
         db_path: Path to the SQLite database file.
-        client_factory: Callable that returns an Anthropic client instance.
         job_row: Job record dict.
         profile: Experience profile dict.
         strategy: Strategy identifier from STRATEGY_POOL.
@@ -144,7 +139,6 @@ def _generate_single_variant(
             generate_resume_multi for partial-failure handling.
     """
     with standalone_connection(db_path) as conn:
-        client = client_factory()
 
         # Build strategy-specific system prompt
         strategy_desc = _STRATEGY_DESCRIPTIONS.get(strategy, strategy)
@@ -153,6 +147,18 @@ def _generate_single_variant(
             f"STRATEGY EMPHASIS: {strategy_desc}. "
             f"Weight your achievement selection and summary framing toward this angle."
         )
+
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
+
+        # Check budget gate
+        if not cost_gate(conn, config, "sonnet"):
+            raise RuntimeError(
+                f"Budget exceeded during variant generation for strategy: {strategy}"
+            )
 
         # Build the same user message as generate_resume_single
         fit_analysis = job_row.get("fit_analysis")
@@ -224,25 +230,18 @@ def _generate_single_variant(
         if contact_hint:
             user_message += f"- Contact line: {contact_hint}\n"
 
-        try:
-            result_obj = call_model(
-                tier="sonnet",
-                system=strategy_system,
-                messages=[{"role": "user", "content": user_message}],
-                conn=conn,
-                config=config,
-                output_schema=RESUME_SCHEMA,
-                job_id=job_row.get("dedup_key"),
-                purpose="resume_generation",
-                max_tokens=4096,
-                client=client,
-            )
-        except BudgetExceededError:
-            raise RuntimeError(
-                f"Budget exceeded during variant generation for strategy: {strategy}"
-            )
-        return result_obj.data
-
+        result, _cost = call_claude(
+            model=model,
+            system=strategy_system,
+            messages=[{"role": "user", "content": user_message}],
+            output_schema=RESUME_SCHEMA,
+            conn=conn,
+            job_id=job_row.get("dedup_key"),
+            purpose="resume_generation",
+            config=config,
+            max_tokens=4096,
+        )
+        return result
 
 def generate_resume_multi(
     db_path: str,
@@ -270,18 +269,8 @@ def generate_resume_multi(
         RuntimeError: If all 3 variant generators fail.
     """
     # Step 1: Haiku selects 3 strategies
-    # Best-effort Anthropic client — free providers route via call_model(client=None)
-    def _make_client() -> Any:
-        if anthropic is not None:
-            try:
-                return anthropic.Anthropic()
-            except Exception:
-                pass
-        return None
-
     with standalone_connection(db_path) as strategy_conn:
-        strategy_client = _make_client()
-        strategies = _haiku_select_strategies(strategy_client, job_row, strategy_conn, config)
+        strategies = _haiku_select_strategies(job_row, strategy_conn, config)
 
     logger.debug(
         "generate_resume_multi: selected strategies %s for '%s' @ '%s'",
@@ -291,10 +280,6 @@ def generate_resume_multi(
     )
 
     # Step 2: Parallel Sonnet variant generation
-    # Each thread gets its own client instance (stateless — thread-safe)
-    def client_factory() -> Any:
-        return _make_client()
-
     variants: list[dict] = []
     futures_to_strategy: dict = {}
 
@@ -303,7 +288,6 @@ def generate_resume_multi(
             future = executor.submit(
                 _generate_single_variant,
                 db_path,
-                client_factory,
                 job_row,
                 profile,
                 strategy,
@@ -334,7 +318,6 @@ def generate_resume_multi(
     # Step 3: Synthesis pass
     return _synthesize_variants(db_path, variants, job_row, config)
 
-
 def _synthesize_variants(
     db_path: str,
     variants: list[dict],
@@ -355,12 +338,12 @@ def _synthesize_variants(
         Final synthesized resume dict matching RESUME_SCHEMA.
     """
     with standalone_connection(db_path) as conn:
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("sonnet", DEFAULT_MODEL_SONNET)
+        )
 
         synthesis_system = (
             "You are a resume editor. You have multiple resume variants for the same candidate "
@@ -393,16 +376,15 @@ def _synthesize_variants(
             f"- Output a single unified resume combining the best elements\n"
         )
 
-        result_obj = call_model(
-            tier="sonnet",
+        result, _cost = call_claude(
+            model=model,
             system=synthesis_system,
             messages=[{"role": "user", "content": user_message}],
-            conn=conn,
-            config=config,
             output_schema=RESUME_SCHEMA,
+            conn=conn,
             job_id=job_row.get("dedup_key"),
             purpose="resume_synthesis",
+            config=config,
             max_tokens=4096,
-            client=client,
         )
-        return result_obj.data
+        return result

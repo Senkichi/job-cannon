@@ -14,11 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fuzzy match tests
 # ---------------------------------------------------------------------------
-
 
 class TestFuzzyMatchCompany:
     """Tests for fuzzy_match_company()."""
@@ -106,11 +104,9 @@ class TestFuzzyMatchCompany:
         assert company_id is None
         assert score == 0
 
-
 # ---------------------------------------------------------------------------
 # Denylist tests
 # ---------------------------------------------------------------------------
-
 
 class TestDenylistFiltering:
     """Tests that denylist names are skipped during linkage."""
@@ -148,11 +144,9 @@ class TestDenylistFiltering:
                 f"upsert_company was called with denylist name '{company_name}'"
             )
 
-
 # ---------------------------------------------------------------------------
 # Company linkage tests
 # ---------------------------------------------------------------------------
-
 
 class TestCompanyLinkage:
     """Tests for link_jobs_to_companies()."""
@@ -252,11 +246,9 @@ class TestCompanyLinkage:
         ).fetchall()
         assert all(row["company_id"] == new_company_id for row in rows)
 
-
 # ---------------------------------------------------------------------------
 # ATS probing tests
 # ---------------------------------------------------------------------------
-
 
 class TestAtsProbing:
     """Tests for run_ats_probing()."""
@@ -277,11 +269,9 @@ class TestAtsProbing:
         assert result["hits"] == 2
         assert result["misses"] == 3
 
-
 # ---------------------------------------------------------------------------
 # DDG enrichment tests
 # ---------------------------------------------------------------------------
-
 
 class TestDdgEnrichment:
     """Tests for run_ddg_enrichment()."""
@@ -339,16 +329,13 @@ class TestDdgEnrichment:
         assert result["enriched"] == 0
         assert result["empty_result"] == 1
 
-
 # ---------------------------------------------------------------------------
 # Summary output test
 # ---------------------------------------------------------------------------
 
-
 # ---------------------------------------------------------------------------
 # Denylist cleanup tests
 # ---------------------------------------------------------------------------
-
 
 class TestDenylistCleanup:
     """Tests for cleanup_denylist_companies()."""
@@ -478,11 +465,9 @@ class TestDenylistCleanup:
         assert second_result["companies_deleted"] == 0
         assert second_result["jobs_unlinked"] == 0
 
-
 # ---------------------------------------------------------------------------
 # Duplicate company detection tests
 # ---------------------------------------------------------------------------
-
 
 class TestFindDuplicateCompanies:
     """Tests for find_duplicate_companies()."""
@@ -534,11 +519,9 @@ class TestFindDuplicateCompanies:
         # Third element is the normalized name
         assert first[2] == "acme"
 
-
 # ---------------------------------------------------------------------------
 # Fuzzy false positive detection tests
 # ---------------------------------------------------------------------------
-
 
 class TestFindFuzzyFalsePositives:
     """Tests for find_fuzzy_false_positives()."""
@@ -624,11 +607,9 @@ class TestFindFuzzyFalsePositives:
             assert isinstance(r["id_b"], int)
             assert isinstance(r["score"], int)
 
-
 # ---------------------------------------------------------------------------
 # Homepage URL verification tests
 # ---------------------------------------------------------------------------
-
 
 class TestVerifyHomepageUrls:
     """Tests for verify_homepage_urls()."""
@@ -696,11 +677,9 @@ class TestVerifyHomepageUrls:
         assert len(results) == 1
         assert results[0]["reachable"] is False
 
-
 # ---------------------------------------------------------------------------
 # Linkage verification tests
 # ---------------------------------------------------------------------------
-
 
 class TestVerifyAllLinkableJobsLinked:
     """Tests for verify_all_linkable_jobs_linked()."""
@@ -764,11 +743,9 @@ class TestVerifyAllLinkableJobsLinked:
 
         assert result["unlinked_non_denylist"] == 0
 
-
 # ---------------------------------------------------------------------------
 # Summary output test
 # ---------------------------------------------------------------------------
-
 
 class TestSummaryOutput:
     """Tests that main() calls all phases and prints summary."""

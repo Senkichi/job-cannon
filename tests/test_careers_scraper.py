@@ -10,7 +10,6 @@ Covers:
 import pytest
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build mock response objects
 # ---------------------------------------------------------------------------
@@ -23,7 +22,6 @@ def _mock_response(url, text, status_code=200):
     resp.status_code = status_code
     resp.raise_for_status = MagicMock()
     return resp
-
 
 # ---------------------------------------------------------------------------
 # Tests: find_careers_url
@@ -150,7 +148,6 @@ class TestFindCareersUrl:
 
         assert result == "https://example.com/join"
 
-
 # ---------------------------------------------------------------------------
 # Tests: scrape_careers_page
 # ---------------------------------------------------------------------------
@@ -274,7 +271,6 @@ class TestScrapeCareersPage:
         # Empty target_titles means no filter — all links returned
         assert len(results) == 2
 
-
 # ---------------------------------------------------------------------------
 # Tests: Haiku fallback in find_careers_url
 # ---------------------------------------------------------------------------
@@ -295,7 +291,7 @@ class TestHaikuFallback:
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
              patch("job_finder.web.careers_scraper._find_careers_url_with_haiku", return_value="https://example.com/work-here") as mock_haiku:
-            result = find_careers_url("https://example.com/", client=mock_client, conn=mock_conn, config=mock_config)
+            result = find_careers_url("https://example.com/", conn=mock_conn, config=mock_config)
 
         mock_haiku.assert_called_once()
         assert result == "https://example.com/work-here"
@@ -312,7 +308,7 @@ class TestHaikuFallback:
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
              patch("job_finder.web.careers_scraper._find_careers_url_with_haiku") as mock_haiku:
-            result = find_careers_url("https://example.com/", client=mock_client, conn=mock_conn, config={})
+            result = find_careers_url("https://example.com/", conn=mock_conn, config={})
 
         mock_haiku.assert_not_called()
         assert result == "https://example.com/careers"
@@ -340,10 +336,9 @@ class TestHaikuFallback:
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
              patch("job_finder.web.careers_scraper._find_careers_url_with_haiku", return_value=None):
-            result = find_careers_url("https://example.com/", client=MagicMock(), conn=MagicMock(), config={})
+            result = find_careers_url("https://example.com/", conn=MagicMock(), config={})
 
         assert result is None
-
 
 # ---------------------------------------------------------------------------
 # Tests: Rich JD extraction via job link following
@@ -428,7 +423,6 @@ class TestRichJdExtraction:
 
         assert "description" in results[0]
 
-
 # ---------------------------------------------------------------------------
 # Tests: Haiku job extraction fallback in scrape_careers_page
 # ---------------------------------------------------------------------------
@@ -450,7 +444,6 @@ class TestHaikuJobExtraction:
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
                 exclusions=[],
-                client=MagicMock(),
                 conn=MagicMock(),
                 config={},
             )
@@ -478,7 +471,6 @@ class TestHaikuJobExtraction:
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
                 exclusions=[],
-                client=MagicMock(),
                 conn=MagicMock(),
                 config={},
             )

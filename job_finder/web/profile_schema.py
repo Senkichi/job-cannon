@@ -12,8 +12,9 @@ import json
 import logging
 import os
 import re
-import sqlite3
 from pathlib import Path
+
+from job_finder.config import DEFAULT_MODEL_OPUS
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,6 @@ EMPTY_PROFILE = {
         "emphasis": [],
     },
 }
-
 
 # ---------------------------------------------------------------------------
 # Validation
@@ -116,7 +116,6 @@ def validate_profile(profile: dict) -> list:
 
     return warnings
 
-
 # ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
@@ -139,7 +138,6 @@ def load_profile(profile_path: str = "experience_profile.json") -> dict:
             return json.load(f)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in profile file {path}: {exc}") from exc
-
 
 def save_profile(profile: dict, profile_path: str = "experience_profile.json", *, force: bool = False) -> None:
     """Save the experience profile to a JSON file.
@@ -198,7 +196,6 @@ def save_profile(profile: dict, profile_path: str = "experience_profile.json", *
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
 
-
 # ---------------------------------------------------------------------------
 # Opus-powered markdown extraction
 # ---------------------------------------------------------------------------
@@ -236,55 +233,30 @@ Rules:
 Resume/markdown to extract from:
 """
 
-
-def extract_profile_from_markdown(
-    markdown_text: str,
-    conn: sqlite3.Connection | None = None,
-    config: dict | None = None,
-) -> dict:
+def extract_profile_from_markdown(markdown_text: str) -> dict:
     """Extract a structured profile from markdown text using Claude Opus.
 
     Args:
         markdown_text: Raw markdown resume/experience text.
-        conn: Open SQLite connection for cost tracking. When provided, cost is
-              recorded in scoring_costs. Pass None only in contexts without DB
-              access (cost will not be tracked).
-        config: Application config dict for model routing (optional — uses
-                Anthropic defaults if None).
 
     Returns:
         Profile dict matching PROFILE_SCHEMA, or an error dict with key 'error'.
     """
     try:
-        import anthropic
-        from job_finder.web.model_provider import call_model
+        from job_finder.web.claude_client import _run_oneshot
 
-        client = anthropic.Anthropic()
-        cfg = config or {}
-
-        result_obj = call_model(
-            tier="opus",
-            system="You are a professional resume parser. Extract structured experience data.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": _EXTRACTION_PROMPT + markdown_text,
-                }
-            ],
-            conn=conn,
-            config=cfg,
-            output_schema=None,
-            purpose="profile_extraction",
-            max_tokens=4096,
-            client=client,
+        envelope = _run_oneshot(
+            model=DEFAULT_MODEL_OPUS,
+            system="You extract structured profiles from resume text. Return valid JSON only.",
+            user_message=_EXTRACTION_PROMPT + markdown_text,
+            timeout=120,
         )
 
-        response_text = result_obj.data.get("text", "").strip()
+        response_text = envelope.get("result", "").strip()
 
         # Strip any accidental code fences
         if response_text.startswith("```"):
             lines = response_text.splitlines()
-            # Remove first and last fence lines
             response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         extracted = json.loads(response_text)

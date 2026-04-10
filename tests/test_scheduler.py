@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -53,7 +52,6 @@ def _make_app(testing=False, db_path=None):
 
     return app
 
-
 # ---------------------------------------------------------------------------
 # Fixture: reset scheduler singleton between tests
 # ---------------------------------------------------------------------------
@@ -65,7 +63,6 @@ def reset_scheduler_state():
     reset_scheduler()
     yield
     reset_scheduler()
-
 
 # ---------------------------------------------------------------------------
 # Test: TESTING=True skips scheduler
@@ -98,7 +95,6 @@ class TestSchedulerTesting:
 
             mock_sched.start.assert_called_once()
             assert get_scheduler() is mock_sched
-
 
 # ---------------------------------------------------------------------------
 # Test: Werkzeug reloader guard
@@ -135,7 +131,6 @@ class TestReloaderGuard:
 
             assert get_scheduler() is mock_sched
 
-
 # ---------------------------------------------------------------------------
 # Test: Double-init guard
 # ---------------------------------------------------------------------------
@@ -158,7 +153,6 @@ class TestDoubleInitGuard:
             # BackgroundScheduler() should only be constructed once
             assert MockScheduler.call_count == 1
             assert mock_sched.start.call_count == 1
-
 
 # ---------------------------------------------------------------------------
 # Test: 30-minute interval job registration
@@ -212,7 +206,6 @@ class TestSchedulerJobConfig:
             kwargs = add_job_kwargs.kwargs if add_job_kwargs.kwargs else add_job_kwargs[1]
             assert kwargs.get("replace_existing") is True
 
-
 # ---------------------------------------------------------------------------
 # Test: run_sync_now
 # ---------------------------------------------------------------------------
@@ -262,11 +255,9 @@ class TestRunSyncNow:
         assert result["thordata_fetched"] == 0
         assert result["thordata_errors"] == []
 
-
 # ---------------------------------------------------------------------------
 # ATS scan scheduler tests (relocated from test_scoring.py, Phase 24)
 # ---------------------------------------------------------------------------
-
 
 class TestSchedulerAtsScan:
     """Verify ATS scan and slug probe jobs are registered in APScheduler."""
@@ -325,11 +316,9 @@ class TestSchedulerAtsScan:
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
         assert "ats_slug_probe" in job_ids_kw
 
-
 # ---------------------------------------------------------------------------
 # Expiry check scheduler tests (Phase 31)
 # ---------------------------------------------------------------------------
-
 
 class TestSchedulerExpiryCheck:
     """Verify expiry check job is registered in APScheduler."""
@@ -357,11 +346,9 @@ class TestSchedulerExpiryCheck:
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
         assert "expiry_check" in job_ids_kw
 
-
 # ---------------------------------------------------------------------------
 # Test: Arg-order regression (Phase 11 plan 01)
 # ---------------------------------------------------------------------------
-
 
 class TestSchedulerArgOrder:
     """Regression tests: scheduler calls run_ingestion/run_pipeline_detection

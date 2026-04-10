@@ -5,7 +5,6 @@ from datetime import datetime
 
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
 
-
 SAMPLE_SINGLE_JOB = """\
 Greenhouse\r\r
 \r\r
@@ -38,7 +37,6 @@ Unsubscribe \r\r
 \r\r
 250 W 34th Street, Suite 329, New York, NY 10119, USA"""
 
-
 SAMPLE_MULTI_JOB = """\
 Here's your weekly update about new roles.
 
@@ -55,7 +53,6 @@ Widgets Inc
 Product
 
 We'll send your next job alert soon."""
-
 
 class TestGreenhouseParser:
     def test_parses_single_job(self):
@@ -90,7 +87,6 @@ class TestGreenhouseParser:
         jobs = parse_greenhouse_alert(SAMPLE_SINGLE_JOB, email_date=date)
         assert jobs[0].posted_date == date
 
-
 class TestGreenhouseMultiJob:
     def test_parses_multiple_jobs(self):
         jobs = parse_greenhouse_alert(SAMPLE_MULTI_JOB)
@@ -112,7 +108,6 @@ class TestGreenhouseMultiJob:
         jobs = parse_greenhouse_alert(SAMPLE_MULTI_JOB)
         for job in jobs:
             assert "we'll send" not in job.title.lower()
-
 
 class TestGreenhouseEdgeCases:
     def test_empty_body(self):

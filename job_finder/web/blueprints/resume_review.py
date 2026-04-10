@@ -14,11 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
-try:
     import fitz  # PyMuPDF -- optional; guarded so app starts without it
 except ImportError:
     fitz = None  # type: ignore[assignment]
@@ -40,7 +35,8 @@ from job_finder.web.activity_tracker import (
     ACTION_SAVE_CONFLICTS,
     ACTION_EXTRACT_STYLE,
 )
-from job_finder.web.model_provider import call_model
+from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile
 
@@ -72,7 +68,6 @@ CONFLICT_SCHEMA = {
     "required": ["conflicts"],
     "additionalProperties": False,
 }
-
 
 @resume_review_bp.route("/upload-pdf", methods=["POST"], strict_slashes=False)
 def upload_pdf():
@@ -142,7 +137,6 @@ def upload_pdf():
 
     return redirect(url_for("resume_review.conflict_review", upload_id=upload_id))
 
-
 def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list:
     """Call Haiku to compare PDF resume text against the profile and return conflict list.
 
@@ -157,12 +151,11 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         Returns [] on error.
     """
     try:
-        client = None
-        if anthropic is not None:
-            try:
-                client = anthropic.Anthropic()
-            except Exception:
-                pass
+        model = (
+            config.get("scoring", {})
+            .get("models", {})
+            .get("haiku", DEFAULT_MODEL_HAIKU)
+        )
 
         system = (
             "You are a resume conflict analyzer. Compare a PDF resume against a structured "
@@ -184,8 +177,8 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
             f"Identify conflicts (differences/additions) between the PDF and the profile."
         )
 
-        result_obj = call_model(
-            tier="haiku",
+        result, _cost = call_claude(
+            model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
             output_schema=CONFLICT_SCHEMA,
@@ -194,14 +187,12 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
             purpose="resume_conflict_review",
             config=config,
             max_tokens=2048,
-            client=client,
         )
-        return result_obj.data.get("conflicts", [])
+        return result.get("conflicts", [])
 
     except Exception as e:
         logger.warning("_compare_conflicts: failed to compare conflicts: %s", e)
-        return None
-
+        return []
 
 @resume_review_bp.route("/review/<int:upload_id>", strict_slashes=False)
 def conflict_review(upload_id: int):
@@ -234,16 +225,13 @@ def conflict_review(upload_id: int):
     config = current_app.config.get("JF_CONFIG", {})
 
     conflicts = _compare_conflicts(row["raw_text"], profile, conn, config)
-    ai_unavailable = conflicts is None
 
     return render_template(
         "profile/conflict_review.html",
-        conflicts=conflicts or [],
-        ai_unavailable=ai_unavailable,
+        conflicts=conflicts,
         upload_id=upload_id,
         upload=row,
     )
-
 
 @resume_review_bp.route("/save-conflicts/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def save_conflicts(upload_id: int):
@@ -335,7 +323,6 @@ def save_conflicts(upload_id: int):
     flash("Changes saved successfully.", "success")
     return redirect(url_for("profile.index"))
 
-
 @resume_review_bp.route("/extract-style/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def extract_style(upload_id: int):
     """Trigger Sonnet style extraction from an uploaded resume PDF.
@@ -383,7 +370,6 @@ def extract_style(upload_id: int):
 
     flash("Style guide extracted successfully.", "success")
     return redirect(url_for("profile.index"))
-
 
 @resume_review_bp.route("/save-style-guide", methods=["POST"], strict_slashes=False)
 def save_style_guide_route():

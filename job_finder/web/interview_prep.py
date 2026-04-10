@@ -14,12 +14,11 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
 import requests
 
+from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.claude_client import BudgetExceededError
-from job_finder.web.model_provider import call_model
+from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 
 logger = logging.getLogger(__name__)
@@ -68,13 +67,11 @@ INTERVIEW_PREP_SCHEMA = {
     "additionalProperties": False,
 }
 
-
 # ---------------------------------------------------------------------------
 # SerpAPI company brief fetcher
 # ---------------------------------------------------------------------------
 
 SERPAPI_BASE_URL = "https://serpapi.com/search.json"
-
 
 def _fetch_company_info(company_name: str, config: dict) -> str:
     """Fetch company info from SerpAPI for interview prep context.
@@ -121,7 +118,6 @@ def _fetch_company_info(company_name: str, config: dict) -> str:
         logger.warning("_fetch_company_info failed for '%s': %s", company_name, e)
         return ""
 
-
 # ---------------------------------------------------------------------------
 # Background interview prep generation
 # ---------------------------------------------------------------------------
@@ -148,7 +144,6 @@ def generate_interview_prep_background(
     """
     with standalone_connection(db_path) as conn:
         _run_prep_generation(conn, dedup_key, config)
-
 
 def _run_prep_generation(
     conn: sqlite3.Connection,
@@ -209,23 +204,34 @@ def _run_prep_generation(
         # --- Fetch company info via SerpAPI (best-effort) ---
         company_info = _fetch_company_info(company, config)
 
-        # --- Load prior reusable stories for prompt context ---
-        prior_stories = _load_recent_reusable_stories(conn)
+        # --- Budget gate ---
+        if not cost_gate(conn, config, "sonnet"):  # "sonnet" tier covers Opus too
+            error_msg = "Monthly budget cap reached. Interview prep skipped."
+            logger.info(
+                "generate_interview_prep_background: budget exceeded for %s", dedup_key
+            )
+            conn.execute(
+                "UPDATE interview_preps SET status = 'error', error_msg = ? WHERE id = ?",
+                (error_msg, prep_id),
+            )
+            conn.commit()
+            return
 
         # --- Build system prompt ---
-        system_prompt = _build_system_prompt(
-            title, company, jd_full, profile, fit_analysis, company_info,
-            prior_stories=prior_stories,
+        system_prompt = _build_system_prompt(title, company, jd_full, profile, fit_analysis, company_info)
+
+        # --- Determine Opus model ---
+        opus_model = (
+            config.get("scoring", {}).get("models", {}).get("opus", DEFAULT_MODEL_OPUS)
         )
 
         # --- Call Opus ---
-        client = anthropic.Anthropic()
         messages = [
             {"role": "user", "content": "Generate the interview preparation for this job application."}
         ]
 
-        result_obj = call_model(
-            tier="opus",
+        result, cost_usd = call_claude(
+            model=opus_model,
             system=system_prompt,
             messages=messages,
             output_schema=INTERVIEW_PREP_SCHEMA,
@@ -234,19 +240,13 @@ def _run_prep_generation(
             purpose="opus_interview_prep",
             config=config,
             max_tokens=4096,
-            client=client,
         )
-        result = result_obj.data
-        cost_usd = result_obj.cost_usd
 
         # --- Store results ---
         company_brief = result.get("company_brief", "")
         predicted_questions = json.dumps(result.get("predicted_questions", []))
         gap_mitigation = json.dumps(result.get("gap_mitigation", []))
         questions_to_ask = json.dumps(result.get("questions_to_ask", []))
-
-        # Extract reusable STAR stories from predicted questions (pure JSON filtering)
-        reusable_stories = extract_reusable_stories(predicted_questions)
 
         conn.execute(
             """UPDATE interview_preps
@@ -255,11 +255,9 @@ def _run_prep_generation(
                    predicted_questions = ?,
                    gap_mitigation = ?,
                    questions_to_ask = ?,
-                   cost_usd = ?,
-                   reusable_stories_json = ?
+                   cost_usd = ?
                WHERE id = ?""",
-            (company_brief, predicted_questions, gap_mitigation, questions_to_ask,
-             cost_usd, reusable_stories, prep_id),
+            (company_brief, predicted_questions, gap_mitigation, questions_to_ask, cost_usd, prep_id),
         )
         conn.commit()
         logger.info(
@@ -290,7 +288,6 @@ def _run_prep_generation(
         )
         conn.commit()
 
-
 def _build_system_prompt(
     title: str,
     company: str,
@@ -298,7 +295,6 @@ def _build_system_prompt(
     profile: dict,
     fit_analysis: dict,
     company_info: str,
-    prior_stories: list[dict] | None = None,
 ) -> str:
     """Build the Opus system prompt for interview prep generation."""
     profile_summary = _format_profile_for_prompt(profile)
@@ -313,21 +309,6 @@ def _build_system_prompt(
         jd_preview = jd_full[:3000]  # Limit JD to avoid token overflow
         jd_section = f"\n\n## Job Description\n{jd_preview}"
 
-    prior_stories_section = ""
-    if prior_stories:
-        story_lines = []
-        for s in prior_stories[:5]:
-            q = s.get("question", "")
-            story = s.get("star_story", "")
-            if q and story:
-                story_lines.append(f"- Q: {q}\n  Story: {story}")
-        if story_lines:
-            prior_stories_section = (
-                "\n\n## Prior STAR Stories (from previous interview preps)\n"
-                "Reuse or adapt these stories where relevant:\n"
-                + "\n".join(story_lines)
-            )
-
     return f"""You are an expert interview coach preparing a candidate for a job interview.
 
 ## Role Being Applied For
@@ -338,7 +319,7 @@ Company: {company}{company_context}{jd_section}
 {profile_summary}
 
 ## AI Fit Analysis
-{fit_summary}{prior_stories_section}
+{fit_summary}
 
 Generate comprehensive interview preparation with all four required sections:
 
@@ -353,7 +334,6 @@ Generate comprehensive interview preparation with all four required sections:
 4. **questions_to_ask**: 5 thoughtful questions for the interviewer that demonstrate genuine interest and strategic thinking about the role.
 
 Be specific, practical, and tailored to both the role and the candidate's actual experience."""
-
 
 def _format_profile_for_prompt(profile: dict) -> str:
     """Format experience profile for inclusion in Opus prompt."""
@@ -397,75 +377,6 @@ def _format_profile_for_prompt(profile: dict) -> str:
                 lines.append(f"    Thesis: {ed['thesis']}")
 
     return "\n".join(lines) if lines else "(No profile data)"
-
-
-def extract_reusable_stories(predicted_questions_json: str) -> str | None:
-    """Extract reusable STAR stories from completed prep output.
-
-    Pure JSON filtering — no LLM call required. Stores up to the first 5
-    distinct {question, star_story, key_points} objects whose star_story is
-    non-empty after whitespace normalization.
-
-    Args:
-        predicted_questions_json: JSON string of predicted_questions array.
-
-    Returns:
-        JSON string of reusable stories array, or None if no valid stories.
-    """
-    try:
-        questions = json.loads(predicted_questions_json) if predicted_questions_json else []
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-    if not isinstance(questions, list):
-        return None
-
-    stories = []
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        star_story = (q.get("star_story") or "").strip()
-        if not star_story:
-            continue
-        stories.append({
-            "question": q.get("question", ""),
-            "star_story": star_story,
-            "key_points": q.get("key_points", []),
-        })
-        if len(stories) >= 5:
-            break
-
-    return json.dumps(stories) if stories else None
-
-
-def _load_recent_reusable_stories(conn: sqlite3.Connection, limit: int = 3) -> list[dict]:
-    """Load recent reusable stories from completed interview preps.
-
-    Args:
-        conn: Open sqlite3 connection.
-        limit: Maximum number of prep rows to scan for stories.
-
-    Returns:
-        Flat list of story dicts from recent completed preps.
-    """
-    rows = conn.execute(
-        "SELECT reusable_stories_json FROM interview_preps "
-        "WHERE status = 'done' AND reusable_stories_json IS NOT NULL "
-        "ORDER BY id DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-
-    all_stories = []
-    for row in rows:
-        try:
-            stories = json.loads(row["reusable_stories_json"])
-            if isinstance(stories, list):
-                all_stories.extend(stories)
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-    return all_stories
-
 
 def _format_fit_analysis(fit_analysis: dict) -> str:
     """Format AI fit analysis for inclusion in Opus prompt."""

@@ -18,7 +18,6 @@ from job_finder.web.claude_client import (
 )
 from job_finder.web.haiku_scorer import build_description_snippet
 
-
 # ---------------------------------------------------------------------------
 # Cost computation tests
 # ---------------------------------------------------------------------------
@@ -60,7 +59,6 @@ class TestCostComputation:
 
     def test_zero_tokens(self):
         assert compute_cost("claude-haiku-4-5", 0, 0) == 0.0
-
 
 # ---------------------------------------------------------------------------
 # Cost recording tests
@@ -111,17 +109,16 @@ class TestCostRecording:
         # Timestamp should be a non-empty string
         assert row["timestamp"] and len(row["timestamp"]) > 0
 
-
 # ---------------------------------------------------------------------------
 # Cost gate tests
 # ---------------------------------------------------------------------------
 
 class TestCostGate:
-    """Verify cost_gate correctly gates Sonnet at the daily budget and always allows Haiku."""
+    """Verify cost_gate correctly gates Sonnet at budget and always allows Haiku."""
 
     @pytest.fixture
     def gate_config(self):
-        return {"scoring": {"daily_budget_usd": 10.0}}
+        return {"scoring": {"monthly_budget_usd": 10.0}}
 
     def test_haiku_always_allowed_when_under_budget(self, migrated_db, gate_config):
         path, conn = migrated_db
@@ -154,21 +151,20 @@ class TestCostGate:
         _insert_cost_row(conn, cost_usd=5.0)
         assert cost_gate(conn, {}, "sonnet") is True
 
-    def test_sonnet_only_counts_today(self, migrated_db, gate_config):
+    def test_sonnet_only_counts_current_month(self, migrated_db, gate_config):
         path, conn = migrated_db
-        # Insert spend from 35 days ago (exceeds daily budget) but today should be 0
-        old_spend = (datetime.now(timezone.utc) - timedelta(days=35)).strftime(
+        # Insert last month's spend (exceeds budget) but this month should be 0
+        last_month = (datetime.now(timezone.utc) - timedelta(days=35)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (None, "test", "claude-sonnet-4-6", 100, 50, 50.0, old_spend),
+            (None, "test", "claude-sonnet-4-6", 100, 50, 50.0, last_month),
         )
         conn.commit()
-        # Today's spend is 0 -- should be allowed
+        # This month's spend is 0 -- should be allowed
         assert cost_gate(conn, gate_config, "sonnet") is True
-
 
 # ---------------------------------------------------------------------------
 # Cost statistics tests
@@ -210,7 +206,7 @@ class TestCostStats:
         # Insert rows for two different days this month
         today = datetime.now(timezone.utc)
         day1 = today.strftime("%Y-%m-%dT%H:%M:%SZ")
-        day2 = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+        day2 = (today - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
         for ts, cost in [(day1, 0.10), (day2, 0.20)]:
             conn.execute(
                 "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
@@ -257,7 +253,6 @@ class TestCostStats:
         assert stats["projected_monthly"] >= 0.0
         assert stats["projected_monthly"] < 1_000_000  # sanity bound
 
-
 # ---------------------------------------------------------------------------
 # BudgetExceededError tests
 # ---------------------------------------------------------------------------
@@ -267,7 +262,7 @@ class TestBudgetExceededError:
 
     def test_raises_when_budget_exceeded(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"daily_budget_usd": 0.0}}  # zero daily budget -- always blocked
+        config = {"scoring": {"monthly_budget_usd": 0.0}}  # zero budget -- always blocked
         # Insert any spend > 0
         _insert_cost_row(conn, cost_usd=0.01)
         with pytest.raises(BudgetExceededError):
@@ -285,7 +280,7 @@ class TestBudgetExceededError:
 
     def test_haiku_succeeds_even_at_zero_budget(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"daily_budget_usd": 0.0}}
+        config = {"scoring": {"monthly_budget_usd": 0.0}}
         _insert_cost_row(conn, cost_usd=999.0)
         # Should not raise for haiku
         result, cost = call_claude(
@@ -302,7 +297,6 @@ class TestBudgetExceededError:
         assert isinstance(cost, float)
         assert cost >= 0.0
 
-
 # ---------------------------------------------------------------------------
 # Haiku scorer tests
 # ---------------------------------------------------------------------------
@@ -310,27 +304,21 @@ class TestBudgetExceededError:
 class TestHaikuScorer:
     """Verify score_job_haiku() structured output, prompt content, and error handling."""
 
-    @pytest.fixture
-    def haiku_mock_client(self):
-        """Return a MagicMock client whose response matches the Haiku structured output schema."""
-        haiku_response = {
-            "score": 72,
-            "summary": "Good title match, remote location fits, salary meets floor",
-            "title_fit": "strong",
-            "location_fit": "remote",
-            "salary_meets_floor": True,
-        }
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        # Simulates tool_use response (content.input is the structured output)
-        mock_response.content[0].input = haiku_response
-        # Also set .text for fallback path
-        mock_response.content[0].text = json.dumps(haiku_response)
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 100
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        return mock_client
+    _HAIKU_RESPONSE = {
+        "score": 72,
+        "summary": "Good title match, remote location fits, salary meets floor",
+        "title_fit": "strong",
+        "location_fit": "remote",
+        "salary_meets_floor": True,
+    }
+
+    @pytest.fixture(autouse=True)
+    def mock_call_claude(self):
+        """Patch call_claude at haiku_scorer import to return structured Haiku output."""
+        with patch("job_finder.web.haiku_scorer.call_claude",
+                   return_value=(self._HAIKU_RESPONSE, 0.001)) as mock:
+            self._mock = mock
+            yield mock
 
     @pytest.fixture
     def sample_job_row(self):
@@ -359,7 +347,7 @@ class TestHaikuScorer:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -368,37 +356,34 @@ class TestHaikuScorer:
         }
 
     def test_score_job_haiku_calls_correct_model(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
         """score_job_haiku must call call_claude with model='claude-haiku-4-5'."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        result = score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
+        result = score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
         # Verify messages.create was called once
-        assert haiku_mock_client.messages.create.call_count == 1
-        call_kwargs = haiku_mock_client.messages.create.call_args[1]
+        assert self._mock.call_count == 1
+        call_kwargs = self._mock.call_args.kwargs
         assert call_kwargs["model"] == "claude-haiku-4-5"
 
     def test_score_job_haiku_uses_haiku_schema(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
         """score_job_haiku must pass HAIKU_SCHEMA as the tool input_schema."""
         from job_finder.web.haiku_scorer import score_job_haiku, HAIKU_SCHEMA
         path, conn = migrated_db
-        result = score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        call_kwargs = haiku_mock_client.messages.create.call_args[1]
-        # Should have tools with HAIKU_SCHEMA as input_schema
-        tools = call_kwargs.get("tools", [])
-        assert len(tools) == 1
-        assert tools[0]["input_schema"] == HAIKU_SCHEMA
+        result = score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
+        call_kwargs = self._mock.call_args.kwargs
+        assert call_kwargs["output_schema"] == HAIKU_SCHEMA
 
     def test_score_job_haiku_returns_structured_result(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
         """score_job_haiku must return a ScoringResult with success status and data dict."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        scoring_result = score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
+        scoring_result = score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
         assert scoring_result is not None
         assert scoring_result.status == "success"
         result = scoring_result.data
@@ -412,13 +397,13 @@ class TestHaikuScorer:
         assert isinstance(result["summary"], str)
 
     def test_score_job_haiku_prompt_contains_job_fields(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
         """Prompt must include job title, company, location, salary, and description snippet."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        call_kwargs = haiku_mock_client.messages.create.call_args[1]
+        score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         prompt_text = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         assert "Senior Data Scientist" in prompt_text
@@ -428,32 +413,30 @@ class TestHaikuScorer:
         assert "160000" in prompt_text or "160,000" in prompt_text
 
     def test_score_job_haiku_prompt_contains_profile_fields(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
         """Prompt must include candidate's target titles, locations, and min salary."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        call_kwargs = haiku_mock_client.messages.create.call_args[1]
+        score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         prompt_text = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         assert "Senior Data Scientist" in prompt_text or "Staff Data Scientist" in prompt_text
         assert "150000" in prompt_text or "150,000" in prompt_text
 
     def test_score_job_haiku_purpose_is_haiku_score(
-        self, haiku_mock_client, migrated_db, sample_job_row, sample_profile, scoring_config
+        self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
-        """Cost row must be recorded with purpose='haiku_score'."""
+        """call_claude must be called with purpose='haiku_score'."""
         from job_finder.web.haiku_scorer import score_job_haiku
         path, conn = migrated_db
-        score_job_haiku(haiku_mock_client, sample_job_row, sample_profile, conn, scoring_config)
-        rows = conn.execute(
-            "SELECT purpose FROM scoring_costs WHERE purpose = 'haiku_score'"
-        ).fetchall()
-        assert len(rows) == 1
+        score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
+        call_kwargs = self._mock.call_args.kwargs
+        assert call_kwargs["purpose"] == "haiku_score"
 
     def test_score_job_haiku_description_uses_expanded_snippet(
-        self, haiku_mock_client, migrated_db, sample_profile, scoring_config
+        self, migrated_db, sample_profile, scoring_config
     ):
         """Description passes through build_description_snippet (not raw [:500] truncation).
 
@@ -472,8 +455,8 @@ class TestHaikuScorer:
             "description": long_description,
         }
         path, conn = migrated_db
-        score_job_haiku(haiku_mock_client, job_row, sample_profile, conn, scoring_config)
-        call_kwargs = haiku_mock_client.messages.create.call_args[1]
+        score_job_haiku(job_row, sample_profile, conn, scoring_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         prompt_text = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         # The prompt must include the skill keyword summary (marker of build_description_snippet)
@@ -487,7 +470,7 @@ class TestHaikuScorer:
         assert long_description not in prompt_text
 
     def test_score_job_haiku_handles_missing_salary(
-        self, haiku_mock_client, migrated_db, sample_profile, scoring_config
+        self, migrated_db, sample_profile, scoring_config
     ):
         """score_job_haiku with None salary fields must still return a valid result."""
         from job_finder.web.haiku_scorer import score_job_haiku
@@ -501,35 +484,32 @@ class TestHaikuScorer:
             "description": "Some job description",
         }
         path, conn = migrated_db
-        scoring_result = score_job_haiku(haiku_mock_client, job_row, sample_profile, conn, scoring_config)
+        scoring_result = score_job_haiku(job_row, sample_profile, conn, scoring_config)
         # Must return a result (not raise, not None)
         assert scoring_result is not None
         assert scoring_result.status == "success"
         assert "score" in scoring_result.data
 
-    def test_score_job_haiku_propagates_budget_exceeded(
+    def test_score_job_haiku_handles_budget_exceeded_gracefully(
         self, migrated_db, sample_job_row, sample_profile, scoring_config
     ):
-        """score_job_haiku must re-raise BudgetExceededError to abort the batch.
+        """score_job_haiku must return ScoringResult with budget_exceeded status.
 
-        When the Anthropic account-level spend cap is hit, the error propagates
-        so batch callers can abort immediately instead of retrying all remaining jobs.
+        Note: Haiku never actually hits budget cap, but the function must be
+        defensive against unexpected budget errors.
         """
-        import pytest
         from job_finder.web.haiku_scorer import score_job_haiku
         from job_finder.web.claude_client import BudgetExceededError
 
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = BudgetExceededError("Budget exceeded")
+        self._mock.side_effect = BudgetExceededError("Budget exceeded")
         path, conn = migrated_db
-        with pytest.raises(BudgetExceededError):
-            score_job_haiku(mock_client, sample_job_row, sample_profile, conn, scoring_config)
-
+        result = score_job_haiku(sample_job_row, sample_profile, conn, scoring_config)
+        assert result.status == "budget_exceeded"
+        assert result.data is None
 
 # ---------------------------------------------------------------------------
 # build_description_snippet tests
 # ---------------------------------------------------------------------------
-
 
 class TestBuildDescriptionSnippet:
     """Verify build_description_snippet() output shape, skill summaries, and extraction."""
@@ -600,7 +580,6 @@ class TestBuildDescriptionSnippet:
         result = build_description_snippet(desc, [])
         assert "[No candidate skill keywords found in full posting text]" in result
 
-
 # ---------------------------------------------------------------------------
 # Pipeline integration tests
 # ---------------------------------------------------------------------------
@@ -618,7 +597,7 @@ class TestHaikuPipelineIntegration:
             },
             "scoring": {
                 "haiku_threshold": 55,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -630,7 +609,7 @@ class TestHaikuPipelineIntegration:
         """Return a mock score_job_haiku function that returns a ScoringResult."""
         from job_finder.web.scoring_types import ScoringResult
 
-        def _mock(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def _mock(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             return ScoringResult(
                 data={
                     "score": score,
@@ -665,11 +644,8 @@ class TestHaikuPipelineIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(72)), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         # Verify the job was scored
@@ -703,11 +679,8 @@ class TestHaikuPipelineIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(80)), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         assert summary["sonnet_queued"] == 1
@@ -734,11 +707,8 @@ class TestHaikuPipelineIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=self._make_mock_score_job_haiku(40)), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[test_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         assert summary["sonnet_queued"] == 0
@@ -770,7 +740,7 @@ class TestHaikuPipelineIntegration:
 
         call_count = {"n": 0}
 
-        def flaky_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def flaky_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
@@ -788,22 +758,17 @@ class TestHaikuPipelineIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=flaky_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[job1, job2]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         # Both jobs were attempted; 1 was successfully scored
         assert summary["haiku_scored"] == 1
         assert call_count["n"] == 2  # Both jobs were attempted
 
-
 # ---------------------------------------------------------------------------
 # Exclusion filter integration tests (Plan 27-01 Task 3)
 # ---------------------------------------------------------------------------
-
 
 class TestExclusionFilterIntegration:
     """Verify exclusion filter is wired into scoring_runner.run_haiku_scoring."""
@@ -818,7 +783,7 @@ class TestExclusionFilterIntegration:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -854,7 +819,7 @@ class TestExclusionFilterIntegration:
 
         score_call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             score_call_count["n"] += 1
             return ScoringResult(
@@ -865,11 +830,8 @@ class TestExclusionFilterIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[excluded_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         # score_job_haiku must NOT have been called for the excluded job
@@ -904,7 +866,7 @@ class TestExclusionFilterIntegration:
 
         score_call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             score_call_count["n"] += 1
             return ScoringResult(
@@ -915,94 +877,13 @@ class TestExclusionFilterIntegration:
 
         with patch("job_finder.web.scoring_runner.score_job_haiku",
                    side_effect=mock_score), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
              patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[good_job]), \
              patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
             summary = run_ingestion(path, pipeline_config)
 
         # score_job_haiku must have been called for the non-excluded job
         assert score_call_count["n"] == 1
         assert summary["haiku_scored"] == 1
-
-    def test_excluded_job_auto_dismissed(self, migrated_db, pipeline_config):
-        """Excluded job auto-transitions from discovered to dismissed."""
-        from job_finder.web.pipeline_runner import run_ingestion
-        from job_finder.models import Job
-
-        path, conn = migrated_db
-
-        excluded_job = Job(
-            title="Junior Data Analyst",
-            company="DismissCo",
-            location="Remote",
-            source="test",
-            source_url="https://example.com/job/dismiss1",
-            source_id="dismiss-1",
-            salary_min=80000,
-            salary_max=100000,
-            description="Entry level position.",
-        )
-
-        with patch("job_finder.web.scoring_runner.score_job_haiku") as mock_score, \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
-             patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[excluded_job]), \
-             patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
-            run_ingestion(path, pipeline_config)
-
-        row = conn.execute(
-            "SELECT pipeline_status FROM jobs WHERE company = 'DismissCo'"
-        ).fetchone()
-        assert row is not None
-        assert row["pipeline_status"] == "dismissed"
-
-        event = conn.execute(
-            "SELECT source FROM pipeline_events WHERE job_id = ("
-            "  SELECT dedup_key FROM jobs WHERE company = 'DismissCo'"
-            ") AND to_status = 'dismissed'"
-        ).fetchone()
-        assert event is not None
-        assert event["source"] == "exclusion_filter"
-
-    def test_auto_dismiss_does_not_override_reviewing(self, migrated_db, pipeline_config):
-        """Auto-dismiss only affects discovered jobs, not user-advanced statuses."""
-        from job_finder.web.pipeline_runner import run_ingestion
-        from job_finder.models import Job
-        from job_finder.db import upsert_job, update_pipeline_status
-
-        path, conn = migrated_db
-
-        job = Job(
-            title="Junior Data Analyst",
-            company="AdvancedCo",
-            location="Remote",
-            source="test",
-            source_url="https://example.com/job/adv1",
-            source_id="adv-1",
-            salary_min=80000,
-            salary_max=100000,
-            description="Entry level.",
-        )
-        upsert_job(conn, job)
-        update_pipeline_status(conn, job.dedup_key, "reviewing", source="manual")
-
-        with patch("job_finder.web.scoring_runner.score_job_haiku"), \
-             patch("job_finder.web.pipeline_runner.anthropic") as mock_anthropic_module, \
-             patch("job_finder.web.scoring_runner.anthropic", mock_anthropic_module), \
-             patch("job_finder.web.pipeline_runner._fetch_gmail", return_value=[job]), \
-             patch("job_finder.web.pipeline_runner._fetch_serpapi", return_value=[]):
-            mock_anthropic_module.Anthropic.return_value = MagicMock()
-            run_ingestion(path, pipeline_config)
-
-        row = conn.execute(
-            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
-            (job.dedup_key,),
-        ).fetchone()
-        assert row["pipeline_status"] == "reviewing"
-
 
 # ---------------------------------------------------------------------------
 # Sonnet evaluator tests (Plan 02-03 Task 1)
@@ -1011,29 +892,24 @@ class TestExclusionFilterIntegration:
 class TestSonnetEvaluator:
     """Verify evaluate_job_sonnet() produces fit analysis and handles edge cases."""
 
-    @pytest.fixture
-    def sonnet_mock_client(self):
-        """Mock client returning a valid Sonnet evaluation response via tool_use."""
-        sonnet_response = {
-            "score": 82,
-            "summary": "Strong match -- A/B testing experience aligns with role requirements.",
-            "fit_analysis": {
-                "strengths": ["A/B testing experience", "Python proficiency"],
-                "gaps": ["No healthcare domain experience"],
-                "talking_points": ["Led experimentation platform", "Causal inference work"],
-                "resume_priority_skills": ["causal inference", "Python", "A/B testing"],
-            },
-        }
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = sonnet_response
-        mock_response.content[0].text = json.dumps(sonnet_response)
-        mock_response.usage.input_tokens = 1500
-        mock_response.usage.output_tokens = 300
+    _SONNET_RESPONSE = {
+        "score": 82,
+        "summary": "Strong match -- A/B testing experience aligns with role requirements.",
+        "fit_analysis": {
+            "strengths": ["A/B testing experience", "Python proficiency"],
+            "gaps": ["No healthcare domain experience"],
+            "talking_points": ["Led experimentation platform", "Causal inference work"],
+            "resume_priority_skills": ["causal inference", "Python", "A/B testing"],
+        },
+    }
 
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        return mock_client
+    @pytest.fixture(autouse=True)
+    def mock_call_claude(self):
+        """Patch call_claude at sonnet_evaluator import to return structured Sonnet output."""
+        with patch("job_finder.web.sonnet_evaluator.call_claude",
+                   return_value=(self._SONNET_RESPONSE, 0.005)) as mock:
+            self._mock = mock
+            yield mock
 
     @pytest.fixture
     def job_with_jd(self):
@@ -1048,8 +924,7 @@ class TestSonnetEvaluator:
             "jd_full": (
                 "We are looking for a Senior Data Scientist to join our team. "
                 "You will design and run A/B experiments, build causal inference models, "
-                "and work with Python and SQL daily. 5+ years experience required. "
-                "Strong communication skills and ability to present findings to stakeholders."
+                "and work with Python and SQL daily. 5+ years experience required."
             ),
         }
 
@@ -1073,7 +948,7 @@ class TestSonnetEvaluator:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1082,35 +957,33 @@ class TestSonnetEvaluator:
         }
 
     def test_calls_call_claude_with_sonnet_model(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """evaluate_job_sonnet must call call_claude with model='claude-sonnet-4-6'."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet, SONNET_SCHEMA
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        assert sonnet_mock_client.messages.create.call_count == 1
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        assert self._mock.call_count == 1
+        call_kwargs = self._mock.call_args.kwargs
         assert call_kwargs["model"] == "claude-sonnet-4-6"
 
     def test_calls_with_sonnet_schema(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """evaluate_job_sonnet must pass SONNET_SCHEMA as the tool input_schema."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet, SONNET_SCHEMA
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
-        tools = call_kwargs.get("tools", [])
-        assert len(tools) == 1
-        assert tools[0]["input_schema"] == SONNET_SCHEMA
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        call_kwargs = self._mock.call_args.kwargs
+        assert call_kwargs["output_schema"] == SONNET_SCHEMA
 
     def test_returns_dict_with_score_summary_fit_analysis(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """evaluate_job_sonnet must return ScoringResult with score, summary, fit_analysis."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        scoring_result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        scoring_result = evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
         assert scoring_result is not None
         assert scoring_result.status == "success"
         result = scoring_result.data
@@ -1119,12 +992,12 @@ class TestSonnetEvaluator:
         assert "fit_analysis" in result
 
     def test_fit_analysis_has_required_keys(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """fit_analysis must include strengths, gaps, talking_points, resume_priority_skills."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        scoring_result = evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        scoring_result = evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
         assert scoring_result is not None
         fa = scoring_result.data["fit_analysis"]
         assert "strengths" in fa
@@ -1138,44 +1011,44 @@ class TestSonnetEvaluator:
         assert isinstance(fa["resume_priority_skills"], list)
 
     def test_prompt_includes_jd_full_text(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """Prompt must include the full job description text."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         assert "A/B experiments" in user_content or "causal inference" in user_content
 
     def test_prompt_includes_job_metadata(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """Prompt must include job title, company, location."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         assert "Senior Data Scientist" in user_content
         assert "Acme Analytics" in user_content
 
     def test_prompt_includes_experience_profile(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """Prompt must include candidate profile positions and skills."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
         assert "Python" in user_content
 
     def test_returns_none_when_jd_full_is_none(
-        self, sonnet_mock_client, sample_profile, sonnet_config, migrated_db
+        self, sample_profile, sonnet_config, migrated_db
     ):
         """evaluate_job_sonnet must return None when jd_full is None (Sonnet requires JD)."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
@@ -1187,11 +1060,11 @@ class TestSonnetEvaluator:
             "location": "Remote",
             "jd_full": None,
         }
-        result = evaluate_job_sonnet(sonnet_mock_client, job_no_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        result = evaluate_job_sonnet(job_no_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
         assert result.status == "skipped"
         assert result.data is None
         # Must NOT have called the API
-        assert sonnet_mock_client.messages.create.call_count == 0
+        assert self._mock.call_count == 0
 
     def test_returns_none_on_budget_exceeded_error(
         self, sample_profile, sonnet_config, migrated_db, job_with_jd
@@ -1201,25 +1074,21 @@ class TestSonnetEvaluator:
         from job_finder.web.claude_client import BudgetExceededError
         path, conn = migrated_db
 
-        mock_client = MagicMock()
-        mock_client.messages.create.side_effect = BudgetExceededError("Budget exceeded")
+        self._mock.side_effect = BudgetExceededError("Budget exceeded")
 
-        result = evaluate_job_sonnet(mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        result = evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
         assert result.status == "budget_exceeded"
         assert result.data is None
 
     def test_records_cost_with_purpose_sonnet_eval(
-        self, sonnet_mock_client, job_with_jd, sample_profile, sonnet_config, migrated_db
+        self, job_with_jd, sample_profile, sonnet_config, migrated_db
     ):
         """Cost row must be recorded with purpose='sonnet_eval'."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
         path, conn = migrated_db
-        evaluate_job_sonnet(sonnet_mock_client, job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
-        rows = conn.execute(
-            "SELECT purpose FROM scoring_costs WHERE purpose = 'sonnet_eval'"
-        ).fetchall()
-        assert len(rows) == 1
-
+        evaluate_job_sonnet(job_with_jd, experience_profile=sample_profile, conn=conn, config=sonnet_config)
+        call_kwargs = self._mock.call_args.kwargs
+        assert call_kwargs["purpose"] == "sonnet_eval"
 
 # ---------------------------------------------------------------------------
 # Sonnet pipeline integration tests (Plan 02-03 Task 2)
@@ -1239,7 +1108,7 @@ class TestSonnetPipelineIntegration:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1272,12 +1141,7 @@ class TestSonnetPipelineIntegration:
                 "{}",
                 "unreviewed",
                 72,
-                (
-                    "We are looking for a Senior Data Scientist to join our team. "
-                    "You will design and run A/B experiments, build causal inference models, "
-                    "and work with Python and SQL daily. 5+ years experience required. "
-                    "Strong communication skills and ability to present findings to stakeholders."
-                ),
+                "Full job description text for Senior Data Scientist at Acme Analytics.",
             ),
         )
         conn.commit()
@@ -1311,9 +1175,7 @@ class TestSonnetPipelineIntegration:
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result):
             count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 1
@@ -1321,8 +1183,7 @@ class TestSonnetPipelineIntegration:
             "SELECT jd_full FROM jobs WHERE dedup_key = 'acme|senior-ds|remote'"
         ).fetchone()
         assert row is not None
-        assert row["jd_full"] is not None
-        assert len(row["jd_full"]) > 200
+        assert row["jd_full"] == "Full job description text for Senior Data Scientist at Acme Analytics."
 
     def test_writes_sonnet_score_to_db(self, job_with_jd, pipeline_config, mock_sonnet_result):
         """run_sonnet_evaluation must write sonnet_score to jobs table."""
@@ -1330,9 +1191,7 @@ class TestSonnetPipelineIntegration:
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result):
             count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 1
@@ -1347,9 +1206,7 @@ class TestSonnetPipelineIntegration:
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=mock_sonnet_result):
             run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         row = conn.execute(
@@ -1381,9 +1238,7 @@ class TestSonnetPipelineIntegration:
         )
         conn.commit()
 
-        with patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
-            count = run_sonnet_evaluation(["corp|job|loc"], pipeline_config, path)
+        count = run_sonnet_evaluation(["corp|job|loc"], pipeline_config, path)
 
         assert count == 0
         row = conn.execute("SELECT sonnet_score FROM jobs WHERE dedup_key='corp|job|loc'").fetchone()
@@ -1396,9 +1251,7 @@ class TestSonnetPipelineIntegration:
 
         path, conn = job_with_jd
 
-        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=None), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=None):
             count = run_sonnet_evaluation(["acme|senior-ds|remote"], pipeline_config, path)
 
         assert count == 0
@@ -1409,11 +1262,9 @@ class TestSonnetPipelineIntegration:
         assert row["haiku_score"] == 72
         assert row["sonnet_score"] is None
 
-
 # ---------------------------------------------------------------------------
 # Sonnet candidate preferences tests (Plan 27-02 Task 2)
 # ---------------------------------------------------------------------------
-
 
 class TestSonnetPreferences:
     """Verify evaluate_job_sonnet injects Candidate Preferences from config.yaml.
@@ -1422,28 +1273,24 @@ class TestSonnetPreferences:
     based on the target_titles, target_locations, min_salary, and industries in config.
     """
 
-    @pytest.fixture
-    def sonnet_mock_client(self):
-        """Mock client returning a valid Sonnet evaluation response."""
-        sonnet_response = {
-            "score": 82,
-            "summary": "Strong match.",
-            "fit_analysis": {
-                "strengths": ["Python proficiency"],
-                "gaps": ["No healthcare experience"],
-                "talking_points": ["Led experimentation platform"],
-                "resume_priority_skills": ["Python", "A/B testing"],
-            },
-        }
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = sonnet_response
-        mock_response.content[0].text = json.dumps(sonnet_response)
-        mock_response.usage.input_tokens = 1500
-        mock_response.usage.output_tokens = 300
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        return mock_client
+    _SONNET_RESPONSE = {
+        "score": 82,
+        "summary": "Strong match.",
+        "fit_analysis": {
+            "strengths": ["Python proficiency"],
+            "gaps": ["No healthcare experience"],
+            "talking_points": ["Led experimentation platform"],
+            "resume_priority_skills": ["Python", "A/B testing"],
+        },
+    }
+
+    @pytest.fixture(autouse=True)
+    def mock_call_claude(self):
+        """Patch call_claude at sonnet_evaluator import to return structured Sonnet output."""
+        with patch("job_finder.web.sonnet_evaluator.call_claude",
+                   return_value=(self._SONNET_RESPONSE, 0.005)) as mock:
+            self._mock = mock
+            yield mock
 
     @pytest.fixture
     def job_with_jd(self):
@@ -1455,12 +1302,7 @@ class TestSonnetPreferences:
             "location": "Remote",
             "salary_min": 180000,
             "salary_max": 250000,
-            "jd_full": (
-                "We are looking for a Senior Data Scientist to join our team. "
-                "You will design and run A/B experiments, build causal inference models, "
-                "and work with Python and SQL daily. 5+ years experience required. "
-                "Strong communication skills and ability to present findings to stakeholders."
-            ),
+            "jd_full": "We are looking for a Senior Data Scientist. Python and SQL required.",
         }
 
     @pytest.fixture
@@ -1484,7 +1326,7 @@ class TestSonnetPreferences:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1499,7 +1341,7 @@ class TestSonnetPreferences:
         }
 
     def test_sonnet_prompt_contains_preferences_section(
-        self, sonnet_mock_client, job_with_jd, sample_experience_profile,
+        self, job_with_jd, sample_experience_profile,
         config_with_preferences, migrated_db
     ):
         """Prompt must include ## Candidate Preferences section with all preference fields."""
@@ -1507,11 +1349,11 @@ class TestSonnetPreferences:
         path, conn = migrated_db
 
         evaluate_job_sonnet(
-            sonnet_mock_client, job_with_jd, sample_experience_profile, conn,
+            job_with_jd, sample_experience_profile, conn,
             config_with_preferences
         )
 
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
 
@@ -1522,7 +1364,7 @@ class TestSonnetPreferences:
         assert "**Target Industries:** Tech" in user_content
 
     def test_sonnet_prompt_handles_empty_preferences(
-        self, sonnet_mock_client, job_with_jd, sample_experience_profile, migrated_db
+        self, job_with_jd, sample_experience_profile, migrated_db
     ):
         """Prompt shows 'Not specified' for all fields when config has empty profile section."""
         from job_finder.web.sonnet_evaluator import evaluate_job_sonnet
@@ -1531,17 +1373,17 @@ class TestSonnetPreferences:
         empty_config = {
             "scoring": {
                 "haiku_threshold": 42,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-6"},
             },
             "profile": {},  # empty profile section
         }
 
         evaluate_job_sonnet(
-            sonnet_mock_client, job_with_jd, sample_experience_profile, conn, empty_config
+            job_with_jd, sample_experience_profile, conn, empty_config
         )
 
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
 
@@ -1550,7 +1392,7 @@ class TestSonnetPreferences:
         assert user_content.count("Not specified") >= 4
 
     def test_sonnet_prompt_includes_preference_evaluation_instruction(
-        self, sonnet_mock_client, job_with_jd, sample_experience_profile,
+        self, job_with_jd, sample_experience_profile,
         config_with_preferences, migrated_db
     ):
         """Evaluation instruction must mention preference alignment."""
@@ -1558,16 +1400,15 @@ class TestSonnetPreferences:
         path, conn = migrated_db
 
         evaluate_job_sonnet(
-            sonnet_mock_client, job_with_jd, sample_experience_profile, conn,
+            job_with_jd, sample_experience_profile, conn,
             config_with_preferences
         )
 
-        call_kwargs = sonnet_mock_client.messages.create.call_args[1]
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(m["content"] for m in messages if isinstance(m["content"], str))
 
         assert "preference alignment" in user_content
-
 
 # ---------------------------------------------------------------------------
 # Stale detection tests (Plan 02-04 Task 1)
@@ -1727,11 +1568,9 @@ class TestStaleDetection:
         assert "stale_cleared" in result
         assert "archived" in result
 
-
 # ---------------------------------------------------------------------------
 # Borderline re-evaluation band tests (Plan 27-02 Task 1)
 # ---------------------------------------------------------------------------
-
 
 class TestBorderlineReeval:
     """Verify the borderline re-evaluation band (C2) in run_haiku_scoring.
@@ -1750,7 +1589,7 @@ class TestBorderlineReeval:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1791,7 +1630,7 @@ class TestBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
@@ -1809,9 +1648,7 @@ class TestBorderlineReeval:
                     status="success",
                 )
 
-        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # score_job_haiku must be called twice (initial + re-eval)
@@ -1835,7 +1672,7 @@ class TestBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
@@ -1852,9 +1689,7 @@ class TestBorderlineReeval:
                     status="success",
                 )
 
-        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Two calls were made
@@ -1878,7 +1713,7 @@ class TestBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             return ScoringResult(
@@ -1887,9 +1722,7 @@ class TestBorderlineReeval:
                 status="success",
             )
 
-        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Only one call (no re-eval)
@@ -1907,7 +1740,7 @@ class TestBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             return ScoringResult(
@@ -1916,16 +1749,13 @@ class TestBorderlineReeval:
                 status="success",
             )
 
-        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+        with patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], pipeline_config, path)
 
         # Only one call (no re-eval below threshold)
         assert call_count["n"] == 1
         # NOT in sonnet_queue
         assert dedup_key not in sonnet_queue
-
 
 # ---------------------------------------------------------------------------
 # Batch Haiku borderline re-eval tests (Plan 28-02)
@@ -1944,7 +1774,7 @@ class TestBatchHaikuBorderlineReeval:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1996,7 +1826,7 @@ class TestBatchHaikuBorderlineReeval:
 
         call_args_list = []
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_args_list.append({"max_chars": max_chars, "purpose": purpose})
             if len(call_args_list) == 1:
@@ -2013,9 +1843,7 @@ class TestBatchHaikuBorderlineReeval:
                 )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
-             patch("anthropic.Anthropic") as mock_anthropic_cls:
-            mock_anthropic_cls.return_value = MagicMock()
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}):
             _run_batch_haiku_bg(path, session_id, batch_config)
 
         # score_job_haiku must be called twice
@@ -2039,7 +1867,7 @@ class TestBatchHaikuBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             return ScoringResult(
@@ -2049,9 +1877,7 @@ class TestBatchHaikuBorderlineReeval:
             )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
-             patch("anthropic.Anthropic") as mock_anthropic_cls:
-            mock_anthropic_cls.return_value = MagicMock()
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}):
             _run_batch_haiku_bg(path, session_id, batch_config)
 
         # score_job_haiku must be called exactly once (no re-eval)
@@ -2067,7 +1893,7 @@ class TestBatchHaikuBorderlineReeval:
 
         call_count = {"n": 0}
 
-        def mock_score(client, job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
+        def mock_score(job_row, profile, conn, config, max_chars=2000, purpose="haiku_score"):
             from job_finder.web.scoring_types import ScoringResult
             call_count["n"] += 1
             if call_count["n"] == 1:
@@ -2084,9 +1910,7 @@ class TestBatchHaikuBorderlineReeval:
                 )
 
         with patch("job_finder.web.haiku_scorer.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}), \
-             patch("anthropic.Anthropic") as mock_anthropic_cls:
-            mock_anthropic_cls.return_value = MagicMock()
+             patch("job_finder.web.scoring_orchestrator.load_scoring_profile", return_value={}):
             _run_batch_haiku_bg(path, session_id, batch_config)
 
         # jobs.haiku_score must be the re-eval score (58), not the initial (45)
@@ -2095,7 +1919,6 @@ class TestBatchHaikuBorderlineReeval:
         ).fetchone()
         assert row["haiku_score"] == 58
         assert "Re-eval score" in row["haiku_summary"]
-
 
 # ---------------------------------------------------------------------------
 # Filter tests (Plan 02-04 Task 1)
@@ -2144,7 +1967,6 @@ class TestFilteredJobsSorting:
         j2_idx = dedup_keys.index("j2")
         j3_idx = dedup_keys.index("j3")
         assert j1_idx < j2_idx < j3_idx
-
 
 class TestHideStaleFilter:
     """Verify hide_stale=True excludes stale jobs from results."""
@@ -2201,7 +2023,6 @@ class TestHideStaleFilter:
         jobs = get_filtered_jobs(conn)  # default hide_stale=False
         keys = [j["dedup_key"] for j in jobs]
         assert "stale-j2" in keys
-
 
 # ---------------------------------------------------------------------------
 # Score display tests (Plan 02-04 Task 1)
@@ -2311,7 +2132,6 @@ class TestScoreDisplay:
         s3_idx = keys.index("s3")
         assert s1_idx < s2_idx < s3_idx
 
-
 # ---------------------------------------------------------------------------
 # Haiku compensation context tests (Plan 07-02 Task 2)
 # ---------------------------------------------------------------------------
@@ -2319,42 +2139,32 @@ class TestScoreDisplay:
 class TestHaikuCompensationContext:
     """Verify Haiku scoring prompt includes compensation context from comp_data_json."""
 
+    _HAIKU_RESPONSE = {
+        "score": 75,
+        "summary": "Good match",
+        "title_fit": "strong",
+        "location_fit": "remote",
+        "salary_meets_floor": True,
+    }
+
+    @pytest.fixture(autouse=True)
+    def mock_call_claude(self):
+        """Patch call_claude at haiku_scorer import to return structured Haiku output."""
+        with patch("job_finder.web.haiku_scorer.call_claude",
+                   return_value=(self._HAIKU_RESPONSE, 0.001)) as mock:
+            self._mock = mock
+            yield mock
+
     @pytest.fixture
     def haiku_config(self):
         """Config for haiku scorer tests."""
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "daily_budget_usd": 25.0,
+                "monthly_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5"},
             }
         }
-
-    def _make_mock_client(self, score=75):
-        """Build a mock Anthropic client returning a valid Haiku response.
-
-        call_claude uses tool_choice so content[0].input is the parsed result
-        (not content[0].text). See claude_client.py: 'if hasattr(content, "input")'.
-        """
-        haiku_result = {
-            "score": score,
-            "summary": "Good match",
-            "title_fit": "strong",
-            "location_fit": "remote",
-            "salary_meets_floor": True,
-        }
-        content_block = MagicMock()
-        content_block.input = haiku_result
-        # Ensure hasattr(content, 'input') returns True
-        del content_block.text  # Remove text so it falls back to .input
-
-        mock_response = MagicMock()
-        mock_response.content = [content_block]
-        mock_response.usage.input_tokens = 100
-        mock_response.usage.output_tokens = 50
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
-        return mock_client
 
     def test_haiku_prompt_includes_comp_context_when_present(self, migrated_db, haiku_config):
         """Haiku prompt includes Additional Compensation line when comp_data_json is set."""
@@ -2362,7 +2172,6 @@ class TestHaikuCompensationContext:
         from job_finder.web.haiku_scorer import score_job_haiku
 
         path, conn = migrated_db
-        mock_client = self._make_mock_client()
 
         # Job row with Ashby compensation tier summary
         comp_data = {
@@ -2387,9 +2196,9 @@ class TestHaikuCompensationContext:
             "industries": ["Technology"],
         }
 
-        score_job_haiku(mock_client, job_row, profile, conn, haiku_config)
+        score_job_haiku(job_row, profile, conn, haiku_config)
 
-        call_kwargs = mock_client.messages.create.call_args[1]
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(
             m["content"] for m in messages if isinstance(m.get("content"), str)
@@ -2402,7 +2211,6 @@ class TestHaikuCompensationContext:
         from job_finder.web.haiku_scorer import score_job_haiku
 
         path, conn = migrated_db
-        mock_client = self._make_mock_client()
 
         # Job row without comp_data_json
         job_row = {
@@ -2423,7 +2231,7 @@ class TestHaikuCompensationContext:
             "industries": [],
         }
 
-        result = score_job_haiku(mock_client, job_row, profile, conn, haiku_config)
+        result = score_job_haiku(job_row, profile, conn, haiku_config)
 
         # Should succeed without error
         assert result is not None
@@ -2431,216 +2239,12 @@ class TestHaikuCompensationContext:
         assert "score" in result.data
 
         # Prompt should NOT have "Additional Compensation" line
-        call_kwargs = mock_client.messages.create.call_args[1]
+        call_kwargs = self._mock.call_args.kwargs
         messages = call_kwargs["messages"]
         user_content = " ".join(
             m["content"] for m in messages if isinstance(m.get("content"), str)
         )
         assert "Additional Compensation" not in user_content
-
-
-# ---------------------------------------------------------------------------
-# Tests: Sonnet liveness preflight and calibration bypass (career-ops)
-# ---------------------------------------------------------------------------
-
-
-class TestSonnetLivenessPreflight:
-    """score_and_persist_sonnet preflight gates Sonnet on job liveness."""
-
-    @pytest.fixture
-    def _job_row(self, migrated_db):
-        """Insert a job with jd_full and return (path, conn, job_row)."""
-        path, conn = migrated_db
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest, haiku_score, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("pftest|ds|remote", "Data Scientist", "PrefCo", "Remote",
-             '["test"]', '["https://example.com/jobs/123"]',
-             "2026-04-01", "2026-04-01", 0, "{}", "unreviewed", 72,
-             "Full job description with details about data science role..."),
-        )
-        conn.commit()
-        job = dict(conn.execute(
-            "SELECT * FROM jobs WHERE dedup_key = 'pftest|ds|remote'"
-        ).fetchone())
-        return path, conn, job
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness")
-    def test_expired_skips_evaluator(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        path, conn, job_row = _job_row
-        mock_liveness.return_value = "expired"
-
-        mock_evaluator = MagicMock()
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        assert result is None
-        mock_evaluator.assert_not_called()
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness")
-    def test_expired_persists_expiry_status(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        path, conn, job_row = _job_row
-        mock_liveness.return_value = "expired"
-
-        score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=MagicMock(),
-        )
-        row = conn.execute(
-            "SELECT expiry_status FROM jobs WHERE dedup_key = 'pftest|ds|remote'"
-        ).fetchone()
-        assert row["expiry_status"] == "expired"
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness")
-    def test_live_runs_evaluator(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        from job_finder.web.scoring_types import ScoringResult
-        path, conn, job_row = _job_row
-        mock_liveness.return_value = "live"
-
-        mock_evaluator = MagicMock(return_value=ScoringResult(
-            data={"score": 75, "fit_analysis": {}, "summary": "Good fit"},
-            status="success",
-        ))
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        assert result is not None
-        mock_evaluator.assert_called_once()
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness")
-    def test_inconclusive_runs_evaluator(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        from job_finder.web.scoring_types import ScoringResult
-        path, conn, job_row = _job_row
-        mock_liveness.return_value = "inconclusive"
-
-        mock_evaluator = MagicMock(return_value=ScoringResult(
-            data={"score": 65, "fit_analysis": {}, "summary": "OK"},
-            status="success",
-        ))
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        assert result is not None
-        mock_evaluator.assert_called_once()
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness")
-    def test_liveness_cache_prevents_duplicate_check(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        path, conn, job_row = _job_row
-        cache = {"https://example.com/jobs/123": "expired"}
-
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {},
-            evaluator_fn=MagicMock(), liveness_cache=cache,
-        )
-        assert result is None
-        mock_liveness.assert_not_called()  # cache hit — no HTTP call
-
-
-class TestSonnetCalibrationBypass:
-    """Calibration is skipped when eval_blocks are present in Sonnet result."""
-
-    @pytest.fixture
-    def _job_row(self, migrated_db):
-        path, conn = migrated_db
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest, haiku_score, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("caltest|ml|remote", "ML Engineer", "CalCo", "Remote",
-             '["test"]', '["https://example.com/cal"]',
-             "2026-04-01", "2026-04-01", 0, "{}", "unreviewed", 72,
-             "Full ML engineering job description with requirements..."),
-        )
-        conn.commit()
-        job = dict(conn.execute(
-            "SELECT * FROM jobs WHERE dedup_key = 'caltest|ml|remote'"
-        ).fetchone())
-        return path, conn, job
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
-    @patch("job_finder.web.score_calibration.has_calibration", return_value=True)
-    @patch("job_finder.web.score_calibration.calibrate_score", return_value=60)
-    def test_eval_blocks_bypasses_calibration(
-        self, mock_cal, mock_has_cal, mock_liveness, _job_row,
-    ):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        from job_finder.web.scoring_types import ScoringResult
-        path, conn, job_row = _job_row
-
-        mock_evaluator = MagicMock(return_value=ScoringResult(
-            data={
-                "score": 82,
-                "fit_analysis": {},
-                "summary": "Great fit",
-                "eval_blocks": [{"criterion": "Python", "score": 9}],
-                "provider": "ollama",
-            },
-            status="success",
-        ))
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        assert result is not None
-        assert result["score"] == 82  # raw score, NOT calibrated to 60
-        mock_cal.assert_not_called()
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
-    @patch("job_finder.web.score_calibration.has_calibration", return_value=True)
-    @patch("job_finder.web.score_calibration.calibrate_score", return_value=60)
-    def test_no_eval_blocks_applies_calibration(
-        self, mock_cal, mock_has_cal, mock_liveness, _job_row,
-    ):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        from job_finder.web.scoring_types import ScoringResult
-        path, conn, job_row = _job_row
-
-        mock_evaluator = MagicMock(return_value=ScoringResult(
-            data={
-                "score": 82,
-                "fit_analysis": {},
-                "summary": "Great fit",
-                "provider": "ollama",
-            },
-            status="success",
-        ))
-        result = score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        assert result is not None
-        assert result["score"] == 60  # calibrated
-        mock_cal.assert_called_once()
-
-    @patch("job_finder.web.expiry_checker.check_job_liveness", return_value="live")
-    def test_eval_blocks_persisted_to_db(self, mock_liveness, _job_row):
-        from job_finder.web.scoring_orchestrator import score_and_persist_sonnet
-        from job_finder.web.scoring_types import ScoringResult
-        path, conn, job_row = _job_row
-
-        eval_blocks = [{"criterion": "Python", "score": 9, "rationale": "Strong match"}]
-        mock_evaluator = MagicMock(return_value=ScoringResult(
-            data={
-                "score": 78,
-                "fit_analysis": {"strengths": ["Python"]},
-                "summary": "Good",
-                "eval_blocks": eval_blocks,
-            },
-            status="success",
-        ))
-        score_and_persist_sonnet(
-            conn, job_row, {}, MagicMock(), {}, evaluator_fn=mock_evaluator,
-        )
-        row = conn.execute(
-            "SELECT eval_blocks FROM jobs WHERE dedup_key = 'caltest|ml|remote'"
-        ).fetchone()
-        assert row["eval_blocks"] is not None
-        import json
-        assert json.loads(row["eval_blocks"]) == eval_blocks
-
 
 # ---------------------------------------------------------------------------
 # Helpers

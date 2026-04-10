@@ -34,63 +34,6 @@ companies_bp = Blueprint("companies", __name__, url_prefix="/companies")
 _SORT_ALLOWLIST = {"name", "ats_platform", "last_scanned_at", "jobs_found_total"}
 _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
-
-def _companies_health(conn) -> dict:
-    """Compute companies pipeline health metrics for dashboard card.
-
-    Uses a single CTE query to avoid 6 serial round-trips to SQLite.
-    """
-    from datetime import datetime as _dt
-
-    row = conn.execute(
-        """WITH
-             c_totals AS (
-               SELECT
-                 COUNT(*)                                                     AS total,
-                 COUNT(*) FILTER (WHERE ats_probe_status = 'pending')         AS pending,
-                 COUNT(*) FILTER (WHERE homepage_url IS NOT NULL)             AS with_homepage,
-                 COUNT(*) FILTER (WHERE company_size IS NOT NULL
-                                     OR industry IS NOT NULL)                 AS with_enrichment
-               FROM companies
-             ),
-             j_unlinked AS (
-               SELECT COUNT(*) AS cnt FROM jobs WHERE company_id IS NULL
-             ),
-             last_scan AS (
-               SELECT MAX(scanned_at) AS ts FROM company_scan_log
-             )
-           SELECT
-             c_totals.total,
-             c_totals.pending,
-             c_totals.with_homepage,
-             c_totals.with_enrichment,
-             j_unlinked.cnt      AS unlinked_jobs,
-             last_scan.ts        AS last_scan_at
-           FROM c_totals, j_unlinked, last_scan"""
-    ).fetchone()
-
-    total = row["total"] or 0
-    last_scan_at = row["last_scan_at"]
-
-    last_scan_age_days = None
-    if last_scan_at:
-        try:
-            scan_dt = _dt.fromisoformat(last_scan_at)
-            last_scan_age_days = (_dt.now() - scan_dt).days
-        except (ValueError, TypeError):
-            pass
-
-    return {
-        "total": total,
-        "pending_probe": row["pending"],
-        "homepage_pct": round(row["with_homepage"] / max(total, 1) * 100, 1),
-        "enrichment_pct": round(row["with_enrichment"] / max(total, 1) * 100, 1),
-        "unlinked_jobs": row["unlinked_jobs"],
-        "last_scan_at": last_scan_at,
-        "last_scan_age_days": last_scan_age_days,
-    }
-
-
 @companies_bp.route("/", strict_slashes=False)
 def index():
     """Companies list page with sortable table, search, and ATS filter."""
@@ -98,11 +41,6 @@ def index():
     conn = get_db(db_path)
 
     search = request.args.get("search", "").strip()
-    page = request.args.get("page", 1, type=int)
-    if page < 1:
-        page = 1
-    per_page = 50
-    offset = (page - 1) * per_page
     ats_platform = request.args.get("ats_platform", "").strip().lower()
     sort_by = request.args.get("sort_by", "name")
 
@@ -126,13 +64,6 @@ def index():
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    total_count = conn.execute(
-        f"SELECT COUNT(*) FROM companies c {where_sql}",
-        params,
-    ).fetchone()[0]
-
-    # Fetch per_page+1 rows to detect whether a next page exists (avoids false
-    # positive when total is exactly divisible by per_page).
     companies = conn.execute(
         f"""SELECT c.*,
                COUNT(j.dedup_key) as job_count_live
@@ -140,33 +71,18 @@ def index():
             LEFT JOIN jobs j ON j.company_id = c.id
             {where_sql}
             GROUP BY c.id
-            ORDER BY c.{sort_by} ASC NULLS LAST
-            LIMIT ? OFFSET ?""",
-        params + [per_page + 1, offset],
+            ORDER BY c.{sort_by} ASC NULLS LAST""",
+        params,
     ).fetchall()
-
-    has_more = len(companies) > per_page
-    if has_more:
-        companies = companies[:per_page]
 
     is_htmx = request.headers.get("HX-Request")
     if is_htmx:
-        # page > 1 means the sentinel fired — return rows-only partial so the
-        # response doesn't nest an outer container + duplicate header inside the
-        # existing page-1 container.  Sentinel uses hx-swap="outerHTML" so it
-        # replaces itself with the new rows + next-page sentinel.
-        template = (
-            "companies/_rows_partial.html" if page > 1 else "companies/_table.html"
-        )
         return render_template(
-            template,
+            "companies/_table.html",
             companies=companies,
             search=search,
             ats_platform=ats_platform,
             sort_by=sort_by,
-            page=page,
-            has_more=has_more,
-            total_count=total_count,
         )
 
     return render_template(
@@ -175,12 +91,7 @@ def index():
         search=search,
         ats_platform=ats_platform,
         sort_by=sort_by,
-        page=page,
-        has_more=has_more,
-        total_count=total_count,
-        health=_companies_health(conn),
     )
-
 
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
 def expand(company_id):
@@ -221,7 +132,6 @@ def expand(company_id):
         scan_history=scan_history,
     )
 
-
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
@@ -242,7 +152,6 @@ def collapse(company_id):
 
     return render_template("companies/_row.html", company=company)
 
-
 @companies_bp.route("/add", methods=["POST"], strict_slashes=False)
 def add():
     """Create a new company record and trigger ATS probe."""
@@ -257,11 +166,12 @@ def add():
         return redirect(url_for("companies.index"))
 
     try:
-        from job_finder.web.ats_company import find_or_create_company
-        company_id = find_or_create_company(
+        from job_finder.web.ats_scanner import upsert_company
+        company_id = upsert_company(
             conn,
             name=company_name,
             homepage_url=homepage_url,
+            ats_probe_status="pending",
         )
         conn.commit()
 
@@ -275,7 +185,6 @@ def add():
         flash(f"Error adding company: {e}", "error")
 
     return redirect(url_for("companies.index"))
-
 
 @companies_bp.route("/<int:company_id>/toggle", methods=["POST"], strict_slashes=False)
 def toggle(company_id):
@@ -310,7 +219,6 @@ def toggle(company_id):
     ).fetchone()
 
     return render_template("companies/_row.html", company=updated_company)
-
 
 @companies_bp.route("/<int:company_id>/update-slug", methods=["POST"], strict_slashes=False)
 def update_slug(company_id):
@@ -362,7 +270,6 @@ def update_slug(company_id):
         scan_history=scan_history,
     )
 
-
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)
 def scan():
     """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment.
@@ -387,7 +294,6 @@ def scan():
 
     # render_template is OUTSIDE the try block — TemplateErrors propagate as 500
     return render_template("companies/_scan_result.html", result=result, error=scan_error)
-
 
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)
 def retry(company_id):
@@ -437,102 +343,3 @@ def retry(company_id):
     ).fetchone()
 
     return render_template("companies/_row.html", company=updated_company)
-
-
-# ---------------------------------------------------------------------------
-# Company research routes
-# ---------------------------------------------------------------------------
-
-
-@companies_bp.route("/<int:company_id>/research", methods=["POST"], strict_slashes=False)
-def start_research(company_id):
-    """Start on-demand company research. Returns generating fragment for polling."""
-    from job_finder.web.company_research import get_cached_company_research, start_company_research
-
-    db_path = current_app.config["DB_PATH"]
-    config = current_app.config.get("JF_CONFIG", {})
-    conn = get_db(db_path)
-
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
-    if company is None:
-        return "Company not found", 404
-
-    # Check for cached or in-progress research
-    cached = get_cached_company_research(conn, company_id)
-    if cached and cached["status"] == "done":
-        return render_template(
-            "companies/_research_section.html",
-            research=cached, company=company,
-        )
-    if cached and cached["status"] in ("pending", "generating"):
-        return render_template(
-            "companies/_research_generating.html",
-            research_id=cached["id"], company_id=company_id,
-        )
-
-    research_id = start_company_research(conn, company_id, db_path, config)
-    return render_template(
-        "companies/_research_generating.html",
-        research_id=research_id, company_id=company_id,
-    )
-
-
-@companies_bp.route(
-    "/<int:company_id>/research/status/<int:research_id>",
-    strict_slashes=False,
-)
-def research_status(company_id, research_id):
-    """Poll research status. Returns generating fragment or final section."""
-    from datetime import datetime as _dt, timezone as _tz
-
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
-
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
-    if company is None:
-        return "Company not found", 404
-
-    row = conn.execute(
-        "SELECT * FROM company_research WHERE id = ? AND company_id = ?",
-        (research_id, company_id),
-    ).fetchone()
-    if row is None:
-        return "Research not found", 404
-
-    research = dict(row)
-
-    # Timeout safety net: mark stale generating rows as error
-    if research["status"] in ("pending", "generating") and research.get("requested_at"):
-        try:
-            requested = _dt.fromisoformat(research["requested_at"])
-            age_minutes = (
-                _dt.now(_tz.utc) - requested.replace(tzinfo=_tz.utc)
-            ).total_seconds() / 60
-            if age_minutes > 10:
-                now = _dt.now(_tz.utc).isoformat()
-                conn.execute(
-                    "UPDATE company_research SET status = 'error', "
-                    "error_msg = 'Generation timed out', completed_at = ? WHERE id = ?",
-                    (now, research_id),
-                )
-                conn.commit()
-                research["status"] = "error"
-                research["error_msg"] = "Generation timed out"
-        except (ValueError, TypeError):
-            pass
-
-    if research["status"] in ("done", "error"):
-        return render_template(
-            "companies/_research_section.html",
-            research=research, company=company,
-        )
-
-    # Still generating — return polling fragment
-    return render_template(
-        "companies/_research_generating.html",
-        research_id=research_id, company_id=company_id,
-    )

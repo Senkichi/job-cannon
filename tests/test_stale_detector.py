@@ -12,7 +12,6 @@ import pytest
 
 from job_finder.web.stale_detector import run_stale_detection
 
-
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, pipeline_status: str, last_seen: str) -> None:
     """Insert a minimal job row for testing."""
     conn.execute(
@@ -24,11 +23,9 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, pipeline_status: str, 
     )
     conn.commit()
 
-
 def _days_ago(n: int) -> str:
     """Return ISO datetime string for n days ago."""
     return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
-
 
 class TestBatchArchive:
     """Test batch archive path in run_stale_detection()."""

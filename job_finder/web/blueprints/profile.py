@@ -12,8 +12,6 @@ import json
 import logging
 import os
 
-import anthropic
-
 from flask import (
     Blueprint,
     current_app,
@@ -40,7 +38,6 @@ profile_bp = Blueprint("profile", __name__, url_prefix="/profile")
 _PROFILE_PATH = "experience_profile.json"
 _UPLOAD_DIR = "data/resume_uploads"
 
-
 def _get_all_skills(profile: dict) -> list:
     """Gather all unique skills from positions for autocomplete."""
     seen = set()
@@ -55,7 +52,6 @@ def _get_all_skills(profile: dict) -> list:
                 seen.add(skill)
 
     return all_skills
-
 
 def _load_profile_page_extras() -> dict:
     """Load supplementary variables required by profile/index.html.
@@ -103,7 +99,6 @@ def _load_profile_page_extras() -> dict:
         "profile_mtime": profile_mtime,
     }
 
-
 @profile_bp.route("/", strict_slashes=False)
 def index():
     """Profile Editor -- display experience_profile.json in editable form."""
@@ -119,7 +114,6 @@ def index():
         all_skills=all_skills,
         **extras,
     )
-
 
 @profile_bp.route("/save", methods=["POST"], strict_slashes=False)
 def save():
@@ -160,22 +154,9 @@ def save():
         flash(f"Error saving profile: {exc}", "error")
         return redirect(url_for("profile.index"))
 
-
 @profile_bp.route("/import", methods=["POST"], strict_slashes=False)
 def import_markdown():
     """Accept .md file upload, extract structured profile via Claude Opus."""
-    try:
-        import anthropic
-        # Key availability probe — not a model call (MIGR-02 exception: verifies API key, result discarded)
-        anthropic.Anthropic()  # verify key is available (via telemetry injection)
-    except Exception:
-        flash(
-            "Anthropic API key not configured. "
-            "Check ~/.anthropic-telemetry/config.toml.",
-            "error",
-        )
-        return redirect(url_for("profile.index"))
-
     uploaded = request.files.get("markdown_file")
     if uploaded is None or uploaded.filename == "":
         flash("No file uploaded. Please select a .md file.", "error")
@@ -187,10 +168,7 @@ def import_markdown():
         flash("Could not read file as UTF-8 text. Please upload a .md file.", "error")
         return redirect(url_for("profile.index"))
 
-    db_path = current_app.config.get("DB_PATH", "jobs.db")
-    conn = get_db(db_path)
-    config = current_app.config.get("JF_CONFIG", {})
-    extracted = extract_profile_from_markdown(markdown_text, conn=conn, config=config)
+    extracted = extract_profile_from_markdown(markdown_text)
 
     if "error" in extracted and not extracted.get("positions") and not extracted.get("skills"):
         flash(f"Extraction failed: {extracted['error']}", "error")
@@ -208,7 +186,6 @@ def import_markdown():
         import_success=True,
         **extras,
     )
-
 
 @profile_bp.route("/reorder-positions", methods=["POST"], strict_slashes=False)
 def reorder_positions():
@@ -237,7 +214,6 @@ def reorder_positions():
         )
     except (ValueError, KeyError, IndexError) as exc:
         return str(exc), 400
-
 
 @profile_bp.route("/reorder-skills", methods=["POST"], strict_slashes=False)
 def reorder_skills():

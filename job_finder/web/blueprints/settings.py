@@ -25,10 +25,10 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
+    DEFAULT_MONTHLY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
-from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.drive_status import get_drive_status
 from job_finder.web.resume_style_guide import (
     load_style_guide,
@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
 _CONFIG_PATH = "config.yaml"
-
 
 @settings_bp.route("/", strict_slashes=False)
 def index():
@@ -93,7 +92,6 @@ def index():
         new_fields_available=new_fields_available,
         guidelines_text=guidelines_text,
     )
-
 
 @settings_bp.route("/save", methods=["POST"], strict_slashes=False)
 def save():
@@ -155,7 +153,6 @@ def save():
 
     return redirect(url_for("settings.index"))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -174,7 +171,6 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
         else:
             merged[key] = value
     return merged
-
 
 def _parse_form_to_config(form) -> dict:
     """Convert flat form fields back to nested config dict.
@@ -270,19 +266,6 @@ def _parse_form_to_config(form) -> dict:
     if jsearch:
         config.setdefault("sources", {})["jsearch"] = jsearch
 
-    # --- Sources: Thordata ---
-    thordata = {}
-    if _has("thordata_enabled"):
-        thordata["enabled"] = form["thordata_enabled"] == "on"
-    if _has("thordata_api_key"):
-        thordata["api_key"] = form["thordata_api_key"]
-    if _has("thordata_max_age_days"):
-        thordata["max_age_days"] = safe_int(form["thordata_max_age_days"], 3)
-    if _has("_thordata_queries_present"):
-        thordata["queries"] = _parse_thordata_queries(form)
-    if thordata:
-        config.setdefault("sources", {})["thordata"] = thordata
-
     # --- Scoring ---
     scoring = {}
     weights = {}
@@ -295,11 +278,8 @@ def _parse_form_to_config(form) -> dict:
         scoring["weights"] = weights
     if _has("min_score_threshold"):
         scoring["min_score_threshold"] = safe_int(form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD)
-    if _has("daily_budget_usd"):
-        scoring["daily_budget_usd"] = safe_float(form["daily_budget_usd"], DEFAULT_DAILY_BUDGET_USD)
-    elif _has("monthly_budget_usd"):
-        # Legacy field name — silently migrate to daily_budget_usd on next save
-        scoring["daily_budget_usd"] = safe_float(form["monthly_budget_usd"], DEFAULT_DAILY_BUDGET_USD)
+    if _has("monthly_budget_usd"):
+        scoring["monthly_budget_usd"] = safe_float(form["monthly_budget_usd"], DEFAULT_MONTHLY_BUDGET_USD)
     if _has("haiku_threshold"):
         scoring["haiku_threshold"] = safe_int(form["haiku_threshold"], DEFAULT_HAIKU_THRESHOLD)
     models = {}
@@ -362,7 +342,6 @@ def _parse_form_to_config(form) -> dict:
 
     return config
 
-
 def _parse_serpapi_queries(form) -> list:
     """Extract SerpAPI queries from form fields (variable number of rows)."""
     queries = []
@@ -379,24 +358,6 @@ def _parse_serpapi_queries(form) -> list:
             break
     return queries
 
-
-def _parse_thordata_queries(form) -> list:
-    """Extract Thordata queries from form fields (variable number of rows)."""
-    queries = []
-    i = 0
-    while True:
-        query = form.get(f"thordata_query_{i}", "").strip()
-        location = form.get(f"thordata_location_{i}", "").strip()
-        if not query and not location:
-            break
-        if query or location:
-            queries.append({"query": query, "location": location})
-        i += 1
-        if i > 50:  # safety limit
-            break
-    return queries
-
-
 def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     """Write config dict to YAML file atomically.
 
@@ -408,12 +369,7 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        try:
-            os.replace(tmp_path, config_path)
-        except PermissionError as exc:
-            raise PermissionError(
-                f"Could not save config — file may be locked by another process: {exc}"
-            ) from exc
+        os.replace(tmp_path, config_path)
     except Exception:
         try:
             tmp_path.unlink(missing_ok=True)
