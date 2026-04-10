@@ -21,7 +21,7 @@ Exports:
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import BudgetExceededError, ClaudeContext, call_claude
@@ -88,9 +88,7 @@ _SYSTEM_PROMPT = (
     "immediately; 65-79 = good fit worth applying; 50-64 = partial fit; <50 = poor fit."
 )
 
-
 def evaluate_job_sonnet(
-    client: Any,
     job_row: JobRow,
     experience_profile: dict,
     conn: Any,
@@ -104,8 +102,6 @@ def evaluate_job_sonnet(
     analysis.
 
     Args:
-        client: Anthropic client instance (injected for testability).
-            Ignored when *ctx* is provided.
         job_row: Job record dict. Must include jd_full (str or None), plus
                  title, company, location, salary_min, salary_max.
         experience_profile: Experience profile dict (from experience_profile.json).
@@ -114,8 +110,8 @@ def evaluate_job_sonnet(
         config: Application config dict (reads scoring.models.sonnet and
                 profile section for candidate preferences).
             Ignored when *ctx* is provided.
-        ctx: ClaudeContext bundling (client, conn, config).  When supplied,
-            the individual client/conn/config parameters are ignored.
+        ctx: ClaudeContext bundling (conn, config).  When supplied,
+            the individual conn/config parameters are ignored.
 
     Returns:
         ScoringResult with status='success' and data dict containing score,
@@ -124,7 +120,6 @@ def evaluate_job_sonnet(
     """
     # Resolve context: prefer ctx fields over individual params
     if ctx is not None:
-        client = ctx.client
         conn = ctx.conn
         config = ctx.config
 
@@ -221,7 +216,7 @@ def evaluate_job_sonnet(
             job_id=job_row.get("dedup_key"),
             purpose="sonnet_eval",
             max_tokens=2048,
-            ctx=ctx or ClaudeContext(client=client, conn=conn, config=config),
+            ctx=ctx or ClaudeContext(conn=conn, config=config),
         )
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",

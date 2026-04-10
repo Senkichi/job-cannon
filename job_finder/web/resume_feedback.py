@@ -21,7 +21,6 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-import anthropic
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -31,7 +30,6 @@ from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.drive_uploader import get_drive_service
 
 logger = logging.getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # Schema for Sonnet preference extraction
@@ -85,7 +83,6 @@ PREFERENCE_EXTRACTION_SCHEMA = {
 # ---------------------------------------------------------------------------
 _original_text_cache: dict[int, str] = {}
 
-
 # ---------------------------------------------------------------------------
 # Drive polling
 # ---------------------------------------------------------------------------
@@ -106,7 +103,6 @@ def _extract_file_id_from_url(doc_url: str) -> str | None:
     if match:
         return match.group(1)
     return None
-
 
 def poll_resume_for_changes(
     service, file_id: str, last_polled_at: str | None
@@ -162,7 +158,6 @@ def poll_resume_for_changes(
 
     return buf.getvalue().decode("utf-8"), modified_time
 
-
 # ---------------------------------------------------------------------------
 # Preference extraction
 # ---------------------------------------------------------------------------
@@ -209,9 +204,7 @@ def _extract_preferences(
     ]
 
     try:
-        client = anthropic.Anthropic()
         result, cost = call_claude(
-            client=client,
             model=DEFAULT_MODEL_SONNET,
             system=system_prompt,
             messages=messages,
@@ -260,7 +253,6 @@ def _extract_preferences(
 
     return preferences
 
-
 def _store_preferences(
     conn: sqlite3.Connection,
     job_id: str,
@@ -301,7 +293,6 @@ def _store_preferences(
 
     conn.commit()
     return count
-
 
 # ---------------------------------------------------------------------------
 # Main poll runner
@@ -426,7 +417,6 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
         logger.info("Drive feedback poll: %s", result)
         return result
 
-
 # ---------------------------------------------------------------------------
 # Preference consolidation
 # ---------------------------------------------------------------------------
@@ -486,9 +476,7 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
         ]
 
         try:
-            client = anthropic.Anthropic()
             result, cost = call_claude(
-                client=client,
                 model=DEFAULT_MODEL_SONNET,
                 system=system_prompt,
                 messages=messages,

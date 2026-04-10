@@ -21,12 +21,10 @@ from job_finder.web.db_helpers import get_db
 
 feedback_bp = Blueprint("feedback", __name__, url_prefix="/feedback")
 
-
 def _get_db():
     """Get DB connection using app config DB_PATH."""
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     return get_db(db_path)
-
 
 def _query_preferences(conn):
     """Query all preferences with job context, grouped by job."""
@@ -43,7 +41,6 @@ def _query_preferences(conn):
     ).fetchall()
     return [dict(row) for row in rows]
 
-
 def _get_stats(conn, preferences):
     """Compute summary stats for the feedback page."""
     total = len(preferences)
@@ -56,7 +53,6 @@ def _get_stats(conn, preferences):
         "accepted": accepted,
         "pending_consolidation": pending_consolidation,
     }
-
 
 @feedback_bp.route("/", strict_slashes=False)
 def index():
@@ -92,7 +88,6 @@ def index():
         preferences=preferences,
         stats=stats,
     )
-
 
 @feedback_bp.route("/<int:pref_id>/toggle", methods=["POST"], strict_slashes=False)
 def toggle(pref_id: int):
@@ -132,7 +127,6 @@ def toggle(pref_id: int):
         "feedback/_preference_row.html",
         pref=dict(updated),
     ), 200
-
 
 @feedback_bp.route("/consolidate", methods=["POST"], strict_slashes=False)
 def consolidate():

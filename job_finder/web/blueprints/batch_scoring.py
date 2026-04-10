@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
 
-
 @batch_scoring_bp.route("/batch-score/haiku/start", methods=["POST"], strict_slashes=False)
 def batch_score_haiku_start():
     """Start async Haiku batch scoring — returns HTMX polling fragment.
@@ -70,7 +69,6 @@ def batch_score_haiku_start():
         scored=0,
         cancelling=False,
     )
-
 
 @batch_scoring_bp.route("/batch-score/sonnet/start", methods=["POST"], strict_slashes=False)
 def batch_score_sonnet_start():
@@ -127,7 +125,6 @@ def batch_score_sonnet_start():
         scored=0,
         cancelling=False,
     )
-
 
 @batch_scoring_bp.route("/batch-score/status/<int:session_id>", strict_slashes=False)
 def batch_score_status(session_id):
@@ -206,7 +203,6 @@ def batch_score_status(session_id):
         cancelling=(status == "cancelling"),
     )
 
-
 @batch_scoring_bp.route("/batch-score/cancel/<int:session_id>", methods=["POST"], strict_slashes=False)
 def batch_score_cancel(session_id):
     """Cancel a running batch score session.
@@ -251,7 +247,6 @@ def batch_score_cancel(session_id):
         cancelling=True,
     )
 
-
 def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     """Background thread: run Haiku scoring for all unscored jobs.
 
@@ -265,12 +260,10 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
-        import anthropic
 
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_haiku
 
         profile = load_scoring_profile(config)
-        client = anthropic.Anthropic()
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
@@ -310,7 +303,7 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     continue
 
                 try:
-                    result = score_and_persist_haiku(conn, job_row, config, client, profile)
+                    result = score_and_persist_haiku(conn, job_row, config, profile)
                     if result is not None:
                         scored_count += 1
                     else:
@@ -336,7 +329,6 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
         logger.error("Batch Haiku background thread failed: %s", e)
         _mark_session_error(db_path, session_id, str(e)[:500])
 
-
 def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     """Background thread: run Sonnet evaluation for qualifying jobs.
 
@@ -350,7 +342,6 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
-        import anthropic
 
         from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
     except ImportError as e:
@@ -359,7 +350,6 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
 
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
     profile = load_scoring_profile(config)
-    client = anthropic.Anthropic()
 
     try:
         with standalone_connection(db_path) as conn:
@@ -388,7 +378,7 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
             for row in rows:
                 job_row = dict(row)
                 try:
-                    result = score_and_persist_sonnet(conn, job_row, config, client, profile)
+                    result = score_and_persist_sonnet(conn, job_row, config, profile)
                     if result is not None:
                         scored_count += 1
                     else:
@@ -413,7 +403,6 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
     except Exception as e:
         logger.error("Batch Sonnet background thread failed: %s", e)
         _mark_session_error(db_path, session_id, str(e)[:500])
-
 
 def _finish_session(conn, db_path: str, session_id: int, status: str, session_type: str) -> None:
     """Mark a batch session as done and log the activity."""
@@ -448,7 +437,6 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
     except Exception:
         pass
 
-
 def _fail_session(conn, db_path: str, session_id: int, error: Exception, session_type: str) -> None:
     """Mark a batch session as errored and log the failure."""
     try:
@@ -473,7 +461,6 @@ def _fail_session(conn, db_path: str, session_id: int, error: Exception, session
         )
     except Exception:
         pass
-
 
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
     """Mark a batch session as errored. Used for background thread import failures."""

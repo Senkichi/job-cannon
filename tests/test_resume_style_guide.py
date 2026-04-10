@@ -16,7 +16,6 @@ import pytest
 
 from job_finder.web.resume_style_guide import load_style_guide, save_style_guide
 
-
 class TestLoadStyleGuide:
     def test_load_style_guide_returns_empty_dict_when_file_missing(self, tmp_path):
         """load_style_guide on a non-existent path returns {}."""
@@ -32,7 +31,6 @@ class TestLoadStyleGuide:
             json.dump(data, f)
         result = load_style_guide(path)
         assert isinstance(result, dict)
-
 
 class TestSaveLoadRoundtrip:
     def test_save_load_roundtrip(self, tmp_path):
@@ -77,11 +75,9 @@ class TestSaveLoadRoundtrip:
             raw = f.read()
         assert "\u00e9" in raw
 
-
 # ---------------------------------------------------------------------------
 # _build_style_guide_directives tests
 # ---------------------------------------------------------------------------
-
 
 class TestBuildStyleGuideDirectives:
     def test_build_style_guide_directives_returns_list(self):
@@ -132,11 +128,9 @@ class TestBuildStyleGuideDirectives:
         assert any("Tone" in d for d in result)
         assert not any("Verb tense:" in d for d in result)
 
-
 # ---------------------------------------------------------------------------
 # extract_style_guide tests
 # ---------------------------------------------------------------------------
-
 
 class TestSchemaExpansion:
     def test_schema_has_all_new_fields(self):
@@ -195,7 +189,6 @@ class TestSchemaExpansion:
                       "Confidentiality rules", "Typography rules",
                       "JD mirroring rules", "Role archetype"]:
             assert any(label in d for d in result), f"Missing directive for: {label}"
-
 
 class TestExtractStyleGuide:
     @pytest.fixture
@@ -290,7 +283,6 @@ class TestExtractStyleGuide:
                 config=sample_config,
             )
         assert result is None
-
 
 class TestMigrateStyleGuide:
     @pytest.fixture

@@ -40,7 +40,6 @@ settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
 _CONFIG_PATH = "config.yaml"
 
-
 @settings_bp.route("/", strict_slashes=False)
 def index():
     """Settings page — display config.yaml values in editable form."""
@@ -93,7 +92,6 @@ def index():
         new_fields_available=new_fields_available,
         guidelines_text=guidelines_text,
     )
-
 
 @settings_bp.route("/save", methods=["POST"], strict_slashes=False)
 def save():
@@ -155,7 +153,6 @@ def save():
 
     return redirect(url_for("settings.index"))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -174,7 +171,6 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
         else:
             merged[key] = value
     return merged
-
 
 def _parse_form_to_config(form) -> dict:
     """Convert flat form fields back to nested config dict.
@@ -346,7 +342,6 @@ def _parse_form_to_config(form) -> dict:
 
     return config
 
-
 def _parse_serpapi_queries(form) -> list:
     """Extract SerpAPI queries from form fields (variable number of rows)."""
     queries = []
@@ -362,7 +357,6 @@ def _parse_serpapi_queries(form) -> list:
         if i > 50:  # safety limit
             break
     return queries
-
 
 def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     """Write config dict to YAML file atomically.

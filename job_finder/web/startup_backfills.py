@@ -13,7 +13,6 @@ first schema migrations, then startup backfills.
 
 from job_finder.web.db_helpers import standalone_connection
 
-
 def run_description_reformat_once(db_path: str, config: dict) -> None:
     """Start a daemon thread to reformat all job descriptions once (TESTING-guarded).
 
@@ -33,11 +32,7 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
     if config.get("TESTING"):
         return
 
-    # Key is injected by anthropic-telemetry from ~/.anthropic-telemetry/config.toml.
-    # No need to check os.environ for ANTHROPIC_API_KEY.
     try:
-        import anthropic
-
         import threading
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
@@ -53,11 +48,8 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
         t.start()
         logger.debug("Description reformat pass started in background thread")
 
-    except ImportError:
-        logger.debug("anthropic not installed — skipping description reformat pass")
     except Exception as e:
         logger.warning("Failed to start description reformat pass: %s", e)
-
 
 def run_data_backfills_once(db_path: str, config: dict) -> None:
     """Run one-time data backfills in a background thread.

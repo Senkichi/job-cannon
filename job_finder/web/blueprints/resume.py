@@ -23,7 +23,6 @@ import threading
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
-import anthropic
 from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_MODEL_SONNET
@@ -38,7 +37,6 @@ from job_finder.web.resume_generator import _generate_resume_background, generat
 logger = logging.getLogger(__name__)
 
 resume_bp = Blueprint("resume", __name__, url_prefix="/jobs")
-
 
 @resume_bp.route("/<path:dedup_key>/resume/generate", methods=["POST"], strict_slashes=False)
 def generate(dedup_key: str):
@@ -116,7 +114,6 @@ def generate(dedup_key: str):
         gen_id=gen_id,
     )
 
-
 @resume_bp.route("/<path:dedup_key>/resume/status/<int:gen_id>", methods=["GET"], strict_slashes=False)
 def status(dedup_key: str, gen_id: int):
     """Poll resume generation status.
@@ -165,7 +162,6 @@ def status(dedup_key: str, gen_id: int):
         gen_id=gen_id,
     )
 
-
 @resume_bp.route("/<path:dedup_key>/quick-apply", methods=["POST"], strict_slashes=False)
 def quick_apply(dedup_key: str):
     """One-click apply: generate resume if needed, open tabs, set status to applied.
@@ -210,9 +206,8 @@ def quick_apply(dedup_key: str):
 
         # Open a direct connection (not g.db) -- this call may take 30-60s
         with standalone_connection(db_path) as direct_conn:
-            client = anthropic.Anthropic()
 
-            resume_data = generate_resume_single(client, job_row, profile, direct_conn, config)
+            resume_data = generate_resume_single(job_row, profile, direct_conn, config)
 
             if resume_data is None:
                 # Budget exceeded

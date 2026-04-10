@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 _STALE_THRESHOLD_DAYS = 14   # Mark job as stale after this many days without re-sighting
 _ARCHIVE_THRESHOLD_DAYS = 30  # Auto-archive passive-stage jobs after this many days
 
-
 def run_stale_detection(db_path: str) -> dict:
     """Run stale detection and auto-archive on the job database.
 

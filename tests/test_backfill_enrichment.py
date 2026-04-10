@@ -12,7 +12,6 @@ import pytest
 
 import job_finder.web.backfill_enrichment as be_module
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -60,7 +59,6 @@ def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     )
     conn.commit()
 
-
 # ---------------------------------------------------------------------------
 # test_convergence
 # ---------------------------------------------------------------------------
@@ -74,7 +72,7 @@ def test_convergence(migrated_db):
     insert_job(conn, "job2")
     insert_job(conn, "job3")
 
-    def mock_enrich(job_row, serpapi_key=None, anthropic_client=None, conn=None, config=None):
+    def mock_enrich(job_row, serpapi_key=None, conn=None, config=None):
         # Advance to exhausted tier immediately
         if conn is not None:
             conn.execute(
@@ -87,7 +85,7 @@ def test_convergence(migrated_db):
     with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
          patch.object(be_module, "estimate_and_confirm", return_value=True):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
-            conn, serpapi_key=None, config={}, client=MagicMock()
+            conn, serpapi_key=None, config={}
         )
 
     # First pass enriches 3, second pass returns 0 (all exhausted)
@@ -97,7 +95,6 @@ def test_convergence(migrated_db):
     assert "job1" in tier_advanced_keys
     assert "job2" in tier_advanced_keys
     assert "job3" in tier_advanced_keys
-
 
 # ---------------------------------------------------------------------------
 # test_convergence_multiple_passes
@@ -115,7 +112,7 @@ def test_convergence_multiple_passes(migrated_db):
     # free -> ddg -> haiku -> serpapi -> sonnet -> exhausted (5 steps)
     tier_progression = ["free", "ddg", "haiku", "serpapi", "sonnet", "exhausted"]
 
-    def mock_enrich(job_row, serpapi_key=None, anthropic_client=None, conn=None, config=None):
+    def mock_enrich(job_row, serpapi_key=None, conn=None, config=None):
         key = job_row["dedup_key"]
         current = job_row.get("enrichment_tier")
         # Advance one tier
@@ -141,13 +138,12 @@ def test_convergence_multiple_passes(migrated_db):
     with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
          patch.object(be_module, "estimate_and_confirm", return_value=True):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
-            conn, serpapi_key=None, config={}, client=MagicMock()
+            conn, serpapi_key=None, config={}
         )
 
     # Multiple passes should complete and all 5 jobs should have been advanced
     assert total_enriched > 5  # multiple passes × 5 jobs
     assert len(tier_advanced_keys) == 5
-
 
 # ---------------------------------------------------------------------------
 # test_cost_estimate
@@ -169,7 +165,6 @@ def test_cost_estimate_yes(migrated_db, monkeypatch):
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is True
 
-
 def test_cost_estimate_no(migrated_db, monkeypatch):
     """estimate_and_confirm returns False on 'n'."""
     path, conn = migrated_db
@@ -180,7 +175,6 @@ def test_cost_estimate_no(migrated_db, monkeypatch):
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is False
 
-
 def test_cost_estimate_default_no(migrated_db, monkeypatch):
     """estimate_and_confirm returns False on empty Enter (default N)."""
     path, conn = migrated_db
@@ -190,7 +184,6 @@ def test_cost_estimate_default_no(migrated_db, monkeypatch):
 
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is False
-
 
 def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     """estimate_and_confirm correctly counts jobs at each eligible tier."""
@@ -212,7 +205,6 @@ def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     assert "NULL" in captured.out or "null" in captured.out.lower()
     assert "$" in captured.out  # cost estimate printed
 
-
 # ---------------------------------------------------------------------------
 # test_no_ai_calls_without_confirmation
 # ---------------------------------------------------------------------------
@@ -227,14 +219,13 @@ def test_no_ai_calls_without_confirmation(migrated_db):
     with patch.object(be_module, "enrich_job", mock_enrich), \
          patch.object(be_module, "estimate_and_confirm", return_value=False):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
-            conn, serpapi_key=None, config={}, client=MagicMock()
+            conn, serpapi_key=None, config={}
         )
 
     # enrich_job should never be called
     mock_enrich.assert_not_called()
     assert total_enriched == 0
     assert len(tier_advanced_keys) == 0
-
 
 # ---------------------------------------------------------------------------
 # test_sonnet_queue
@@ -257,7 +248,7 @@ def test_sonnet_queue(migrated_db):
     mock_evaluate = MagicMock(return_value=mock_result)
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        count = be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())
+        count = be_module.run_sonnet_backfill(conn, config={})
 
     assert count == 3
     assert mock_evaluate.call_count == 3
@@ -268,7 +259,6 @@ def test_sonnet_queue(migrated_db):
     ).fetchall()
     for row in rows:
         assert dict(row)["sonnet_score"] == 82
-
 
 # ---------------------------------------------------------------------------
 # test_sonnet_queue_skips_scored
@@ -291,7 +281,7 @@ def test_sonnet_queue_skips_scored(migrated_db):
     mock_evaluate = MagicMock(return_value=mock_result)
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        count = be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())
+        count = be_module.run_sonnet_backfill(conn, config={})
 
     assert count == 1  # Only 1 job evaluated
     assert mock_evaluate.call_count == 1
@@ -300,7 +290,6 @@ def test_sonnet_queue_skips_scored(migrated_db):
         "SELECT sonnet_score FROM jobs WHERE dedup_key = 'already_scored'"
     ).fetchone()
     assert dict(row)["sonnet_score"] == 75  # unchanged
-
 
 # ---------------------------------------------------------------------------
 # test_borderline_rescore
@@ -327,7 +316,7 @@ def test_borderline_rescore(migrated_db):
 
     with patch.object(be_module, "score_job_haiku", mock_score):
         count = be_module.run_borderline_rescore(
-            conn, config={}, client=MagicMock(), tier_advanced_keys=tier_advanced_keys
+            conn, config={}, tier_advanced_keys=tier_advanced_keys
         )
 
     assert count == 2
@@ -339,7 +328,6 @@ def test_borderline_rescore(migrated_db):
     ).fetchall()
     for row in rows:
         assert dict(row)["haiku_score"] == 65
-
 
 # ---------------------------------------------------------------------------
 # test_borderline_skips_non_advanced
@@ -367,7 +355,7 @@ def test_borderline_skips_non_advanced(migrated_db):
 
     with patch.object(be_module, "score_job_haiku", mock_score):
         count = be_module.run_borderline_rescore(
-            conn, config={}, client=MagicMock(), tier_advanced_keys=tier_advanced_keys
+            conn, config={}, tier_advanced_keys=tier_advanced_keys
         )
 
     # Only 1 job re-scored (the one in tier_advanced_keys)
@@ -378,7 +366,6 @@ def test_borderline_skips_non_advanced(migrated_db):
         "SELECT haiku_score FROM jobs WHERE dedup_key = 'borderline_not_advanced'"
     ).fetchone()
     assert dict(row)["haiku_score"] == 55
-
 
 # ---------------------------------------------------------------------------
 # test_ordering_by_score_desc
@@ -395,7 +382,7 @@ def test_ordering_by_score_desc(migrated_db):
 
     call_order = []
 
-    def mock_enrich(job_row, serpapi_key=None, anthropic_client=None, conn=None, config=None):
+    def mock_enrich(job_row, serpapi_key=None, conn=None, config=None):
         call_order.append(job_row["dedup_key"])
         # Advance to exhausted so convergence happens in 1 pass
         if conn is not None:
@@ -408,13 +395,12 @@ def test_ordering_by_score_desc(migrated_db):
 
     with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
          patch.object(be_module, "estimate_and_confirm", return_value=True):
-        be_module.run_passes_to_convergence(conn, serpapi_key=None, config={}, client=MagicMock())
+        be_module.run_passes_to_convergence(conn, serpapi_key=None, config={})
 
     # high_score (85) should come before low_score (30) and no_score (NULL=0)
     assert call_order[0] == "high_score"
     assert call_order[1] == "low_score"
     assert call_order[2] == "no_score"
-
 
 # ---------------------------------------------------------------------------
 # test_run_enrichment_pass_tracks_tier_advancement
@@ -428,7 +414,7 @@ def test_run_enrichment_pass_tracks_tier_advancement(migrated_db):
     insert_job(conn, "no_change", enrichment_tier=None)
     insert_job(conn, "exhausted_already", enrichment_tier="exhausted")
 
-    def mock_enrich(job_row, serpapi_key=None, anthropic_client=None, conn=None, config=None):
+    def mock_enrich(job_row, serpapi_key=None, conn=None, config=None):
         key = job_row["dedup_key"]
         if key == "advances":
             if conn is not None:
@@ -443,14 +429,13 @@ def test_run_enrichment_pass_tracks_tier_advancement(migrated_db):
 
     with patch.object(be_module, "enrich_job", side_effect=mock_enrich):
         enriched_count, tier_advanced_keys = be_module.run_enrichment_pass(
-            conn, serpapi_key=None, config={}, client=MagicMock()
+            conn, serpapi_key=None, config={}
         )
 
     # Only "advances" job had tier advance (from None to "free")
     assert "advances" in tier_advanced_keys
     # enriched_count reflects how many got non-empty results
     assert enriched_count >= 1
-
 
 # ---------------------------------------------------------------------------
 # test_sonnet_backfill_writes_fit_analysis
@@ -472,7 +457,7 @@ def test_sonnet_backfill_writes_fit_analysis(migrated_db):
     mock_evaluate = MagicMock(return_value=mock_result)
 
     with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        be_module.run_sonnet_backfill(conn, config={}, client=MagicMock())
+        be_module.run_sonnet_backfill(conn, config={})
 
     row = conn.execute(
         "SELECT sonnet_score, fit_analysis FROM jobs WHERE dedup_key = 'job_with_jd'"

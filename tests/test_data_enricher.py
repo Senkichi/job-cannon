@@ -27,11 +27,9 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def sparse_job_row():
@@ -50,7 +48,6 @@ def sparse_job_row():
         "description": "Build ML models",
     }
 
-
 @pytest.fixture
 def rich_job_row():
     """A job row with all scoring-relevant data (no enrichment needed)."""
@@ -67,7 +64,6 @@ def rich_job_row():
         "enrichment_tier": None,
         "description": "Lead data science.",
     }
-
 
 @pytest.fixture
 def mock_anthropic_client():
@@ -86,7 +82,6 @@ def mock_anthropic_client():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client
-
 
 @pytest.fixture
 def temp_db():
@@ -133,11 +128,9 @@ def temp_db():
     conn.commit()
     return conn
 
-
 # ---------------------------------------------------------------------------
 # Tests for search_serpapi (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestSearchSerpapi:
     def test_search_serpapi_makes_request_with_job_query(self):
@@ -213,11 +206,9 @@ class TestSearchSerpapi:
 
         assert result is None
 
-
 # ---------------------------------------------------------------------------
 # Tests for search_duckduckgo (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestSearchDuckDuckGo:
     def test_search_duckduckgo_queries_ddg_api(self):
@@ -284,11 +275,9 @@ class TestSearchDuckDuckGo:
 
         assert result is None
 
-
 # ---------------------------------------------------------------------------
 # Tests for extract_with_haiku (from enrichment_tiers)
 # ---------------------------------------------------------------------------
-
 
 class TestExtractWithHaiku:
     def test_extract_with_haiku_sends_search_text_to_haiku(
@@ -311,7 +300,7 @@ class TestExtractWithHaiku:
                 0.0001,
             )
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         mock_call.assert_called_once()
@@ -334,7 +323,7 @@ class TestExtractWithHaiku:
                 0.0001,
             )
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         assert isinstance(result, dict)
@@ -353,16 +342,14 @@ class TestExtractWithHaiku:
         with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
             mock_call.side_effect = Exception("API error")
             result = extract_with_haiku(
-                search_text, job_row, mock_anthropic_client, temp_db, config
+                search_text, job_row, temp_db, config
             )
 
         assert result == {}
 
-
 # ---------------------------------------------------------------------------
 # Tests for enrich_company_info (preserved)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichCompanyInfo:
     def test_enrich_company_info_calls_duckduckgo(self):
@@ -412,11 +399,9 @@ class TestEnrichCompanyInfo:
 
         assert result == {}
 
-
 # ---------------------------------------------------------------------------
 # Tests for enrich_job tier ordering (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichJobTierOrder:
     """Verify strict cost ordering: free -> DDG -> Haiku -> SerpAPI -> Sonnet."""
@@ -432,7 +417,7 @@ class TestEnrichJobTierOrder:
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             # Free tier URL fetch succeeds with JD
             mock_fetch.return_value = "Full job description from direct URL fetch."
-            result = enrich_job(sparse_job_row, serpapi_key="key", anthropic_client=None)
+            result = enrich_job(sparse_job_row, serpapi_key="key")
 
         mock_fetch.assert_called_once()
         # DDG and SerpAPI should not be called if free tier satisfied JD
@@ -473,7 +458,7 @@ class TestEnrichJobTierOrder:
             mock_haiku.return_value = {"jd_full": "Haiku extracted JD."}
             mock_serp.return_value = None
 
-            result = enrich_job(sparse_job_row, anthropic_client=mock_anthropic_client)
+            result = enrich_job(sparse_job_row)
 
         mock_haiku.assert_called_once()
 
@@ -497,7 +482,6 @@ class TestEnrichJobTierOrder:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=MagicMock(),
             )
 
         mock_serp.assert_called_once()
@@ -571,11 +555,9 @@ class TestEnrichJobTierOrder:
         mock_scrape.assert_called_once()
         mock_ddg.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Tests for per-field cost ceilings (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestFieldCeilings:
     """Salary stops at Haiku tier; JD escalates all the way to Sonnet."""
@@ -603,7 +585,6 @@ class TestFieldCeilings:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
             )
 
         # SerpAPI and Sonnet should NOT be called when only salary is missing
@@ -633,16 +614,13 @@ class TestFieldCeilings:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
             )
 
         mock_sonnet.assert_called_once()
 
-
 # ---------------------------------------------------------------------------
 # Tests for Sonnet enrichment (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestSonnetEnrichment:
     """Sonnet enrichment uses all prior fragments and checks cost_gate."""
@@ -670,7 +648,6 @@ class TestSonnetEnrichment:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
             )
 
         # Sonnet should have been called with fragments dict containing DDG text
@@ -703,18 +680,15 @@ class TestSonnetEnrichment:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key="test-key",
-                anthropic_client=mock_anthropic_client,
                 conn=temp_db,
             )
 
         # Sonnet should NOT be called when cost_gate returns False
         mock_sonnet.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Tests for enrichment_tier persistence (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichmentTierPersistence:
     """enrichment_tier persisted atomically; resume-from-next-tier; exhausted skip."""
@@ -769,7 +743,6 @@ class TestEnrichmentTierPersistence:
 
             result = enrich_job(
                 sparse_job_row,
-                anthropic_client=mock_anthropic_client,
                 conn=temp_db,
             )
 
@@ -797,11 +770,9 @@ class TestEnrichmentTierPersistence:
         mock_ddg.assert_not_called()
         mock_serp.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Backward compatibility and never-raises (Phase 10 — updated)
 # ---------------------------------------------------------------------------
-
 
 class TestEnrichJobBackwardCompat:
     """Old call patterns and error handling still work."""
@@ -875,7 +846,6 @@ class TestEnrichJobBackwardCompat:
             result = enrich_job(
                 sparse_job_row,
                 serpapi_key=None,
-                anthropic_client=MagicMock(),
                 conn=temp_db,
                 config={},
             )
@@ -900,11 +870,9 @@ class TestEnrichJobBackwardCompat:
         assert TIER_ORDER.index("serpapi") < TIER_ORDER.index("sonnet")
         assert TIER_ORDER.index("sonnet") < TIER_ORDER.index("exhausted")
 
-
 # ---------------------------------------------------------------------------
 # Pipeline integration tests (Phase 10 Plan 02 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestPipelineIntegration:
     """Integration tests verifying pipeline_runner wiring and Migration 8 schema.
@@ -963,9 +931,7 @@ class TestPipelineIntegration:
         }
 
         with patch("job_finder.web.scoring_runner.enrich_job", side_effect=mock_enrich), \
-             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score), \
-             patch("job_finder.web.scoring_runner.anthropic") as mock_anthropic:
-            mock_anthropic.Anthropic.return_value = MagicMock()
+             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
             run_haiku_scoring(
                 ["acme|data-scientist|remote"], config, tmp_db_path
             )
@@ -1129,11 +1095,9 @@ class TestPipelineIntegration:
             f"got: {row['enrichment_tier']!r}"
         )
 
-
 # ---------------------------------------------------------------------------
 # JD direct fetch tests (ported from TestJDFetcher in test_scoring.py — DEBT-03)
 # ---------------------------------------------------------------------------
-
 
 class TestFetchDirectJd:
     """Verify _fetch_direct_jd() handles URL fetch, HTML stripping, length cap, and failures.
@@ -1251,11 +1215,9 @@ class TestFetchDirectJd:
 
         assert result is None
 
-
 # ---------------------------------------------------------------------------
 # Auth-wall guard tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestAuthWallGuard:
     """Verify _fetch_direct_jd() returns None for auth-wall pages.
@@ -1351,11 +1313,9 @@ class TestAuthWallGuard:
 
         assert result is None, "Expected None even for uppercase auth-wall text"
 
-
 # ---------------------------------------------------------------------------
 # Migration 15 tests (Phase 40 Data Quality — DQ-04, DQ-05)
 # ---------------------------------------------------------------------------
-
 
 class TestMigration15:
     """Migration 15 cleans poison data and promotes descriptions."""
@@ -1494,11 +1454,9 @@ class TestMigration15:
         assert row["jd_full"] is not None, "Long description should be promoted to jd_full"
         assert len(row["jd_full"]) > 200
 
-
 # ---------------------------------------------------------------------------
 # Description promotion tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestDescriptionPromotion:
     """Verify enrich_job auto-promotes long descriptions to jd_full.

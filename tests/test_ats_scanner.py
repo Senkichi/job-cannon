@@ -22,7 +22,6 @@ import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -41,7 +40,6 @@ def migrated_db_path():
     if os.path.exists(path):
         os.remove(path)
 
-
 @pytest.fixture
 def db_conn(migrated_db_path):
     """Open a connection to the migrated DB, yield (path, conn), close after."""
@@ -49,7 +47,6 @@ def db_conn(migrated_db_path):
     conn.row_factory = sqlite3.Row
     yield migrated_db_path, conn
     conn.close()
-
 
 def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     """Helper: insert a company with ats_probe_status='hit' and scan_enabled=1."""
@@ -64,7 +61,6 @@ def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     )
     conn.commit()
     return cursor.lastrowid
-
 
 # ---------------------------------------------------------------------------
 # Tests: extract_ats_from_urls
@@ -147,7 +143,6 @@ class TestExtractAtsFromUrls:
         assert platform == "lever"
         assert slug == "stripe"
 
-
 # ---------------------------------------------------------------------------
 # Tests: _title_matches
 # ---------------------------------------------------------------------------
@@ -217,7 +212,6 @@ class TestTitleMatches:
             target_titles=["machine learning"],
             exclusions=[],
         ) is True
-
 
 # ---------------------------------------------------------------------------
 # Tests: upsert_company
@@ -303,7 +297,6 @@ class TestUpsertCompany:
         id2 = upsert_company(conn, name="Ramp")
         assert id1 == id2
 
-
 # ---------------------------------------------------------------------------
 # Tests: derive_slug_candidates
 # ---------------------------------------------------------------------------
@@ -343,7 +336,6 @@ class TestDeriveSlugCandidates:
         result = derive_slug_candidates("AnyCompany")
         assert isinstance(result, list)
         assert len(result) >= 1
-
 
 # ---------------------------------------------------------------------------
 # Tests: probe_ats_slugs
@@ -521,7 +513,6 @@ class TestProbeAtsSlugs:
             probe_ats_slugs(migrated_db_path, config={"TESTING": True})
             mock_get.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Tests: scan_lever
 # ---------------------------------------------------------------------------
@@ -690,7 +681,6 @@ class TestScanLever:
         assert "source_url" in job
         assert "description" in job
 
-
 # ---------------------------------------------------------------------------
 # Tests: scan_greenhouse
 # ---------------------------------------------------------------------------
@@ -800,7 +790,6 @@ class TestScanGreenhouse:
 
         assert len(results) == 1
         assert results[0]["title"] == "Data Scientist"
-
 
 # ---------------------------------------------------------------------------
 # Tests: scan_ashby
@@ -937,7 +926,6 @@ class TestScanAshby:
             )
 
         assert results == []
-
 
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan
@@ -1336,7 +1324,6 @@ class TestRunAtsScan:
         assert row["salary_min"] == 180000
         assert row["salary_max"] == 240000
 
-
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan HTML fallback loop
 # ---------------------------------------------------------------------------
@@ -1515,7 +1502,6 @@ class TestRunAtsScanHtmlFallback:
         # scrape_careers_page should NOT be called when find_careers_url returns None
         mock_scrape.assert_not_called()
 
-
 # ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)
 # ---------------------------------------------------------------------------
@@ -1657,7 +1643,6 @@ class TestHTMLJobsScoring:
             f"Expected haiku_scored=2 (ATS + HTML jobs), got: {result['haiku_scored']}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Tests: /companies/scan route — probe before scan
 # ---------------------------------------------------------------------------
@@ -1738,7 +1723,6 @@ class TestScanRouteProbeBeforeScan:
             f"Expected logger.info called with probe result, got: {info_calls}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Tests: ATS Retry Logic (Phase 14, DEBT-01)
 # ---------------------------------------------------------------------------
@@ -1759,7 +1743,6 @@ def _insert_company_with_status(conn, name, status, platform=None, slug=None,
     )
     conn.commit()
     return cursor.lastrowid
-
 
 class TestAtsRetryLogic:
     """Tests for ATS transient error retry state machine (DEBT-01)."""
@@ -2037,7 +2020,6 @@ class TestAtsRetryLogic:
         assert "retry_after" in cols, "retry_after missing from companies"
         assert "miss_reason" in cols, "miss_reason missing from companies"
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/retry route
 # ---------------------------------------------------------------------------
@@ -2130,7 +2112,6 @@ class TestRetryRoute:
         assert response.status_code == 400, (
             f"Expected 400 for regular miss company, got {response.status_code}"
         )
-
 
 # ---------------------------------------------------------------------------
 # Tests: URL pattern audit (real-world format verification)
@@ -2267,11 +2248,9 @@ class TestAtsUrlPatternAudit:
         assert platform is None
         assert slug is None
 
-
 # ---------------------------------------------------------------------------
 # ATS jd_full storage tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
-
 
 class TestAtsJdFullStorage:
     """Verify run_ats_scan writes jd_full after job upsert using COALESCE guard.
@@ -2451,11 +2430,9 @@ class TestAtsJdFullStorage:
             f"Short description should NOT set jd_full. Got: {row['jd_full']!r}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Homepage discovery integration tests
 # ---------------------------------------------------------------------------
-
 
 class TestHomepageDiscoveryIntegration:
     """Tests for homepage discovery pre-step in run_ats_scan."""
@@ -2495,11 +2472,9 @@ class TestHomepageDiscoveryIntegration:
         result = run_ats_scan(migrated_db_path, config)
         assert result["homepages_discovered"] == 0
 
-
 # ---------------------------------------------------------------------------
 # HTML fallback description passthrough tests
 # ---------------------------------------------------------------------------
-
 
 class TestHtmlFallbackDescriptionPassthrough:
     """Tests for description passthrough in HTML fallback loop."""

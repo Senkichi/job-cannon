@@ -40,7 +40,6 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-
 def _set_margins(doc: Document, margin_inches: float = 1.0) -> None:
     """Set uniform page margins on all sections."""
     for section in doc.sections:
@@ -49,7 +48,6 @@ def _set_margins(doc: Document, margin_inches: float = 1.0) -> None:
         section.left_margin = Inches(margin_inches)
         section.right_margin = Inches(margin_inches)
 
-
 def _add_centered_paragraph(doc: Document, text: str, style: str, font_size: Optional[int] = None) -> None:
     """Add a centered paragraph with the given style and optional font size."""
     para = doc.add_paragraph(text, style=style)
@@ -57,7 +55,6 @@ def _add_centered_paragraph(doc: Document, text: str, style: str, font_size: Opt
     if font_size is not None:
         for run in para.runs:
             run.font.size = Pt(font_size)
-
 
 def build_resume_docx(resume_data: dict) -> io.BytesIO:
     """Build a .docx resume document from structured data.

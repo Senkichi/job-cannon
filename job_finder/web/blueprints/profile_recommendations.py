@@ -10,8 +10,6 @@ import json
 import logging
 import shutil
 
-import anthropic
-
 from flask import (
     Blueprint,
     current_app,
@@ -71,7 +69,6 @@ _SAFE_EDITABLE_FIELDS = {
     "resume_preferences.emphasis",
 }
 
-
 @profile_recs_bp.route("/recommendation", strict_slashes=False)
 def recommendation():
     """GET /profile/recommendation -- Haiku-generated fix guidance for a single warning.
@@ -100,7 +97,6 @@ def recommendation():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -128,7 +124,6 @@ def recommendation():
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -161,7 +156,6 @@ def recommendation():
             error=True,
         )
 
-
 @profile_recs_bp.route("/recommendations-all", methods=["POST"], strict_slashes=False)
 def recommendations_all():
     """POST /profile/recommendations-all -- Batch Haiku recommendations for all current warnings.
@@ -183,7 +177,6 @@ def recommendations_all():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -214,7 +207,6 @@ def recommendations_all():
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -241,7 +233,6 @@ def recommendations_all():
             recommendations=[],
             warnings=[],
         )
-
 
 @profile_recs_bp.route("/apply-fix", methods=["POST"], strict_slashes=False)
 def apply_fix():

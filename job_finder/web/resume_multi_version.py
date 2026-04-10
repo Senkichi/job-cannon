@@ -4,9 +4,7 @@ import json
 import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
-
-import anthropic
+from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude, cost_gate
@@ -24,9 +22,7 @@ from job_finder.web.resume_generator import (
 
 logger = logging.getLogger(__name__)
 
-
 def _haiku_select_strategies(
-    client: Any,
     job_row: dict,
     conn,
     config: dict,
@@ -89,7 +85,6 @@ def _haiku_select_strategies(
 
     try:
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system,
             messages=[{"role": "user", "content": user_message}],
@@ -116,10 +111,8 @@ def _haiku_select_strategies(
         logger.warning("_haiku_select_strategies: Haiku call failed, using fallback: %s", e)
         return STRATEGY_POOL[:3]
 
-
 def _generate_single_variant(
     db_path: str,
-    client_factory: Callable,
     job_row: dict,
     profile: dict,
     strategy: str,
@@ -127,13 +120,12 @@ def _generate_single_variant(
 ) -> dict:
     """Generate one strategy-focused resume variant (thread-safe).
 
-    Opens its own SQLite connection and creates its own Anthropic client for
-    thread safety (per architecture decision: each background thread owns its
-    own connections, following stale_detector.py pattern).
+    Opens its own SQLite connection for thread safety (per architecture
+    decision: each background thread owns its own connections, following
+    stale_detector.py pattern).
 
     Args:
         db_path: Path to the SQLite database file.
-        client_factory: Callable that returns an Anthropic client instance.
         job_row: Job record dict.
         profile: Experience profile dict.
         strategy: Strategy identifier from STRATEGY_POOL.
@@ -147,7 +139,6 @@ def _generate_single_variant(
             generate_resume_multi for partial-failure handling.
     """
     with standalone_connection(db_path) as conn:
-        client = client_factory()
 
         # Build strategy-specific system prompt
         strategy_desc = _STRATEGY_DESCRIPTIONS.get(strategy, strategy)
@@ -240,7 +231,6 @@ def _generate_single_variant(
             user_message += f"- Contact line: {contact_hint}\n"
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=strategy_system,
             messages=[{"role": "user", "content": user_message}],
@@ -252,7 +242,6 @@ def _generate_single_variant(
             max_tokens=4096,
         )
         return result
-
 
 def generate_resume_multi(
     db_path: str,
@@ -281,8 +270,7 @@ def generate_resume_multi(
     """
     # Step 1: Haiku selects 3 strategies
     with standalone_connection(db_path) as strategy_conn:
-        strategy_client = anthropic.Anthropic()
-        strategies = _haiku_select_strategies(strategy_client, job_row, strategy_conn, config)
+        strategies = _haiku_select_strategies(job_row, strategy_conn, config)
 
     logger.debug(
         "generate_resume_multi: selected strategies %s for '%s' @ '%s'",
@@ -292,9 +280,6 @@ def generate_resume_multi(
     )
 
     # Step 2: Parallel Sonnet variant generation
-    def client_factory() -> Any:
-        return anthropic.Anthropic()
-
     variants: list[dict] = []
     futures_to_strategy: dict = {}
 
@@ -303,7 +288,6 @@ def generate_resume_multi(
             future = executor.submit(
                 _generate_single_variant,
                 db_path,
-                client_factory,
                 job_row,
                 profile,
                 strategy,
@@ -334,7 +318,6 @@ def generate_resume_multi(
     # Step 3: Synthesis pass
     return _synthesize_variants(db_path, variants, job_row, config)
 
-
 def _synthesize_variants(
     db_path: str,
     variants: list[dict],
@@ -355,7 +338,6 @@ def _synthesize_variants(
         Final synthesized resume dict matching RESUME_SCHEMA.
     """
     with standalone_connection(db_path) as conn:
-        client = anthropic.Anthropic()
 
         model = (
             config.get("scoring", {})
@@ -395,7 +377,6 @@ def _synthesize_variants(
         )
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=synthesis_system,
             messages=[{"role": "user", "content": user_message}],

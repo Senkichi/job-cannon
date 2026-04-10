@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 sync_bp = Blueprint("sync", __name__, url_prefix="/dashboard")
 
-
 @sync_bp.route("/sync/start", methods=["POST"], strict_slashes=False)
 def sync_start():
     """Start async sync — returns HTMX polling fragment.
@@ -64,7 +63,6 @@ def sync_start():
         session_id=session_id,
         phase_label="Starting...",
     )
-
 
 @sync_bp.route("/sync/status/<int:session_id>", strict_slashes=False)
 def sync_status(session_id):
@@ -142,7 +140,6 @@ def sync_status(session_id):
         phase_label=phase_label,
     )
 
-
 @sync_bp.route("/sync/dismiss", strict_slashes=False)
 def sync_dismiss():
     """Return the original Sync Now button so it reappears after auto-dismiss."""
@@ -153,7 +150,6 @@ def sync_dismiss():
         'text-white text-sm font-medium rounded-lg transition-colors">Sync Now</button>'
         '</form></div>'
     )
-
 
 def _run_sync_bg(db_path: str, session_id: int, app) -> None:
     """Background thread: run full sync pipeline and update session row.
@@ -229,7 +225,6 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             )
         except Exception:
             pass
-
 
 @sync_bp.route("/sync", methods=["POST"], strict_slashes=False)
 def sync():

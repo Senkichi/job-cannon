@@ -5,7 +5,6 @@ import json
 import logging
 from pathlib import Path
 
-import anthropic
 from flask import Blueprint, current_app, request
 
 from job_finder.config import DEFAULT_MODEL_SONNET
@@ -22,7 +21,6 @@ from job_finder.web.resume_style_guide import (
 logger = logging.getLogger(__name__)
 
 guidelines_bp = Blueprint("guidelines", __name__, url_prefix="/settings")
-
 
 @guidelines_bp.route("/migrate-style-guide", methods=["POST"], strict_slashes=False)
 def migrate_style_guide_route():
@@ -62,7 +60,6 @@ def migrate_style_guide_route():
             200,
         )
 
-
 @guidelines_bp.route("/preview-guidelines-merge", methods=["POST"], strict_slashes=False)
 def preview_guidelines_merge():
     """Preview a field-by-field diff of merging updated guidelines into the style guide.
@@ -85,7 +82,6 @@ def preview_guidelines_merge():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config["DB_PATH"]
         conn = get_db(db_path)
-        client = anthropic.Anthropic()
         model = (
             config.get("scoring", {})
             .get("models", {})
@@ -95,7 +91,6 @@ def preview_guidelines_merge():
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
             existing_guide=existing_guide,
-            client=client,
             model=model,
             conn=conn,
             config=config,
@@ -197,7 +192,6 @@ def preview_guidelines_merge():
             f"</div>",
             200,
         )
-
 
 @guidelines_bp.route("/apply-guidelines-merge", methods=["POST"], strict_slashes=False)
 def apply_guidelines_merge():

@@ -19,7 +19,6 @@ from job_finder.json_utils import safe_json_load  # noqa: F401 -- re-exported fo
 
 logger = logging.getLogger(__name__)
 
-
 def get_db(db_path: str) -> sqlite3.Connection:
     """Return the per-request SQLite connection, creating it if needed.
 
@@ -44,7 +43,6 @@ def get_db(db_path: str) -> sqlite3.Connection:
         g.db.row_factory = sqlite3.Row
     return g.db
 
-
 def close_db(e=None) -> None:
     """Close the per-request SQLite connection on request teardown.
 
@@ -57,7 +55,6 @@ def close_db(e=None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
-
 
 @contextmanager
 def standalone_connection(db_path: str):
@@ -78,7 +75,6 @@ def standalone_connection(db_path: str):
         yield conn
     finally:
         conn.close()
-
 
 def get_config_snapshot(app) -> dict:
     """Return a frozen deep copy of JF_CONFIG for use in background threads.

@@ -65,7 +65,6 @@ _POSTING_PATTERNS = {
     "ashby": _ASHBY_POSTING_RE,
 }
 
-
 def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
     """Extract the individual posting ID from an ATS URL.
 
@@ -82,11 +81,9 @@ def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
     match = pattern.search(url)
     return match.group(1) if match else None
 
-
 # ---------------------------------------------------------------------------
 # Signal 1: ATS API Check
 # ---------------------------------------------------------------------------
-
 
 def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
     """Check if a specific job posting is still live via ATS API.
@@ -125,7 +122,6 @@ def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
         logger.warning("_check_ats_api: unexpected error for %s/%s: %s", slug, posting_id, e)
         return INCONCLUSIVE
 
-
 # ---------------------------------------------------------------------------
 # Signal 2: Company Careers Page Check
 # ---------------------------------------------------------------------------
@@ -143,7 +139,6 @@ try:
     from job_finder.web.ats_scanner import _title_matches
 except ImportError:
     _title_matches = None  # type: ignore[assignment]
-
 
 def _check_careers_page(
     homepage_url: Optional[str],
@@ -201,11 +196,9 @@ def _check_careers_page(
         logger.debug("_check_careers_page: error checking %s: %s", homepage_url, e)
         return INCONCLUSIVE
 
-
 # ---------------------------------------------------------------------------
 # Signal 3: SerpAPI Fallback
 # ---------------------------------------------------------------------------
-
 
 def _check_serpapi(job_title: str, company_name: str, config: dict) -> str:
     """Re-search for a job via SerpAPI google_jobs engine.
@@ -254,7 +247,6 @@ def _check_serpapi(job_title: str, company_name: str, config: dict) -> str:
         logger.warning("_check_serpapi: error searching for '%s' at '%s': %s", job_title, company_name, e)
         return INCONCLUSIVE
 
-
 # ---------------------------------------------------------------------------
 # In-memory failure tracker (Signal 2 backoff)
 # ---------------------------------------------------------------------------
@@ -268,7 +260,6 @@ _careers_skip_until: dict[int, datetime] = {}
 
 _MAX_CAREERS_FAILURES = 3
 _CAREERS_SKIP_DAYS = 7
-
 
 def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
     """Track careers page check outcome for backoff logic.
@@ -296,11 +287,9 @@ def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
                     company_id, count, _CAREERS_SKIP_DAYS,
                 )
 
-
 # ---------------------------------------------------------------------------
 # Signal cascade orchestrator
 # ---------------------------------------------------------------------------
-
 
 def _check_job_expiry(
     job: dict,
@@ -374,11 +363,9 @@ def _check_job_expiry(
 
     return INCONCLUSIVE, ""
 
-
 # ---------------------------------------------------------------------------
 # Public API: Nightly batch runner
 # ---------------------------------------------------------------------------
-
 
 def run_expiry_check(db_path: str, config: dict) -> dict:
     """Run expiry detection on discovered/reviewing jobs.

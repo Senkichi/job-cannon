@@ -11,7 +11,6 @@ from job_finder.web.enrichment_tiers import search_duckduckgo
 
 logger = logging.getLogger(__name__)
 
-
 def enrich_company_info(company_name: str) -> dict:
     """Enrich company info via DuckDuckGo (for Sonnet-scored jobs only).
 

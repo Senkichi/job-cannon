@@ -123,11 +123,9 @@ TITLE_STOP_WORDS = {
     "principal", "associate", "junior", "mid", "level",
 }
 
-
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
-
 
 def run_pipeline_detection(db_path: str, config: dict) -> dict:
     """Scan Gmail for pipeline emails and process matches.
@@ -200,11 +198,9 @@ def run_pipeline_detection(db_path: str, config: dict) -> dict:
 
     return summary
 
-
 # ---------------------------------------------------------------------------
 # Gmail service helpers
 # ---------------------------------------------------------------------------
-
 
 def _get_gmail_service(config: dict):
     """Authenticate and return the Gmail API service.
@@ -219,7 +215,6 @@ def _get_gmail_service(config: dict):
     except Exception as e:
         logger.warning("Pipeline detection: Gmail auth failed: %s", e)
         return None
-
 
 def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
     """Fetch and parse pipeline emails from Gmail using three query patterns.
@@ -371,11 +366,9 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
 
     return emails
 
-
 # ---------------------------------------------------------------------------
 # Classification helpers
 # ---------------------------------------------------------------------------
-
 
 def _classify_email(subject: str, body: str) -> Optional[str]:
     """Classify email as 'rejection', 'interview', 'confirmation', or None.
@@ -405,7 +398,6 @@ def _classify_email(subject: str, body: str) -> Optional[str]:
             return "confirmation"
 
     return None
-
 
 def _company_in_email(company: str | None, body: str, subject: str) -> bool:
     """Check if a company name appears in email subject or body.
@@ -445,7 +437,6 @@ def _company_in_email(company: str | None, body: str, subject: str) -> bool:
 
     return False
 
-
 def _title_in_email(title: str, subject: str, body: str) -> bool:
     """Check if significant words from job title appear in subject or body.
 
@@ -480,7 +471,6 @@ def _title_in_email(title: str, subject: str, body: str) -> bool:
     if len(sig_words) == 1:
         return matched == 1
     return matched >= 2
-
 
 def _timing_ok(email_date: str, job: dict) -> bool:
     """Check if email date is within timing windows of job activity.
@@ -518,7 +508,6 @@ def _timing_ok(email_date: str, job: dict) -> bool:
 
     return False
 
-
 def _sender_is_ats(from_address: str) -> bool:
     """Return True if the sender domain is a known ATS platform.
 
@@ -543,7 +532,6 @@ def _sender_is_ats(from_address: str) -> bool:
         sender_domain == d or sender_domain.endswith("." + d)
         for d in ATS_DOMAINS
     )
-
 
 def _extract_snippet(body: str, detection_type: str) -> str:
     """Extract the most relevant sentence from email body.
@@ -578,11 +566,9 @@ def _extract_snippet(body: str, detection_type: str) -> str:
 
     return ""
 
-
 # ---------------------------------------------------------------------------
 # Confidence scoring
 # ---------------------------------------------------------------------------
-
 
 def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
     """Compute 0-4 confidence score by checking four independent signals.
@@ -630,11 +616,9 @@ def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
 
     return len(matched), matched
 
-
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
-
 
 def _load_active_jobs(conn: sqlite3.Connection) -> list[dict]:
     """Load all jobs that are NOT in inactive pipeline statuses.
@@ -659,7 +643,6 @@ def _load_active_jobs(conn: sqlite3.Connection) -> list[dict]:
         return []
     return [dict(row) for row in rows]
 
-
 def _already_processed(conn: sqlite3.Connection, message_id: str) -> bool:
     """Check if a Gmail message ID has already been processed.
 
@@ -675,7 +658,6 @@ def _already_processed(conn: sqlite3.Connection, message_id: str) -> bool:
         (message_id,),
     ).fetchone()
     return row is not None
-
 
 def _mark_processed(
     conn: sqlite3.Connection,
@@ -706,7 +688,6 @@ def _mark_processed(
         conn.commit()
     except Exception as e:
         logger.warning("Failed to mark message as processed: %s", e)
-
 
 def _insert_detection(
     conn: sqlite3.Connection,
@@ -760,11 +741,9 @@ def _insert_detection(
     )
     conn.commit()
 
-
 # ---------------------------------------------------------------------------
 # Core email processing
 # ---------------------------------------------------------------------------
-
 
 def _process_email(
     email: dict,

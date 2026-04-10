@@ -34,7 +34,6 @@ companies_bp = Blueprint("companies", __name__, url_prefix="/companies")
 _SORT_ALLOWLIST = {"name", "ats_platform", "last_scanned_at", "jobs_found_total"}
 _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
-
 @companies_bp.route("/", strict_slashes=False)
 def index():
     """Companies list page with sortable table, search, and ATS filter."""
@@ -94,7 +93,6 @@ def index():
         sort_by=sort_by,
     )
 
-
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
 def expand(company_id):
     """HTMX: expand company row with jobs and scan history."""
@@ -134,7 +132,6 @@ def expand(company_id):
         scan_history=scan_history,
     )
 
-
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
@@ -154,7 +151,6 @@ def collapse(company_id):
         return "Company not found", 404
 
     return render_template("companies/_row.html", company=company)
-
 
 @companies_bp.route("/add", methods=["POST"], strict_slashes=False)
 def add():
@@ -190,7 +186,6 @@ def add():
 
     return redirect(url_for("companies.index"))
 
-
 @companies_bp.route("/<int:company_id>/toggle", methods=["POST"], strict_slashes=False)
 def toggle(company_id):
     """Toggle scan_enabled for a company. Returns updated _row.html fragment."""
@@ -224,7 +219,6 @@ def toggle(company_id):
     ).fetchone()
 
     return render_template("companies/_row.html", company=updated_company)
-
 
 @companies_bp.route("/<int:company_id>/update-slug", methods=["POST"], strict_slashes=False)
 def update_slug(company_id):
@@ -276,7 +270,6 @@ def update_slug(company_id):
         scan_history=scan_history,
     )
 
-
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)
 def scan():
     """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment.
@@ -301,7 +294,6 @@ def scan():
 
     # render_template is OUTSIDE the try block — TemplateErrors propagate as 500
     return render_template("companies/_scan_result.html", result=result, error=scan_error)
-
 
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)
 def retry(company_id):

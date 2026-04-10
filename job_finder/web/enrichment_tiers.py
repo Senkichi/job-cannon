@@ -55,11 +55,9 @@ _AUTH_WALL_SIGNATURES = [
 # Timeout for external API calls (seconds)
 _TIMEOUT = 10
 
-
 # ---------------------------------------------------------------------------
 # Tier implementations
 # ---------------------------------------------------------------------------
-
 
 def fetch_direct_jd(url: str) -> Optional[str]:
     """Attempt a direct HTTP GET and return cleaned job description text.
@@ -95,7 +93,6 @@ def fetch_direct_jd(url: str) -> Optional[str]:
     except Exception as e:
         logger.debug("Direct fetch failed for '%s': %s", url, e)
         return None
-
 
 def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
     """Query ATS API (Lever/Greenhouse/Ashby) for job data if company has a slug.
@@ -172,7 +169,6 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
         logger.debug("ATS API query failed: %s", e)
         return {}
 
-
 def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
     """Scrape company careers page for matching job listing.
 
@@ -233,11 +229,9 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         logger.debug("Careers scrape failed: %s", e)
         return {}
 
-
 def extract_with_sonnet(
     fragments: dict,
     job_row: dict,
-    client: Any,
     conn: Any,
     config: dict,
 ) -> dict:
@@ -299,7 +293,6 @@ def extract_with_sonnet(
         job_id = job_row.get("dedup_key")
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -326,7 +319,6 @@ def extract_with_sonnet(
     except Exception as e:
         logger.debug("Sonnet extraction failed: %s", e)
         return {}
-
 
 def search_serpapi(query: str, api_key: str) -> Optional[dict]:
     """Search Google Jobs via SerpAPI for job details.
@@ -381,7 +373,6 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
         logger.debug("SerpAPI search failed for '%s': %s", query, e)
         return None
 
-
 def search_duckduckgo(query: str) -> Optional[str]:
     """Query DuckDuckGo Instant Answer API for job/company info.
 
@@ -421,11 +412,9 @@ def search_duckduckgo(query: str) -> Optional[str]:
         logger.debug("DuckDuckGo search failed for '%s': %s", query, e)
         return None
 
-
 def extract_with_haiku(
     search_text: str,
     job_row: dict,
-    client: Any,
     conn: Any,
     config: dict,
 ) -> dict:
@@ -472,7 +461,6 @@ def extract_with_haiku(
         job_id = job_row.get("dedup_key")
 
         result, _cost = call_claude(
-            client=client,
             model=model,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -501,11 +489,9 @@ def extract_with_haiku(
         logger.debug("Haiku extraction failed: %s", e)
         return {}
 
-
 # ---------------------------------------------------------------------------
 # Private helper
 # ---------------------------------------------------------------------------
-
 
 def _parse_salary_string(salary_str: str) -> Optional[dict]:
     """Parse a salary string like '$140K-$180K/yr' into min/max integers.
