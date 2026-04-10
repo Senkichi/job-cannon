@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
-
 class TestExtractPostingId:
     """_extract_posting_id extracts individual posting IDs from ATS URLs."""
 
@@ -37,7 +36,6 @@ class TestExtractPostingId:
         from job_finder.web.expiry_checker import _extract_posting_id
         url = "https://jobs.lever.co/acme/abc123"
         assert _extract_posting_id(url, "unknown") is None
-
 
 class TestCheckAtsApi:
     """Signal 1: ATS API liveness check."""
@@ -78,7 +76,6 @@ class TestCheckAtsApi:
         result = _check_ats_api("acme", "abc-123", "unknown")
         assert result == INCONCLUSIVE
 
-
 class TestCheckCareersPage:
     """Signal 2: Company careers page title search."""
 
@@ -112,7 +109,6 @@ class TestCheckCareersPage:
         from job_finder.web.expiry_checker import _check_careers_page, INCONCLUSIVE
         result = _check_careers_page(None, "Senior Data Scientist", ["data scientist"], [])
         assert result == INCONCLUSIVE
-
 
 class TestCheckSerpapi:
     """Signal 3: SerpAPI re-search fallback."""
@@ -154,7 +150,6 @@ class TestCheckSerpapi:
         config = {"sources": {"serpapi": {"enabled": True, "api_key": ""}}}
         result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
         assert result == INCONCLUSIVE
-
 
 class TestSignalCascade:
     """_check_job_expiry runs signals in order and short-circuits."""
@@ -205,7 +200,6 @@ class TestSignalCascade:
         config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
         result, evidence = _check_job_expiry(job, company, config)
         assert result == INCONCLUSIVE
-
 
 class TestRunExpiryCheck:
     """run_expiry_check batch runner queries DB and processes jobs."""
@@ -320,7 +314,6 @@ class TestRunExpiryCheck:
 
         mock_check.assert_not_called()
 
-
 class TestCareersBackoff:
     """_record_careers_outcome tracks failures and sets skip-until timestamps."""
 
@@ -351,7 +344,6 @@ class TestCareersBackoff:
         _record_careers_outcome(42, success=True)
         assert 42 not in _careers_failure_counts
         assert 42 not in _careers_skip_until
-
 
 class TestAutoReopen:
     """Archived jobs re-appearing during ingestion are auto-reopened."""

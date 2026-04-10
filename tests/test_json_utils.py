@@ -22,11 +22,9 @@ import pytest
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 
-
 # ---------------------------------------------------------------------------
 # Tests: utc_now_iso
 # ---------------------------------------------------------------------------
-
 
 class TestUtcNowIso:
     def test_returns_string(self):
@@ -55,11 +53,9 @@ class TestUtcNowIso:
         # String comparison is valid for ISO 8601 with consistent format
         assert second >= first
 
-
 # ---------------------------------------------------------------------------
 # Tests: safe_json_load
 # ---------------------------------------------------------------------------
-
 
 class TestSafeJsonLoad:
     # --- None / empty / non-string inputs ---

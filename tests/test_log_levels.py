@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -32,7 +31,6 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     return path, conn
 
-
 # ---------------------------------------------------------------------------
 # pipeline_runner.py — 3 DEBUG demotions
 # ---------------------------------------------------------------------------
@@ -40,84 +38,70 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
 
-    def test_anthropic_not_installed_logs_at_debug(self, caplog):
-        """'anthropic package not installed' branch uses logger.debug not WARNING."""
-        # Source inspection: verify the run_ingestion elif branch uses logger.debug.
-        # This is a regression test — if anyone reverts it to logger.warning it fails.
+    def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog):
+        """scoring_runner 'claude CLI not found' branch uses logger.debug not WARNING."""
         import inspect
-        import job_finder.web.pipeline_runner as runner_module
+        import job_finder.web.scoring_runner as sr_module
 
-        source = inspect.getsource(runner_module.run_ingestion)
+        source = inspect.getsource(sr_module.run_haiku_scoring)
         lines = source.splitlines()
 
         for i, line in enumerate(lines):
-            if "anthropic package not installed" in line.lower():
+            if "claude cli not found" in line.lower():
                 context = "\n".join(lines[max(0, i-3):i+1])
                 assert "logger.warning" not in context, (
-                    f"pipeline_runner 'anthropic package not installed' must not use logger.warning.\n"
+                    f"scoring_runner 'claude CLI not found' must not use logger.warning.\n"
                     f"Context:\n{context}"
                 )
                 assert "logger.debug" in context, (
-                    f"pipeline_runner 'anthropic package not installed' must use logger.debug.\n"
+                    f"scoring_runner 'claude CLI not found' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
                 return  # found and validated
 
-        # If the message text changed, fail explicitly
         raise AssertionError(
-            "Could not find 'anthropic package not installed' log message in "
-            "pipeline_runner.run_ingestion — was the message text changed?"
+            "Could not find 'claude CLI not found' log message in "
+            "scoring_runner.run_haiku_scoring — was the message text changed?"
         )
 
-    def test_anthropic_not_installed_caplog_integration(self, caplog):
-        """When anthropic is None and new jobs exist, run_ingestion emits DEBUG not WARNING."""
+    def test_claude_cli_not_found_logs_at_debug(self, caplog):
+        """When claude CLI is not on PATH, scoring_runner emits DEBUG not WARNING."""
         import job_finder.web.pipeline_runner as runner_module
         from job_finder.models import Job
 
-        original_anthropic = runner_module.anthropic
+        db_path, conn = _make_migrated_db()
+        conn.close()
+
+        config = {
+            "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
+            "scoring": {"monthly_budget_usd": 25.0, "haiku_threshold": 42},
+            "profile": {"target_titles": [], "target_locations": [],
+                        "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
+        }
+
+        fake_job = Job(
+            title="Fake Job", company="FakeCo", location="Remote",
+            source="test", source_url="http://example.com", source_id="x1",
+        )
 
         try:
-            runner_module.anthropic = None
-
-            db_path, conn = _make_migrated_db()
-            conn.close()
-
-            config = {
-                "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
-                "scoring": {"monthly_budget_usd": 25.0, "haiku_threshold": 42},
-                "profile": {"target_titles": [], "target_locations": [],
-                            "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
-            }
-
-            fake_job = Job(
-                title="Fake Job", company="FakeCo", location="Remote",
-                source="test", source_url="http://example.com", source_id="x1",
-            )
-
-            try:
-                with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]):
-                    with patch.object(runner_module, "_fetch_serpapi", return_value=[]):
-                        with patch.object(runner_module, "_check_budget_alert"):
-                            with caplog.at_level(logging.DEBUG, logger="job_finder.web.pipeline_runner"):
-                                runner_module.run_ingestion(db_path, config)
-            finally:
-                if os.path.exists(db_path):
-                    os.remove(db_path)
-
+            with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]), \
+                 patch.object(runner_module, "_fetch_serpapi", return_value=[]), \
+                 patch.object(runner_module, "_check_budget_alert"), \
+                 patch("job_finder.web.scoring_runner.shutil.which", return_value=None), \
+                 caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"):
+                runner_module.run_ingestion(db_path, config)
         finally:
-            runner_module.anthropic = original_anthropic
+            if os.path.exists(db_path):
+                os.remove(db_path)
 
         debug_records = [
             r for r in caplog.records
-            if r.levelno == logging.DEBUG and "anthropic" in r.message.lower()
+            if r.levelno == logging.DEBUG and "claude cli not found" in r.message.lower()
         ]
-        warning_records = [
-            r for r in caplog.records
-            if r.levelno == logging.WARNING and "anthropic" in r.message.lower()
-        ]
-        assert debug_records, "Expected a DEBUG record mentioning 'anthropic' — none found"
-        assert not warning_records, (
-            f"anthropic-not-installed message should not be WARNING; found: {warning_records}"
+        assert debug_records, (
+            f"Expected a DEBUG record mentioning 'claude CLI not found' — got: "
+            f"{[r.message for r in caplog.records if r.levelno == logging.DEBUG]}"
         )
 
     def test_zero_job_email_routed_to_activity_feed_logs_at_debug(self, caplog):
@@ -165,7 +149,6 @@ class TestPipelineRunnerLogLevels:
                     f"'Haiku: no result for' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
-
 
 # ---------------------------------------------------------------------------
 # rejection_analyzer.py — INFO demotion
@@ -231,7 +214,6 @@ class TestRejectionAnalyzerLogLevels:
         ]
         assert info_records, "Expected INFO record for budget cap in rejection_analyzer"
         assert not warning_records, "Budget cap must not be WARNING in rejection_analyzer"
-
 
 # ---------------------------------------------------------------------------
 # interview_prep.py — 2 INFO demotions
@@ -326,7 +308,6 @@ class TestInterviewPrepLogLevels:
         assert info_records, "Expected INFO record for budget exceeded in interview_prep"
         assert not warning_records, "Budget message must not be WARNING in interview_prep"
 
-
 # ---------------------------------------------------------------------------
 # ats_scanner.py — INFO demotion
 # ---------------------------------------------------------------------------
@@ -397,7 +378,6 @@ class TestAtsScannerLogLevels:
         assert info_records, "Expected INFO record for 'promoted to unreachable'"
         assert not warning_records, "'promoted to unreachable' must not be WARNING"
 
-
 # ---------------------------------------------------------------------------
 # blueprints/settings.py — DEBUG demotion
 # ---------------------------------------------------------------------------
@@ -423,7 +403,6 @@ class TestSettingsLogLevels:
                     f"settings 'blocked wipe of' must use logger.debug.\n"
                     f"Context:\n{context}"
                 )
-
 
 # ---------------------------------------------------------------------------
 # blueprints/jobs.py — 2 INFO demotions
@@ -469,7 +448,6 @@ class TestJobsBlueprintLogLevels:
                     f"jobs.py 'rescore: budget cap reached' must use logger.info.\n"
                     f"Context:\n{context}"
                 )
-
 
 # ---------------------------------------------------------------------------
 # parsers/ziprecruiter_parser.py — body-size guard

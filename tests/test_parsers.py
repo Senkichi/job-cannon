@@ -12,7 +12,6 @@ from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
 from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert
 
-
 # Sample LinkedIn alert body (based on actual email format)
 SAMPLE_LINKEDIN_BODY = """Your job alert for Data Scientist in San Francisco Bay Area
 
@@ -47,7 +46,6 @@ View job: https://www.linkedin.com/comm/jobs/view/4337163287/?trackingId=test789
 
 See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search?keywords=test
 """
-
 
 class TestLinkedInParser:
     def test_parse_basic_alert(self):
@@ -86,7 +84,6 @@ class TestLinkedInParser:
         body = "This email has no job listings in it."
         assert parse_linkedin_alert(body) == []
 
-
 # Sample Glassdoor HTML (simplified from actual format)
 SAMPLE_GLASSDOOR_HTML = """
 <html><body>
@@ -104,7 +101,6 @@ SAMPLE_GLASSDOOR_HTML = """
 </a>
 </body></html>
 """
-
 
 class TestGlassdoorParser:
     def test_parse_basic_alert(self):
@@ -131,7 +127,6 @@ class TestGlassdoorParser:
     def test_empty_html(self):
         assert parse_glassdoor_alert("") == []
         assert parse_glassdoor_alert("<html></html>") == []
-
 
 # Sample Glassdoor positional HTML (new classless format as of 2026)
 SAMPLE_GLASSDOOR_POSITIONAL_HTML = """
@@ -175,7 +170,6 @@ SAMPLE_GLASSDOOR_POSITIONAL_HTML = """
 </a>
 </body></html>
 """
-
 
 class TestGlassdoorPositionalParser:
     """Tests for Glassdoor positional extraction (no CSS classes)."""
@@ -231,7 +225,6 @@ class TestGlassdoorPositionalParser:
             assert all(j.company and j.company != "Unknown" for j in jobs)
             assert all(j.title for j in jobs)
 
-
 class TestDeduplication:
     def test_dedup_key_consistency(self):
         from job_finder.models import Job
@@ -260,7 +253,6 @@ class TestDeduplication:
         j2 = Job(title="staff ds", company="toast", location="us",
                   source="b", source_url="")
         assert j1.dedup_key == j2.dedup_key
-
 
 # ---------------------------------------------------------------------------
 # Meta-email pollution filter tests (Phase 6 - Task 2)
@@ -333,7 +325,6 @@ View job: https://www.linkedin.com/comm/jobs/view/4364166509/?trackingId=test123
 ---------------------------------------------------------
 """
 
-
 class TestLinkedInMetaEmailFilter:
     """Test that LinkedIn parser rejects meta-email digest/count bodies."""
 
@@ -384,7 +375,6 @@ class TestLinkedInMetaEmailFilter:
         result = parse_linkedin_alert(LINKEDIN_META_BODY_DIGEST, email_date=date)
         assert result == []
 
-
 class TestGlassdoorMetaEmailFilter:
     """Test that Glassdoor parser handles meta/empty emails correctly."""
 
@@ -408,7 +398,6 @@ class TestGlassdoorMetaEmailFilter:
         result = parse_glassdoor_alert(SAMPLE_GLASSDOOR_HTML)
         assert len(result) == 2, f"Expected 2 jobs, got {len(result)}"
 
-
 class TestZipRecruiterMetaEmailFilter:
     """Test that ZipRecruiter parser rejects meta-email content."""
 
@@ -429,7 +418,6 @@ class TestZipRecruiterMetaEmailFilter:
         </body></html>"""
         result = parse_ziprecruiter_alert(body)
         assert result == [], f"Expected [], got {len(result)} jobs from ZipRecruiter digest"
-
 
 # ---------------------------------------------------------------------------
 # Indeed parser tests (Phase 14 - Task 1)
@@ -554,7 +542,6 @@ SAMPLE_INDEED_NON_TABLE_LAYOUT = """
 </body></html>
 """
 
-
 class TestIndeedParser:
     """Tests for the Indeed dual-strategy parser."""
 
@@ -635,7 +622,6 @@ class TestIndeedParser:
         assert len(jobs) > 0
         assert all(j.posted_date == date for j in jobs)
 
-
 # ---------------------------------------------------------------------------
 # Parse failure archival tests (Phase 14 - Task 2)
 # ---------------------------------------------------------------------------
@@ -643,7 +629,6 @@ class TestIndeedParser:
 import os
 import tempfile
 import sqlite3
-
 
 # A realistic non-meta email body that is long enough to trigger archival (> 500 chars)
 _LONG_NONMETA_HTML_BODY = """<html><body>""" + (
@@ -660,7 +645,6 @@ _META_HTML_BODY = """<html><body>
 
 # A short body (< 500 chars) — should NOT trigger archival (likely empty/broken)
 _SHORT_BODY = "<html><body><p>Short email.</p></body></html>"
-
 
 class TestParseFailureArchival:
     """Tests for _should_archive_failure and _archive_parse_failure helpers."""
@@ -779,7 +763,6 @@ class TestParseFailureArchival:
             assert isinstance(source.parse_failures, list), "parse_failures should be a list"
             assert source.parse_failures == [], "parse_failures should start empty"
 
-
 class TestParseFailureActivityFeed:
     """Tests for parse failure activity feed entries in runs table."""
 
@@ -863,7 +846,6 @@ class TestParseFailureActivityFeed:
 
         assert len(rows) == 0, f"Expected no parse_failure entries, got {len(rows)}"
 
-
 # ---------------------------------------------------------------------------
 # Indeed plain-text parser tests (Phase 14 - Plan 03)
 # ---------------------------------------------------------------------------
@@ -935,7 +917,6 @@ https://engage.indeed.com/f/a/SINGLE_JOB_URL_ENCODED
 (c) 2026 Indeed, Inc.
 Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 """
-
 
 class TestIndeedPlaintextParser:
     """Tests for the plain-text strategy of the Indeed parser."""
@@ -1050,7 +1031,6 @@ class TestIndeedPlaintextParser:
             f"All jobs should have source='indeed', got {[j.source for j in jobs]}"
         )
 
-
 # Sample Indeed rc/clk/dl plain-text email (new 2026+ format)
 SAMPLE_INDEED_RC_CLK_PLAINTEXT = """Indeed Job Alert
 2 new lead data analyst jobs in San Francisco Bay Area, CA
@@ -1072,13 +1052,11 @@ Degree in a quantitative field like statistics, economics, applied math...
 Just posted
 https://www.indeed.com/rc/clk/dl?jk=6ca3afffde0194ba&from=ja&qd=RnZh_TRUNCATED&bb=TRUNCATED
 
-
 Do not share this email
 
 \u00a9 2026 Indeed, Inc.
 Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 """
-
 
 class TestIndeedRcClkParser:
     """Tests for Indeed rc/clk/dl URL format parsing."""
@@ -1128,20 +1106,17 @@ class TestIndeedRcClkParser:
             assert len(jobs) > 0, f"Real Indeed email produced 0 jobs"
             assert all(j.source == "indeed" for j in jobs)
 
-
 # ---------------------------------------------------------------------------
 # ZipRecruiter placeholder rejection tests (Phase 20 - Plan 03)
 # ---------------------------------------------------------------------------
 
 from job_finder.parsers.ziprecruiter_parser import _extract_job_from_container
 
-
 def _make_zr_container(lines: list[str]):
     """Helper: create a BS4 div tag whose text content is the given lines."""
     from bs4 import BeautifulSoup
     html = "<div>" + "<br/>".join(lines) + "</div>"
     return BeautifulSoup(html, "html.parser").div
-
 
 class TestPlaceholderRejection:
     """Tests confirming that HTML template artifact values are rejected by the parser."""
@@ -1220,12 +1195,10 @@ class TestPlaceholderRejection:
             f"{[(j.title, j.company) for j in jobs]}"
         )
 
-
 # ---------------------------------------------------------------------------
 # Parser audit tests (Phase 25 - Plan 01)
 # Systematic coverage of all four parsers: title, company, location, salary
 # ---------------------------------------------------------------------------
-
 
 class TestParserAudit:
     """Audit-quality regression tests for all four parsers.
@@ -1709,7 +1682,6 @@ This email does not have the expected format.
         assert job.salary_min is None
         assert job.salary_max is None
 
-
 # ---------------------------------------------------------------------------
 # Parse failure archival E2E tests (Phase 25 - Plan 01)
 # ---------------------------------------------------------------------------
@@ -1736,7 +1708,6 @@ _ALL_PARSERS = [
     ("alert@indeed.com", parse_indeed_alert),
     ("no-reply@ziprecruiter.com", parse_ziprecruiter_alert),
 ]
-
 
 class TestParseFailureE2E:
     """End-to-end parse failure archival tests.

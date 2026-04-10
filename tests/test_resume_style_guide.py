@@ -250,8 +250,8 @@ class TestExtractStyleGuide:
 
         captured_messages = []
 
-        def capture_call(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured_messages.extend(messages)
+        def capture_call(*args, **kwargs):
+            captured_messages.extend(kwargs.get("messages", []))
             return (existing, 0.01)
 
         with patch("job_finder.web.resume_style_guide.call_claude", side_effect=capture_call):
@@ -307,9 +307,9 @@ class TestMigrateStyleGuide:
 
         captured = {}
 
-        def capture_call_kw(client, model, system, messages, output_schema, conn, job_id, purpose, config, max_tokens=1024):
-            captured["purpose"] = purpose
-            captured["output_schema"] = output_schema
+        def capture_call_kw(*args, **kwargs):
+            captured["purpose"] = kwargs.get("purpose", "")
+            captured["output_schema"] = kwargs.get("output_schema")
             merged = dict(existing)
             merged["summary_formula"] = "Title + years"
             return (merged, 0.05)

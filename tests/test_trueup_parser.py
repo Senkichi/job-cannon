@@ -5,7 +5,6 @@ from datetime import datetime
 
 from job_finder.parsers.trueup_parser import parse_trueup_alert
 
-
 # Minimal realistic HTML fixture with 2 job cards
 SAMPLE_TRUEUP_HTML = """\
 <!DOCTYPE html>
@@ -98,12 +97,10 @@ SAMPLE_TRUEUP_HTML = """\
 </body>
 </html>"""
 
-
 SAMPLE_TRUEUP_EMPTY = """\
 <!DOCTYPE html><html><body>
 <table><tr><td>No jobs this week.</td></tr></table>
 </body></html>"""
-
 
 class TestTrueUpParser:
     def test_parses_job_cards(self):
@@ -163,7 +160,6 @@ class TestTrueUpParser:
         for job in jobs:
             assert "view all" not in job.title.lower()
             assert "my trueup" not in job.title.lower()
-
 
 class TestTrueUpEdgeCases:
     def test_empty_body(self):

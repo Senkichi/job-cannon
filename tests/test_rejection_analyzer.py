@@ -138,7 +138,7 @@ class TestNoUnreviewedRejections:
         assert result["rejections_analyzed"] == 0
         assert result.get("report_id") is None
 
-    def test_does_not_call_opus_when_no_unreviewed(self, mock_anthropic):
+    def test_does_not_call_opus_when_no_unreviewed(self):
         """Opus API is NOT called when there are no unreviewed rejections."""
         from job_finder.web.rejection_analyzer import run_rejection_analysis
 
@@ -167,16 +167,18 @@ class TestRejectionAnalysisBatch:
         insert_rejected_job(conn, "job3|ds|remote", title="Job 3")
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        run_rejection_analysis(path, config)
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)) as mock_cc:
+            run_rejection_analysis(path, config)
 
         os.unlink(path)
 
         # Should be called exactly once (not 3 times)
-        assert mock_client.messages.create.call_count == 1, (
-            f"Expected 1 Opus call for all rejections, got {mock_client.messages.create.call_count}"
+        assert mock_cc.call_count == 1, (
+            f"Expected 1 Opus call for all rejections, got {mock_cc.call_count}"
         )
 
     def test_report_stored_in_rejection_reports_table(self):
@@ -187,10 +189,12 @@ class TestRejectionAnalysisBatch:
         insert_rejected_job(conn, "acme|ds|remote")
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        result = run_rejection_analysis(path, config)
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)):
+            result = run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
@@ -245,10 +249,12 @@ class TestRejectionAnalysisBatch:
         insert_rejected_job(conn, "job2|ds|remote")
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        result = run_rejection_analysis(path, config)
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)):
+            result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 
@@ -265,10 +271,12 @@ class TestRejectionAnalysisBatch:
         insert_rejected_job(conn, "job2|ds|remote", rejection_reviewed=1)  # already reviewed
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        result = run_rejection_analysis(path, config)
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)):
+            result = run_rejection_analysis(path, config)
 
         os.unlink(path)
 

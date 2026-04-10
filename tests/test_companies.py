@@ -16,11 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def companies_app(migrated_db):
@@ -58,13 +56,11 @@ def companies_app(migrated_db):
 
     yield application, db_path, conn
 
-
 @pytest.fixture
 def companies_client(companies_app):
     """Return (test_client, db_path, conn) for companies blueprint tests."""
     app, db_path, conn = companies_app
     return app.test_client(), db_path, conn
-
 
 def _insert_company(
     conn,
@@ -98,11 +94,9 @@ def _insert_company(
     conn.commit()
     return cursor.lastrowid
 
-
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/ (index)
 # ---------------------------------------------------------------------------
-
 
 class TestIndexRoute:
     def test_index_returns_200(self, companies_client):
@@ -154,11 +148,9 @@ class TestIndexRoute:
         response = client.get("/companies/?sort_by=malicious; DROP TABLE companies;--")
         assert response.status_code == 200
 
-
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/<id>/expand
 # ---------------------------------------------------------------------------
-
 
 class TestExpandRoute:
     def test_expand_returns_200(self, companies_client):
@@ -182,11 +174,9 @@ class TestExpandRoute:
         assert response.status_code == 200
         assert b"ExpandCorp" in response.data
 
-
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/<id>/collapse
 # ---------------------------------------------------------------------------
-
 
 class TestCollapseRoute:
     def test_collapse_returns_200(self, companies_client):
@@ -202,11 +192,9 @@ class TestCollapseRoute:
         response = client.get("/companies/99999/collapse")
         assert response.status_code == 404
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/add
 # ---------------------------------------------------------------------------
-
 
 class TestAddRoute:
     def test_add_redirects_to_index(self, companies_client):
@@ -230,11 +218,9 @@ class TestAddRoute:
         response = client.post("/companies/add", data={"company_name": ""})
         assert response.status_code == 302
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/toggle
 # ---------------------------------------------------------------------------
-
 
 class TestToggleRoute:
     def test_toggle_returns_200(self, companies_client):
@@ -270,11 +256,9 @@ class TestToggleRoute:
         response = client.post("/companies/99999/toggle")
         assert response.status_code == 404
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/update-slug
 # ---------------------------------------------------------------------------
-
 
 class TestUpdateSlugRoute:
     def test_update_slug_returns_200(self, companies_client):
@@ -320,11 +304,9 @@ class TestUpdateSlugRoute:
         response = client.post("/companies/99999/update-slug")
         assert response.status_code == 404
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/scan
 # ---------------------------------------------------------------------------
-
 
 class TestScanRoute:
     def test_scan_returns_200(self, companies_client):
@@ -344,11 +326,9 @@ class TestScanRoute:
         assert response.status_code == 200
         assert len(response.data) > 0
 
-
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/retry
 # ---------------------------------------------------------------------------
-
 
 class TestRetryRoute:
     def test_retry_error_company_returns_200(self, companies_client):

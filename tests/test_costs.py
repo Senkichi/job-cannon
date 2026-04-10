@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helper: insert scoring_costs rows
 # ---------------------------------------------------------------------------
@@ -28,7 +27,6 @@ def _insert_cost_rows(conn, rows):
         rows,
     )
     conn.commit()
-
 
 # ---------------------------------------------------------------------------
 # Tests: get_daily_cost_breakdown
@@ -119,7 +117,6 @@ class TestGetDailyCostBreakdown:
         result = get_daily_cost_breakdown(conn)
         assert isinstance(result[0]["spend"], float)
 
-
 # ---------------------------------------------------------------------------
 # Tests: get_monthly_feature_breakdown
 # ---------------------------------------------------------------------------
@@ -191,7 +188,6 @@ class TestGetMonthlyFeatureBreakdown:
         from job_finder.web.claude_client import get_monthly_feature_breakdown
         result = get_monthly_feature_breakdown(conn)
         assert result == []
-
 
 # ---------------------------------------------------------------------------
 # Tests: /costs route
@@ -266,7 +262,6 @@ class TestCostsRoute:
         # Template renders: Cap: ${{ "%.0f" | format(budget_cap) }} → "Cap: $42"
         assert "42" in html
 
-
 # ---------------------------------------------------------------------------
 # Tests: sidebar nav
 # ---------------------------------------------------------------------------
@@ -284,7 +279,6 @@ class TestSidebarNav:
         html = response.data.decode("utf-8")
         # Check sidebar label
         assert ">Costs<" in html
-
 
 # ---------------------------------------------------------------------------
 # Tests: dashboard cost card link

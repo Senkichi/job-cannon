@@ -111,7 +111,7 @@ def test_haiku_batch_fetch(migrated_db):
 
     with (
         patch.object(sr, "standalone_connection", _make_tracking_connection_factory(select_calls)),
-        patch.object(sr, "anthropic") as mock_anthropic,
+        patch.object(sr, "shutil") as mock_shutil,
         patch.object(sr, "score_and_persist_haiku", return_value={"score": 7}),
         patch.object(sr, "enrich_job", None),
         patch.object(sr, "should_exclude", return_value=(False, "")),
@@ -137,12 +137,12 @@ def test_haiku_missing_key_skipped(migrated_db, caplog):
 
     scored_keys: list[str] = []
 
-    def mock_persist(conn, job_row, config, client, profile, scorer_fn=None):
+    def mock_persist(conn, job_row, config, profile, scorer_fn=None):
         scored_keys.append(job_row["dedup_key"])
         return {"score": 7}
 
     with (
-        patch.object(sr, "anthropic") as mock_anthropic,
+        patch.object(sr, "shutil") as mock_shutil,
         patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist),
         patch.object(sr, "enrich_job", None),
         patch.object(sr, "should_exclude", return_value=(False, "")),
@@ -196,7 +196,7 @@ def test_sonnet_batch_fetch(migrated_db):
 
     with (
         patch.object(sr, "standalone_connection", _make_tracking_connection_factory(select_calls)),
-        patch.object(sr, "anthropic") as mock_anthropic,
+        patch.object(sr, "shutil") as mock_shutil,
         patch.object(sr, "score_and_persist_sonnet", return_value={"sonnet_score": 85}),
         patch.object(sr, "enrich_company_info", None),
         patch.object(sr, "load_scoring_profile", return_value={}),
@@ -221,12 +221,12 @@ def test_sonnet_missing_key_skipped(migrated_db, caplog):
 
     evaluated_keys: list[str] = []
 
-    def mock_persist(conn, job_row, config, client, profile, evaluator_fn=None):
+    def mock_persist(conn, job_row, config, profile, evaluator_fn=None):
         evaluated_keys.append(job_row["dedup_key"])
         return {"sonnet_score": 85}
 
     with (
-        patch.object(sr, "anthropic") as mock_anthropic,
+        patch.object(sr, "shutil") as mock_shutil,
         patch.object(sr, "score_and_persist_sonnet", side_effect=mock_persist),
         patch.object(sr, "enrich_company_info", None),
         patch.object(sr, "load_scoring_profile", return_value={}),

@@ -550,10 +550,7 @@ class TestSinglePassGeneration:
         run_migrations(tmp_db_path)
         conn = __import__("sqlite3").connect(tmp_db_path)
 
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = {
+        canned_resume = {
             "name": "Jane Doe",
             "contact_line": "jane@example.com",
             "summary": "Experienced data scientist.",
@@ -568,9 +565,6 @@ class TestSinglePassGeneration:
             ],
             "education": [{"degree": "M.S. Statistics", "institution": "Stanford", "year": "2018"}],
         }
-        mock_response.usage.input_tokens = 100
-        mock_response.usage.output_tokens = 200
-        mock_client.messages.create.return_value = mock_response
 
         job_row = {
             "dedup_key": "acme|senior-ds|remote",
@@ -583,7 +577,8 @@ class TestSinglePassGeneration:
             "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
         }
 
-        result = generate_resume_single(job_row, sample_resume_data, conn, config)
+        with patch("job_finder.web.resume_generator.call_claude", return_value=(canned_resume, 0.05)):
+            result = generate_resume_single(job_row, sample_resume_data, conn, config)
         conn.close()
 
         assert result is not None
@@ -594,21 +589,22 @@ class TestSinglePassGeneration:
 
     def test_returns_none_when_budget_exceeded(self, tmp_db_path, sample_resume_data):
         """generate_resume_single returns None when cost_gate returns False."""
+        from datetime import datetime, timezone
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import generate_resume_single
 
         run_migrations(tmp_db_path)
         conn = __import__("sqlite3").connect(tmp_db_path)
 
-        # Exhaust the budget by inserting costs exceeding cap
+        # Exhaust the budget by inserting costs exceeding cap (current-month timestamp)
+        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, "2026-03-01T00:00:00Z"),
+            (None, "test", "claude-sonnet-4-6", 0, 0, 30.0, now_ts),
         )
         conn.commit()
 
-        mock_client = MagicMock()
         job_row = {
             "dedup_key": "acme|senior-ds|remote",
             "title": "Senior Data Scientist",
@@ -1383,11 +1379,8 @@ class TestThreadSafety:
             with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
                 mock_call.return_value = (sample_resume, 0.01)
                 with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                    mock_client_factory = MagicMock()
-                    mock_client_factory.return_value = MagicMock()
                     _generate_single_variant(
                         tmp_db_path,
-                        mock_client_factory,
                         job_row,
                         sample_resume_data,
                         "impact_focused",
@@ -1446,7 +1439,7 @@ class TestPartialFailure:
         sample_resume = self._make_sample_resume()
         call_count = {"n": 0}
 
-        def mock_generate_variant(db_path, client_factory, job_row, profile, strategy, config):
+        def mock_generate_variant(db_path, job_row, profile, strategy, config):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise RuntimeError("Variant 1 failed")
@@ -2721,9 +2714,7 @@ class TestPreferenceInjection:
 
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                mock_client = MagicMock()
                 generate_resume_single(
-                    mock_client,
                     self._make_job_row(),
                     self._make_profile(),
                     conn,
@@ -2776,9 +2767,7 @@ class TestPreferenceInjection:
 
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                mock_client = MagicMock()
                 generate_resume_single(
-                    mock_client,
                     self._make_job_row(),
                     self._make_profile(),
                     conn,
@@ -2827,9 +2816,7 @@ class TestPreferenceInjection:
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
                     generate_resume_single(
-                        mock_client,
                         self._make_job_row(),
                         self._make_profile(),
                         conn,
@@ -2881,9 +2868,7 @@ class TestPreferenceInjection:
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
                     generate_resume_single(
-                        mock_client,
                         self._make_job_row(),
                         self._make_profile(),
                         conn,
@@ -2931,10 +2916,8 @@ class TestPreferenceInjection:
 
         with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                mock_client = MagicMock()
                 _generate_single_variant(
                     tmp_db_path,
-                    lambda: mock_client,
                     self._make_job_row(),
                     self._make_profile(),
                     STRATEGY_POOL[0],
@@ -3036,9 +3019,7 @@ class TestStyleGuideInjection:
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    mock_client = MagicMock()
                     generate_resume_single(
-                        mock_client,
                         self._make_job_row(),
                         self._make_profile(),
                         conn,
@@ -3071,9 +3052,7 @@ class TestStyleGuideInjection:
         with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    mock_client = MagicMock()
                     generate_resume_single(
-                        mock_client,
                         self._make_job_row(),
                         self._make_profile(),
                         conn,
@@ -3112,10 +3091,8 @@ class TestStyleGuideInjection:
         with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
                 with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    mock_client = MagicMock()
                     _generate_single_variant(
                         tmp_db_path,
-                        lambda: mock_client,
                         self._make_job_row(),
                         self._make_profile(),
                         STRATEGY_POOL[0],

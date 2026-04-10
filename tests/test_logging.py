@@ -4,7 +4,6 @@ from logging.handlers import RotatingFileHandler
 
 import pytest
 
-
 class TestFileLogging:
     """Verify RotatingFileHandler setup and idempotency guard."""
 
@@ -61,7 +60,6 @@ class TestFileLogging:
                     root.removeHandler(h)
                     h.close()
             os.chdir(orig_dir)
-
 
 class TestNoFileLoggingInTestMode:
     """Verify that create_app() in test mode does NOT attach RotatingFileHandler."""
