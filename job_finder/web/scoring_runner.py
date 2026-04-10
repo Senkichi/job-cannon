@@ -2,9 +2,12 @@
 
 import logging
 import shutil
+from datetime import datetime, timezone
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-from job_finder.db import JOBS_ALL_COLUMNS
+from job_finder.db import JOBS_ALL_COLUMNS, persist_job_expiry_state, update_pipeline_status
+from job_finder.web.expiry_checker import check_job_liveness, EXPIRED as _EXPIRED
+from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
@@ -104,6 +107,31 @@ def run_haiku_scoring(
                             dedup_key,
                             enrich_err,
                         )
+
+                # --- Liveness gate (after enrichment discovers direct URLs) ---
+                # enrich_job may have written updated source_urls directly to DB
+                # via merge_apply_urls without returning them in the enriched dict.
+                # Re-read to ensure we check the most current URL.
+                refreshed = conn.execute(
+                    "SELECT source_urls FROM jobs WHERE dedup_key = ?", (dedup_key,)
+                ).fetchone()
+                if refreshed:
+                    job_row["source_urls"] = refreshed["source_urls"]
+
+                liveness = check_job_liveness(job_row)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
+
+                if liveness == _EXPIRED:
+                    logger.info(
+                        "Liveness gate: archiving expired '%s' @ '%s'",
+                        job_row.get("title"), job_row.get("company"),
+                    )
+                    update_pipeline_status(
+                        conn, dedup_key, "archived",
+                        source="ingestion_liveness", evidence="quick_liveness_check expired",
+                    )
+                    continue
 
                 # --- Pre-Haiku exclusion filter (C3) ---
                 exclusions = config.get("profile", {}).get("exclusions", {})

@@ -54,7 +54,10 @@ class _TrackingConnection:
         self.dedup_select_calls: list[str] = []
 
     def execute(self, sql: str, *args, **kwargs):
-        if "FROM jobs WHERE dedup_key" in sql:
+        # Track only batch IN queries (N+1 detection).
+        # Per-job single-row reads (e.g. liveness gate source_urls re-read) use
+        # "WHERE dedup_key = ?" and are intentionally excluded from this count.
+        if "FROM jobs WHERE dedup_key IN" in sql:
             self.dedup_select_calls.append(sql)
         return self._conn.execute(sql, *args, **kwargs)
 
@@ -116,6 +119,7 @@ def test_haiku_batch_fetch(migrated_db):
         patch.object(sr, "enrich_job", None),
         patch.object(sr, "should_exclude", return_value=(False, "")),
         patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "check_job_liveness", return_value="live"),
     ):
         sr.run_haiku_scoring(keys, _TEST_CONFIG, db_path)
 
@@ -147,6 +151,7 @@ def test_haiku_missing_key_skipped(migrated_db, caplog):
         patch.object(sr, "enrich_job", None),
         patch.object(sr, "should_exclude", return_value=(False, "")),
         patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "check_job_liveness", return_value="live"),
         caplog.at_level(logging.WARNING, logger="job_finder.web.scoring_runner"),
     ):
         sr.run_haiku_scoring(["key-exists", "key-missing"], _TEST_CONFIG, db_path)
@@ -261,3 +266,129 @@ def test_sonnet_empty_keys(migrated_db):
 
     assert result == 0
     assert not db_touched, "DB should not be accessed for empty queue"
+
+
+# ---------------------------------------------------------------------------
+# CLI availability gate tests (adapted from pre-refactor provider routing tests)
+# ---------------------------------------------------------------------------
+
+
+def test_haiku_scoring_no_cli_returns_zero(migrated_db):
+    """Haiku scoring returns ([], 0) when claude CLI is not available."""
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "no-cli-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    with patch.object(sr, "shutil") as mock_shutil:
+        mock_shutil.which.return_value = None
+        sonnet_queue, haiku_scored = sr.run_haiku_scoring(
+            ["no-cli-1"], _TEST_CONFIG, db_path,
+        )
+
+    assert sonnet_queue == []
+    assert haiku_scored == 0
+
+
+# ---------------------------------------------------------------------------
+# Liveness gate tests (Fix 2: ingestion-time expiry check)
+# ---------------------------------------------------------------------------
+
+
+def test_liveness_gate_expired_archives_job_and_skips_haiku(migrated_db):
+    """Liveness gate archives expired jobs before Haiku scoring."""
+    import sqlite3
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "expired-job-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    scored_keys: list[str] = []
+
+    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+        scored_keys.append(job_row["dedup_key"])
+        return {"score": 7}
+
+    with (
+        patch.object(sr, "shutil") as mock_shutil,
+        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
+        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "check_job_liveness", return_value="expired"),
+    ):
+        mock_shutil.which.return_value = "/usr/bin/claude"
+        sonnet_queue, haiku_scored = sr.run_haiku_scoring(
+            ["expired-job-1"], _TEST_CONFIG, db_path,
+        )
+
+    # Job must not reach Haiku scoring
+    assert "expired-job-1" not in scored_keys
+    assert haiku_scored == 0
+
+    # Job must be archived in DB
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT pipeline_status FROM jobs WHERE dedup_key = ?", ("expired-job-1",)
+    ).fetchone()
+    assert row["pipeline_status"] == "archived"
+    conn.close()
+
+
+def test_liveness_gate_live_proceeds_to_haiku(migrated_db):
+    """Liveness gate passes LIVE jobs through to Haiku scoring."""
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "live-job-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    scored_keys: list[str] = []
+
+    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+        scored_keys.append(job_row["dedup_key"])
+        return {"score": 7}
+
+    with (
+        patch.object(sr, "shutil") as mock_shutil,
+        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
+        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "check_job_liveness", return_value="live"),
+    ):
+        mock_shutil.which.return_value = "/usr/bin/claude"
+        sr.run_haiku_scoring(["live-job-1"], _TEST_CONFIG, db_path)
+
+    assert "live-job-1" in scored_keys
+
+
+def test_liveness_gate_inconclusive_proceeds_to_haiku(migrated_db):
+    """Liveness gate passes INCONCLUSIVE jobs through to Haiku scoring."""
+    db_path, setup_conn = migrated_db
+    _insert_job(setup_conn, "inconclusive-job-1")
+    setup_conn.commit()
+
+    import job_finder.web.scoring_runner as sr
+
+    scored_keys: list[str] = []
+
+    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+        scored_keys.append(job_row["dedup_key"])
+        return {"score": 7}
+
+    with (
+        patch.object(sr, "shutil") as mock_shutil,
+        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
+        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
+        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "load_scoring_profile", return_value={}),
+        patch.object(sr, "check_job_liveness", return_value="inconclusive"),
+    ):
+        mock_shutil.which.return_value = "/usr/bin/claude"
+        sr.run_haiku_scoring(["inconclusive-job-1"], _TEST_CONFIG, db_path)
+
+    assert "inconclusive-job-1" in scored_keys

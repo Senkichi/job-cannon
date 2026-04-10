@@ -41,6 +41,8 @@ ACTION_SCHEDULED_EXPIRY_CHECK = "scheduled_expiry_check"
 ACTION_SAVE_JD = "save_jd"
 ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
+ACTION_SCHEDULED_CAREERS_CRAWL = "scheduled_careers_crawl"
+ACTION_LIVENESS_CHECK = "liveness_check"
 
 # ---------------------------------------------------------------------------
 # Core helper

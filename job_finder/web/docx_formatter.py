@@ -40,6 +40,57 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
+
+# ATS-safe character normalization map.
+# ATS parsers (Workday, Taleo, iCIMS) choke on these Unicode characters
+# during keyword extraction. Replace with ASCII equivalents.
+_ATS_NORMALIZE_MAP = str.maketrans({
+    "\u2018": "'",     # left single quote
+    "\u2019": "'",     # right single quote (apostrophe)
+    "\u201A": "'",     # single low-9 quote
+    "\u201B": "'",     # single high-reversed-9 quote
+    "\u201C": '"',     # left double quote
+    "\u201D": '"',     # right double quote
+    "\u201E": '"',     # double low-9 quote
+    "\u201F": '"',     # double high-reversed-9 quote
+    "\u2014": " - ",   # em dash -> space-hyphen-space
+    "\u2013": "-",     # en dash -> hyphen
+    "\u2026": "...",   # ellipsis
+    "\u00A0": " ",     # non-breaking space
+    "\u200B": "",      # zero-width space (remove)
+    "\u200C": "",      # zero-width non-joiner (remove)
+    "\u200D": "",      # zero-width joiner (remove)
+    "\uFEFF": "",      # BOM / zero-width no-break space (remove)
+    "\u2022": "-",     # bullet -> hyphen (for inline lists)
+    "\u25CF": "-",     # black circle bullet
+    "\u25CB": "-",     # white circle bullet
+    "\u00B7": "-",     # middle dot
+    "\u2023": "-",     # triangular bullet
+    "\u00AB": '"',     # left guillemet
+    "\u00BB": '"',     # right guillemet
+    "\u2039": "'",     # single left angle quote
+    "\u203A": "'",     # single right angle quote
+})
+
+
+def _normalize_for_ats(text: str) -> str:
+    """Replace Unicode characters that break ATS keyword matching."""
+    if not text:
+        return text
+    return text.translate(_ATS_NORMALIZE_MAP)
+
+
+def _normalize_resume_data(data):
+    """Recursively normalize all strings in resume_data for ATS compatibility."""
+    if isinstance(data, str):
+        return _normalize_for_ats(data)
+    if isinstance(data, list):
+        return [_normalize_resume_data(item) for item in data]
+    if isinstance(data, dict):
+        return {k: _normalize_resume_data(v) for k, v in data.items()}
+    return data
+
+
 def _set_margins(doc: Document, margin_inches: float = 1.0) -> None:
     """Set uniform page margins on all sections."""
     for section in doc.sections:
@@ -70,6 +121,8 @@ def build_resume_docx(resume_data: dict) -> io.BytesIO:
     Returns:
         BytesIO positioned at 0 containing the .docx file bytes.
     """
+    resume_data = _normalize_resume_data(resume_data)
+
     doc = Document()
     _set_margins(doc, margin_inches=1.0)
 

@@ -68,10 +68,14 @@ def standalone_connection(db_path: str):
             rows = conn.execute("SELECT ...").fetchall()
             conn.commit()
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     # WAL mode ensures concurrent read/write safety for background jobs
     conn.execute("PRAGMA journal_mode=WAL")
+    # Busy timeout: wait up to 30s for write locks to clear instead of
+    # failing immediately. Prevents "database is locked" when batch scoring
+    # threads compete with Flask HTMX polling for write access.
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
         yield conn
     finally:

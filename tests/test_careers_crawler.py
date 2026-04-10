@@ -1,0 +1,637 @@
+"""Tests for the Playwright-based careers page crawler."""
+
+import json
+import os
+import sqlite3
+import tempfile
+from unittest.mock import MagicMock, patch
+
+import pytest
+from bs4 import BeautifulSoup
+
+from job_finder.web.careers_crawler import (
+    _clean_title,
+    _extract_jobs_from_soup,
+    _extract_jsonld_postings,
+    _try_static_extract,
+    crawl_careers_batch,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def tmp_db_path():
+    """Temp SQLite DB with companies + jobs tables for crawler tests."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            name_raw TEXT NOT NULL,
+            homepage_url TEXT DEFAULT NULL,
+            ats_platform TEXT DEFAULT NULL,
+            ats_slug TEXT DEFAULT NULL,
+            ats_probe_status TEXT DEFAULT 'pending',
+            ats_probe_attempted_at TEXT DEFAULT NULL,
+            scan_enabled INTEGER DEFAULT 1,
+            last_scanned_at TEXT DEFAULT NULL,
+            jobs_found_total INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            retry_count INTEGER DEFAULT 0,
+            retry_after TEXT DEFAULT NULL,
+            miss_reason TEXT DEFAULT NULL,
+            company_size TEXT DEFAULT NULL,
+            industry TEXT DEFAULT NULL,
+            homepage_probe_attempted_at TEXT DEFAULT NULL,
+            enrichment_attempts INTEGER DEFAULT 0,
+            enrichment_last_attempted_at TEXT DEFAULT NULL,
+            enrichment_backoff_until TEXT DEFAULT NULL,
+            enrichment_last_error TEXT DEFAULT NULL,
+            careers_url TEXT DEFAULT NULL,
+            careers_crawl_last_at TEXT DEFAULT NULL
+        );
+        CREATE TABLE jobs (
+            dedup_key TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            company TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT '',
+            sources TEXT DEFAULT '[]',
+            source_urls TEXT DEFAULT '[]',
+            source_id TEXT DEFAULT '',
+            salary_min INTEGER,
+            salary_max INTEGER,
+            description TEXT,
+            first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+            last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+            score REAL DEFAULT 0,
+            score_breakdown TEXT DEFAULT '{}',
+            user_interest TEXT DEFAULT 'unreviewed',
+            pipeline_status TEXT DEFAULT 'discovered',
+            posted_date TEXT,
+            notes TEXT,
+            haiku_score REAL,
+            haiku_summary TEXT,
+            sonnet_score REAL,
+            fit_analysis TEXT,
+            jd_full TEXT,
+            is_stale INTEGER DEFAULT 0,
+            rejection_reviewed INTEGER DEFAULT 0,
+            locations_raw TEXT DEFAULT '[]',
+            description_reformatted TEXT,
+            company_id INTEGER,
+            comp_data_json TEXT,
+            enrichment_tier TEXT,
+            expiry_checked_at TEXT,
+            opus_score REAL,
+            scoring_provider TEXT,
+            expiry_status TEXT,
+            eval_blocks TEXT,
+            job_archetype TEXT
+        );
+        CREATE TABLE runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            source TEXT NOT NULL,
+            jobs_fetched INTEGER DEFAULT 0,
+            jobs_new INTEGER DEFAULT 0,
+            jobs_scored INTEGER DEFAULT 0
+        );
+        CREATE TABLE company_scan_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            scanned_at TEXT NOT NULL,
+            jobs_found INTEGER DEFAULT 0,
+            jobs_matched INTEGER DEFAULT 0,
+            error TEXT
+        );
+    """)
+    conn.close()
+
+    yield path
+
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def _insert_company(db_path, name, careers_url, probe_status="miss"):
+    """Helper to insert a test company."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO companies (name, name_raw, careers_url, ats_probe_status)
+           VALUES (?, ?, ?, ?)""",
+        (name.lower(), name, careers_url, probe_status),
+    )
+    conn.commit()
+    company_id = conn.execute(
+        "SELECT id FROM companies WHERE name = ?", (name.lower(),)
+    ).fetchone()[0]
+    conn.close()
+    return company_id
+
+
+def _insert_high_scoring_job(db_path, company_id, title="Old Engineer Role", score=80):
+    """Insert a job with a high haiku_score so the company qualifies for crawling."""
+    conn = sqlite3.connect(db_path)
+    dedup_key = f"test-{company_id}-{title.replace(' ', '-').lower()}"
+    conn.execute(
+        """INSERT INTO jobs (dedup_key, title, company, haiku_score, company_id)
+           VALUES (?, ?, ?, ?, ?)""",
+        (dedup_key, title, "test", score, company_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# _extract_jsonld_postings
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJsonldPostings:
+    def test_single_job_posting(self):
+        data = {"@type": "JobPosting", "title": "Software Engineer", "url": "/jobs/123"}
+        result = _extract_jsonld_postings(data)
+        assert len(result) == 1
+        assert result[0]["title"] == "Software Engineer"
+
+    def test_array_of_postings(self):
+        data = [
+            {"@type": "JobPosting", "title": "Engineer"},
+            {"@type": "JobPosting", "title": "Designer"},
+        ]
+        result = _extract_jsonld_postings(data)
+        assert len(result) == 2
+
+    def test_item_list_wrapper(self):
+        data = {
+            "@type": "ItemList",
+            "itemListElement": [
+                {"@type": "JobPosting", "title": "PM"},
+                {"@type": "JobPosting", "title": "Engineer"},
+            ],
+        }
+        result = _extract_jsonld_postings(data)
+        assert len(result) == 2
+
+    def test_graph_wrapper(self):
+        data = {
+            "@graph": [
+                {"@type": "JobPosting", "title": "Analyst"},
+                {"@type": "Organization", "name": "Acme"},
+            ],
+        }
+        result = _extract_jsonld_postings(data)
+        assert len(result) == 1
+        assert result[0]["title"] == "Analyst"
+
+    def test_non_job_posting_ignored(self):
+        data = {"@type": "Organization", "name": "Acme"}
+        assert _extract_jsonld_postings(data) == []
+
+    def test_empty_data(self):
+        assert _extract_jsonld_postings({}) == []
+        assert _extract_jsonld_postings([]) == []
+
+
+# ---------------------------------------------------------------------------
+# _extract_jobs_from_soup
+# ---------------------------------------------------------------------------
+
+
+class TestExtractJobsFromSoup:
+    def test_jsonld_extraction(self):
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        [{"@type": "JobPosting", "title": "Data Scientist", "url": "/jobs/42"}]
+        </script>
+        </head><body></body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com", ["data scientist"], [],
+        )
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Data Scientist"
+        assert jobs[0]["url"] == "https://example.com/jobs/42"
+
+    def test_link_matching(self):
+        html = """
+        <html><body>
+        <a href="/careers/senior-software-engineer">Senior Software Engineer</a>
+        <a href="/careers/marketing-manager">Marketing Manager</a>
+        <a href="/about">About Us</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com",
+            ["software engineer"], [],
+        )
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Senior Software Engineer"
+
+    def test_filters_nav_links(self):
+        html = """
+        <html><body>
+        <a href="/about">About Software Engineer Careers</a>
+        <a href="/contact">Contact Engineering</a>
+        <a href="/blog/engineer-spotlight">Engineer Spotlight</a>
+        <a href="/jobs/real-engineer">Software Engineer</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com",
+            ["software engineer", "engineer"], [],
+        )
+        # Only /jobs/real-engineer should match (others filtered by nav prefixes)
+        assert len(jobs) == 1
+        assert "real-engineer" in jobs[0]["url"]
+
+    def test_deduplicates_by_url(self):
+        html = """
+        <html><body>
+        <a href="/jobs/123">Software Engineer</a>
+        <a href="/jobs/123">Software Engineer - Apply Now</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com",
+            ["software engineer"], [],
+        )
+        assert len(jobs) == 1
+
+    def test_exclusion_filter(self):
+        html = """
+        <html><body>
+        <a href="/jobs/1">Senior Software Engineer</a>
+        <a href="/jobs/2">Junior Software Engineer</a>
+        <a href="/jobs/3">Software Engineer Intern</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com",
+            ["software engineer"], ["junior", "intern"],
+        )
+        assert len(jobs) == 1
+        assert "Senior" in jobs[0]["title"]
+
+    def test_empty_target_titles_matches_all(self):
+        html = """
+        <html><body>
+        <a href="/jobs/1">Software Engineer</a>
+        <a href="/jobs/2">Product Manager</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(soup, "https://example.com", [], [])
+        assert len(jobs) == 2
+
+    def test_skips_short_link_text(self):
+        html = """
+        <html><body>
+        <a href="/jobs/1">OK</a>
+        <a href="/jobs/2">Software Engineer</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com", ["software engineer"], [],
+        )
+        assert len(jobs) == 1
+
+    def test_skips_javascript_and_hash_links(self):
+        html = """
+        <html><body>
+        <a href="#">Software Engineer</a>
+        <a href="javascript:void(0)">Data Scientist</a>
+        <a href="/jobs/real">Data Scientist</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com", ["data scientist"], [],
+        )
+        assert len(jobs) == 1
+        assert "/jobs/real" in jobs[0]["url"]
+
+    def test_jsonld_takes_priority_no_duplicates(self):
+        """Jobs found via JSON-LD should not be duplicated by link pass."""
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {"@type": "JobPosting", "title": "Software Engineer", "url": "/jobs/42"}
+        </script>
+        </head><body>
+        <a href="/jobs/42">Software Engineer</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup, "https://example.com", ["software engineer"], [],
+        )
+        assert len(jobs) == 1
+
+
+# ---------------------------------------------------------------------------
+# _clean_title
+# ---------------------------------------------------------------------------
+
+
+class TestCleanTitle:
+    def _make_tag(self, html):
+        return BeautifulSoup(html, "html.parser").find("a")
+
+    def test_strips_remote_suffix(self):
+        tag = self._make_tag('<a href="/j"><span>Senior Engineer</span><span>Remote - Americas</span></a>')
+        assert _clean_title(tag, "Senior EngineerRemote - Americas") == "Senior Engineer"
+
+    def test_strips_location_dash(self):
+        tag = self._make_tag('<a href="/j">Data Scientist - Remote</a>')
+        assert _clean_title(tag, "Data Scientist - Remote") == "Data Scientist"
+
+    def test_strips_hybrid_suffix(self):
+        tag = self._make_tag('<a href="/j">Product Manager – Hybrid</a>')
+        assert _clean_title(tag, "Product Manager – Hybrid") == "Product Manager"
+
+    def test_preserves_clean_title(self):
+        tag = self._make_tag('<a href="/j">Software Engineer</a>')
+        assert _clean_title(tag, "Software Engineer") == "Software Engineer"
+
+    def test_uses_first_child_element(self):
+        tag = self._make_tag(
+            '<a href="/j"><div>Lead Designer</div><div>New York, NY</div></a>'
+        )
+        assert _clean_title(tag, "Lead DesignerNew York, NY") == "Lead Designer"
+
+
+# ---------------------------------------------------------------------------
+# _try_static_extract
+# ---------------------------------------------------------------------------
+
+
+class TestTryStaticExtract:
+    @patch("job_finder.web.careers_crawler.requests.get")
+    def test_returns_jobs_from_static_html(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.text = """
+        <html><body>
+        <p>Lots of text content here to make the ratio high enough.</p>
+        <p>We are a great company with many opportunities.</p>
+        <a href="/jobs/1">Senior Software Engineer</a>
+        <a href="/jobs/2">Lead Software Engineer</a>
+        </body></html>
+        """
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = _try_static_extract(
+            "https://example.com/careers",
+            ["software engineer"], [],
+        )
+        assert result is not None
+        assert len(result) == 2
+
+    @patch("job_finder.web.careers_crawler.requests.get")
+    def test_returns_none_for_js_heavy_page(self, mock_get):
+        mock_resp = MagicMock()
+        # Minimal text, lots of JS — simulates SPA shell
+        mock_resp.text = '<html><head></head><body><div id="root"></div>' + (
+            '<script>var a="' + "x" * 5000 + '";</script></body></html>'
+        )
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = _try_static_extract(
+            "https://example.com/careers",
+            ["software engineer"], [],
+        )
+        assert result is None  # Signals Playwright needed
+
+    @patch("job_finder.web.careers_crawler.requests.get")
+    def test_returns_empty_for_static_page_no_matches(self, mock_get):
+        mock_resp = MagicMock()
+        # Must exceed _STATIC_MIN_TEXT_LEN (500 chars of visible text)
+        filler = "We are building the future of work. " * 20  # ~720 chars
+        mock_resp.text = f"""
+        <html><body>
+        <p>{filler}</p>
+        <a href="/jobs/1">Marketing Coordinator</a>
+        </body></html>
+        """
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = _try_static_extract(
+            "https://example.com/careers",
+            ["software engineer"], [],
+        )
+        assert result == []  # Static page, genuinely no matching jobs
+
+    @patch("job_finder.web.careers_crawler.requests.get")
+    def test_returns_none_on_request_failure(self, mock_get):
+        mock_get.side_effect = Exception("Connection refused")
+
+        result = _try_static_extract(
+            "https://example.com/careers",
+            ["software engineer"], [],
+        )
+        assert result is None  # Can't determine page type — let Playwright try
+
+
+# ---------------------------------------------------------------------------
+# crawl_careers_batch
+# ---------------------------------------------------------------------------
+
+
+class TestCrawlCareersBatch:
+    def test_testing_guard(self, tmp_db_path):
+        result = crawl_careers_batch(tmp_db_path, {"TESTING": True})
+        assert result["companies_crawled"] == 0
+        assert result["jobs_found"] == 0
+
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_updates_crawl_timestamp(self, mock_static, mock_pw, tmp_db_path):
+        cid = _insert_company(tmp_db_path, "TestCo", "https://testco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        # Static extract returns empty (no jobs, page is static)
+        mock_static.return_value = []
+
+        # Mock Playwright context manager
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        crawl_careers_batch(tmp_db_path, config)
+
+        conn = sqlite3.connect(tmp_db_path)
+        row = conn.execute(
+            "SELECT careers_crawl_last_at FROM companies WHERE name = 'testco'"
+        ).fetchone()
+        conn.close()
+        assert row[0] is not None
+
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_freshness_skip(self, mock_static, mock_pw, tmp_db_path):
+        """Companies crawled recently should be skipped."""
+        cid = _insert_company(tmp_db_path, "FreshCo", "https://freshco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        # Set careers_crawl_last_at to now (within freshness window)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE companies SET careers_crawl_last_at = datetime('now') WHERE name = 'freshco'"
+        )
+        conn.commit()
+        conn.close()
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 0
+        mock_static.assert_not_called()
+
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_skips_companies_without_high_scoring_jobs(self, mock_static, mock_pw, tmp_db_path):
+        """Companies with no high-scoring jobs should not be crawled."""
+        cid = _insert_company(tmp_db_path, "LowCo", "https://lowco.com/careers")
+        # Insert a job below threshold (default 42)
+        _insert_high_scoring_job(tmp_db_path, cid, score=20)
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 0
+        mock_static.assert_not_called()
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_upserts_discovered_jobs(self, mock_static, mock_pw, mock_score, tmp_db_path):
+        company_id = _insert_company(
+            tmp_db_path, "GoodCo", "https://goodco.com/careers",
+        )
+        _insert_high_scoring_job(tmp_db_path, company_id)
+
+        mock_static.return_value = [
+            {"title": "Software Engineer", "url": "https://goodco.com/jobs/1", "description": ""},
+            {"title": "Data Engineer", "url": "https://goodco.com/jobs/2", "description": ""},
+        ]
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["companies_crawled"] == 1
+        assert result["jobs_found"] == 2
+        assert result["jobs_new"] == 2
+
+        # Verify jobs in DB
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        jobs = conn.execute("SELECT * FROM jobs ORDER BY title").fetchall()
+        conn.close()
+
+        crawled_jobs = [j for j in jobs if json.loads(j["sources"]) == ["careers_crawl"]]
+        assert len(crawled_jobs) == 2
+        titles = sorted(j["title"] for j in crawled_jobs)
+        assert titles == ["Data Engineer", "Software Engineer"]
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_falls_back_to_playwright(self, mock_static, mock_pw, mock_score, tmp_db_path):
+        """When static returns None, Playwright should be used."""
+        cid = _insert_company(tmp_db_path, "JsCo", "https://jsco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        # Static returns None → JS-heavy page
+        mock_static.return_value = None
+
+        # Mock Playwright to return rendered content
+        mock_page = MagicMock()
+        mock_page.content.return_value = """
+        <html><body>
+        <a href="/jobs/1">Software Engineer</a>
+        </body></html>
+        """
+        mock_browser = MagicMock()
+        mock_browser.new_page.return_value = mock_page
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["software engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["playwright_rendered"] == 1
+        assert result["jobs_found"] == 1
+        mock_page.goto.assert_called_once()
+        mock_page.close.assert_called_once()
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_logs_scan_and_runs_entry(self, mock_static, mock_pw, mock_score, tmp_db_path):
+        cid = _insert_company(tmp_db_path, "LogCo", "https://logco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+        mock_static.return_value = []
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        crawl_careers_batch(tmp_db_path, config)
+
+        conn = sqlite3.connect(tmp_db_path)
+        # Check company_scan_log
+        scan_log = conn.execute(
+            "SELECT * FROM company_scan_log"
+        ).fetchall()
+        assert len(scan_log) == 1
+
+        # Check runs table
+        runs = conn.execute(
+            "SELECT * FROM runs WHERE source = 'careers_crawl'"
+        ).fetchall()
+        assert len(runs) == 1
+        conn.close()

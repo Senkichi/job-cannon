@@ -34,6 +34,8 @@ HAIKU_SCHEMA: dict = {
         "score": {
             "type": "integer",
             "description": "Score 0-100 based on title/location/salary fit against candidate profile",
+            "minimum": 0,
+            "maximum": 100,
         },
         "summary": {
             "type": "string",
@@ -258,6 +260,24 @@ def score_job_haiku(
         f"Minimum Salary: {min_salary_str}\n"
         f"Key Skills: {skills_str}\n"
         f"Target Industries: {industries_str}\n"
+    )
+
+    # Inject legitimacy signals if any red flags detected
+    try:
+        from job_finder.web.legitimacy_signals import compute_legitimacy_signals
+        leg_signals = compute_legitimacy_signals(job_row, conn)
+        if leg_signals.get("legitimacy_note"):
+            user_prompt += (
+                f"\n## Legitimacy Signals\n"
+                f"{leg_signals['legitimacy_note']}\n\n"
+                f"Factor these signals into your score. A job with multiple red flags "
+                f"(very old posting, no salary, vague description, appears on many "
+                f"sources) is likely a ghost posting and should be scored lower.\n"
+            )
+    except Exception:
+        pass  # Legitimacy signals are best-effort; never block scoring
+
+    user_prompt += (
         f"\n"
         f"Score this job posting against the candidate profile. "
         f"Use the structured output format."

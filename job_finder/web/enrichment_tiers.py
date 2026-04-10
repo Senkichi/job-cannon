@@ -189,7 +189,7 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
             return {}
 
         company_row = conn.execute(
-            "SELECT homepage_url FROM companies WHERE id = ?",
+            "SELECT homepage_url, careers_url FROM companies WHERE id = ?",
             (company_id,),
         ).fetchone()
 
@@ -206,7 +206,16 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         except ImportError:
             return {}
 
-        careers_url = find_careers_url(homepage_url)
+        # Use cached careers_url or discover from homepage
+        careers_url = dict(company_row).get("careers_url")
+        if not careers_url:
+            careers_url = find_careers_url(homepage_url)
+            if careers_url:
+                conn.execute(
+                    "UPDATE companies SET careers_url = ? WHERE id = ?",
+                    (careers_url, company_id),
+                )
+                conn.commit()
         if not careers_url:
             return {}
 

@@ -777,7 +777,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         # Guard: only run if careers_scraper was imported successfully.
         if find_careers_url is not None and scrape_careers_page is not None:
             miss_companies = conn.execute(
-                """SELECT id, name_raw, homepage_url FROM companies
+                """SELECT id, name_raw, homepage_url, careers_url FROM companies
                    WHERE ats_probe_status = 'miss'
                      AND homepage_url IS NOT NULL
                      AND scan_enabled = 1"""
@@ -796,12 +796,18 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 )
 
                 try:
-                    # Step 1: Find careers URL from homepage
-                    careers_url = find_careers_url(
-                        miss_homepage_url,
-                        conn=conn,
-                        config=config,
-                    )
+                    html_tried += 1
+                    # Step 1: Use cached careers_url or discover from homepage
+                    careers_url = miss_company.get("careers_url")
+                    newly_discovered_careers = False
+                    if not careers_url:
+                        careers_url = find_careers_url(
+                            miss_homepage_url,
+                            conn=conn,
+                            config=config,
+                        )
+                        if careers_url:
+                            newly_discovered_careers = True
                     if not careers_url:
                         logger.debug(
                             "ATS HTML fallback: no careers link found for %s",
@@ -852,14 +858,29 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         (miss_company_id, now, company_html_found),
                     )
 
-                    # Step 5: Update company last_scanned_at and jobs_found_total
-                    conn.execute(
-                        """UPDATE companies
-                           SET last_scanned_at = ?,
-                               jobs_found_total = jobs_found_total + ?
-                           WHERE id = ?""",
-                        (now, company_html_found, miss_company_id),
-                    )
+                    # Step 5: Update company last_scanned_at, jobs_found_total,
+                    # and cache newly discovered careers_url for future runs.
+                    if newly_discovered_careers:
+                        conn.execute(
+                            """UPDATE companies
+                               SET last_scanned_at = ?,
+                                   careers_url = ?,
+                                   jobs_found_total = (
+                                       SELECT COUNT(*) FROM jobs WHERE company_id = ?
+                                   )
+                               WHERE id = ?""",
+                            (now, careers_url, miss_company_id, miss_company_id),
+                        )
+                    else:
+                        conn.execute(
+                            """UPDATE companies
+                               SET last_scanned_at = ?,
+                                   jobs_found_total = (
+                                       SELECT COUNT(*) FROM jobs WHERE company_id = ?
+                                   )
+                               WHERE id = ?""",
+                            (now, miss_company_id, miss_company_id),
+                        )
                     conn.commit()
 
                 except Exception as html_err:

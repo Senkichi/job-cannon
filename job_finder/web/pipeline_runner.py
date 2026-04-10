@@ -36,6 +36,25 @@ try:
 except ImportError:
     GmailSource = None  # type: ignore[assignment,misc]
 
+# Re-export all helpers from ingestion_runner so existing patch paths work:
+#   patch("job_finder.web.pipeline_runner._fetch_gmail", ...)  ← still valid
+#   patch("job_finder.web.pipeline_runner.GmailSource", ...)   ← still valid (imported above)
+#   patch("job_finder.web.pipeline_runner.upsert_job", ...)    ← still valid (imported above)
+from job_finder.web.ingestion_runner import (  # noqa: E402
+    _collect_dataforseo_results,
+    _fetch_gmail,
+    _fetch_portal_search,
+    _fetch_scaleserp,
+    _fetch_serpapi,
+    _fetch_thordata,
+    _log_to_email_parse_log,
+    _prune_stale_data,
+    _score_and_persist,
+    _submit_dataforseo_tasks,
+    _touch_existing_job,
+    _upsert_job_company,
+)
+
 logger = logging.getLogger(__name__)
 
 # Track last notified budget threshold to avoid repeated notifications.
@@ -77,6 +96,14 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         "gmail_errors": [],
         "serpapi_fetched": 0,
         "serpapi_errors": [],
+        "thordata_fetched": 0,
+        "thordata_errors": [],
+        "scaleserp_fetched": 0,
+        "scaleserp_errors": [],
+        "dataforseo_fetched": 0,
+        "dataforseo_errors": [],
+        "portal_search_fetched": 0,
+        "portal_search_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
         "jobs_scored": 0,
@@ -99,8 +126,13 @@ def run_ingestion(db_path: str, config: dict) -> dict:
         # --- SerpAPI ingestion ---
         serpapi_jobs = _fetch_serpapi(config, summary)
 
+        # --- Additional sources ---
+        thordata_jobs = _fetch_thordata(config, summary)
+        scaleserp_jobs = _fetch_scaleserp(config, summary)
+        portal_jobs = _fetch_portal_search(config, summary)
+
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs
+        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + portal_jobs
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:

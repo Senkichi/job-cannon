@@ -32,6 +32,13 @@ from typing import Any
 from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
 
+try:
+    from jsonschema import ValidationError as _ValidationError
+    from jsonschema import validate as _jsonschema_validate
+except ImportError:
+    _ValidationError = None  # type: ignore[assignment,misc]
+    _jsonschema_validate = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_API_TIMEOUT_SECONDS: int = 120
@@ -105,6 +112,7 @@ def record_cost(
     model: str,
     input_tokens: int,
     output_tokens: int,
+    provider: str = "anthropic",
 ) -> float:
     """Insert a cost row into scoring_costs and return cost_usd.
 
@@ -115,6 +123,7 @@ def record_cost(
         model: Model identifier used for the call.
         input_tokens: Number of input tokens consumed.
         output_tokens: Number of output tokens generated.
+        provider: Provider name for attribution (default "anthropic").
 
     Returns:
         Computed cost in USD.
@@ -122,12 +131,45 @@ def record_cost(
     cost_usd = compute_cost(model, input_tokens, output_tokens)
     timestamp = utc_now_iso()
     conn.execute(
-        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp),
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider),
     )
     conn.commit()
     return cost_usd
+
+
+# ---------------------------------------------------------------------------
+# Provider breakdown
+# ---------------------------------------------------------------------------
+
+
+def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-provider cost breakdown scoped to the current calendar month.
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+
+    Returns:
+        List of dicts with keys: provider (str), calls (int), spend (float).
+        Sorted descending by spend.
+    """
+    now = datetime.now(timezone.utc)
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+
+    rows = conn.execute(
+        "SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        "FROM scoring_costs "
+        "WHERE timestamp >= ? "
+        "GROUP BY provider "
+        "ORDER BY spend DESC",
+        (month_start,),
+    ).fetchall()
+
+    return [
+        {"provider": row[0], "calls": int(row[1]), "spend": float(row[2])}
+        for row in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -548,5 +590,68 @@ def call_claude(
             result = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             result = {"text": str(raw)}
+
+    # --- Post-parse schema validation with one retry ---
+    if (
+        output_schema is not None
+        and _jsonschema_validate is not None
+        and isinstance(result, dict)
+    ):
+        try:
+            _jsonschema_validate(instance=result, schema=output_schema)
+        except _ValidationError as _val_err:
+            logger.warning(
+                "call_claude schema validation failed: purpose=%s model=%s error=%s — retrying once",
+                purpose, model, _val_err.message,
+            )
+            retry_user_message = (
+                user_message
+                + f"\n\nSchema validation error from previous attempt:\n- {_val_err.message}\n\n"
+                "Please provide a response that satisfies all schema constraints."
+            )
+            try:
+                retry_envelope = _run_oneshot(
+                    model=model,
+                    system=system,
+                    user_message=retry_user_message,
+                    json_schema=output_schema,
+                    timeout=effective_timeout,
+                )
+            except Exception as retry_exc:
+                raise ValueError(
+                    f"Schema validation retry API call failed: {retry_exc}"
+                ) from retry_exc
+
+            # Record cost for the retry call
+            retry_usage = retry_envelope.get("usage", {})
+            record_cost(
+                conn, job_id, purpose, model,
+                retry_usage.get("input_tokens", 0),
+                retry_usage.get("output_tokens", 0),
+            )
+
+            # Parse retry result
+            if output_schema is not None:
+                result = retry_envelope.get("structured_output")
+                if result is None:
+                    raw = retry_envelope.get("result", "")
+                    try:
+                        result = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        raise ValueError("Schema validation retry returned unparseable response")
+            else:
+                raw = retry_envelope.get("result", "")
+                try:
+                    result = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    result = {"text": str(raw)}
+
+            try:
+                _jsonschema_validate(instance=result, schema=output_schema)
+            except _ValidationError as _retry_err:
+                raise ValueError(
+                    f"Schema validation failed after retry: {_retry_err.message} "
+                    f"(purpose={purpose}, model={model})"
+                ) from _retry_err
 
     return result, cost_usd

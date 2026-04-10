@@ -201,7 +201,7 @@ def test_call_request_payload_has_num_predict():
 
 
 def test_call_embeds_schema_in_system():
-    """Schema should be appended to the system message content."""
+    """Schema should be embedded as field instructions and example in system message."""
     provider = _make_provider()
     schema = {"type": "object", "properties": {"score": {"type": "integer"}}}
 
@@ -215,9 +215,10 @@ def test_call_embeds_schema_in_system():
 
     payload = mock_post.call_args.kwargs["json"]
     system_content = payload["messages"][0]["content"]
-    schema_str = json.dumps(schema, indent=2)
-    assert schema_str in system_content
     assert "Rate this job." in system_content
+    assert "EXACTLY these fields" in system_content
+    assert '"score"' in system_content
+    assert "Example structure" in system_content
 
 
 def test_call_without_schema_no_schema_in_system():

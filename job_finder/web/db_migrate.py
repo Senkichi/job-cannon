@@ -410,6 +410,251 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_companies_homepage_probe_attempted_at ON companies(homepage_probe_attempted_at)",
     ],
+
+    # Migration 18: Add provider column to scoring_costs table.
+    # Tracks which provider (anthropic, gemini, ollama) handled each API call.
+    # Default 'anthropic' for all existing rows (pre-multi-provider).
+    [
+        "ALTER TABLE scoring_costs ADD COLUMN provider TEXT DEFAULT 'anthropic'",
+    ],
+
+    # Migration 19: Add opus_score column for Opus baseline evaluation.
+    # Stores Opus-generated scores as gold-standard baseline for model comparison.
+    [
+        "ALTER TABLE jobs ADD COLUMN opus_score REAL DEFAULT NULL",
+    ],
+
+    # Migration 20: Provider attribution for Sonnet scoring (ATTR-01).
+    # Records which provider produced each Sonnet score.
+    # Default 'anthropic' for all existing rows (pre-cascade).
+    [
+        "ALTER TABLE jobs ADD COLUMN scoring_provider TEXT DEFAULT 'anthropic'",
+    ],
+
+    # Migration 21: Clean up stub JDs — title restatements from AI enrichment.
+    # When all free tiers failed, AI extraction echoed the title as jd_full
+    # (e.g., "Data Manager at Mochi Health" for a Data Manager role).
+    # NULL out these stubs and reset enrichment_tier so jobs can be re-enriched.
+    # Also NULL out sonnet_score/fit_analysis for stubs that were scored with garbage input.
+    [
+        """UPDATE jobs
+           SET jd_full = NULL,
+               enrichment_tier = NULL
+           WHERE jd_full IS NOT NULL
+             AND LENGTH(jd_full) < 200
+             AND enrichment_tier IN ('haiku', 'sonnet', 'exhausted')""",
+        """UPDATE jobs
+           SET sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full IS NULL
+             AND sonnet_score IS NOT NULL""",
+    ],
+
+    # Migration 22: Clean up chrome-polluted JDs — scraped website chrome, LinkedIn
+    # login walls, company overview pages, and search result pages stored as jd_full.
+    # These pass length checks but contain no usable job description content.
+    # NULL out jd_full + scores and reset enrichment_tier for re-enrichment.
+    [
+        # LinkedIn login wall pages (most common: 151 jobs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (jd_full LIKE '%Agree & Join LinkedIn%'
+               OR jd_full LIKE '%Join or sign in to find your next job%'
+               OR jd_full LIKE '%Join to apply for the%')""",
+        # Cookie banners in first 300 chars of jd_full
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (SUBSTR(jd_full, 1, 300) LIKE '%cookie%'
+               OR SUBSTR(jd_full, 1, 300) LIKE '%Close this dialog%'
+               OR SUBSTR(jd_full, 1, 300) LIKE '%third-party partners%')""",
+        # Built In company overview pages (not JDs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND (jd_full LIKE '%View All Jobs at%'
+               OR jd_full LIKE '%Recently Posted Jobs at%'
+               OR jd_full LIKE '%Similar Companies Hiring%')""",
+        # LinkedIn search results pages (not individual JDs)
+        """UPDATE jobs
+           SET jd_full = NULL, enrichment_tier = NULL,
+               sonnet_score = NULL, fit_analysis = NULL
+           WHERE jd_full IS NOT NULL
+             AND jd_full LIKE '%Past month%Past week%Past 24 hours%'""",
+    ],
+
+    # Migration 23: Recalibrate jobs_found_total from cumulative to current count
+    # and add jobs_matched column to company_scan_log.
+    [
+        """UPDATE companies SET jobs_found_total = (
+            SELECT COUNT(*) FROM jobs WHERE company_id = companies.id
+        )""",
+        "ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER DEFAULT NULL",
+    ],
+
+    # Migration 24: Add composite index on email_parse_log(sender, processed_at)
+    # to support the per-message Gmail dedup query:
+    #   WHERE sender = 'gmail' AND processed_at >= datetime('now', ?)
+    # The composite covers both filter columns; single-column (processed_at)
+    # would scan all senders unnecessarily as the table grows.
+    [
+        "CREATE INDEX IF NOT EXISTS idx_email_parse_log_sender_processed_at"
+        " ON email_parse_log(sender, processed_at)",
+    ],
+
+    # Migration 25: Clean up Eightfold/Phenom PCS ATS SPA shell garbage in jd_full.
+    # Eightfold-powered careers pages (vizientinc.com, bayer.com, caci.com, etc.)
+    # inject CSS theming config as inline JSON on page load:
+    #   {"themeOptions": {"customTheme": {"varTheme": {...}}}}
+    # fetch_direct_jd() fetched these JS-rendered SPA shells before the detection
+    # fix in Migration 25 was added to _WRONG_PAGE_SIGNATURES. The content:
+    #   - Is 8000 chars (passes is_stub_jd length check)
+    #   - Contains "benefits" from "perks-and-benefits-icon-color" CSS variable
+    #     (passes has_jd_content check — false positive)
+    #   - Has no auth-wall or chrome markers (passes all rejection filters)
+    # 4 jobs affected. Fix A: exhausted-tier jobs — null jd_full + Sonnet scores so
+    # agentic enricher (Playwright) can fetch the real JD on next nightly run.
+    # Fix B: free-tier jobs — null jd_full + reset enrichment_tier so the free tier
+    # re-runs and falls through to DDG/Haiku without storing SPA garbage again.
+    [
+        # Fix A: exhausted-tier jobs — agentic enricher picks up jd_full IS NULL
+        """UPDATE jobs
+           SET jd_full = NULL,
+               sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full LIKE '%"themeOptions"%'
+             AND enrichment_tier = 'exhausted'""",
+
+        # Fix B: non-exhausted jobs — reset to re-run free tier cleanly
+        """UPDATE jobs
+           SET jd_full = NULL,
+               enrichment_tier = NULL,
+               sonnet_score = NULL,
+               fit_analysis = NULL
+           WHERE jd_full LIKE '%"themeOptions"%'
+             AND (enrichment_tier IS NULL OR enrichment_tier != 'exhausted')""",
+    ],
+
+    # Migration 26: Enrichment retry metadata + last_scanned_at index.
+    #
+    # enrichment_* columns track DuckDuckGo company-metadata enrichment failures
+    # separately from the ATS probe retry columns (retry_count/retry_after/miss_reason
+    # added in Migration 12). The enrichment_ prefix makes the distinction unambiguous.
+    #
+    # Backoff policy (enforced in run_ddg_enrichment):
+    #   attempt 1 empty result:    +24h
+    #   attempts 2-4 empty result: +72h
+    #   attempt 5+ empty result:   +30 days
+    #   exceptions follow same schedule with error recorded in enrichment_last_error
+    #
+    # idx_companies_last_scanned_at: supports ORDER BY last_scanned_at ASC NULLS FIRST
+    # in the HTML fallback loop in ats_scanner.py (Plan 5B).
+    [
+        "ALTER TABLE companies ADD COLUMN enrichment_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE companies ADD COLUMN enrichment_last_attempted_at TEXT DEFAULT NULL",
+        "ALTER TABLE companies ADD COLUMN enrichment_backoff_until TEXT DEFAULT NULL",
+        "ALTER TABLE companies ADD COLUMN enrichment_last_error TEXT DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_companies_last_scanned_at ON companies(last_scanned_at)",
+    ],
+
+    # Migration 27: Career-ops scoring metadata columns + interview story reuse.
+    #
+    # expiry_status: per-job liveness verdict from scoring preflight
+    #   ('expired', 'live', 'inconclusive'). Written by persist_job_expiry_state()
+    #   which is the sole write path for both expiry_status and expiry_checked_at.
+    #
+    # eval_blocks: JSON array of structured evaluation criteria from Sonnet.
+    #   Presence triggers calibration bypass in score_and_persist_sonnet().
+    #
+    # job_archetype: deterministic classification result ('platform_engineering',
+    #   'ml_engineering', 'analytics_lead', etc.). Used 'job_archetype' (not
+    #   'archetype') to avoid semantic collision with resume-generation role_archetype.
+    [
+        "ALTER TABLE jobs ADD COLUMN expiry_status TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN eval_blocks TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN job_archetype TEXT DEFAULT NULL",
+    ],
+
+    # Migration 28: Interview story reuse — reusable_stories_json on interview_preps.
+    #
+    # Stores up to 5 distinct {question, star_story, key_points} objects extracted
+    # from completed prep output. Pure JSON filtering from predicted_questions —
+    # no LLM call required. Stories are row-scoped (no separate table).
+    [
+        "ALTER TABLE interview_preps ADD COLUMN reusable_stories_json TEXT DEFAULT NULL",
+    ],
+
+    # Migration 29: Company research table — on-demand company research lifecycle.
+    #
+    # Follows the resume-generation async pattern: pending → generating → done/error.
+    # One row per research request. TTL-based cache: callers check completed_at age
+    # before starting a new request.
+    [
+        """CREATE TABLE IF NOT EXISTS company_research (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL REFERENCES companies(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            research_json TEXT DEFAULT NULL,
+            error_msg TEXT DEFAULT NULL,
+            requested_at TEXT NOT NULL,
+            completed_at TEXT DEFAULT NULL,
+            cost_usd REAL DEFAULT 0.0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_company_research_company_id ON company_research(company_id)",
+    ],
+
+    # Migration 30: Persist careers_url on companies table.
+    #
+    # Caches the result of find_careers_url() so the HTML fallback scan loop
+    # skips the homepage-fetch + HTML-parse rediscovery on every run.
+    # Also populated by Claude CLI enricher for companies where heuristic
+    # discovery fails.
+    [
+        "ALTER TABLE companies ADD COLUMN careers_url TEXT DEFAULT NULL",
+    ],
+
+    # Migration 31: Track when careers page was last crawled via Playwright.
+    #
+    # Enables freshness-based rotation in the careers crawler scheduled job.
+    # Companies with recent careers_crawl_last_at are skipped until the
+    # freshness window expires (default 3 days).
+    [
+        "ALTER TABLE companies ADD COLUMN careers_crawl_last_at TEXT DEFAULT NULL",
+    ],
+
+    # Migration 32: Legitimacy signals for ghost job detection.
+    # Stores the computed legitimacy_note string after Haiku scoring for
+    # analytics and dashboard display. Does not affect the scoring pipeline.
+    [
+        "ALTER TABLE jobs ADD COLUMN legitimacy_note TEXT DEFAULT NULL",
+    ],
+
+    # Migration 33: Liveness checker columns.
+    # URL liveness verification tracks when each job was last checked,
+    # its liveness status, and the reason for the determination.
+    [
+        "ALTER TABLE jobs ADD COLUMN liveness_checked_at TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN liveness_status TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN liveness_reason TEXT DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_liveness ON jobs(liveness_checked_at, pipeline_status)",
+    ],
+
+    # Migration 34: Rejection pattern reports table.
+    # Stores zero-LLM-cost mechanical rejection analysis results for
+    # dashboard display and trend tracking.
+    [
+        """CREATE TABLE IF NOT EXISTS rejection_pattern_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_json TEXT NOT NULL,
+            period_days INTEGER NOT NULL,
+            total_rejections INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )""",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:

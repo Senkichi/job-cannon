@@ -1,10 +1,15 @@
-"""Tests for claude_client.py — record_cost provider parameter and get_monthly_provider_breakdown."""
+"""Tests for claude_client.py — record_cost, provider breakdown, and schema validation retry."""
 
+import json
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
+from jsonschema import ValidationError, validate
 
-from job_finder.web.claude_client import record_cost
+from job_finder.web.claude_client import call_claude, record_cost
+from job_finder.web.haiku_scorer import HAIKU_SCHEMA
+from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, SONNET_SCHEMA_WITH_EVAL_BLOCKS
 
 
 def test_record_cost_default_provider(migrated_db):
@@ -99,3 +104,131 @@ class TestGetMonthlyProviderBreakdown:
         from job_finder.web.claude_client import get_monthly_provider_breakdown
         result = get_monthly_provider_breakdown(conn)
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: schema score bounds
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaScoreBounds:
+    """Verify score field has minimum/maximum constraints in all schemas."""
+
+    def test_haiku_schema_has_score_bounds(self):
+        assert HAIKU_SCHEMA["properties"]["score"]["minimum"] == 0
+        assert HAIKU_SCHEMA["properties"]["score"]["maximum"] == 100
+
+    def test_sonnet_schema_has_score_bounds(self):
+        assert SONNET_SCHEMA["properties"]["score"]["minimum"] == 0
+        assert SONNET_SCHEMA["properties"]["score"]["maximum"] == 100
+
+    def test_sonnet_with_eval_blocks_inherits_score_bounds(self):
+        props = SONNET_SCHEMA_WITH_EVAL_BLOCKS["properties"]
+        assert props["score"]["minimum"] == 0
+        assert props["score"]["maximum"] == 100
+
+    def test_haiku_schema_rejects_score_above_100(self):
+        doc = {"score": 150, "summary": "x", "title_fit": "strong",
+               "location_fit": "remote", "salary_meets_floor": True}
+        with pytest.raises(ValidationError, match="maximum"):
+            validate(doc, HAIKU_SCHEMA)
+
+    def test_haiku_schema_rejects_negative_score(self):
+        doc = {"score": -5, "summary": "x", "title_fit": "strong",
+               "location_fit": "remote", "salary_meets_floor": True}
+        with pytest.raises(ValidationError, match="minimum"):
+            validate(doc, HAIKU_SCHEMA)
+
+    def test_haiku_schema_accepts_boundary_values(self):
+        base = {"summary": "x", "title_fit": "strong",
+                "location_fit": "remote", "salary_meets_floor": True}
+        validate({**base, "score": 0}, HAIKU_SCHEMA)
+        validate({**base, "score": 100}, HAIKU_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# Tests: call_claude schema validation retry
+# ---------------------------------------------------------------------------
+
+
+def _make_oneshot_envelope(data: dict):
+    """Build a mock _run_oneshot return envelope with structured output."""
+    return {
+        "result": json.dumps(data),
+        "structured_output": data,
+        "usage": {"input_tokens": 100, "output_tokens": 50},
+    }
+
+
+class TestCallClaudeValidationRetry:
+    SCHEMA = {
+        "type": "object",
+        "properties": {
+            "score": {"type": "integer", "minimum": 0, "maximum": 100},
+            "summary": {"type": "string"},
+        },
+        "required": ["score", "summary"],
+    }
+
+    @patch("job_finder.web.claude_client._run_oneshot")
+    def test_no_retry_when_valid(self, mock_oneshot, migrated_db):
+        _, conn = migrated_db
+        mock_oneshot.return_value = _make_oneshot_envelope(
+            {"score": 75, "summary": "Good"}
+        )
+
+        result, cost = call_claude(
+            model="claude-haiku-4-5", system="test",
+            messages=[{"role": "user", "content": "test"}],
+            output_schema=self.SCHEMA, conn=conn, purpose="test",
+        )
+        assert result["score"] == 75
+        assert mock_oneshot.call_count == 1
+
+    @patch("job_finder.web.claude_client._run_oneshot")
+    def test_retry_on_invalid_score(self, mock_oneshot, migrated_db):
+        _, conn = migrated_db
+        mock_oneshot.side_effect = [
+            _make_oneshot_envelope({"score": 150, "summary": "Bad"}),
+            _make_oneshot_envelope({"score": 85, "summary": "Fixed"}),
+        ]
+
+        result, cost = call_claude(
+            model="claude-haiku-4-5", system="test",
+            messages=[{"role": "user", "content": "test"}],
+            output_schema=self.SCHEMA, conn=conn, purpose="test",
+        )
+        assert result["score"] == 85
+        assert mock_oneshot.call_count == 2
+
+    @patch("job_finder.web.claude_client._run_oneshot")
+    def test_raises_on_second_failure(self, mock_oneshot, migrated_db):
+        _, conn = migrated_db
+        mock_oneshot.side_effect = [
+            _make_oneshot_envelope({"score": 150, "summary": "Bad"}),
+            _make_oneshot_envelope({"score": -10, "summary": "Still bad"}),
+        ]
+
+        with pytest.raises(ValueError, match="Schema validation failed after retry"):
+            call_claude(
+                model="claude-haiku-4-5", system="test",
+                messages=[{"role": "user", "content": "test"}],
+                output_schema=self.SCHEMA, conn=conn, purpose="test",
+            )
+
+    @patch("job_finder.web.claude_client._run_oneshot")
+    def test_no_validation_without_schema(self, mock_oneshot, migrated_db):
+        """Without output_schema, no validation occurs even with odd data."""
+        _, conn = migrated_db
+        mock_oneshot.return_value = {
+            "result": json.dumps({"score": 999}),
+            "usage": {"input_tokens": 10, "output_tokens": 10},
+        }
+
+        result, cost = call_claude(
+            model="claude-haiku-4-5", system="test",
+            messages=[{"role": "user", "content": "test"}],
+            conn=conn, purpose="test",
+        )
+        assert result["score"] == 999
+        assert mock_oneshot.call_count == 1
