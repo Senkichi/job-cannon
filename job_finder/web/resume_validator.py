@@ -96,8 +96,13 @@ _AUDIT_SYSTEM = (
     "- A bullet exceeds 3 lines\n"
     "- Soft skills listed in the Skills section (e.g., 'Stakeholder Communication', "
     "'Cross-Functional Collaboration', 'Team Leadership')\n"
-    "- Em dashes used anywhere in the document\n"
     "- Bold text used within bullet point content (bold is only for headers and titles)\n\n"
+
+    "### ats_compatibility (error — triggers auto-fix)\n"
+    "- Em dashes (\u2014) or en dashes (\u2013) used anywhere in the document\n"
+    "- Smart/curly quotes (\u201C \u201D \u2018 \u2019) used anywhere in the document\n"
+    "- These characters break ATS keyword matching (Workday, Taleo, iCIMS). "
+    "Replace with ASCII equivalents (hyphens, straight quotes).\n\n"
 
     "### jd_alignment (warning — reported but not auto-fixed)\n"
     "- Top 5 JD keywords are missing from the resume entirely\n"

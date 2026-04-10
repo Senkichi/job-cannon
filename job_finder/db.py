@@ -429,6 +429,21 @@ def update_pipeline_status(
 _HIDDEN_STATUSES = ("archived", "withdrawn", "dismissed", "rejected")
 
 
+def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
+    """Return distinct source names parsed from the JSON sources column."""
+    rows = conn.execute(
+        "SELECT DISTINCT sources FROM jobs WHERE sources != '[]'"
+    ).fetchall()
+    seen: set[str] = set()
+    for row in rows:
+        try:
+            for src in json.loads(row[0]):
+                seen.add(src)
+        except (json.JSONDecodeError, TypeError):
+            _log.warning("get_distinct_sources: corrupt sources JSON skipped: %r", row[0])
+    return sorted(seen)
+
+
 def get_filtered_jobs(
     conn: sqlite3.Connection,
     status: str | list[str] | None = None,

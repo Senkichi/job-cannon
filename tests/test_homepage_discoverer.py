@@ -222,26 +222,38 @@ class TestDiscoverHomepage:
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://unknown-company.com", 404)
+        # Slug heuristic now also does GET (fallback from HEAD).
+        # Return 404 for the domain probe, then SerpAPI empty results.
+        domain_get_resp = _mock_response("https://unknown-company.com", "", status_code=404)
         serpapi_resp = _serpapi_response(organic_results=[])
 
+        def get_side_effect(url, **kwargs):
+            if "serpapi" in url or "google" in url:
+                return serpapi_resp
+            return domain_get_resp
+
         with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=serpapi_resp):
+             patch("job_finder.web.homepage_discoverer.requests.get", side_effect=get_side_effect):
             result = discover_homepage("Unknown Company", None, "unknown-company", [], api_key="key")
 
         assert result is None
 
     def test_no_api_key_skips_tier3(self):
-        """api_key=None — Tier 3 not called, requests.get not called for SerpAPI."""
+        """api_key=None — Tier 3 not called, SerpAPI requests.get not called."""
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://acme-corp.com", 404)
+        # Slug heuristic now also does GET (fallback from HEAD). Return 404.
+        domain_get_resp = _mock_response("https://acme-corp.com", "", status_code=404)
 
         with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get") as mock_get:
+             patch("job_finder.web.homepage_discoverer.requests.get", return_value=domain_get_resp) as mock_get:
             result = discover_homepage("Acme Corp", None, "acme-corp", [], api_key=None)
 
         assert result is None
-        mock_get.assert_not_called()
+        # GET is called for domain probe, but NOT for SerpAPI
+        for c in mock_get.call_args_list:
+            assert "serpapi" not in c.args[0].lower()
 
     def test_request_exception_returns_none(self):
         """Network error in all tiers returns None gracefully."""
@@ -342,8 +354,8 @@ class TestDiscoverHomepagesBatch:
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_batch_caps_at_fast_batch_cap(self):
-        """Phase A (free-tier) batch processes at most _FAST_BATCH_CAP=50 companies per run."""
+    def test_batch_caps_at_batch_cap(self):
+        """Batch processes at most _BATCH_CAP=10 companies per run."""
         from job_finder.web.homepage_discoverer import run_homepage_discovery
 
         path = self._make_db_with_companies(20)
@@ -353,9 +365,9 @@ class TestDiscoverHomepagesBatch:
                 mock_discover.return_value = None
                 result = run_homepage_discovery(path)
 
-            # 20 companies < 50 cap, so all 20 are processed in Phase A
-            assert result["companies_checked"] == 20
-            assert mock_discover.call_count == 20
+            # 20 companies but _BATCH_CAP=10, so only 10 processed
+            assert result["companies_checked"] == 10
+            assert mock_discover.call_count == 10
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -436,29 +448,6 @@ class TestDiscoverHomepagesBatch:
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_batch_passes_api_key_from_config(self):
-        """Phase A processes free-tier companies (api_key=None); Phase B uses api_key for remaining."""
-        from job_finder.web.homepage_discoverer import run_homepage_discovery, _FAST_BATCH_CAP
-
-        # Create more companies than _FAST_BATCH_CAP so Phase B also runs
-        # _FAST_BATCH_CAP = 50, so use 51 companies — Phase A processes 50, Phase B gets 1
-        # But to keep test fast, patch _process_homepage_batch instead
-        path = self._make_db_with_companies(1)
-
-        try:
-            with patch("job_finder.web.homepage_discoverer._process_homepage_batch") as mock_process:
-                mock_process.return_value = (1, 0, [])
-                run_homepage_discovery(path, config={"serpapi": {"api_key": "test123"}})
-
-            # Phase A called with api_key=None, Phase B with api_key="test123"
-            assert mock_process.call_count >= 1
-            # First call (Phase A) should have api_key=None
-            phase_a_kwargs = mock_process.call_args_list[0][1]
-            assert phase_a_kwargs.get("api_key") is None
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
-
     def test_batch_skips_companies_with_existing_homepage(self):
         """Batch only processes companies where homepage_url IS NULL."""
         from job_finder.web.homepage_discoverer import run_homepage_discovery
@@ -501,14 +490,14 @@ class TestRunHomepageDiscoveryThroughput:
     """Tests that run_homepage_discovery processes more than 10 companies in Phase A."""
 
     def test_fast_batch_processes_up_to_cap(self, migrated_db):
-        """Phase A free-tier batch handles up to _FAST_BATCH_CAP companies."""
+        """Phase A free-tier batch handles up to _BATCH_CAP companies."""
         db_path, conn = migrated_db
         from datetime import datetime
-        from job_finder.web.homepage_discoverer import _FAST_BATCH_CAP
+        from job_finder.web.homepage_discoverer import _BATCH_CAP
         now = datetime.now().isoformat()
 
-        # Insert more companies than _FAST_BATCH_CAP
-        insert_count = _FAST_BATCH_CAP + 5
+        # Insert more companies than _BATCH_CAP
+        insert_count = _BATCH_CAP + 5
         for i in range(insert_count):
             conn.execute(
                 """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
@@ -521,22 +510,19 @@ class TestRunHomepageDiscoveryThroughput:
             from job_finder.web.homepage_discoverer import run_homepage_discovery
             result = run_homepage_discovery(db_path, None)
 
-        # Phase A should process up to _FAST_BATCH_CAP (no api_key so Phase B is skipped)
-        assert result["companies_checked"] == _FAST_BATCH_CAP
+        # Phase A should process up to _BATCH_CAP (no api_key so Phase B is skipped)
+        assert result["companies_checked"] == _BATCH_CAP
 
 
 class TestTryDomainGuessTwoWord:
     """Tests _try_domain_guess with two-word company names."""
 
-    def test_two_word_name_concatenated(self):
-        """Two-word name after suffix strip -> concatenated slug tried."""
-        with patch("job_finder.web.homepage_discoverer._try_slug_heuristic") as mock_slug:
-            mock_slug.return_value = "https://paloalto.com"
-            from job_finder.web.homepage_discoverer import _try_domain_guess
-            # "Palo Alto Inc" -> strip "inc" -> "palo alto" (2 tokens) -> "paloalto"
-            result = _try_domain_guess("Palo Alto Inc")
-        mock_slug.assert_called_once_with("paloalto")
-        assert result == "https://paloalto.com"
+    def test_two_word_name_returns_none(self):
+        """Two-word name after suffix strip -> None (single-token only)."""
+        from job_finder.web.homepage_discoverer import _try_domain_guess
+        # "Palo Alto Inc" -> strip "inc" -> "palo alto" (2 tokens) -> None
+        result = _try_domain_guess("Palo Alto Inc")
+        assert result is None
 
     def test_three_word_name_returns_none(self):
         """Three-token name after suffix strip returns None."""

@@ -309,6 +309,21 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Rejection pattern analysis (weekly, Tuesday 3:00 AM) -----------
+
+        def _import_rejection_patterns():
+            from job_finder.web.rejection_patterns import run_rejection_pattern_analysis
+            return run_rejection_pattern_analysis
+
+        scheduler.add_job(
+            _make_simple_job(app, "Rejection patterns", _import_rejection_patterns),
+            trigger=CronTrigger(day_of_week="tue", hour=3, minute=0),
+            id="rejection_patterns",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # -- ATS scan (Mon/Wed 7:00 AM) ------------------------------------
 
         def _import_ats_scan():
@@ -352,6 +367,38 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Careers crawl (daily 5:00 AM) ------------------------------------
+
+        def _import_careers_crawl():
+            from job_finder.web.careers_crawler import crawl_careers_batch
+            return crawl_careers_batch
+
+        def _import_careers_crawl_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_CAREERS_CRAWL
+            return ACTION_SCHEDULED_CAREERS_CRAWL
+
+        scheduler.add_job(
+            _make_tracked_job(
+                app, "Careers crawl",
+                import_func=_import_careers_crawl,
+                import_action=_import_careers_crawl_action,
+                extract_metadata=lambda r: {
+                    "companies_crawled": r.get("companies_crawled", 0),
+                    "jobs_found": r.get("jobs_found", 0),
+                    "jobs_new": r.get("jobs_new", 0),
+                    "playwright_rendered": r.get("playwright_rendered", 0),
+                },
+                guard=lambda config: config.get("careers_crawl", {}).get(
+                    "enabled", True
+                ),
+            ),
+            trigger=CronTrigger(hour=5, minute=0),
+            id="careers_crawl",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # -- Expiry check (nightly 2:30 AM) --------------------------------
 
         def _import_expiry():
@@ -377,6 +424,33 @@ def init_scheduler(app) -> None:
             ),
             trigger=CronTrigger(hour=2, minute=30),
             id="expiry_check",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # -- URL liveness check (nightly 3:00 AM) ----------------------------
+
+        def _import_liveness_check():
+            from job_finder.web.liveness_checker import run_liveness_check
+            return run_liveness_check
+
+        def _import_liveness_action():
+            from job_finder.web.activity_tracker import ACTION_LIVENESS_CHECK
+            return ACTION_LIVENESS_CHECK
+
+        scheduler.add_job(
+            _make_tracked_job(
+                app, "Liveness check",
+                import_func=_import_liveness_check,
+                import_action=_import_liveness_action,
+                extract_metadata=lambda r: {
+                    "checked": r.get("checked", 0),
+                    "expired": r.get("expired", 0),
+                },
+            ),
+            trigger=CronTrigger(hour=3, minute=0),
+            id="liveness_check",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -558,6 +632,8 @@ def run_sync_now(app) -> dict:
             "scaleserp_errors": [],
             "dataforseo_fetched": 0,
             "dataforseo_errors": [],
+            "portal_search_fetched": 0,
+            "portal_search_errors": [],
             "jobs_new": 0,
             "jobs_updated": 0,
             "jobs_scored": 0,

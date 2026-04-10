@@ -35,6 +35,11 @@ _PARKED_DOMAIN_SIGNATURES = [
     "buy this domain",
     "parked domain",
     "this domain is available",
+    "hugedomains.com",
+    "domain_profile.cfm",
+    "gen.xyz/cart",
+    "this domain may be for sale",
+    "make an offer on this domain",
 ]
 
 _BATCH_CAP = 10  # Conservative SerpAPI quota (100-250/month depending on plan)
@@ -172,13 +177,19 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
             company_id, name_raw, ats_platform, ats_slug = row
             companies_checked += 1
 
-            # Fetch source_urls for this company from jobs table
+            # Fetch source_urls for this company from jobs table (FK join)
             try:
                 source_url_rows = conn.execute(
-                    "SELECT DISTINCT source_url FROM jobs WHERE company = ? AND source_url != ''",
-                    (name_raw,)
+                    "SELECT source_urls FROM jobs WHERE company_id = ? AND source_urls IS NOT NULL",
+                    (company_id,)
                 ).fetchall()
-                source_urls = [r[0] for r in source_url_rows]
+                import json as _json
+                source_urls = []
+                for r in source_url_rows:
+                    try:
+                        source_urls.extend(_json.loads(r[0]))
+                    except (ValueError, TypeError):
+                        pass
             except Exception as e:
                 logger.debug("Could not fetch source_urls for %s: %s", name_raw, e)
                 source_urls = []
@@ -259,27 +270,45 @@ def _try_slug_heuristic(ats_slug: str) -> str | None:
     """
     url = f"https://{ats_slug}.com"
     try:
+        # Many modern sites block HEAD requests (return 403/405/406/502).
+        # Try HEAD first for efficiency, fall back to GET if non-200.
         head_resp = requests.head(url, allow_redirects=True, timeout=_TIMEOUT, headers=_HEADERS)
-        if head_resp.status_code != 200:
-            logger.debug("Slug heuristic: %s returned %d", url, head_resp.status_code)
-            return None
-
-        content_type = head_resp.headers.get("Content-Type", "")
-        if "text/html" not in content_type:
-            logger.debug("Slug heuristic: %s has non-HTML content-type: %s", url, content_type)
-            return None
+        if head_resp.status_code == 200:
+            content_type = head_resp.headers.get("Content-Type", "")
+            if "text/html" not in content_type:
+                logger.debug("Slug heuristic: %s has non-HTML content-type: %s", url, content_type)
+                return None
+            final_url = head_resp.url
+        else:
+            # HEAD failed — fall back to GET (many sites only accept GET)
+            head_resp = None
+            final_url = None
 
         # Fetch body to check for parked domain signatures (first 5000 chars)
         get_resp = requests.get(url, timeout=_TIMEOUT, headers=_HEADERS)
-        body_sample = get_resp.text[:5000].lower()
 
+        # Bot-blocking codes (403, 405, 406) prove the domain is active —
+        # parked domains never return these. Accept the URL directly.
+        # But first check the redirect chain didn't land on a domain squatter.
+        resolved = final_url or get_resp.url
+        if get_resp.status_code in (403, 405, 406):
+            if any(sig in resolved.lower() for sig in _PARKED_DOMAIN_SIGNATURES):
+                logger.debug("Slug heuristic: %s redirected to parked domain: %s", url, resolved)
+                return None
+            return resolved
+
+        if get_resp.status_code != 200:
+            logger.debug("Slug heuristic: %s GET returned %d", url, get_resp.status_code)
+            return None
+
+        body_sample = get_resp.text[:5000].lower()
         for signature in _PARKED_DOMAIN_SIGNATURES:
             if signature in body_sample:
                 logger.debug("Slug heuristic: %s appears to be a parked domain", url)
                 return None
 
-        # Return final URL after redirects
-        return head_resp.url
+        # Return final URL after redirects (prefer HEAD redirect chain, fall back to GET)
+        return final_url or get_resp.url
 
     except Exception as e:
         logger.debug("Slug heuristic failed for %s: %s", url, e)

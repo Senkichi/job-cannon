@@ -107,6 +107,20 @@ sources:
       - query: Data Scientist
         location: San Francisco Bay Area
 
+  portal_search:
+    # Niche job portal discovery. Two tiers:
+    #   1. Free APIs (RemoteOK, Remotive, Himalayas) — always zero cost.
+    #   2. Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
+    # SerpAPI/Thordata are NOT used (too expensive for site: queries).
+    # If DataForSEO is not enabled, only free API portals are searched.
+    enabled: false
+    keywords:
+      - Staff Engineer
+      - ML Platform
+      - Data Infrastructure
+    # Max DataForSEO site: queries per run (caps SERP spend)
+    max_serp_queries: 30
+
 # --- AI scoring configuration ---
 scoring:
   # How much each factor contributes to the overall score (must sum to 1.0)

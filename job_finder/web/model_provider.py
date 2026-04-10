@@ -277,6 +277,91 @@ def _validate_schema(data: dict, schema: dict | None) -> list[str]:
         return [exc.message]
 
 
+def _coerce_enum(value: str, enum_values: list[str]) -> str:
+    """Best-effort coercion of a verbose model string to the closest enum value.
+
+    Ollama frequently returns explanatory text instead of bare enum tokens,
+    e.g. ``"Partial fit: The roles are..."`` instead of ``"partial"``.
+
+    Strategy (ordered by confidence):
+      1. Exact match (case-insensitive).
+      2. Value starts with an enum token (e.g. ``"partial fit: ..."`` → ``"partial"``).
+      3. Enum token appears anywhere in value.
+    Falls back to the original string if nothing matches (lets schema
+    validation report the real error).
+    """
+    lower = value.lower().strip()
+
+    # 1. Exact match
+    for ev in enum_values:
+        if lower == ev.lower():
+            return ev
+
+    # 2. Starts-with (longest enum first to prefer "unknown" over "un")
+    for ev in sorted(enum_values, key=len, reverse=True):
+        if lower.startswith(ev.lower()):
+            return ev
+
+    # 3. Contains
+    for ev in sorted(enum_values, key=len, reverse=True):
+        if ev.lower() in lower:
+            return ev
+
+    return value
+
+
+def _sanitize_output(data: dict, schema: dict | None) -> dict:
+    """Best-effort sanitization of model output before schema validation.
+
+    Local models (Ollama) frequently add extra keys, use slightly wrong
+    types, or omit required array fields. This function:
+    - Strips extra keys when additionalProperties is false
+    - Coerces string→int for integer fields
+    - Coerces verbose strings to enum values when schema has an enum constraint
+    - Backfills missing required array fields with empty lists
+    - Recurses into nested objects
+
+    Returns a NEW dict (does not mutate input).
+    """
+    if schema is None or not isinstance(data, dict):
+        return data
+
+    props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    additional = schema.get("additionalProperties", True)
+
+    result = {}
+    for key, value in data.items():
+        if not additional and key not in props:
+            continue  # strip extra keys
+        spec = props.get(key, {})
+        # Coerce string→int for integer fields (common Ollama issue)
+        if spec.get("type") == "integer" and isinstance(value, str):
+            try:
+                value = int(float(value))
+            except (ValueError, TypeError):
+                pass
+        # Coerce verbose strings to enum values
+        if "enum" in spec and isinstance(value, str) and value not in spec["enum"]:
+            value = _coerce_enum(value, spec["enum"])
+        # Recurse into nested objects
+        if spec.get("type") == "object" and isinstance(value, dict):
+            value = _sanitize_output(value, spec)
+        result[key] = value
+
+    # Backfill missing required fields with safe defaults.
+    # Ollama frequently omits talking_points / resume_priority_skills.
+    for key in required:
+        if key not in result:
+            spec = props.get(key, {})
+            if spec.get("type") == "array":
+                result[key] = []
+            elif spec.get("type") == "object":
+                result[key] = {}
+
+    return result
+
+
 def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
     """Return a NEW messages list with schema errors appended to the last message.
 
@@ -341,6 +426,14 @@ def _make_adapter(
     from job_finder.web.providers.sambanova_provider import SambanovaProvider
 
     if provider_name == "anthropic":
+        if client is None:
+            raise ValueError("Anthropic client not provided")
+        # Detect DOA clients: anthropic.Anthropic() succeeds without an API key
+        # but every API call fails with "Could not resolve authentication method".
+        # Fail fast here so the cascade skips immediately instead of wasting time.
+        _key = getattr(client, "api_key", None)
+        if not _key:
+            raise ValueError("Anthropic client has no API key configured")
         return AnthropicProvider(
             client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
         )
@@ -514,6 +607,15 @@ def call_model(
                     result = adapter.call(
                         entry_model, effective_system, messages, output_schema, max_tokens, timeout,
                     )
+                    # Sanitize output for non-Anthropic providers (strip extra keys, coerce types)
+                    if entry_provider != "anthropic" and isinstance(result.data, dict):
+                        sanitized = _sanitize_output(result.data, output_schema)
+                        if sanitized is not result.data:
+                            result = ModelResult(
+                                data=sanitized, cost_usd=result.cost_usd,
+                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                                model=result.model, provider=result.provider, schema_valid=result.schema_valid,
+                            )
                     # Schema validation + retry (per-provider, using original messages)
                     errors = _validate_schema(result.data, output_schema)
                     if errors:
@@ -522,10 +624,26 @@ def call_model(
                         result = adapter.call(
                             entry_model, effective_system, augmented, output_schema, max_tokens, timeout,
                         )
+                        if entry_provider != "anthropic" and isinstance(result.data, dict):
+                            sanitized = _sanitize_output(result.data, output_schema)
+                            if sanitized is not result.data:
+                                result = ModelResult(
+                                    data=sanitized, cost_usd=result.cost_usd,
+                                    input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                                    model=result.model, provider=result.provider, schema_valid=result.schema_valid,
+                                )
                         errors = _validate_schema(result.data, output_schema)
                     if not errors:
                         _increment_usage(entry_provider)
-                        _maybe_record_cost(result, conn, job_id, purpose)
+                        try:
+                            _maybe_record_cost(result, conn, job_id, purpose)
+                        except Exception as cost_exc:
+                            # Cost recording is non-fatal — don't discard a good
+                            # scoring result because of a transient DB lock.
+                            logger.warning(
+                                "Cascade: %s cost recording failed (non-fatal): %s",
+                                entry_provider, cost_exc,
+                            )
                         return result
                     # Schema still invalid after retry — skip to next provider
                     logger.warning(

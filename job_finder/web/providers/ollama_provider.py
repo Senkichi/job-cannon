@@ -23,6 +23,86 @@ from job_finder.web.model_provider import BaseProvider, ModelResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
+
+_TYPE_PLACEHOLDERS = {
+    "string": "...",
+    "integer": 0,
+    "number": 0.0,
+    "boolean": True,
+}
+
+# When a field has an enum constraint, use its first value as the example
+# instead of the generic "..." placeholder.  This gives the model a concrete
+# token to imitate, dramatically improving enum adherence.
+
+
+def _schema_to_example(schema: dict) -> str:
+    """Build a concrete JSON example from a schema so the model copies field names exactly."""
+
+    def _build(s: dict) -> dict | list | str | int | float | bool:
+        typ = s.get("type", "string")
+        if typ == "object" and "properties" in s:
+            return {k: _build(v) for k, v in s["properties"].items()}
+        if typ == "array":
+            items = s.get("items", {})
+            return [_build(items)]
+        # Use first enum value as example instead of generic placeholder
+        if "enum" in s and s["enum"]:
+            return s["enum"][0]
+        return _TYPE_PLACEHOLDERS.get(typ, "...")
+
+    return json.dumps(_build(schema), indent=2)
+
+
+def _schema_to_field_instructions(schema: dict, indent: int = 0) -> str:
+    """Convert a JSON schema into explicit field-name instructions.
+
+    Smaller models (qwen2.5:14b etc.) ignore raw JSON schema dumps and invent
+    semantically similar but wrong field names. This function produces a
+    template-style listing that models follow more reliably.
+
+    Example output:
+        {
+          "score": <integer>,        // Overall fit score 0-100
+          "summary": <string>,       // 2-3 sentence evaluation summary
+          "fit_analysis": {          // REQUIRED
+            "strengths": [<string>, ...],   // Candidate strengths for this role
+            ...
+          }
+        }
+    """
+    props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    lines = []
+    pad = "  " * indent
+
+    for key, spec in props.items():
+        typ = spec.get("type", "any")
+        desc = spec.get("description", "")
+        req = " (REQUIRED)" if key in required else ""
+        comment = f"  // {desc}{req}" if desc else req
+
+        if typ == "object" and "properties" in spec:
+            lines.append(f'{pad}"{key}": {{')
+            lines.append(_schema_to_field_instructions(spec, indent + 1))
+            lines.append(f"{pad}}},{comment}")
+        elif typ == "array":
+            item_type = spec.get("items", {}).get("type", "any")
+            if item_type == "object" and "properties" in spec.get("items", {}):
+                lines.append(f'{pad}"{key}": [')
+                lines.append(f"{pad}  {{")
+                lines.append(_schema_to_field_instructions(spec["items"], indent + 2))
+                lines.append(f"{pad}  }}, ...")
+                lines.append(f"{pad}],{comment}")
+            else:
+                lines.append(f'{pad}"{key}": [<{item_type}>, ...],{comment}')
+        elif "enum" in spec:
+            enum_str = " | ".join(f'"{v}"' for v in spec["enum"])
+            lines.append(f'{pad}"{key}": one of [{enum_str}],{comment}')
+        else:
+            lines.append(f'{pad}"{key}": <{typ}>,{comment}')
+
+    return "\n".join(lines)
 _DEFAULT_TIMEOUT = 300.0
 _HEALTH_CHECK_TIMEOUT = 5.0
 
@@ -105,9 +185,13 @@ class OllamaProvider(BaseProvider):
         # Embed schema in system prompt when provided
         system_with_schema = system
         if output_schema is not None:
-            schema_str = json.dumps(output_schema, indent=2)
+            schema_instructions = _schema_to_field_instructions(output_schema)
+            example_json = _schema_to_example(output_schema)
             system_with_schema = (
-                f"{system}\n\nRespond with valid JSON matching this schema:\n{schema_str}"
+                f"{system}\n\n## Required Output Format\n\n"
+                f"Respond with valid JSON using EXACTLY these fields (no renaming, no extras):\n\n"
+                f"{schema_instructions}\n\n"
+                f"Example structure (fill in real values):\n{example_json}"
             )
 
         payload = {

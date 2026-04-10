@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIMEOUT = 10  # seconds for HTTP requests
-_INTER_REQUEST_DELAY = 2  # seconds between jobs in batch
+_INTER_REQUEST_DELAY = 1  # seconds between jobs in batch
 
 # Signal result constants
 EXPIRED = "expired"
@@ -298,7 +298,31 @@ _EXPIRED_BODY_MARKERS = (
     "this job is no longer available",
     "job has been removed",
     "this position has been closed",
+    "this job has expired",
+    "this job posting has expired",
+    "this listing has expired",
+    "this job listing has expired",
+    "this position is no longer open",
+    "this role has been filled",
+    "this position is no longer available",
+    "job no longer available",
+    "the position has been filled",
+    "this job is closed",
+    "this job has been closed",
+    "sorry, this position has been filled",
+    "this opportunity is no longer available",
 )
+
+_EXPIRED_BODY_REGEXES = tuple(re.compile(p) for p in (
+    # Glassdoor: "This job from Jul 9, 2025 is no longer available for applications"
+    r"this job\b.{0,50}\bis no longer available",
+    # "This job posting is no longer accepting applications"
+    r"this job\b.{0,30}\bis no longer accepting",
+    # Generic date-interpolated: "Posted on <date> - No longer active"
+    r"no longer active",
+    # "Expired on <date>"
+    r"expired\s+on\s+\w+",
+))
 
 
 def quick_liveness_check(url: str, timeout: int = 8) -> str:
@@ -324,6 +348,9 @@ def quick_liveness_check(url: str, timeout: int = 8) -> str:
             body_lower = resp.text[:5000].lower()
             for marker in _EXPIRED_BODY_MARKERS:
                 if marker in body_lower:
+                    return EXPIRED
+            for pattern in _EXPIRED_BODY_REGEXES:
+                if pattern.search(body_lower):
                     return EXPIRED
             return LIVE
         return INCONCLUSIVE
@@ -400,6 +427,15 @@ def _check_job_expiry(
     else:
         source_urls = source_urls_raw or []
 
+    # --- Signal 0: Direct URL liveness check ---
+    if source_urls:
+        url_result = quick_liveness_check(source_urls[0])
+        if url_result == EXPIRED:
+            return EXPIRED, "url_check expired_markers"
+        if url_result == LIVE:
+            return LIVE, "url_check 200_ok"
+        # INCONCLUSIVE falls through to ATS API
+
     # --- Signal 1: ATS API Check ---
     if company and company.get("ats_platform") and company.get("ats_slug"):
         platform = company["ats_platform"]
@@ -457,12 +493,13 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
     if not expiry_config.get("enabled", True):
         return {"checked": 0, "archived": 0, "live": 0, "inconclusive": 0}
 
-    batch_size = expiry_config.get("batch_size", 20)
     recheck_days = expiry_config.get("recheck_days", 3)
 
     with standalone_connection(db_path) as conn:
         try:
-            # Query candidate jobs: discovered/reviewing, not recently checked
+            # Query candidate jobs: discovered/reviewing, not recently checked.
+            # No LIMIT — recheck_days is the natural throttle. On the first run all
+            # unchecked jobs are eligible; subsequent nights only rechek stale ones.
             recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
             rows = conn.execute(
                 """SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id as company_row_id
@@ -470,9 +507,8 @@ def run_expiry_check(db_path: str, config: dict) -> dict:
                    LEFT JOIN companies c ON j.company_id = c.id
                    WHERE j.pipeline_status IN ('discovered', 'reviewing')
                      AND (j.expiry_checked_at IS NULL OR j.expiry_checked_at < ?)
-                   ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC
-                   LIMIT ?""",
-                (recheck_cutoff, batch_size),
+                   ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC""",
+                (recheck_cutoff,),
             ).fetchall()
 
             from job_finder.db import update_pipeline_status, persist_job_expiry_state

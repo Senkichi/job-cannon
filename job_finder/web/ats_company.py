@@ -27,6 +27,14 @@ _MAX_COMPANY_NAME_LEN = 100
 # At least one alpha character is required after normalization
 _HAS_ALPHA_RE = re.compile(r"[a-zA-Z]")
 
+# Patterns that indicate a company name is actually a URL, HTML fragment, or
+# other parser artifact — not a real company name.
+_GARBAGE_PATTERNS = [
+    re.compile(r"https?://", re.IGNORECASE),            # URLs
+    re.compile(r"<\s*\w+[^>]*>", re.IGNORECASE),        # HTML tags
+    re.compile(r"Edit alert\s", re.IGNORECASE),          # LinkedIn email alert artifacts
+]
+
 
 @dataclass(frozen=True)
 class CompanyNameDecision:
@@ -96,6 +104,11 @@ def classify_company_name(
     # Hard reject: no alphabetic characters (punctuation-only, digits-only)
     if not _HAS_ALPHA_RE.search(cleaned):
         return CompanyNameDecision(cleaned_name=None, action="reject", reason="no_alpha_characters")
+
+    # Hard reject: URLs, HTML tags, email alert artifacts
+    for pattern in _GARBAGE_PATTERNS:
+        if pattern.search(name):
+            return CompanyNameDecision(cleaned_name=None, action="reject", reason="garbage_pattern")
 
     # Config-aware checks
     if config is not None:

@@ -281,6 +281,63 @@ def _fetch_scaleserp(config: dict, summary: dict) -> list[Job]:
         return []
 
 
+def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
+    """Fetch from niche job portals: free APIs first, DataForSEO SERP fallback.
+
+    Three tiers:
+      1. Free API portals (RemoteOK, Remotive, Himalayas) — zero cost.
+      2. SERP portals via DataForSEO — cheap ($0.0006/10 results), batched.
+      3. If no DataForSEO key, only free API portals are searched.
+
+    SerpAPI and Thordata are NOT used — too expensive for site: queries.
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects from portal searches.
+    """
+    portal_cfg = config.get("sources", {}).get("portal_search", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+
+    keywords = portal_cfg.get("keywords", [])
+    if not keywords:
+        logger.info("Portal search: no keywords configured, skipping")
+        return []
+
+    max_serp_queries = portal_cfg.get("max_serp_queries", 30)
+
+    # Build DataForSEO source if configured (cheapest SERP backend)
+    dataforseo_source = None
+    dfse_cfg = config.get("sources", {}).get("dataforseo", {})
+    if dfse_cfg.get("enabled") and dfse_cfg.get("api_key"):
+        from job_finder.sources.dataforseo_source import DataForSEOSource
+        dataforseo_source = DataForSEOSource(
+            api_key=dfse_cfg["api_key"],
+            depth=10,  # site: queries return few results; 10 is plenty
+            priority=dfse_cfg.get("priority", 1),
+            poll_interval_seconds=dfse_cfg.get("poll_interval_seconds", 30),
+            poll_timeout_seconds=dfse_cfg.get("poll_timeout_seconds", 360),
+        )
+
+    try:
+        from job_finder.sources.portal_search_source import fetch_all_portals
+        jobs = fetch_all_portals(
+            keywords,
+            dataforseo_source=dataforseo_source,
+            max_serp_queries=max_serp_queries,
+        )
+        summary["portal_search_fetched"] = len(jobs)
+        return jobs
+    except Exception as e:
+        error_msg = str(e)
+        summary.setdefault("portal_search_errors", []).append(error_msg)
+        logger.warning("Portal search failed: %s", error_msg)
+        return []
+
+
 def _submit_dataforseo_tasks(
     config: dict, summary: dict
 ) -> tuple[list[str], Optional["DataForSEOSource"]]:

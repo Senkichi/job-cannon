@@ -1,0 +1,157 @@
+"""Backfill homepage and careers URLs via Claude Code CLI.
+
+Processes companies without homepage_url, using Claude's knowledge to
+discover URLs that the domain-guess heuristic can't find.
+
+Usage:
+    uv run --active python scripts/claude_homepage_backfill.py [--limit N]
+"""
+
+import json
+import os
+import sqlite3
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.stdout.reconfigure(line_buffering=True)
+
+from job_finder.web.claude_enricher import enrich_companies_via_claude, BATCH_SIZE
+from job_finder.web.db_helpers import standalone_connection
+from job_finder.config import load_config
+
+# Canonical industry mapping for DB storage
+_INDUSTRY_DB = {
+    "automotive": "automotive",
+    "biotechnology": "biotech",
+    "healthcare technology": "healthcare",
+    "higher education": "education",
+    "utilities": "energy",
+    "government": "government",
+}
+
+
+def _map_industry(raw: str) -> str:
+    lower = raw.lower().strip()
+    return _INDUSTRY_DB.get(lower, lower)
+
+
+def main():
+    limit = 100  # default
+    for arg in sys.argv[1:]:
+        if arg.startswith("--limit"):
+            limit = int(arg.split("=")[1] if "=" in arg else sys.argv[sys.argv.index(arg) + 1])
+
+    config = load_config()
+    db_path = config["db"]["path"]
+
+    with standalone_connection(db_path) as conn:
+        rows = conn.execute(
+            """SELECT id, name_raw FROM companies
+               WHERE homepage_url IS NULL
+               ORDER BY id ASC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+        total_missing = conn.execute(
+            "SELECT COUNT(*) FROM companies WHERE homepage_url IS NULL"
+        ).fetchone()[0]
+
+        print(f"=== Claude Homepage Backfill ===")
+        print(f"Processing {len(rows)} of {total_missing} companies without homepage")
+        print(f"Estimated cost: ~${len(rows) / BATCH_SIZE * 0.01:.2f}")
+        print()
+
+        companies = [{"name": r["name_raw"]} for r in rows]
+        id_map = {r["name_raw"]: r["id"] for r in rows}
+
+        start = time.time()
+        results = enrich_companies_via_claude(companies)
+
+        homepage_found = 0
+        careers_found = 0
+        size_found = 0
+        industry_found = 0
+
+        for entry in results:
+            name = entry.get("name", "")
+            company_id = id_map.get(name)
+            if not company_id:
+                # Try fuzzy match on name
+                for raw_name, cid in id_map.items():
+                    if name.lower() in raw_name.lower() or raw_name.lower() in name.lower():
+                        company_id = cid
+                        break
+            if not company_id:
+                continue
+
+            updates = []
+            values = []
+
+            if "homepage_url" in entry and entry["homepage_url"]:
+                updates.append("homepage_url = ?")
+                values.append(entry["homepage_url"])
+                homepage_found += 1
+
+            if "company_size" in entry and entry["company_size"]:
+                # Only update if not already set
+                existing = conn.execute(
+                    "SELECT company_size FROM companies WHERE id = ?",
+                    (company_id,),
+                ).fetchone()
+                if existing and not existing["company_size"]:
+                    updates.append("company_size = ?")
+                    values.append(entry["company_size"])
+                    size_found += 1
+
+            if "industry" in entry and entry["industry"]:
+                existing = conn.execute(
+                    "SELECT industry FROM companies WHERE id = ?",
+                    (company_id,),
+                ).fetchone()
+                if existing and not existing["industry"]:
+                    updates.append("industry = ?")
+                    values.append(_map_industry(entry["industry"]))
+                    industry_found += 1
+
+            if updates:
+                values.append(company_id)
+                conn.execute(
+                    f"UPDATE companies SET {', '.join(updates)} WHERE id = ?",
+                    values,
+                )
+
+            if "careers_url" in entry and entry["careers_url"]:
+                # Only store if not already set
+                existing = conn.execute(
+                    "SELECT careers_url FROM companies WHERE id = ?",
+                    (company_id,),
+                ).fetchone()
+                if existing and not existing["careers_url"]:
+                    conn.execute(
+                        "UPDATE companies SET careers_url = ? WHERE id = ?",
+                        (entry["careers_url"], company_id),
+                    )
+                careers_found += 1
+                safe_name = name.encode("ascii", errors="replace").decode("ascii")
+                print(f"  CAREERS: {safe_name:40s} -> {entry['careers_url']}")
+
+        conn.commit()
+        elapsed = time.time() - start
+
+        print(f"\n=== Results ({elapsed:.0f}s) ===")
+        print(f"Processed:     {len(rows)}")
+        print(f"Homepages:     {homepage_found}")
+        print(f"Careers URLs:  {careers_found}")
+        print(f"Sizes:         {size_found}")
+        print(f"Industries:    {industry_found}")
+
+        r = conn.execute(
+            "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL"
+        ).fetchone()
+        print(f"\nTotal with homepage: {r[0]}/1486 ({100*r[0]/1486:.1f}%)")
+
+
+if __name__ == "__main__":
+    main()
