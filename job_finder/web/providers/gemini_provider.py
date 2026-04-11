@@ -13,8 +13,12 @@ import os
 import time
 from typing import Any
 
-import google.generativeai as genai
-from google.generativeai import types
+try:
+    import google.generativeai as genai
+    from google.generativeai import types
+    _GENAI_AVAILABLE = True
+except ImportError:
+    _GENAI_AVAILABLE = False
 
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
@@ -36,6 +40,11 @@ class GeminiProvider(BaseProvider):
     """
 
     def __init__(self, config: dict, *, client: Any | None = None) -> None:
+        if not _GENAI_AVAILABLE:
+            raise ImportError(
+                "google-generativeai is required for Gemini provider. "
+                "Install with: pip install google-generativeai~=0.8.5"
+            )
         provider_cfg = config.get("providers", {}).get("gemini", {})
         self._retry_sleep: float = provider_cfg.get("retry_sleep_seconds", 15.0)
 

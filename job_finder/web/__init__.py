@@ -29,6 +29,7 @@ from job_finder.config import (
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
+from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
@@ -125,6 +126,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.jinja_env.globals["DEFAULT_MAX_RESULTS"] = DEFAULT_MAX_RESULTS
     app.jinja_env.globals["DEFAULT_MODEL_HAIKU"] = DEFAULT_MODEL_HAIKU
     app.jinja_env.globals["DEFAULT_MODEL_SONNET"] = DEFAULT_MODEL_SONNET
+    app.jinja_env.globals["DEFAULT_DAILY_BUDGET_USD"] = DEFAULT_DAILY_BUDGET_USD
 
     # --- Custom Jinja2 filters ---
     @app.template_filter("from_json")

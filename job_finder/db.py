@@ -455,6 +455,12 @@ def get_filtered_jobs(
     limit: int = 100,
     hide_stale: bool = False,
     show_hidden: bool = False,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    salary_min: int | None = None,
+    source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
@@ -530,6 +536,25 @@ def get_filtered_jobs(
 
     if hide_stale:
         conditions.append("is_stale = 0")
+
+    if min_score is not None:
+        conditions.append("COALESCE(sonnet_score, haiku_score, score) >= ?")
+        params.append(min_score)
+    if max_score is not None:
+        conditions.append("COALESCE(sonnet_score, haiku_score, score) <= ?")
+        params.append(max_score)
+    if salary_min is not None:
+        conditions.append("salary_min >= ?")
+        params.append(salary_min)
+    if source:
+        conditions.append("sources LIKE ?")
+        params.append(f'%"{source}"%')
+    if date_from:
+        conditions.append("first_seen >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("first_seen <= ? || ' 23:59:59'")
+        params.append(date_to)
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"SELECT {JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"

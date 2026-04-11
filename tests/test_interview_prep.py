@@ -155,9 +155,7 @@ class TestInterviewPrepDedup:
             "scoring": {"monthly_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
         }
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = {
+        prep_result = {
             "company_brief": "Acme is a great company.",
             "predicted_questions": [
                 {"question": "Q1", "star_story": "Story1", "key_points": ["p1"]},
@@ -169,10 +167,9 @@ class TestInterviewPrepDedup:
             "gap_mitigation": ["Gap1"],
             "questions_to_ask": ["Q for interviewer 1"],
         }
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."):
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)):
             generate_interview_prep_background(dedup_key, path, config)
 
         # Verify a new 'done' row was inserted
@@ -343,9 +340,7 @@ class TestInterviewPrepContent:
 
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock()]
-        mock_response.content[0].input = {
+        prep_result = {
             "company_brief": "Brief.",
             "predicted_questions": [
                 {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
@@ -354,10 +349,9 @@ class TestInterviewPrepContent:
             "gap_mitigation": [],
             "questions_to_ask": [],
         }
-        mock_response.usage.input_tokens = 500
-        mock_response.usage.output_tokens = 1000
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
+        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"), \
+             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)

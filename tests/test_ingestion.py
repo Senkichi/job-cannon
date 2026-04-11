@@ -93,10 +93,10 @@ class TestEmailParseLog:
         """After a successful Gmail run, an email_parse_log entry is written."""
         fake_jobs = [_make_job()]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = fake_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (fake_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -114,10 +114,10 @@ class TestEmailParseLog:
 
     def test_gmail_failure_creates_error_log_entry(self, minimal_config, migrated_db_path):
         """When GmailSource raises, an error entry is written to email_parse_log."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.side_effect = Exception("OAuth token expired")
+            MockGmail.return_value.fetch_jobs.side_effect = Exception("OAuth token expired")
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -145,10 +145,10 @@ class TestSourceErrorIsolation:
         """If Gmail throws an exception, SerpAPI still runs."""
         serpapi_jobs = [_make_job(title="Staff DS", company="TechCorp")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.side_effect = Exception("Gmail OAuth failed")
+            MockGmail.return_value.fetch_jobs.side_effect = Exception("Gmail OAuth failed")
             mock_serp_instance = MockSerpAPI.return_value
             mock_serp_instance.fetch_jobs.return_value = serpapi_jobs
 
@@ -169,11 +169,11 @@ class TestSourceErrorIsolation:
         """If SerpAPI throws, Gmail still persists its jobs."""
         gmail_jobs = [_make_job(title="Senior DS", company="StartupCo")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
             mock_gmail_instance = MockGmail.return_value
-            mock_gmail_instance.fetch_jobs.return_value = gmail_jobs
+            mock_gmail_instance.fetch_jobs.return_value = (gmail_jobs, set())
             MockSerpAPI.side_effect = Exception("SerpAPI quota exceeded")
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -210,12 +210,12 @@ class TestJobErrorIsolation:
                 raise sqlite3.OperationalError("disk full")
             return True
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
-             patch("job_finder.web.pipeline_runner.upsert_job", side_effect=mock_upsert):
+             patch("job_finder.web.ingestion_runner.upsert_job", side_effect=mock_upsert):
 
             mock_gmail_instance = MockGmail.return_value
-            mock_gmail_instance.fetch_jobs.return_value = jobs
+            mock_gmail_instance.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -233,10 +233,10 @@ class TestJobErrorIsolation:
 class TestSummaryDict:
     def test_run_ingestion_returns_summary_dict(self, minimal_config, migrated_db_path):
         """run_ingestion always returns a dict with the expected keys."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = []
+            MockGmail.return_value.fetch_jobs.return_value = ([], set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -260,10 +260,10 @@ class TestSummaryDict:
         gmail_jobs = [_make_job(title="Senior DS", company="Co1")]
         serp_jobs = [_make_job(title="Staff DS", company="Co2")]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = gmail_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
             # SerpAPISource is instantiated with an api_key, so mock the class
             MockSerpAPI.return_value.fetch_jobs.return_value = serp_jobs
 
@@ -277,10 +277,10 @@ class TestSummaryDict:
 
     def test_empty_run_returns_zero_counts(self, minimal_config, migrated_db_path):
         """When no jobs are fetched, all counts are zero and no errors."""
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = []
+            MockGmail.return_value.fetch_jobs.return_value = ([], set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -747,10 +747,10 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = lever_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (lever_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -782,10 +782,10 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = non_ats_jobs
+            MockGmail.return_value.fetch_jobs.return_value = (non_ats_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -816,14 +816,14 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
              patch(
-                 "job_finder.web.ats_scanner.upsert_company",
+                 "job_finder.web.ats_company.upsert_company",
                  side_effect=Exception("DB connection failed"),
              ):
 
-            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockGmail.return_value.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
@@ -845,10 +845,10 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.pipeline_runner.GmailSource") as MockGmail, \
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
              patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
 
-            MockGmail.return_value.fetch_jobs.return_value = jobs
+            MockGmail.return_value.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion

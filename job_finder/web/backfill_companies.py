@@ -38,8 +38,9 @@ from thefuzz import fuzz
 
 from job_finder.config import load_config, COMPANY_DENYLIST, get_company_denylist
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.ats_scanner import probe_ats_slugs, upsert_company
-from job_finder.web.company_enricher import enrich_company_info
+from job_finder.web import company_resolver as _company_resolver
+from job_finder.web.ats_scanner import probe_ats_slugs
+# enrich_company_info accessed via _company_resolver to match test mock paths
 from job_finder.web.dedup_normalizer import normalize_company
 
 logger = logging.getLogger(__name__)
@@ -404,7 +405,7 @@ def link_jobs_to_companies(
             )
         else:
             # No match — create new company record
-            company_id = upsert_company(conn, raw_name)
+            company_id = _company_resolver.upsert_company(conn, raw_name)
             if company_id is None:
                 logger.warning("upsert_company returned None for '%s' — skipping", raw_name)
                 continue
@@ -465,7 +466,7 @@ def run_ats_probing(db_path: str, config: dict) -> dict:
 def run_ddg_enrichment(
     conn: sqlite3.Connection,
     new_company_ids: list[int],
-) -> int:
+) -> dict:
     """Run DuckDuckGo enrichment on newly created company records.
 
     For each company_id in new_company_ids, looks up name_raw from the
@@ -481,16 +482,18 @@ def run_ddg_enrichment(
         new_company_ids: List of company IDs for newly created records.
 
     Returns:
-        Number of companies enriched with at least one field.
+        Dict with "enriched" (int) and "empty_result" (int) counts.
     """
     if not new_company_ids:
-        return 0
+        return {"enriched": 0, "empty_result": 0, "error": 0}
 
     # Get companies table columns for safe UPDATE construction
     col_rows = conn.execute("PRAGMA table_info(companies)").fetchall()
     valid_columns: frozenset[str] = frozenset(row["name"] for row in col_rows)
 
     enriched_count = 0
+    empty_count = 0
+    error_count = 0
     total = len(new_company_ids)
 
     print(f"\n--- DDG Enrichment ({total} companies) ---")
@@ -508,12 +511,14 @@ def run_ddg_enrichment(
         print(f"  [{idx}/{total}] Enriching: {name_raw}")
 
         try:
-            result = enrich_company_info(name_raw)
+            result = _company_resolver.enrich_company_info(name_raw)
         except Exception as e:
             logger.debug("enrich_company_info failed for '%s': %s", name_raw, e)
-            result = {}
+            error_count += 1
+            continue
 
         if not result:
+            empty_count += 1
             continue
 
         # Filter to only fields that exist as columns in the companies table
@@ -525,6 +530,7 @@ def run_ddg_enrichment(
                 name_raw,
                 list(result.keys()),
             )
+            empty_count += 1
             continue
 
         # Build UPDATE statement dynamically (only valid columns)
@@ -543,9 +549,171 @@ def run_ddg_enrichment(
             logger.warning(
                 "Failed to store DDG enrichment for '%s': %s", name_raw, e
             )
+            error_count += 1
 
     print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
-    return enriched_count
+    return {"enriched": enriched_count, "empty_result": empty_count, "error": error_count}
+
+def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
+    """Delete companies with no linked jobs and no scan history.
+
+    Also recalibrates jobs_found_total to actual linked job count for all
+    remaining companies.
+
+    Returns:
+        Dict with "orphans_deleted" (int) and "recalibrated_total" (int).
+    """
+    # Find orphans: no linked jobs AND no scan history
+    orphan_ids = conn.execute(
+        """SELECT c.id FROM companies c
+           WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.company_id = c.id)
+             AND NOT EXISTS (SELECT 1 FROM company_scan_log s WHERE s.company_id = c.id)"""
+    ).fetchall()
+    orphan_id_list = [r[0] for r in orphan_ids]
+
+    deleted = 0
+    for oid in orphan_id_list:
+        conn.execute("DELETE FROM companies WHERE id = ?", (oid,))
+        deleted += 1
+    conn.commit()
+
+    # Recalibrate jobs_found_total for all remaining companies
+    recalibrated = 0
+    rows = conn.execute("SELECT id FROM companies").fetchall()
+    for r in rows:
+        cid = r[0]
+        actual = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE companies SET jobs_found_total = ? WHERE id = ?",
+            (actual, cid),
+        )
+        recalibrated += 1
+    conn.commit()
+
+    return {"orphans_deleted": deleted, "recalibrated_total": recalibrated}
+
+
+def run_orphan_cleanup(db_path: str, config: dict) -> dict:
+    """Wrapper for cleanup_orphan_companies that opens its own connection."""
+    with standalone_connection(db_path) as conn:
+        return cleanup_orphan_companies(conn)
+
+
+def run_company_linkage(db_path: str, config: dict) -> dict:
+    """Link unlinked jobs to company records. Returns summary dict."""
+    with standalone_connection(db_path) as conn:
+        linked_count, _new_ids, _matched = link_jobs_to_companies(conn)
+        return {"linked": linked_count}
+
+
+def cleanup_invalid_company_data(
+    conn: sqlite3.Connection,
+    config: dict | None = None,
+) -> dict:
+    """Null company_id for jobs linked to denylist companies; re-normalize linkable ones.
+
+    Never mutates jobs.company (the raw name). Only modifies company_id.
+    Idempotent.
+
+    Returns:
+        Dict with "normalized" (int) count of jobs re-linked.
+    """
+    denylist = get_company_denylist(config or {})
+    normalized_count = 0
+
+    # Phase 1: Null out company_id for jobs linked to denylist companies
+    rows = conn.execute(
+        """SELECT j.dedup_key, j.company, j.company_id, c.name
+           FROM jobs j
+           JOIN companies c ON j.company_id = c.id"""
+    ).fetchall()
+
+    for row in rows:
+        company_name = row[3]  # companies.name (normalized)
+        if company_name in denylist:
+            conn.execute(
+                "UPDATE jobs SET company_id = NULL WHERE dedup_key = ?",
+                (row[0],),
+            )
+
+    # Phase 2: Re-normalize unlinked jobs
+    unlinked = conn.execute(
+        "SELECT dedup_key, company FROM jobs WHERE company_id IS NULL AND company IS NOT NULL"
+    ).fetchall()
+
+    existing = conn.execute("SELECT id, name FROM companies").fetchall()
+    existing_map = {r[1]: r[0] for r in existing}
+
+    for row in unlinked:
+        dedup_key, raw_name = row[0], row[1]
+        norm = normalize_company(raw_name)
+        if not norm or norm in denylist:
+            continue
+
+        if norm in existing_map:
+            company_id = existing_map[norm]
+        else:
+            company_id = _company_resolver.upsert_company(conn, raw_name)
+            existing_map[norm] = company_id
+
+        conn.execute(
+            "UPDATE jobs SET company_id = ? WHERE dedup_key = ?",
+            (company_id, dedup_key),
+        )
+        normalized_count += 1
+
+    conn.commit()
+    return {"normalized": normalized_count}
+
+
+def run_registry_hygiene(db_path: str, config: dict) -> dict:
+    """Orchestrator: cleanup denylist companies, repair links, then orphan cleanup.
+
+    Returns:
+        Dict with "companies_denylist_deleted", "jobs_denylist_unlinked",
+        "jobs_normalized", "orphans_deleted" (all int).
+    """
+    with standalone_connection(db_path) as conn:
+        denylist_result = cleanup_denylist_companies(conn, config)
+        repair_result = cleanup_invalid_company_data(conn, config)
+        orphan_result = cleanup_orphan_companies(conn)
+
+    return {
+        "companies_denylist_deleted": denylist_result.get("companies_deleted", 0),
+        "jobs_denylist_unlinked": denylist_result.get("jobs_unlinked", 0),
+        "jobs_normalized": repair_result.get("normalized", 0),
+        "orphans_deleted": orphan_result["orphans_deleted"],
+    }
+
+
+def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
+    """Enrich company metadata with retry-aware backoff.
+
+    Skips companies within their backoff window.
+
+    Returns:
+        Dict with "checked" (int) count of companies processed.
+    """
+    from datetime import datetime
+
+    with standalone_connection(db_path) as conn:
+        now = datetime.now().isoformat()
+        rows = conn.execute(
+            """SELECT id FROM companies
+               WHERE (enrichment_backoff_until IS NULL OR enrichment_backoff_until < ?)
+               AND company_size IS NULL
+               AND industry IS NULL""",
+            (now,),
+        ).fetchall()
+
+        company_ids = [r[0] for r in rows]
+        if company_ids:
+            run_ddg_enrichment(conn, company_ids)
+
+    return {"checked": len(company_ids)}
+
 
 def main() -> None:
     """CLI entry point for company backfill.
@@ -582,7 +750,7 @@ def main() -> None:
         ats_result = run_ats_probing(db_path, config)
 
         # Phase 3: DDG enrichment
-        ddg_count = run_ddg_enrichment(conn, new_company_ids)
+        ddg_result = run_ddg_enrichment(conn, new_company_ids)
 
         # Final summary
         null_after = conn.execute(
@@ -599,7 +767,7 @@ def main() -> None:
         print(f"ATS probed:              {ats_result.get('probed', 0)}")
         print(f"ATS hits:                {ats_result.get('hits', 0)}")
         print(f"ATS misses:              {ats_result.get('misses', 0)}")
-        print(f"DDG enriched:            {ddg_count}")
+        print(f"DDG enriched:            {ddg_result.get('enriched', 0)}")
 
 if __name__ == "__main__":
     main()

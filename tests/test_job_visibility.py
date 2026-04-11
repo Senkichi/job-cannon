@@ -138,6 +138,7 @@ class TestShowHidden:
 class TestAutoDismiss:
     def test_auto_dismiss_excluded_job_sets_dismissed_status(self, tmp_db_path):
         """Jobs excluded by keyword filter are auto-set to dismissed status."""
+        from unittest.mock import patch
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.scoring_runner import run_haiku_scoring
 
@@ -170,8 +171,11 @@ class TestAutoDismiss:
             "sources": {},
         }
 
-        # run_haiku_scoring triggers the exclusion filter path
-        run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
+        # Mock shutil.which so the CLI check passes, and check_job_liveness
+        # so no HTTP requests are made during the liveness gate.
+        with patch("job_finder.web.scoring_runner.shutil.which", return_value="/usr/bin/claude"), \
+             patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
+            run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
@@ -183,6 +187,7 @@ class TestAutoDismiss:
 
     def test_auto_dismiss_does_not_override_reviewing(self, tmp_db_path):
         """Auto-dismiss only affects discovered jobs, not reviewing/applied/etc."""
+        from unittest.mock import patch
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.scoring_runner import run_haiku_scoring
 
@@ -215,7 +220,9 @@ class TestAutoDismiss:
             "sources": {},
         }
 
-        run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
+        with patch("job_finder.web.scoring_runner.shutil.which", return_value="/usr/bin/claude"), \
+             patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
+            run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row

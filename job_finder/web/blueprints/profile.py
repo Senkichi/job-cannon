@@ -144,7 +144,7 @@ def save():
 
         # HTMX requests get a lightweight redirect header; normal forms get a redirect
         if request.headers.get("HX-Request"):
-            response = current_app.response_class("", status=204)
+            response = current_app.response_class("", status=200)
             response.headers["HX-Redirect"] = url_for("profile.index")
             return response
 

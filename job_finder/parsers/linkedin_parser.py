@@ -40,16 +40,30 @@ _VIEW_JOB_RE = re.compile(r"View job:\s*https://", re.IGNORECASE)
 def _is_meta_email(body: str) -> bool:
     """Return True if the email preamble matches known meta-email patterns.
 
-    LinkedIn's newer digest format starts with a count line ("30+ new jobs
-    match your preferences.") that would normally match BASE_META_PATTERNS,
-    but the email body also contains actual job listings.  If "View job:" URLs
-    are present the email is a real alert regardless of the preamble count.
+    LinkedIn sends two formats that contain "View job:" URLs:
+    1. Meta digests: first line IS the count/digest pattern (e.g. "30+ new jobs").
+       These are meta emails even with "View job:" URLs — single job examples.
+    2. New AI-powered digests: first line is "Your job alert for ..." then a
+       count line appears later. These are real job alerts — not meta.
 
-    Delegates to the shared ``is_meta_email`` with LinkedIn's extra pattern.
+    Strategy: check meta patterns first. If the preamble IS a meta pattern,
+    it's meta regardless of "View job:" URLs. If not, it's a real alert.
     """
-    if _VIEW_JOB_RE.search(body):
+    preamble_is_meta = is_meta_email(body, extra_patterns=_LINKEDIN_EXTRA_PATTERNS)
+    if not preamble_is_meta:
         return False
-    return is_meta_email(body, extra_patterns=_LINKEDIN_EXTRA_PATTERNS)
+    # Preamble matched a meta pattern. But if the FIRST non-empty line is a
+    # normal "Your job alert for" preamble, the meta pattern matched on a
+    # secondary line — treat as real alert.
+    first_line = ""
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if stripped:
+            first_line = stripped.lower()
+            break
+    if first_line.startswith("your job alert for"):
+        return False
+    return True
 
 
 def parse_linkedin_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, render_template
 
-from job_finder.db import JOBS_ALL_COLUMNS
+from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.exclusion_filter import should_exclude
@@ -30,7 +30,8 @@ def batch_score_haiku_start():
 
     with standalone_connection(db_path) as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL"
+            "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
+            "AND pipeline_status NOT IN ('dismissed', 'archived')"
         ).fetchone()[0]
 
         if total == 0:
@@ -40,7 +41,7 @@ def batch_score_haiku_start():
                 scored=0,
                 skipped=0,
                 status="done",
-                message="All jobs already scored — nothing to do.",
+                message="No scorable jobs — all unscored jobs are dismissed or already scored.",
                 error_msg=None,
             )
 
@@ -67,6 +68,7 @@ def batch_score_haiku_start():
         session_id=session_id,
         total=total,
         scored=0,
+        skipped=0,
         cancelling=False,
     )
 
@@ -123,6 +125,7 @@ def batch_score_sonnet_start():
         session_id=session_id,
         total=total,
         scored=0,
+        skipped=0,
         cancelling=False,
     )
 
@@ -200,6 +203,7 @@ def batch_score_status(session_id):
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
+        skipped=session["skipped"],
         cancelling=(status == "cancelling"),
     )
 
@@ -244,6 +248,7 @@ def batch_score_cancel(session_id):
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
+        skipped=session["skipped"],
         cancelling=True,
     )
 
@@ -271,7 +276,8 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     try:
         with standalone_connection(db_path) as conn:
             rows = conn.execute(
-                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL ORDER BY score DESC"
+                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL "
+                "AND pipeline_status NOT IN ('dismissed', 'archived') ORDER BY score DESC"
             ).fetchall()
 
             # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
@@ -299,6 +305,13 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
                 if excluded:
                     logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
+                    # Auto-dismiss discovered jobs so they don't reappear in future batches
+                    dedup_key = job_row.get("dedup_key")
+                    if dedup_key and job_row.get("pipeline_status") == "discovered":
+                        update_pipeline_status(
+                            conn, dedup_key, "dismissed",
+                            source="exclusion_filter", evidence=reason,
+                        )
                     skipped_count += 1
                     continue
 

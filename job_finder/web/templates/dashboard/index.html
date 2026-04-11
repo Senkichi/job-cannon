@@ -141,21 +141,22 @@
 
       <!-- Batch Haiku Score — async with HTMX polling progress bar -->
       <div id="batch-score-haiku-status">
-        {% if haiku_available %}
+        {% if haiku_available and haiku_scorable_count > 0 %}
           <form hx-post="/dashboard/batch-score/haiku/start"
                 hx-target="#batch-score-haiku-status"
                 hx-swap="outerHTML">
             <button type="submit"
                     class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
-                    title="Run Haiku AI scoring on all unscored jobs in the database">
+                    title="Run Haiku AI scoring on {{ haiku_scorable_count }} unscored jobs">
               Batch Haiku Score
+              <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ haiku_scorable_count }}</span>
             </button>
           </form>
         {% else %}
           <button type="button"
                   disabled
                   class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
-                  title="No Haiku-tier provider configured">
+                  title="{{ 'No Haiku-tier provider configured' if not haiku_available else 'No unscored jobs to process' }}">
             Batch Haiku Score
           </button>
         {% endif %}

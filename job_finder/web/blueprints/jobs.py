@@ -74,6 +74,7 @@ def _get_filter_kwargs() -> dict:
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,
         "hide_stale": args.get("hide_stale") == "on",
+        "show_hidden": args.get("show_hidden") == "on",
     }
 
 def relative_date(iso_str):
@@ -138,6 +139,9 @@ def index():
     archived_count = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
     ).fetchone()[0]
+    hidden_count = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE pipeline_status IN ('archived', 'withdrawn', 'dismissed', 'rejected')"
+    ).fetchone()[0]
 
     return render_template(
         "jobs/index.html",
@@ -148,6 +152,7 @@ def index():
         sources=sources,
         stale_count=stale_count,
         archived_count=archived_count,
+        hidden_count=hidden_count,
     )
 
 @jobs_bp.route("/table", strict_slashes=False)

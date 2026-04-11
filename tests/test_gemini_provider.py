@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+pytest.importorskip("google.generativeai")
 from google.genai import errors as genai_errors
 
 from job_finder.web.model_provider import BaseProvider, ModelResult

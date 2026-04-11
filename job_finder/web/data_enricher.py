@@ -39,6 +39,7 @@ from job_finder.web.claude_client import cost_gate
 from job_finder.web.enrichment_tiers import (
     fetch_direct_jd, query_ats_api, scrape_careers,
     extract_with_sonnet, search_serpapi, search_duckduckgo, extract_with_haiku,
+    search_ddg_web, fetch_ddg_jds,
 )
 from job_finder.web.company_enricher import enrich_company_info  # noqa: F401 (re-exported for callers)
 
@@ -178,10 +179,21 @@ def enrich_job(
 
         if start_idx <= TIER_ORDER.index("ddg"):
             try:
+                ddg_result = search_ddg_web(title, company)
+                ddg_text = ddg_result.get("ddg_snippet", "")
+
+                ddg_jd, ddg_source_url = fetch_ddg_jds(ddg_result.get("ddg_urls", []))
+                if ddg_jd:
+                    fragments["url_jd"] = ddg_jd
+
                 query = f"{title} {company} job description"
-                ddg_text = search_duckduckgo(query)
-                if ddg_text:
-                    fragments["ddg"] = ddg_text
+                fallback_text = search_duckduckgo(query)
+                ddg_parts = [text for text in (ddg_text, fallback_text) if text]
+                if ddg_parts:
+                    fragments["ddg"] = "\n\n".join(ddg_parts)
+
+                if ddg_source_url:
+                    _merge_apply_urls(conn, job_row, [ddg_source_url])
 
                 # Resolve what DDG tier found (via Haiku extraction later if needed)
                 # DDG doesn't directly provide structured data; it feeds the Haiku tier.
@@ -243,7 +255,7 @@ def enrich_job(
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
             try:
                 query = f"{title} {company}"
-                serpapi_result = search_serpapi(query, serpapi_key)
+                serpapi_result, _apply_urls = search_serpapi(query, serpapi_key)
                 if serpapi_result:
                     for k, v in serpapi_result.items():
                         if k not in fragments:

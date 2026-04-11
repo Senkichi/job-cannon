@@ -60,6 +60,9 @@ _ATS_DOMAINS = [
     "jobs.ashbyhq.com",
 ]
 
+# Subdomains that indicate a careers site (checked after ATS exclusion)
+_CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.", "apply.")
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -302,6 +305,15 @@ def find_careers_url(
         )
         return None
 
+    # Check if HTTP redirect landed on a careers/jobs/work subdomain
+    if any(parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
+        logger.debug(
+            "find_careers_url('%s'): redirected to careers subdomain '%s'",
+            homepage_url,
+            final_url,
+        )
+        return final_url
+
     # Parse homepage HTML for careers links
     try:
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -309,11 +321,60 @@ def find_careers_url(
         logger.debug("find_careers_url('%s') HTML parse error: %s", homepage_url, e)
         return None
 
+    # Detect <meta http-equiv="refresh"> redirects to careers URLs
+    import re
+    meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.I)})
+    if meta_refresh:
+        content = meta_refresh.get("content", "")
+        # Extract URL from content like "0; url=https://..." or "0;url=/careers"
+        match = re.search(r"url\s*=\s*(.+)", content, re.I)
+        if match:
+            refresh_url = match.group(1).strip().strip("'\"")
+            # Resolve relative URL
+            refresh_url = urljoin(homepage_url, refresh_url)
+            refresh_parsed = urlparse(refresh_url)
+            # Check for ATS domain — don't follow
+            if any(ats in refresh_parsed.netloc for ats in _ATS_DOMAINS):
+                logger.debug(
+                    "find_careers_url('%s'): meta-refresh to ATS domain '%s' — returning None",
+                    homepage_url,
+                    refresh_parsed.netloc,
+                )
+                return None
+            # Check if refresh target is a careers subdomain or careers path
+            if any(refresh_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
+                logger.debug(
+                    "find_careers_url('%s'): meta-refresh to careers subdomain '%s'",
+                    homepage_url,
+                    refresh_url,
+                )
+                return refresh_url
+            if any(pattern in refresh_parsed.path for pattern in _CAREERS_PATTERNS):
+                logger.debug(
+                    "find_careers_url('%s'): meta-refresh to careers path '%s'",
+                    homepage_url,
+                    refresh_url,
+                )
+                return refresh_url
+
     # Search all <a href="..."> for careers-pattern matches
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
         if not href:
             continue
+
+        # Check absolute URLs pointing to careers subdomains
+        if href.lower().startswith("http"):
+            href_parsed = urlparse(href)
+            if any(href_parsed.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
+                # Verify it's not an ATS domain
+                if not any(ats in href_parsed.netloc for ats in _ATS_DOMAINS):
+                    logger.debug(
+                        "find_careers_url('%s'): found link to careers subdomain '%s'",
+                        homepage_url,
+                        href,
+                    )
+                    return href
 
         # Check if href matches any careers pattern
         href_lower = href.lower()

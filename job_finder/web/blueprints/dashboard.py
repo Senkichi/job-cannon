@@ -12,7 +12,7 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
-from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+from job_finder.config import DEFAULT_HAIKU_THRESHOLD, get_company_denylist
 from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD, get_cost_stats
 from job_finder.web.db_helpers import get_db
 from job_finder.web.model_provider import tier_has_configured_provider
@@ -76,6 +76,52 @@ def _get_rejection_context(conn):
         "unreviewed_rejection_count": unreviewed_count,
     }
 
+def _count_haiku_scorable(conn, config: dict) -> int:
+    """Count unscored jobs that would pass the exclusion filter.
+
+    Replicates the three exclusion checks from exclusion_filter.should_exclude()
+    in SQL so the dashboard button count accurately reflects scorable jobs:
+    1. Title keyword exclusions (case-insensitive substring)
+    2. Company denylist + config exclusions (case-insensitive, trimmed)
+    3. Salary floor (salary_max < min_salary * 0.85)
+    """
+    try:
+        conditions = [
+            "haiku_score IS NULL",
+            "pipeline_status NOT IN ('dismissed', 'archived')",
+        ]
+        params: list = []
+
+        exclusions = config.get("profile", {}).get("exclusions", {})
+
+        # Title keyword exclusions
+        for keyword in exclusions.get("title_keywords", []):
+            if keyword:
+                conditions.append("LOWER(title) NOT LIKE ?")
+                params.append(f"%{keyword.lower()}%")
+
+        # Company exclusions (config list + denylist)
+        excluded_companies = {c.lower().strip() for c in exclusions.get("companies", []) if c}
+        excluded_companies |= get_company_denylist(config)
+        if excluded_companies:
+            placeholders = ",".join("?" * len(excluded_companies))
+            conditions.append(f"LOWER(TRIM(company)) NOT IN ({placeholders})")
+            params.extend(sorted(excluded_companies))
+
+        # Salary floor (min_salary * 0.85)
+        min_salary = config.get("profile", {}).get("min_salary")
+        if min_salary is not None:
+            floor = min_salary * 0.85
+            conditions.append(
+                "NOT (salary_max IS NOT NULL AND salary_max > 0 AND salary_max < ?)"
+            )
+            params.append(floor)
+
+        where = " AND ".join(conditions)
+        return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params).fetchone()[0]
+    except Exception:
+        return 0
+
 @dashboard_bp.route("/", strict_slashes=False)
 def index():
     """Dashboard landing page — stat cards, activity feed, pipeline summary."""
@@ -94,6 +140,10 @@ def index():
     pending_count = stats.get("pending_detections", 0)
     rejection_ctx = _get_rejection_context(conn)
     ats_ctx = _get_ats_context(conn)
+
+    # Count jobs eligible for Haiku scoring — mirrors exclusion_filter.should_exclude()
+    # so the dashboard button only shows when there are actually scorable jobs.
+    haiku_scorable_count = _count_haiku_scorable(conn, config)
 
     # Count jobs eligible for Sonnet evaluation (haiku_score >= threshold, no sonnet_score)
     threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
@@ -133,6 +183,7 @@ def index():
         pipeline_events=pipeline_events,
         latest_report=rejection_ctx["latest_report"],
         unreviewed_rejection_count=rejection_ctx["unreviewed_rejection_count"],
+        haiku_scorable_count=haiku_scorable_count,
         sonnet_eligible_count=sonnet_eligible_count,
         haiku_available=haiku_available,
         sonnet_available=sonnet_available,
