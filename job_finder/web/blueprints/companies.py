@@ -8,9 +8,12 @@ Routes:
     POST /companies/<id>/toggle       -- Toggle scan_enabled between 0 and 1
     POST /companies/<id>/update-slug  -- Update ATS platform/slug manually
     POST /companies/scan              -- Trigger immediate ATS scan (synchronous)
+    POST /companies/<id>/research     -- Start or return cached company research
+    GET  /companies/<id>/research/status/<rid> -- Poll research status
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from flask import (
     Blueprint,
@@ -34,6 +37,8 @@ companies_bp = Blueprint("companies", __name__, url_prefix="/companies")
 _SORT_ALLOWLIST = {"name", "ats_platform", "last_scanned_at", "jobs_found_total"}
 _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
+_PAGE_SIZE = 50
+
 @companies_bp.route("/", strict_slashes=False)
 def index():
     """Companies list page with sortable table, search, and ATS filter."""
@@ -43,6 +48,9 @@ def index():
     search = request.args.get("search", "").strip()
     ats_platform = request.args.get("ats_platform", "").strip().lower()
     sort_by = request.args.get("sort_by", "name")
+    page = request.args.get("page", 1, type=int)
+    if page < 1:
+        page = 1
 
     # Validate sort_by against allowlist
     if sort_by not in _SORT_ALLOWLIST:
@@ -64,6 +72,13 @@ def index():
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+    # Total count for display
+    total_count = conn.execute(
+        f"SELECT COUNT(*) FROM companies c {where_sql}", params
+    ).fetchone()[0]
+
+    # Paginated query
+    offset = (page - 1) * _PAGE_SIZE
     companies = conn.execute(
         f"""SELECT c.*,
                COUNT(j.dedup_key) as job_count_live
@@ -71,19 +86,30 @@ def index():
             LEFT JOIN jobs j ON j.company_id = c.id
             {where_sql}
             GROUP BY c.id
-            ORDER BY c.{sort_by} ASC NULLS LAST""",
-        params,
+            ORDER BY c.{sort_by} ASC NULLS LAST
+            LIMIT ? OFFSET ?""",
+        params + [_PAGE_SIZE, offset],
     ).fetchall()
+
+    has_more = (offset + len(companies)) < total_count
 
     is_htmx = request.headers.get("HX-Request")
     if is_htmx:
+        # Page 2+ returns rows-only partial (no container/header)
+        template = "companies/_rows_partial.html" if page > 1 else "companies/_table.html"
         return render_template(
-            "companies/_table.html",
+            template,
             companies=companies,
             search=search,
             ats_platform=ats_platform,
             sort_by=sort_by,
+            page=page,
+            has_more=has_more,
+            total_count=total_count,
         )
+
+    # Compute health metrics for full page
+    health = _compute_health_metrics(conn)
 
     return render_template(
         "companies/index.html",
@@ -91,6 +117,10 @@ def index():
         search=search,
         ats_platform=ats_platform,
         sort_by=sort_by,
+        page=page,
+        has_more=has_more,
+        total_count=total_count,
+        health=health,
     )
 
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
@@ -200,7 +230,6 @@ def toggle(company_id):
         return "Company not found", 404
 
     new_enabled = 0 if company["scan_enabled"] else 1
-    from datetime import datetime
     now = datetime.now().isoformat()
     conn.execute(
         "UPDATE companies SET scan_enabled = ?, updated_at = ? WHERE id = ?",
@@ -236,7 +265,6 @@ def update_slug(company_id):
     ats_platform = request.form.get("ats_platform", "").strip() or None
     ats_slug = request.form.get("ats_slug", "").strip() or None
 
-    from datetime import datetime
     now = datetime.now().isoformat()
     conn.execute(
         """UPDATE companies
@@ -343,3 +371,164 @@ def retry(company_id):
     ).fetchone()
 
     return render_template("companies/_row.html", company=updated_company)
+
+
+# ---------------------------------------------------------------------------
+# Health metrics helper
+# ---------------------------------------------------------------------------
+
+def _compute_health_metrics(conn) -> dict:
+    """Compute pipeline health metrics for the companies index page."""
+    total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+
+    pending_probe = conn.execute(
+        "SELECT COUNT(*) FROM companies WHERE ats_probe_status = 'pending'"
+    ).fetchone()[0]
+
+    homepage_count = conn.execute(
+        "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL AND homepage_url != ''"
+    ).fetchone()[0]
+    homepage_pct = round(100 * homepage_count / total) if total else 0
+
+    # Enrichment: companies with industry or company_size populated
+    enriched_count = conn.execute(
+        "SELECT COUNT(*) FROM companies WHERE industry IS NOT NULL OR company_size IS NOT NULL"
+    ).fetchone()[0]
+    enrichment_pct = round(100 * enriched_count / total) if total else 0
+
+    # Unlinked jobs: jobs with no company_id
+    unlinked_jobs = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
+    ).fetchone()[0]
+
+    # Last scan age
+    last_scan_row = conn.execute(
+        "SELECT MAX(scanned_at) as last_scan FROM company_scan_log"
+    ).fetchone()
+    last_scan_at = last_scan_row["last_scan"] if last_scan_row else None
+    last_scan_age_days = None
+    if last_scan_at:
+        try:
+            last_dt = datetime.fromisoformat(last_scan_at)
+            last_scan_age_days = (datetime.now() - last_dt).days
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "pending_probe": pending_probe,
+        "homepage_pct": homepage_pct,
+        "enrichment_pct": enrichment_pct,
+        "unlinked_jobs": unlinked_jobs,
+        "last_scan_at": last_scan_at,
+        "last_scan_age_days": last_scan_age_days,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Company research routes
+# ---------------------------------------------------------------------------
+
+@companies_bp.route("/<int:company_id>/research", methods=["POST"], strict_slashes=False)
+def research(company_id):
+    """Start or return cached company research.
+
+    If a recent done/generating research row exists, return it immediately.
+    Otherwise, insert a new generating row and launch background research.
+    Returns an HTMX fragment (polling or final section).
+    """
+    db_path = current_app.config["DB_PATH"]
+    config = current_app.config.get("JF_CONFIG", {})
+    conn = get_db(db_path)
+
+    company = conn.execute(
+        "SELECT * FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
+
+    if company is None:
+        return "Company not found", 404
+
+    from job_finder.web.company_research import (
+        get_cached_company_research,
+        start_company_research,
+    )
+
+    cached = get_cached_company_research(conn, company_id)
+    if cached and cached["status"] == "done":
+        return render_template(
+            "companies/_research_section.html",
+            research=cached,
+            company=company,
+        )
+    if cached and cached["status"] in ("generating", "pending"):
+        return render_template(
+            "companies/_research_generating.html",
+            company_id=company_id,
+            research_id=cached["id"],
+        )
+
+    research_id = start_company_research(conn, company_id, db_path, config)
+    return render_template(
+        "companies/_research_generating.html",
+        company_id=company_id,
+        research_id=research_id,
+    )
+
+
+@companies_bp.route(
+    "/<int:company_id>/research/status/<int:research_id>",
+    strict_slashes=False,
+)
+def research_status(company_id, research_id):
+    """Poll research generation status. Returns final section or keeps polling."""
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+
+    company = conn.execute(
+        "SELECT * FROM companies WHERE id = ?", (company_id,)
+    ).fetchone()
+
+    if company is None:
+        return "Company not found", 404
+
+    row = conn.execute(
+        "SELECT * FROM company_research WHERE id = ? AND company_id = ?",
+        (research_id, company_id),
+    ).fetchone()
+
+    if row is None:
+        return "Research not found", 404
+
+    research = dict(row)
+
+    # Check for timeout on generating rows (>10 min)
+    if research["status"] == "generating":
+        try:
+            requested = datetime.fromisoformat(research["requested_at"])
+            age_minutes = (
+                datetime.now(timezone.utc) - requested.replace(tzinfo=timezone.utc)
+            ).total_seconds() / 60
+            if age_minutes > 10:
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "UPDATE company_research SET status = 'error', error_msg = ?, completed_at = ? WHERE id = ?",
+                    ("Research timed out", now, research_id),
+                )
+                conn.commit()
+                research["status"] = "error"
+                research["error_msg"] = "Research timed out"
+        except (ValueError, TypeError):
+            pass
+
+    if research["status"] in ("done", "error"):
+        return render_template(
+            "companies/_research_section.html",
+            research=research,
+            company=company,
+        )
+
+    # Still generating — keep polling
+    return render_template(
+        "companies/_research_generating.html",
+        company_id=company_id,
+        research_id=research_id,
+    )

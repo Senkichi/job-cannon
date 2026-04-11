@@ -10,6 +10,7 @@ These are called by data_enricher.enrich_job() in cost order.
 import json
 import logging
 import re
+import time
 from typing import Optional, Any
 
 import requests
@@ -17,6 +18,8 @@ from bs4 import BeautifulSoup
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude, cost_gate
+from ddgs import DDGS
+from job_finder.web.domain_policy import is_blocked_domain, domain_priority
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,22 @@ _TIMEOUT = 10
 # ---------------------------------------------------------------------------
 # Tier implementations
 # ---------------------------------------------------------------------------
+
+def is_short_auth_page(text: str) -> bool:
+    """Return True if text looks like a short auth-wall or CAPTCHA page.
+
+    Detection: page is under 2000 chars AND the first 500 chars contain
+    an auth/bot signal keyword.
+    """
+    if not text or len(text) >= 2000:
+        return False
+    prefix = text[:500].lower()
+    signals = [
+        "sign in", "log in", "login", "captcha", "just a moment",
+        "access denied", "verify you are human", "verify you are a human",
+    ]
+    return any(s in prefix for s in signals)
+
 
 def fetch_direct_jd(url: str) -> Optional[str]:
     """Attempt a direct HTTP GET and return cleaned job description text.
@@ -329,7 +348,7 @@ def extract_with_sonnet(
         logger.debug("Sonnet extraction failed: %s", e)
         return {}
 
-def search_serpapi(query: str, api_key: str) -> Optional[dict]:
+def search_serpapi(query: str, api_key: str) -> tuple[Optional[dict], list[str]]:
     """Search Google Jobs via SerpAPI for job details.
 
     Args:
@@ -337,8 +356,9 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
         api_key: SerpAPI API key.
 
     Returns:
-        Dict with job data (jd_full, salary_min, salary_max, location) or None
-        if no results or an error occurs.
+        2-tuple of (result_dict, apply_urls):
+        - result_dict: Dict with job data or None if no results.
+        - apply_urls: Filtered and priority-sorted apply option URLs.
     """
     try:
         params = {
@@ -353,7 +373,7 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
         data = response.json()
         jobs = data.get("jobs_results", [])
         if not jobs:
-            return None
+            return None, []
 
         job = jobs[0]
         result = {}
@@ -376,11 +396,29 @@ def search_serpapi(query: str, api_key: str) -> Optional[dict]:
             if salary_range:
                 result.update(salary_range)
 
-        return result if result else None
+        # Extract, filter, and sort apply_options URLs
+        apply_options = job.get("apply_options", [])
+        apply_urls = [
+            opt["link"] for opt in apply_options
+            if opt.get("link") and not is_blocked_domain(opt["link"])
+        ]
+        apply_urls.sort(key=domain_priority)
+
+        # Try to fetch JD from ATS apply URLs
+        for url in apply_urls:
+            try:
+                url_jd = fetch_direct_jd(url)
+                if url_jd:
+                    result["url_jd"] = url_jd
+                    break
+            except Exception:
+                pass
+
+        return (result if result else None), apply_urls
 
     except Exception as e:
         logger.debug("SerpAPI search failed for '%s': %s", query, e)
-        return None
+        return None, []
 
 def search_duckduckgo(query: str) -> Optional[str]:
     """Query DuckDuckGo Instant Answer API for job/company info.
@@ -553,3 +591,245 @@ def _parse_salary_string(salary_str: str) -> Optional[dict]:
     except Exception:
         logger.debug("_parse_salary_string failed", exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Page content helpers
+# ---------------------------------------------------------------------------
+
+# Browser-like headers for sites that block bot UAs
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+# Chrome/login page detection signals
+_CHROME_SIGNALS = [
+    "download google chrome",
+    "update your browser",
+    "browser not supported",
+    "enable cookies",
+    "cookies are disabled",
+    "accept cookies to continue",
+]
+
+_LOGIN_PAGE_SIGNALS = [
+    "create your free account",
+    "sign up for free",
+    "start your free trial",
+    "register to view",
+    "join now to view",
+]
+
+# Delay between DDG web search queries (rate limiting)
+_DDG_SEARCH_DELAY_S = 1.0
+
+
+_COMPANY_STOP_WORDS = frozenset({
+    "inc", "llc", "ltd", "corp", "co", "the", "and", "group",
+    "holdings", "international", "services", "solutions", "technologies",
+})
+
+
+def company_tokens(company_name: str) -> list[str]:
+    """Extract meaningful tokens from a company name, filtering stop words.
+
+    Returns lowercase tokens that are >= 2 chars and not in the stop list.
+    """
+    if not company_name:
+        return []
+    raw_tokens = re.split(r"[\s.,;:!?&/|()]+", company_name.lower())
+    return [t for t in raw_tokens if len(t) >= 2 and t not in _COMPANY_STOP_WORDS]
+
+
+def company_name_in_text(company_name: str, text: str) -> bool:
+    """Check whether any meaningful company token appears in the text."""
+    tokens = company_tokens(company_name)
+    if not tokens:
+        return False
+    text_lower = text.lower()
+    return any(t in text_lower for t in tokens)
+
+
+def extract_content_from_html(html: str) -> Optional[str]:
+    """Extract cleaned text content from raw HTML.
+
+    Strips noise tags (script, style, nav, etc.) and returns cleaned text.
+
+    Args:
+        html: Raw HTML string.
+
+    Returns:
+        Cleaned text content, or None if empty.
+    """
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(_NOISE_TAGS):
+        tag.decompose()
+
+    text = soup.get_text(separator="\n", strip=True)
+    return text if text.strip() else None
+
+
+def is_chrome_or_login_page(text: str) -> bool:
+    """Return True if text looks like a browser upgrade or login/signup page.
+
+    Checks for Chrome download prompts, browser upgrade notices, cookie
+    consent walls, and generic signup gates.
+
+    Args:
+        text: Cleaned page text to check.
+
+    Returns:
+        True if the page is a Chrome/browser page or login gate.
+    """
+    if not text:
+        return False
+
+    text_lower = text[:2000].lower()
+    if any(sig in text_lower for sig in _CHROME_SIGNALS):
+        return True
+    if any(sig in text_lower for sig in _LOGIN_PAGE_SIGNALS):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn JD extraction
+# ---------------------------------------------------------------------------
+
+def fetch_linkedin_jd(url: str) -> Optional[str]:
+    """Extract job description from a LinkedIn guest job page.
+
+    LinkedIn guest pages serve full JD content inside a specific container
+    even though the surrounding page chrome contains login prompts that
+    trip the generic auth-wall detector.
+
+    Args:
+        url: A LinkedIn job URL (e.g. linkedin.com/jobs/view/...).
+
+    Returns:
+        Cleaned JD text up to _MAX_JD_CHARS, or None if extraction fails.
+    """
+    try:
+        response = requests.get(url, headers=_BROWSER_HEADERS, timeout=_TIMEOUT)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        jd_el = soup.select_one("div.show-more-less-html__markup")
+        if jd_el is None:
+            jd_el = soup.select_one("div.description__text")
+
+        if jd_el is None:
+            logger.debug("LinkedIn JD container not found for '%s'", url)
+            return None
+
+        text = jd_el.get_text(separator="\n", strip=True)
+        if not text.strip():
+            return None
+
+        return text[:_MAX_JD_CHARS]
+
+    except Exception as e:
+        logger.debug("LinkedIn JD fetch failed for '%s': %s", url, e)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# DDG web search tier
+# ---------------------------------------------------------------------------
+
+def search_ddg_web(title: str, company: str) -> dict:
+    """Search DuckDuckGo web search for job description URLs and snippets.
+
+    Generates two search queries, collects up to 8 candidate URLs, filters
+    blocked domains, and sorts by domain priority.
+
+    Args:
+        title: Job title.
+        company: Company name.
+
+    Returns:
+        Dict with keys:
+        - "ddg_urls": list[str] of discovered URLs (up to 8)
+        - "ddg_snippet": str concatenation of result body text
+    """
+    queries = [
+        f'"{company}" "{title}" job description',
+        f"{company} careers {title}",
+    ]
+
+    all_results: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for i, query in enumerate(queries):
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=5))
+            for r in results:
+                href = r.get("href", "")
+                if href and href not in seen_urls:
+                    seen_urls.add(href)
+                    all_results.append(r)
+        except Exception as exc:
+            logger.debug("DDG web search failed for '%s': %s", query[:60], exc)
+
+        if i < len(queries) - 1:
+            time.sleep(_DDG_SEARCH_DELAY_S)
+
+    filtered_urls: list[str] = []
+    for r in all_results:
+        href = r.get("href", "")
+        if href and not is_blocked_domain(href):
+            filtered_urls.append(href)
+
+    filtered_urls.sort(key=domain_priority)
+    filtered_urls = filtered_urls[:8]
+
+    snippets = [r.get("body", "") for r in all_results if r.get("body")]
+    ddg_snippet = "\n\n".join(snippets) if snippets else ""
+
+    return {
+        "ddg_urls": filtered_urls,
+        "ddg_snippet": ddg_snippet,
+    }
+
+
+def fetch_ddg_jds(urls: list[str]) -> tuple[Optional[str], Optional[str]]:
+    """Fetch job descriptions from DDG search result URLs.
+
+    Tries each URL (up to 4 attempts), routing LinkedIn URLs through the
+    specialized extractor and others through the generic fetcher.
+
+    Args:
+        urls: List of candidate URLs from DDG web search.
+
+    Returns:
+        2-tuple of (jd_text, source_url):
+        - jd_text: First successful JD text (>= 200 chars), or None
+        - source_url: The URL that yielded the JD, or None
+    """
+    for url in urls[:4]:
+        try:
+            if "linkedin.com/jobs/" in url:
+                jd_text = fetch_linkedin_jd(url)
+            elif is_blocked_domain(url):
+                continue
+            else:
+                jd_text = fetch_direct_jd(url)
+
+            if jd_text and len(jd_text) >= 200 and not is_chrome_or_login_page(jd_text):
+                logger.debug("DDG URL fetch success: %s (%d chars)", url[:80], len(jd_text))
+                return jd_text, url
+        except Exception as exc:
+            logger.debug("DDG URL fetch failed for %s: %s", url[:80], exc)
+
+    return None, None

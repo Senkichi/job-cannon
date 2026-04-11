@@ -177,7 +177,7 @@ class TestSearchSerpapi:
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.return_value = mock_response
-            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result, _urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
         assert result is not None
         assert isinstance(result, dict)
@@ -192,7 +192,7 @@ class TestSearchSerpapi:
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.return_value = mock_response
-            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result, _urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
         assert result is None
 
@@ -202,7 +202,7 @@ class TestSearchSerpapi:
 
         with patch("job_finder.web.enrichment_tiers.requests.get") as mock_get:
             mock_get.side_effect = Exception("Network error")
-            result = search_serpapi("Data Scientist Acme Corp", "test-api-key")
+            result, _urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
         assert result is None
 
@@ -470,10 +470,14 @@ class TestEnrichJobTierOrder:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds, \
              patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp:
             mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = None
             # Haiku only found salary, not JD
             mock_haiku.return_value = {"salary_min": 140000}
@@ -599,12 +603,16 @@ class TestFieldCeilings:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds, \
              patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
              patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
             mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = None
             mock_haiku.return_value = {}
             mock_serp.return_value = None
@@ -633,12 +641,16 @@ class TestSonnetEnrichment:
         sparse_job_row["company_id"] = None
 
         with patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch, \
+             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web, \
+             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds, \
              patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg, \
              patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku, \
              patch("job_finder.web.data_enricher.search_serpapi") as mock_serp, \
              patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet, \
              patch("job_finder.web.data_enricher.cost_gate") as mock_gate:
             mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = "DDG text about the role"
             mock_haiku.return_value = {}  # Haiku failed
             mock_serp.return_value = None  # SerpAPI failed

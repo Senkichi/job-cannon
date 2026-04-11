@@ -53,7 +53,7 @@ _SONNET_OUTPUT_TOKENS = 500
 
 # Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
 _ELIGIBLE_TIERS_QUERY = (
-    "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')"
+    "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet', 'agentic', 'agentic_exhausted')"
 )
 
 # Borderline score range for re-scoring after tier advancement
@@ -278,12 +278,14 @@ def run_sonnet_backfill(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = evaluate_job_sonnet(job_row, profile, conn, config)
+        scoring_result = evaluate_job_sonnet(job_row, profile, conn, config)
 
-        if result is None:
-            logger.debug("Sonnet eval returned None for '%s'", dedup_key)
+        if scoring_result is None or scoring_result.status != "success" or scoring_result.data is None:
+            logger.debug("Sonnet eval returned %s for '%s'",
+                         scoring_result.status if scoring_result else "None", dedup_key)
             continue
 
+        result = scoring_result.data
         score = result.get("score")
         summary = result.get("summary")
         fit_analysis = result.get("fit_analysis")
@@ -347,12 +349,14 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        result = score_job_haiku(job_row, profile, conn, config)
+        scoring_result = score_job_haiku(job_row, profile, conn, config)
 
-        if result is None:
-            logger.debug("Haiku re-score returned None for '%s'", dedup_key)
+        if scoring_result is None or scoring_result.status != "success" or scoring_result.data is None:
+            logger.debug("Haiku re-score returned %s for '%s'",
+                         scoring_result.status if scoring_result else "None", dedup_key)
             continue
 
+        result = scoring_result.data
         new_score = result.get("score")
         new_summary = result.get("summary")
 

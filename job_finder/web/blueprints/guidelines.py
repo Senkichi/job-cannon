@@ -165,7 +165,7 @@ def preview_guidelines_merge():
             f' hx-post="/settings/apply-guidelines-merge"'
             f' hx-target="#guidelines-diff-container"'
             f' hx-swap="innerHTML"'
-            f' hx-include="[name=merged_guide_json],[name=guidelines_text]"'
+            f" hx-include=\"[name='merged_guide_json'],[name='guidelines_text']\""
             f' hx-disabled-elt="this"'
             f' class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-sm transition-colors">'
             f"Apply Changes"

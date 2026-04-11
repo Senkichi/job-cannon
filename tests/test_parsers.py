@@ -801,12 +801,12 @@ class TestParseFailureActivityFeed:
         config = {"sources": {"gmail": {"enabled": True, "lookback_days": 7}}}
 
         mock_source = MagicMock()
-        mock_source.fetch_jobs.return_value = []
+        mock_source.fetch_jobs.return_value = ([], set())
         mock_source.parse_failures = [{"sender": "alert@indeed.com"}]
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}
 
-        with patch("job_finder.web.pipeline_runner.GmailSource", return_value=mock_source):
+        with patch("job_finder.web.ingestion_runner.GmailSource", return_value=mock_source):
             _fetch_gmail(config, conn, summary)
 
         rows = conn.execute(
@@ -831,12 +831,12 @@ class TestParseFailureActivityFeed:
         config = {"sources": {"gmail": {"enabled": True, "lookback_days": 7}}}
 
         mock_source = MagicMock()
-        mock_source.fetch_jobs.return_value = []
+        mock_source.fetch_jobs.return_value = ([], set())
         mock_source.parse_failures = []
 
         summary = {"gmail_fetched": 0, "gmail_errors": []}
 
-        with patch("job_finder.web.pipeline_runner.GmailSource", return_value=mock_source):
+        with patch("job_finder.web.ingestion_runner.GmailSource", return_value=mock_source):
             _fetch_gmail(config, conn, summary)
 
         rows = conn.execute(

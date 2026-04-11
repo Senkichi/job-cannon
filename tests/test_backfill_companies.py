@@ -773,7 +773,7 @@ class TestSummaryOutput:
             mock_cfg.return_value = {"db": {"path": path}}
             mock_link.return_value = (10, [1, 2, 3], 5)
             mock_ats.return_value = {"probed": 3, "hits": 1, "misses": 2}
-            mock_ddg.return_value = 2
+            mock_ddg.return_value = {"enriched": 2, "empty_result": 0, "error": 0}
 
             # Simulate sqlite3.connect returning a mock conn with required queries
             mock_conn = MagicMock()
@@ -1070,14 +1070,14 @@ class TestRunRegistryHygiene:
         assert result["companies_denylist_deleted"] >= 1
 
     def test_hygiene_returns_all_expected_keys(self, migrated_db):
-        """run_registry_hygiene returns companies_denylist_deleted, jobs_denylist_unlinked, orphans_deleted."""
+        """run_registry_hygiene returns denylist, repair, and orphan cleanup counts."""
         db_path, conn = migrated_db
         conn.close()
 
         from job_finder.web.backfill_companies import run_registry_hygiene
         result = run_registry_hygiene(db_path, {"filters": {}})
 
-        for key in ("companies_denylist_deleted", "jobs_denylist_unlinked", "orphans_deleted"):
+        for key in ("companies_denylist_deleted", "jobs_denylist_unlinked", "jobs_normalized", "orphans_deleted"):
             assert key in result
             assert isinstance(result[key], int)
 

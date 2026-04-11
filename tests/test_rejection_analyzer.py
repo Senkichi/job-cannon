@@ -222,10 +222,12 @@ class TestRejectionAnalysisBatch:
         insert_rejected_job(conn, "job2|ds|remote", title="Job 2")
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"monthly_budget_usd": 25.0}}
 
-        run_rejection_analysis(path, config)
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)):
+            run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         unreviewed = conn.execute(
@@ -395,14 +397,16 @@ class TestOnDemandTrigger:
         insert_rejected_job(conn, "test|ds|remote")
         conn.close()
 
-        mock_client, _ = make_opus_mock_response()
+        _, analysis_result = make_opus_mock_response()
 
-        with app.test_client() as client:
-            with client.session_transaction() as sess:
-                sess["_flashes"] = []
-            client.post("/dashboard/rejection-analysis")
-            with client.session_transaction() as sess:
-                flashes = sess.get("_flashes", [])
+        with patch("job_finder.web.rejection_analyzer.call_claude",
+                   return_value=(analysis_result, 0.10)):
+            with app.test_client() as client:
+                with client.session_transaction() as sess:
+                    sess["_flashes"] = []
+                client.post("/dashboard/rejection-analysis")
+                with client.session_transaction() as sess:
+                    flashes = sess.get("_flashes", [])
 
         messages = [msg for cat, msg in flashes]
         assert any("1" in m or "analyzed" in m.lower() for m in messages), (

@@ -783,6 +783,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                      AND scan_enabled = 1"""
             ).fetchall()
 
+            html_tried = 0
+
             for miss_company in miss_companies:
                 miss_company_id = miss_company["id"]
                 miss_company_name = miss_company["name_raw"]
@@ -798,7 +800,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 try:
                     html_tried += 1
                     # Step 1: Use cached careers_url or discover from homepage
-                    careers_url = miss_company.get("careers_url")
+                    careers_url = miss_company["careers_url"]
                     newly_discovered_careers = False
                     if not careers_url:
                         careers_url = find_careers_url(

@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.db import JOBS_ALL_COLUMNS, persist_job_expiry_state, update_pipeline_status
 from job_finder.web.expiry_checker import check_job_liveness, EXPIRED as _EXPIRED
-from job_finder.web.claude_client import BudgetExceededError
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.haiku_scorer import score_job_haiku
@@ -144,6 +143,12 @@ def run_haiku_scoring(
                         job_row.get("company"),
                         reason,
                     )
+                    # Auto-dismiss: only transition 'discovered' jobs to 'dismissed'
+                    if job_row.get("pipeline_status") == "discovered":
+                        update_pipeline_status(
+                            conn, dedup_key, "dismissed",
+                            source="exclusion_filter", evidence=reason,
+                        )
                     continue
 
                 # --- Haiku scoring + borderline re-eval + DB persistence ---
