@@ -205,7 +205,7 @@ def run_liveness_check(db_path: str, config: dict | None = None) -> dict:
                 conn.execute(
                     """
                     INSERT INTO pipeline_events
-                        (job_id, old_status, new_status, source, evidence, created_at)
+                        (job_id, from_status, to_status, source, evidence, timestamp)
                     VALUES (?, 'active', 'expired', 'liveness_checker', ?, datetime('now'))
                     """,
                     (dedup_key, reason),

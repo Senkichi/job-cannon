@@ -63,6 +63,11 @@ def _setup_file_logging() -> None:
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
+    # Ensure root logger level allows INFO messages to reach the handler.
+    # Without this, the default WARNING level filters them before the handler.
+    if root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
