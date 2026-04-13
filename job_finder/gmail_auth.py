@@ -165,8 +165,14 @@ def authenticate():
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             print("Refreshing expired token...")
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception as exc:
+                print(f"Token refresh failed ({exc}) — re-authenticating via browser...")
+                Path(TOKEN_PATH).unlink(missing_ok=True)
+                creds = None
+
+        if not creds:
             if not Path(CREDENTIALS_PATH).exists():
                 print(f"Error: {CREDENTIALS_PATH} not found!")
                 print("Download it from Google Cloud Console:")

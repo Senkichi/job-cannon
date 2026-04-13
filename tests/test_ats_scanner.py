@@ -1470,6 +1470,44 @@ class TestRunAtsScanHtmlFallback:
         # find_careers_url should NOT be called (no homepage_url in query)
         mock_find.assert_not_called()
 
+    def _insert_error_company(self, conn, name, homepage_url=None, scan_enabled=1):
+        """Insert a company with ats_probe_status='error'."""
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, homepage_url, ats_probe_status,
+                scan_enabled, created_at, updated_at)
+               VALUES (?, ?, ?, 'error', ?, ?, ?)""",
+            (name.lower(), name, homepage_url, scan_enabled, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def test_html_fallback_includes_error_companies(self, migrated_db_path):
+        """run_ats_scan HTML fallback includes companies with ats_probe_status='error' AND homepage_url."""
+        from job_finder.web.ats_scanner import run_ats_scan
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        self._insert_error_company(conn, "ErrorCo", homepage_url="https://error.co")
+        conn.close()
+
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
+        }
+
+        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://error.co/careers") as mock_find:
+            with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=[]) as mock_scrape:
+                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                    with patch("job_finder.web.ats_scanner.time.sleep"):
+                        result = run_ats_scan(migrated_db_path, config=config)
+
+        # find_careers_url should be called for the error company
+        mock_find.assert_called_once()
+        mock_scrape.assert_called_once()
+
     def test_run_ats_scan_summary_includes_html_scraped_count(self, migrated_db_path):
         """run_ats_scan summary dict includes html_scraped key."""
         from job_finder.web.ats_scanner import run_ats_scan

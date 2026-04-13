@@ -68,6 +68,8 @@ def _get_filter_kwargs() -> dict:
         "max_score": _safe_float(args.get("max_score", ""), "max_score"),
         "salary_min": _safe_int(args.get("salary_min", ""), "salary_min"),
         "source": args.get("source") or None,
+        "posted_within": args.get("posted_within") or None,
+        "freshness": args.get("freshness") or None,
         "date_from": args.get("date_from") or None,
         "date_to": args.get("date_to") or None,
         "sort_by": args.get("sort_by", "score"),

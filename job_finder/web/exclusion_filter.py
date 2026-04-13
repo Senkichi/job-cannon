@@ -74,3 +74,47 @@ def should_exclude(
             return True, f"Max salary ${salary_max:,} below floor ${min_salary:,}"
 
     return False, ""
+
+
+def count_haiku_scorable(conn, config: dict) -> int:
+    """Count unscored jobs that would pass the exclusion filter.
+
+    Replicates the three exclusion checks from should_exclude() in SQL so the
+    count matches what the batch scorer will actually attempt to score:
+    1. Title keyword exclusions (case-insensitive substring)
+    2. Company denylist + config exclusions (case-insensitive, trimmed)
+    3. Salary floor (salary_max < min_salary * 0.85)
+    """
+    try:
+        conditions = [
+            "haiku_score IS NULL",
+            "pipeline_status NOT IN ('dismissed', 'archived')",
+        ]
+        params: list = []
+
+        exclusions = config.get("profile", {}).get("exclusions", {})
+
+        for keyword in exclusions.get("title_keywords", []):
+            if keyword:
+                conditions.append("LOWER(title) NOT LIKE ?")
+                params.append(f"%{keyword.lower()}%")
+
+        excluded_companies = {c.lower().strip() for c in exclusions.get("companies", []) if c}
+        excluded_companies |= get_company_denylist(config)
+        if excluded_companies:
+            placeholders = ",".join("?" * len(excluded_companies))
+            conditions.append(f"LOWER(TRIM(company)) NOT IN ({placeholders})")
+            params.extend(sorted(excluded_companies))
+
+        min_salary = config.get("profile", {}).get("min_salary")
+        if min_salary is not None:
+            floor = min_salary * 0.85
+            conditions.append(
+                "NOT (salary_max IS NOT NULL AND salary_max > 0 AND salary_max < ?)"
+            )
+            params.append(floor)
+
+        where = " AND ".join(conditions)
+        return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params).fetchone()[0]
+    except Exception:
+        return 0

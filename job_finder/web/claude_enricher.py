@@ -93,16 +93,21 @@ def enrich_companies_via_claude(
 
     for batch_start in range(0, len(companies), BATCH_SIZE):
         batch = companies[batch_start:batch_start + BATCH_SIZE]
-        names = [c["name"] for c in batch]
-        batch_results = _classify_batch(names)
+        batch_results = _classify_batch(batch)
         all_results.extend(batch_results)
 
     return all_results
 
 
-def _classify_batch(company_names: list[str]) -> list[dict]:
+def _classify_batch(companies: list[dict]) -> list[dict]:
     """Classify a single batch via claude CLI."""
-    names_str = ", ".join(company_names)
+    parts = []
+    for c in companies:
+        label = c["name"]
+        if c.get("homepage_url"):
+            label += f" (homepage: {c['homepage_url']})"
+        parts.append(label)
+    names_str = ", ".join(parts)
     prompt = f"Look up these companies and find their URLs: {names_str}"
 
     cmd = [

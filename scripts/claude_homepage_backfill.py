@@ -1,7 +1,7 @@
 """Backfill homepage and careers URLs via Claude Code CLI.
 
-Processes companies without homepage_url, using Claude's knowledge to
-discover URLs that the domain-guess heuristic can't find.
+Processes companies missing homepage_url or careers_url, using Claude's
+knowledge to discover URLs that heuristics can't find.
 
 Usage:
     uv run --active python scripts/claude_homepage_backfill.py [--limit N]
@@ -47,24 +47,32 @@ def main():
 
     with standalone_connection(db_path) as conn:
         rows = conn.execute(
-            """SELECT id, name_raw FROM companies
+            """SELECT id, name_raw, homepage_url FROM companies
                WHERE homepage_url IS NULL
+                  OR careers_url IS NULL
                ORDER BY id ASC
                LIMIT ?""",
             (limit,),
         ).fetchall()
 
         total_missing = conn.execute(
-            "SELECT COUNT(*) FROM companies WHERE homepage_url IS NULL"
+            """SELECT COUNT(*) FROM companies
+               WHERE homepage_url IS NULL OR careers_url IS NULL"""
         ).fetchone()[0]
 
-        print(f"=== Claude Homepage Backfill ===")
-        print(f"Processing {len(rows)} of {total_missing} companies without homepage")
+        print(f"=== Claude Company URL Backfill ===")
+        print(f"Processing {len(rows)} of {total_missing} companies missing homepage or careers URL")
         print(f"Estimated cost: ~${len(rows) / BATCH_SIZE * 0.01:.2f}")
         print()
 
-        companies = [{"name": r["name_raw"]} for r in rows]
-        id_map = {r["name_raw"]: r["id"] for r in rows}
+        companies = []
+        id_map = {}
+        for r in rows:
+            entry = {"name": r["name_raw"]}
+            if r["homepage_url"]:
+                entry["homepage_url"] = r["homepage_url"]
+            companies.append(entry)
+            id_map[r["name_raw"]] = r["id"]
 
         start = time.time()
         results = enrich_companies_via_claude(companies)
@@ -147,10 +155,11 @@ def main():
         print(f"Sizes:         {size_found}")
         print(f"Industries:    {industry_found}")
 
-        r = conn.execute(
-            "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL"
-        ).fetchone()
-        print(f"\nTotal with homepage: {r[0]}/1486 ({100*r[0]/1486:.1f}%)")
+        total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+        hp = conn.execute("SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL").fetchone()[0]
+        cu = conn.execute("SELECT COUNT(*) FROM companies WHERE careers_url IS NOT NULL").fetchone()[0]
+        print(f"\nHomepage coverage: {hp}/{total} ({100*hp//total}%)")
+        print(f"Careers coverage:  {cu}/{total} ({100*cu//total}%)")
 
 
 if __name__ == "__main__":

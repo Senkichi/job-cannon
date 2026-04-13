@@ -56,7 +56,8 @@ def tmp_db_path():
             enrichment_backoff_until TEXT DEFAULT NULL,
             enrichment_last_error TEXT DEFAULT NULL,
             careers_url TEXT DEFAULT NULL,
-            careers_crawl_last_at TEXT DEFAULT NULL
+            careers_crawl_last_at TEXT DEFAULT NULL,
+            careers_api_endpoint TEXT DEFAULT NULL
         );
         CREATE TABLE jobs (
             dedup_key TEXT PRIMARY KEY,
@@ -574,24 +575,24 @@ class TestCrawlCareersBatch:
 
     @patch("job_finder.web.careers_crawler._score_new_jobs")
     @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_playwright_active")
+    @patch("job_finder.web.careers_page_interactions.probe_url_params")
     @patch("job_finder.web.careers_crawler._try_static_extract")
-    def test_falls_back_to_playwright(self, mock_static, mock_pw, mock_score, tmp_db_path):
-        """When static returns None, Playwright should be used."""
+    def test_falls_back_to_playwright_active(
+        self, mock_static, mock_probe, mock_pw_active, mock_pw, mock_score, tmp_db_path,
+    ):
+        """When static returns None and URL params find nothing, Playwright active is used."""
         cid = _insert_company(tmp_db_path, "JsCo", "https://jsco.com/careers")
         _insert_high_scoring_job(tmp_db_path, cid)
 
-        # Static returns None → JS-heavy page
         mock_static.return_value = None
+        mock_probe.return_value = []  # URL params find nothing
+        mock_pw_active.return_value = (
+            [{"title": "Software Engineer", "url": "https://jsco.com/jobs/1", "description": ""}],
+            None,  # no API endpoint discovered
+        )
 
-        # Mock Playwright to return rendered content
-        mock_page = MagicMock()
-        mock_page.content.return_value = """
-        <html><body>
-        <a href="/jobs/1">Software Engineer</a>
-        </body></html>
-        """
         mock_browser = MagicMock()
-        mock_browser.new_page.return_value = mock_page
         mock_pw_instance = MagicMock()
         mock_pw_instance.chromium.launch.return_value = mock_browser
         mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
@@ -602,8 +603,7 @@ class TestCrawlCareersBatch:
 
         assert result["playwright_rendered"] == 1
         assert result["jobs_found"] == 1
-        mock_page.goto.assert_called_once()
-        mock_page.close.assert_called_once()
+        mock_pw_active.assert_called_once()
 
     @patch("job_finder.web.careers_crawler._score_new_jobs")
     @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
@@ -635,3 +635,143 @@ class TestCrawlCareersBatch:
         ).fetchall()
         assert len(runs) == 1
         conn.close()
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_page_interactions.probe_url_params")
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_url_param_search_short_circuits(
+        self, mock_static, mock_probe, mock_pw, mock_score, tmp_db_path,
+    ):
+        """URL param search finding jobs should skip Playwright entirely."""
+        cid = _insert_company(tmp_db_path, "ParamCo", "https://paramco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        mock_static.return_value = None  # JS-heavy
+        mock_probe.return_value = [
+            {"title": "Data Scientist", "url": "https://paramco.com/jobs/1", "description": ""},
+        ]
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["data scientist"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["url_param_hits"] == 1
+        assert result["jobs_found"] == 1
+        assert result["playwright_rendered"] == 0
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_cached_api")
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_cached_api_fast_path(
+        self, mock_static, mock_api, mock_pw, mock_score, tmp_db_path,
+    ):
+        """Cached API endpoint should short-circuit all other tiers."""
+        cid = _insert_company(tmp_db_path, "ApiCo", "https://apico.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        # Set a cached API endpoint
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE companies SET careers_api_endpoint = ? WHERE id = ?",
+            ("https://apico.com/api/jobs", cid),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_api.return_value = [
+            {"title": "ML Engineer", "url": "https://apico.com/jobs/99", "description": ""},
+        ]
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        assert result["api_cached"] == 1
+        assert result["jobs_found"] == 1
+        mock_static.assert_not_called()  # Should never reach static tier
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_cached_api")
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_stale_api_cache_cleared(
+        self, mock_static, mock_api, mock_pw, mock_score, tmp_db_path,
+    ):
+        """When cached API returns None (broken), cache should be cleared."""
+        cid = _insert_company(tmp_db_path, "StaleCo", "https://staleco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            "UPDATE companies SET careers_api_endpoint = ? WHERE id = ?",
+            ("https://staleco.com/api/old", cid),
+        )
+        conn.commit()
+        conn.close()
+
+        mock_api.return_value = None  # Endpoint is broken
+        mock_static.return_value = []  # Fall through to static, find nothing
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        crawl_careers_batch(tmp_db_path, config)
+
+        # API cache should be cleared
+        conn = sqlite3.connect(tmp_db_path)
+        row = conn.execute(
+            "SELECT careers_api_endpoint FROM companies WHERE id = ?", (cid,),
+        ).fetchone()
+        conn.close()
+        assert row[0] is None
+
+    @patch("job_finder.web.careers_crawler._score_new_jobs")
+    @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
+    @patch("job_finder.web.careers_crawler._try_playwright_active")
+    @patch("job_finder.web.careers_page_interactions.probe_url_params")
+    @patch("job_finder.web.careers_crawler._try_static_extract")
+    def test_api_endpoint_cached_on_discovery(
+        self, mock_static, mock_probe, mock_pw_active, mock_pw, mock_score, tmp_db_path,
+    ):
+        """When Playwright discovers an API endpoint, it should be cached."""
+        cid = _insert_company(tmp_db_path, "DiscCo", "https://discco.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        mock_static.return_value = None
+        mock_probe.return_value = []
+        mock_pw_active.return_value = (
+            [{"title": "Engineer", "url": "https://discco.com/j/1", "description": ""}],
+            "https://discco.com/api/v1/jobs",  # Discovered API endpoint
+        )
+
+        mock_browser = MagicMock()
+        mock_pw_instance = MagicMock()
+        mock_pw_instance.chromium.launch.return_value = mock_browser
+        mock_pw.return_value.__enter__ = MagicMock(return_value=mock_pw_instance)
+        mock_pw.return_value.__exit__ = MagicMock(return_value=False)
+
+        config = {"profile": {"target_titles": ["engineer"], "exclusions": {}}}
+        crawl_careers_batch(tmp_db_path, config)
+
+        conn = sqlite3.connect(tmp_db_path)
+        row = conn.execute(
+            "SELECT careers_api_endpoint FROM companies WHERE id = ?", (cid,),
+        ).fetchone()
+        conn.close()
+        assert row[0] == "https://discco.com/api/v1/jobs"
