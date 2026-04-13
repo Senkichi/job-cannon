@@ -63,6 +63,18 @@ _ATS_DOMAINS = [
 # Subdomains that indicate a careers site (checked after ATS exclusion)
 _CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.", "apply.")
 
+
+def _extract_base_domain(url: str) -> str | None:
+    """Extract registrable domain from URL, stripping www. prefix.
+
+    Returns e.g. 'google.com' from 'https://www.google.com/'.
+    """
+    netloc = urlparse(url).netloc
+    if not netloc:
+        return None
+    return netloc.removeprefix("www.")
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -399,7 +411,38 @@ def find_careers_url(
                 )
                 return href
 
-    logger.debug("find_careers_url('%s'): no careers link found", homepage_url)
+    logger.debug("find_careers_url('%s'): no careers link found in HTML", homepage_url)
+
+    # Proactive subdomain probe: try careers.{domain}, jobs.{domain}, etc.
+    base_domain = _extract_base_domain(homepage_url)
+    if base_domain:
+        for prefix in _CAREERS_SUBDOMAINS:
+            candidate = f"https://{prefix}{base_domain}/"
+            try:
+                probe = requests.head(
+                    candidate, timeout=3, headers=_HEADERS, allow_redirects=True,
+                )
+                if probe.status_code >= 400:
+                    continue
+                final = urlparse(probe.url)
+                if any(ats in final.netloc for ats in _ATS_DOMAINS):
+                    continue
+                # Validate final URL still looks like a careers page —
+                # reject if redirect bounced back to main site
+                if any(final.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
+                    logger.debug(
+                        "find_careers_url('%s'): subdomain probe hit '%s'",
+                        homepage_url, probe.url,
+                    )
+                    return probe.url
+                if any(p in final.path for p in _CAREERS_PATTERNS):
+                    logger.debug(
+                        "find_careers_url('%s'): subdomain probe hit '%s' (path match)",
+                        homepage_url, probe.url,
+                    )
+                    return probe.url
+            except Exception:
+                continue
 
     # Haiku fallback: if heuristic found nothing and client is available
     if conn is not None and config is not None:

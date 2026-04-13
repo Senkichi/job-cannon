@@ -377,7 +377,7 @@ def _submit_dataforseo_tasks(
         source = DataForSEOSource(
             api_key,
             max_age_days=dataforseo_config.get("max_age_days", 7),
-            depth=dataforseo_config.get("depth", 20),
+            depth=dataforseo_config.get("depth", 200),
             priority=dataforseo_config.get("priority", 1),
             poll_interval_seconds=dataforseo_config.get("poll_interval_seconds", 30),
             poll_timeout_seconds=dataforseo_config.get("poll_timeout_seconds", 360),

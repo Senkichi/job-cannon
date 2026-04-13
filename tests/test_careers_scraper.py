@@ -3,6 +3,7 @@
 Covers:
 - find_careers_url: detect /careers, /jobs links from homepage HTML
 - find_careers_url: handle relative URLs, ATS redirects, no match
+- find_careers_url: proactive subdomain probing (careers.*, jobs.*, etc.)
 - scrape_careers_page: extract keyword-matched job listings from static HTML
 - scrape_careers_page: exclusion keyword filtering, JS-rendered fallback
 """
@@ -634,3 +635,140 @@ class TestMetaRefreshDetection:
 
         # Meta-refresh to non-careers URL is ignored; link scraping finds /careers
         assert result == "https://example.com/careers"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _extract_base_domain
+# ---------------------------------------------------------------------------
+
+class TestExtractBaseDomain:
+
+    def test_strips_www_prefix(self):
+        from job_finder.web.careers_scraper import _extract_base_domain
+        assert _extract_base_domain("https://www.google.com/") == "google.com"
+
+    def test_no_www_passthrough(self):
+        from job_finder.web.careers_scraper import _extract_base_domain
+        assert _extract_base_domain("https://nvidia.com/en-us/") == "nvidia.com"
+
+    def test_empty_url_returns_none(self):
+        from job_finder.web.careers_scraper import _extract_base_domain
+        assert _extract_base_domain("") is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: subdomain probing
+# ---------------------------------------------------------------------------
+
+class TestSubdomainProbing:
+    """Tests for the proactive subdomain probe step in find_careers_url."""
+
+    def _bare_homepage_response(self):
+        """Mock a homepage with no careers links (like google.com)."""
+        html = "<html><body><input type='text' name='q'></body></html>"
+        return _mock_response("https://www.example.com/", html)
+
+    def _head_response(self, url, status_code=200):
+        resp = MagicMock()
+        resp.url = url
+        resp.status_code = status_code
+        return resp
+
+    def test_subdomain_probe_finds_careers_subdomain(self):
+        """HEAD to careers.example.com returns 200 — function returns it."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        get_resp = self._bare_homepage_response()
+        head_resp = self._head_response("https://careers.example.com/")
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", return_value=head_resp):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result == "https://careers.example.com/"
+
+    def test_subdomain_probe_skips_404(self):
+        """All subdomain probes return 404 — falls through to None."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        get_resp = self._bare_homepage_response()
+        head_resp = self._head_response("https://careers.example.com/", status_code=404)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", return_value=head_resp):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result is None
+
+    def test_subdomain_probe_validates_final_url(self):
+        """Probe returns 200 but final URL is main site (redirect bounce) — rejected."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        get_resp = self._bare_homepage_response()
+        # careers.example.com redirected back to www.example.com
+        head_resp = self._head_response("https://www.example.com/", status_code=200)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", return_value=head_resp):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result is None
+
+    def test_subdomain_probe_accepts_careers_path_redirect(self):
+        """Probe redirects to www.example.com/careers — accepted via path match."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        get_resp = self._bare_homepage_response()
+        head_resp = self._head_response("https://www.example.com/careers", status_code=200)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", return_value=head_resp):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result == "https://www.example.com/careers"
+
+    def test_subdomain_probe_skips_ats_redirect(self):
+        """Probe redirects to jobs.lever.co — rejected as ATS domain."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        get_resp = self._bare_homepage_response()
+        head_resp = self._head_response("https://jobs.lever.co/acme", status_code=200)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", return_value=head_resp):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result is None
+
+    def test_subdomain_probe_not_called_when_link_found(self):
+        """If heuristic finds /careers link, no HEAD probes are made."""
+        from job_finder.web.careers_scraper import find_careers_url
+
+        html = '<html><body><a href="/careers">Join us</a></body></html>'
+        get_resp = _mock_response("https://www.example.com/", html)
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head") as mock_head:
+                result = find_careers_url("https://www.example.com/")
+
+        assert result == "https://www.example.com/careers"
+        mock_head.assert_not_called()
+
+    def test_subdomain_probe_handles_connection_error(self):
+        """Network error during HEAD probe is swallowed — tries next subdomain."""
+        from job_finder.web.careers_scraper import find_careers_url
+        from requests.exceptions import ConnectionError
+
+        get_resp = self._bare_homepage_response()
+
+        def head_side_effect(url, **kwargs):
+            if "careers." in url:
+                raise ConnectionError("DNS resolution failed")
+            # jobs. subdomain works
+            return self._head_response("https://jobs.example.com/")
+
+        with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
+            with patch("job_finder.web.careers_scraper.requests.head", side_effect=head_side_effect):
+                result = find_careers_url("https://www.example.com/")
+
+        assert result == "https://jobs.example.com/"

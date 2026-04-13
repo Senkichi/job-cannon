@@ -93,8 +93,8 @@ sources:
     # Credentials: base64(login:password) — copy from https://app.dataforseo.com/api-access
     api_key: ""
     # Results per query (10-200). Each 10 = 1 billing unit ($0.0006 normal / $0.0012 high).
-    # depth=20 recommended: doubles coverage, ~$0.0012/query.
-    depth: 20
+    # depth=200: full index access, ~$0.10/run max with 8 queries, billed per result returned.
+    depth: 200
     # Only ingest jobs posted within this many days (uses posting timestamp, not time_ago string)
     max_age_days: 7
     # Task priority: 1=normal (~5 min, $0.0006/10 results), 2=high (~1 min, $0.0012/10 results)
@@ -256,6 +256,18 @@ notifications:
   pipeline_change: true
   # Notify when monthly API budget reaches 80% or 100%
   budget_alert: true
+
+# --- Careers page crawler ---
+careers_crawl:
+  enabled: true
+  # Re-crawl companies after this many days
+  freshness_days: 1
+  # Max "Load more" button clicks per company (prevents runaway loops)
+  max_load_more_clicks: 5
+  # Max pagination pages to follow per company
+  max_pagination_pages: 5
+  # Enable Playwright interaction (load-more, pagination, search forms)
+  interactive_enabled: true
 
 # --- ATS (Applicant Tracking System) scanning ---
 ats:

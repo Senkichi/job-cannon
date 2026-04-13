@@ -186,7 +186,7 @@ class TestCancellationPreLoop:
 # ---------------------------------------------------------------------------
 
 class TestDeferredCounters:
-    """BATCH-05: counters accumulated in memory and flushed once before _finish_session."""
+    """BATCH-05: counters accumulated in memory, flushed periodically and before _finish_session."""
 
     def test_counter_deferred_haiku(self):
         """Haiku bg: 2 scored + 1 None → session row has scored=2, skipped=1 at end."""

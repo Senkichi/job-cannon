@@ -778,7 +778,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         if find_careers_url is not None and scrape_careers_page is not None:
             miss_companies = conn.execute(
                 """SELECT id, name_raw, homepage_url, careers_url FROM companies
-                   WHERE ats_probe_status = 'miss'
+                   WHERE ats_probe_status IN ('miss', 'error')
                      AND homepage_url IS NOT NULL
                      AND scan_enabled = 1"""
             ).fetchall()

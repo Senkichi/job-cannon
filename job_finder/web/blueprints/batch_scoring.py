@@ -9,7 +9,7 @@ from flask import Blueprint, current_app, render_template
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.exclusion_filter import should_exclude
+from job_finder.web.exclusion_filter import count_haiku_scorable, should_exclude
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -29,10 +29,7 @@ def batch_score_haiku_start():
     testing = current_app.config.get("TESTING", False)
 
     with standalone_connection(db_path) as conn:
-        total = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
-            "AND pipeline_status NOT IN ('dismissed', 'archived')"
-        ).fetchone()[0]
+        total = count_haiku_scorable(conn, config)
 
         if total == 0:
             return render_template(
@@ -292,27 +289,26 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                 conn.commit()
                 return
 
-            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
             for row in rows:
                 job_row = dict(row)
 
-                # Pre-Haiku exclusion filter
+                # Pre-Haiku exclusion filter — auto-dismiss excluded jobs silently.
+                # Excluded jobs are NOT counted against scored/skipped: total was
+                # computed by count_haiku_scorable() which already excludes them.
                 exclusions = config.get("profile", {}).get("exclusions", {})
                 profile_min_salary = config.get("profile", {}).get("min_salary")
                 excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
                 if excluded:
                     logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
-                    # Auto-dismiss discovered jobs so they don't reappear in future batches
                     dedup_key = job_row.get("dedup_key")
                     if dedup_key and job_row.get("pipeline_status") == "discovered":
                         update_pipeline_status(
                             conn, dedup_key, "dismissed",
                             source="exclusion_filter", evidence=reason,
                         )
-                    skipped_count += 1
                     continue
 
                 try:
@@ -328,7 +324,16 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     )
                     skipped_count += 1
 
-            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
+                # Flush progress counters periodically so the polling endpoint sees updates
+                processed = scored_count + skipped_count
+                if processed % 5 == 0:
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                        (scored_count, skipped_count, session_id),
+                    )
+                    conn.commit()
+
+            # Final flush before finishing
             conn.execute(
                 "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
                 (scored_count, skipped_count, session_id),
@@ -384,7 +389,6 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                 conn.commit()
                 return
 
-            # BATCH-05: In-memory counters (was per-job DB updates)
             scored_count = 0
             skipped_count = 0
 
@@ -403,7 +407,16 @@ def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
                     )
                     skipped_count += 1
 
-            # BATCH-05: Flush counters once before finishing (so _finish_session sees correct values)
+                # Flush progress counters periodically so the polling endpoint sees updates
+                processed = scored_count + skipped_count
+                if processed % 5 == 0:
+                    conn.execute(
+                        "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
+                        (scored_count, skipped_count, session_id),
+                    )
+                    conn.commit()
+
+            # Final flush before finishing
             conn.execute(
                 "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
                 (scored_count, skipped_count, session_id),

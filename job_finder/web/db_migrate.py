@@ -655,6 +655,12 @@ MIGRATIONS = [
             created_at TEXT NOT NULL
         )""",
     ],
+
+    # Migration 35: Cache discovered careers API endpoints for direct HTTP
+    # access on subsequent crawls (skips Playwright entirely).
+    [
+        "ALTER TABLE companies ADD COLUMN careers_api_endpoint TEXT DEFAULT NULL",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:
