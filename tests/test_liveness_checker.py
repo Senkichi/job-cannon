@@ -142,11 +142,11 @@ def liveness_db(tmp_path):
     conn.execute("""CREATE TABLE pipeline_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         job_id TEXT NOT NULL,
-        old_status TEXT,
-        new_status TEXT NOT NULL,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
         source TEXT DEFAULT 'manual',
         evidence TEXT DEFAULT '',
-        created_at TEXT NOT NULL
+        timestamp TEXT NOT NULL
     )""")
     conn.commit()
     conn.close()
