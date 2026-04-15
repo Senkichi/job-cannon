@@ -190,7 +190,7 @@ def score_job_haiku(
                  min_salary, skills, industries keys.
         conn: Open SQLite connection for cost recording.
             Ignored when *ctx* is provided.
-        config: Application config dict (reads scoring.models.haiku, scoring.monthly_budget_usd).
+        config: Application config dict (reads scoring.models.haiku, scoring.daily_budget_usd).
             Ignored when *ctx* is provided.
         max_chars: Maximum characters for description snippet (default 2000).
                    Pass 4000 for borderline re-evaluation to expand context.

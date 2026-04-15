@@ -281,7 +281,7 @@ class TestPreferenceExtraction:
             "structural_preferences": ["Move education section after skills"],
         }
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         diff_text = "+Led growth by 25%\n-spearheaded growth by 25%\n"
 
         with patch("job_finder.web.resume_feedback.call_claude") as mock_call:
@@ -309,7 +309,7 @@ class TestPreferenceExtraction:
         )
         conn.commit()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         diff_text = "+Led growth\n-spearheaded growth\n"
 
         preferences = _extract_preferences(diff_text, conn, "job123", config)
@@ -404,7 +404,7 @@ class TestDriveFeedbackPoll:
         conn.commit()
         conn.close()  # run_drive_feedback_poll opens its own connection
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.get_drive_service") as mock_get_svc:
             mock_service = MagicMock()
@@ -443,7 +443,7 @@ class TestDriveFeedbackPoll:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.get_drive_service") as mock_get_svc:
             mock_service = MagicMock()
@@ -470,7 +470,7 @@ class TestDriveFeedbackPoll:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.get_drive_service") as mock_get_svc:
             mock_service = MagicMock()
@@ -505,7 +505,7 @@ class TestDriveFeedbackPoll:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.get_drive_service") as mock_get_svc:
             mock_service = MagicMock()
@@ -530,7 +530,7 @@ class TestDriveFeedbackPoll:
         path, conn = db_with_resume_gen
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.get_drive_service") as mock_get_svc:
             mock_service = MagicMock()
@@ -602,7 +602,7 @@ class TestConsolidation:
         self._insert_preferences(conn, "j1", 5)  # Only 5, below threshold of 10
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_preference_consolidation(path, config)
 
         assert result["consolidated"] is False
@@ -638,7 +638,7 @@ class TestConsolidation:
         self._insert_preferences(conn, "j1", 12)  # 12 > threshold of 10
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
             result = run_preference_consolidation(path, config)
@@ -674,7 +674,7 @@ class TestConsolidation:
         self._insert_preferences(conn, "j1", 11)
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
             run_preference_consolidation(path, config)
@@ -725,7 +725,7 @@ class TestConsolidation:
         self._insert_preferences(conn, "j1", 11)
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
             result = run_preference_consolidation(path, config)
@@ -763,7 +763,7 @@ class TestConsolidation:
         self._insert_preferences(conn, "j1", 12)
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_preference_consolidation(path, config)
 
         # Should return without consolidating (budget exceeded)

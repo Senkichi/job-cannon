@@ -99,7 +99,7 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         generate_interview_prep_background(dedup_key, path, config)
         # Should NOT have called call_claude (dedup guard skipped it)
@@ -129,7 +129,7 @@ class TestInterviewPrepDedup:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         generate_interview_prep_background(dedup_key, path, config)
         # call_claude should not have been called (dedup guard skipped it)
@@ -152,7 +152,7 @@ class TestInterviewPrepDedup:
         conn.close()
 
         config = {
-            "scoring": {"monthly_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
+            "scoring": {"daily_budget_usd": 25.0, "models": {"opus": "claude-opus-4-6"}},
         }
 
         prep_result = {
@@ -200,7 +200,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -260,7 +260,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -295,7 +295,7 @@ class TestInterviewPrepContent:
 
         config = {
             "scoring": {
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"opus": "claude-opus-4-6"},
             },
         }
@@ -338,7 +338,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         prep_result = {
             "company_brief": "Brief.",
@@ -373,7 +373,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""), \
              patch("job_finder.web.interview_prep.call_claude", side_effect=RuntimeError("API error")):
@@ -399,7 +399,7 @@ class TestInterviewPrepContent:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock()]
@@ -444,7 +444,7 @@ class TestInterviewPrepBudget:
         dedup_key = "acme|senior data scientist|remote"
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 0.0}}  # Budget at zero
+        config = {"scoring": {"daily_budget_usd": 0.0}}  # Budget at zero
 
         generate_interview_prep_background(dedup_key, path, config)
         # API should NOT be called when budget exceeded

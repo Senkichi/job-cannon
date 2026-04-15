@@ -25,7 +25,6 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
-    DEFAULT_MONTHLY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
@@ -278,8 +277,6 @@ def _parse_form_to_config(form) -> dict:
         scoring["weights"] = weights
     if _has("min_score_threshold"):
         scoring["min_score_threshold"] = safe_int(form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD)
-    if _has("monthly_budget_usd"):
-        scoring["monthly_budget_usd"] = safe_float(form["monthly_budget_usd"], DEFAULT_MONTHLY_BUDGET_USD)
     if _has("haiku_threshold"):
         scoring["haiku_threshold"] = safe_int(form["haiku_threshold"], DEFAULT_HAIKU_THRESHOLD)
     models = {}

@@ -13,8 +13,8 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
-from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD, get_cost_stats
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD, DEFAULT_HAIKU_THRESHOLD
+from job_finder.web.claude_client import get_cost_stats
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_haiku_scorable
 from job_finder.web.model_provider import tier_has_configured_provider

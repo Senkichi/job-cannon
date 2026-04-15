@@ -114,7 +114,7 @@ class TestNoUnreviewedRejections:
         path, conn = make_migrated_db()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -130,7 +130,7 @@ class TestNoUnreviewedRejections:
         insert_rejected_job(conn, "acme|ds|remote", rejection_reviewed=1)
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -145,7 +145,7 @@ class TestNoUnreviewedRejections:
         path, conn = make_migrated_db()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
         run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -168,7 +168,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         _, analysis_result = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.call_claude",
                    return_value=(analysis_result, 0.10)) as mock_cc:
@@ -190,7 +190,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         _, analysis_result = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.call_claude",
                    return_value=(analysis_result, 0.10)):
@@ -223,7 +223,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         _, analysis_result = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.call_claude",
                    return_value=(analysis_result, 0.10)):
@@ -252,7 +252,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         _, analysis_result = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.call_claude",
                    return_value=(analysis_result, 0.10)):
@@ -274,7 +274,7 @@ class TestRejectionAnalysisBatch:
         conn.close()
 
         _, analysis_result = make_opus_mock_response()
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         with patch("job_finder.web.rejection_analyzer.call_claude",
                    return_value=(analysis_result, 0.10)):
@@ -301,7 +301,7 @@ class TestBudgetGate:
         conn.close()
 
         # Zero budget forces cost_gate to return False
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
 
         mock_client = MagicMock()
         result = run_rejection_analysis(path, config)
@@ -320,7 +320,7 @@ class TestBudgetGate:
         insert_rejected_job(conn, "acme|ds|remote")
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
         run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
@@ -340,7 +340,7 @@ def _make_test_config(db_path, budget=25.0):
         "db": {"path": db_path},
         "scoring": {
             "min_score_threshold": 40,
-            "monthly_budget_usd": budget,
+            "daily_budget_usd": budget,
         },
         "profile": {
             "target_titles": ["Data Scientist"],

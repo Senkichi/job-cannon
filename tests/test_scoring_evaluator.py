@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from scoring_evaluator import (
     check_profile_ready,
     gather_ground_truth,

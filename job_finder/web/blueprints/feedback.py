@@ -21,11 +21,6 @@ from job_finder.web.db_helpers import get_db
 
 feedback_bp = Blueprint("feedback", __name__, url_prefix="/feedback")
 
-def _get_db():
-    """Get DB connection using app config DB_PATH."""
-    db_path = current_app.config.get("DB_PATH", "jobs.db")
-    return get_db(db_path)
-
 def _query_preferences(conn):
     """Query all preferences with job context, grouped by job."""
     rows = conn.execute(
@@ -57,7 +52,7 @@ def _get_stats(conn, preferences):
 @feedback_bp.route("/", strict_slashes=False)
 def index():
     """Feedback page — display all detected resume preferences."""
-    conn = _get_db()
+    conn = get_db(current_app.config["DB_PATH"])
 
     try:
         preferences = _query_preferences(conn)
@@ -95,7 +90,7 @@ def toggle(pref_id: int):
 
     HTMX: returns updated preference row partial via outerHTML swap.
     """
-    conn = _get_db()
+    conn = get_db(current_app.config["DB_PATH"])
 
     # Toggle accepted column
     row = conn.execute(

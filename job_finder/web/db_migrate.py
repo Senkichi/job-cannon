@@ -773,7 +773,7 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
             except Exception as e:
                 logger.warning("Failed to log dedup migration run: %s", e)
 
-            print(f"[db_migrate] Retroactive dedup: merged {merged_count} duplicate jobs.")
+            logger.info("Retroactive dedup: merged %d duplicate jobs.", merged_count)
 
             # Queue merged canonical rows for re-scoring (nullify AI scores)
             try:
@@ -789,7 +789,7 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
             except Exception as e:
                 logger.warning("Failed to queue merged rows for re-scoring: %s", e)
         else:
-            print("[db_migrate] Retroactive dedup: no duplicates found.")
+            logger.info("Retroactive dedup: no duplicates found.")
 
     except Exception as e:
         logger.warning("Retroactive dedup failed (non-fatal): %s", e)
@@ -829,7 +829,8 @@ def _apply_migration(
     conn.commit()
 
     # Update version counter after all statements succeed
-    assert isinstance(version, int), f"Migration version must be int, got {type(version)}"
+    if not isinstance(version, int):
+        raise TypeError(f"Migration version must be int, got {type(version)}")
     conn.execute(f"PRAGMA user_version = {version}")
     conn.commit()
-    print(f"[db_migrate] Migration {version} applied successfully.")
+    logger.info("Migration %d applied successfully.", version)

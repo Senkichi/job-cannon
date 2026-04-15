@@ -10,8 +10,8 @@ from flask import (
     render_template,
 )
 
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.claude_client import (
-    DEFAULT_DAILY_BUDGET_USD,
     get_cost_stats,
     get_daily_cost_breakdown,
     get_monthly_feature_breakdown,
@@ -21,15 +21,10 @@ from job_finder.web.db_helpers import get_db
 
 costs_bp = Blueprint("costs", __name__, url_prefix="/costs")
 
-def _get_db():
-    """Get DB connection using app config DB_PATH."""
-    db_path = current_app.config.get("DB_PATH", "jobs.db")
-    return get_db(db_path)
-
 @costs_bp.route("/", strict_slashes=False)
 def index():
     """Cost Monitor page — 30-day chart, budget bar, stat cards, feature table."""
-    conn = _get_db()
+    conn = get_db(current_app.config["DB_PATH"])
 
     # Read daily_budget_usd from config — matches what cost_gate() enforces
     budget_cap = (

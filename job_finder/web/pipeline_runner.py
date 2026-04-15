@@ -21,7 +21,7 @@ import threading
 from datetime import datetime
 from typing import Optional
 
-from job_finder.config import DEFAULT_LOOKBACK_DAYS, DEFAULT_MONTHLY_BUDGET_USD
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD, DEFAULT_LOOKBACK_DAYS
 from job_finder.db import upsert_job, log_run
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
@@ -210,13 +210,13 @@ def _check_budget_alert(config: dict, db_path: str) -> None:
     repeated notifications within a single app session. Resets on app restart.
 
     Args:
-        config: Full JF_CONFIG dict (reads scoring.monthly_budget_usd and
+        config: Full JF_CONFIG dict (reads scoring.daily_budget_usd and
                 notifications.budget_alert toggle).
         db_path: Path to the SQLite database file.
     """
     global _last_budget_pct_notified
 
-    budget_cap = config.get("scoring", {}).get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
+    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     if not budget_cap or budget_cap <= 0:
         return
 

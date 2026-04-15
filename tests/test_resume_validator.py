@@ -44,7 +44,7 @@ def _test_config():
     """Return a minimal config dict for tests."""
     return {
         "scoring": {
-            "monthly_budget_usd": 25.0,
+            "daily_budget_usd": 25.0,
             "models": {
                 "sonnet": "claude-sonnet-4-6",
             },
@@ -450,7 +450,7 @@ _MOCK_JOB_ROW = {
 _BACKGROUND_CONFIG = {
     "scoring": {
         "models": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
-        "monthly_budget_usd": 25.0,
+        "daily_budget_usd": 25.0,
         "multi_version_threshold": 80,
     },
     "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},

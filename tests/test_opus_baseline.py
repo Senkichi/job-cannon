@@ -4,8 +4,12 @@ import json
 import sqlite3
 from unittest.mock import patch, MagicMock
 
+import sys
+from pathlib import Path
+
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from opus_baseline import (
     stratified_sample_jobs,
     call_opus_cli,

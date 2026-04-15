@@ -25,11 +25,10 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     DEFAULT_MODEL_HAIKU,
     DEFAULT_MODEL_SONNET,
-    DEFAULT_MONTHLY_BUDGET_USD,
+    DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
-from job_finder.web.claude_client import DEFAULT_DAILY_BUDGET_USD
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
@@ -124,7 +123,6 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
 
     # --- Jinja2 globals: centralized config defaults ---
     app.jinja_env.globals["DEFAULT_HAIKU_THRESHOLD"] = DEFAULT_HAIKU_THRESHOLD
-    app.jinja_env.globals["DEFAULT_MONTHLY_BUDGET_USD"] = DEFAULT_MONTHLY_BUDGET_USD
     app.jinja_env.globals["DEFAULT_MIN_SCORE_THRESHOLD"] = DEFAULT_MIN_SCORE_THRESHOLD
     app.jinja_env.globals["DEFAULT_MULTI_VERSION_THRESHOLD"] = DEFAULT_MULTI_VERSION_THRESHOLD
     app.jinja_env.globals["DEFAULT_LOOKBACK_DAYS"] = DEFAULT_LOOKBACK_DAYS
