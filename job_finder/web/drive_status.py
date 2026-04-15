@@ -53,40 +53,27 @@ def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
 
 def _compute_drive_status(config: dict, token_path: str) -> dict:
     """Internal: compute Drive status without caching."""
-    # Lazy import to avoid triggering google-auth at module load time in tests
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-
     try:
-        # 1. Token file must exist
-        if not Path(token_path).exists():
-            return {
-                "ok": False,
-                "error": f"Token file not found: '{token_path}'. Run: python -m job_finder.gmail_auth",
-                "error_code": "no_token",
-            }
+        # 1-4. Token existence, scope check, and refresh via centralized function
+        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        try:
+            creds = get_credentials(token_path)
+        except AuthenticationError as exc:
+            error_msg = str(exc)
+            if "not found" in error_msg:
+                return {"ok": False, "error": error_msg, "error_code": "no_token"}
+            elif "refresh failed" in error_msg.lower():
+                return {"ok": False, "error": error_msg, "error_code": "refresh_failed"}
+            else:
+                return {"ok": False, "error": error_msg, "error_code": "refresh_failed"}
 
-        # 2. Load with scopes=None for honest scope detection
-        creds = Credentials.from_authorized_user_file(token_path, scopes=None)
-
-        # 3. Check that drive.file scope was actually granted
+        # Check that drive.file scope was actually granted
         if not creds.scopes or _DRIVE_FILE_SCOPE not in creds.scopes:
             return {
                 "ok": False,
                 "error": "Token lacks drive.file scope. Run: python -m job_finder.gmail_auth",
                 "error_code": "missing_scope",
             }
-
-        # 4. Refresh expired token
-        if creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception as exc:
-                return {
-                    "ok": False,
-                    "error": f"Token refresh failed: {exc}. Run: python -m job_finder.gmail_auth",
-                    "error_code": "refresh_failed",
-                }
 
         # 5. Drive folder must be configured
         folder_id = config.get("drive", {}).get("folder_id", "")

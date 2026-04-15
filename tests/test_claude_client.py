@@ -34,6 +34,28 @@ def test_record_cost_explicit_provider(migrated_db):
     assert row[0] == "gemini"
 
 
+def test_record_cost_free_provider_records_zero(migrated_db):
+    """record_cost() sets cost_usd=0.0 for free/subscription providers."""
+    _, conn = migrated_db
+    cost = record_cost(conn, "job3", "haiku_score", "qwen2.5:14b", 1000, 500, provider="ollama")
+    assert cost == 0.0
+    row = conn.execute(
+        "SELECT cost_usd, input_tokens, output_tokens FROM scoring_costs WHERE job_id = ?",
+        ("job3",),
+    ).fetchone()
+    assert row[0] == 0.0
+    # Token counts still recorded for analytics
+    assert row[1] == 1000
+    assert row[2] == 500
+
+
+def test_record_cost_claude_cli_records_zero(migrated_db):
+    """record_cost() with provider='claude_cli' records $0 (subscription-based)."""
+    _, conn = migrated_db
+    cost = record_cost(conn, "job4", "sonnet_eval", "claude-sonnet-4-6", 2000, 800, provider="claude_cli")
+    assert cost == 0.0
+
+
 # ---------------------------------------------------------------------------
 # Tests: get_monthly_provider_breakdown
 # ---------------------------------------------------------------------------

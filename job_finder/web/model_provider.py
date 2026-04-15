@@ -21,7 +21,7 @@ from typing import Any
 from jsonschema import ValidationError, validate
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_OPUS, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import BudgetExceededError, cost_gate, record_cost
+from job_finder.web.claude_client import BudgetExceededError, FREE_PROVIDERS, cost_gate, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +194,8 @@ _SUPPORTED_PROVIDERS: frozenset[str] = frozenset({
     "groq", "cerebras",
 })
 
-# Providers that are free (no cost_gate needed, record cost via record_cost).
-# groq and cerebras are free in this app's budget model only.
-# Vendor billing/rate limits still exist outside the app.
-_FREE_PROVIDERS: frozenset[str] = frozenset({
-    "gemini", "ollama", "ollm", "sambanova",
-    "groq", "cerebras",
-})
+# Alias for backward-compat — canonical definition is in claude_client.py.
+_FREE_PROVIDERS = FREE_PROVIDERS
 
 
 class ProviderCascadeExhaustedError(RuntimeError):

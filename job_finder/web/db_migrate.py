@@ -661,6 +661,22 @@ MIGRATIONS = [
     [
         "ALTER TABLE companies ADD COLUMN careers_api_endpoint TEXT DEFAULT NULL",
     ],
+
+    # Migration 36: Careers crawl tier caching — stores which extraction tier
+    # last succeeded per company (static/url_param/playwright/api_cached) to
+    # skip lower tiers on subsequent crawls.
+    [
+        "ALTER TABLE companies ADD COLUMN careers_crawl_tier TEXT DEFAULT NULL",
+    ],
+
+    # Migration 37: AI-navigated careers crawler — cached navigation recipe.
+    # Stores a Haiku-discovered navigation recipe (JSON) per company so that
+    # subsequent crawls replay the recipe mechanically with zero AI cost.
+    # discover_navigation_recipe() writes this column; replay_navigation_recipe()
+    # reads it. Stale recipes are re-discovered automatically.
+    [
+        "ALTER TABLE companies ADD COLUMN careers_nav_recipe TEXT DEFAULT NULL",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:

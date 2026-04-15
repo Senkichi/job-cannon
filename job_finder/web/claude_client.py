@@ -53,6 +53,15 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-6": {"input": 5.0, "output": 25.0},
 }
 
+# Providers that incur no per-call cost.  Used by cost_gate() to exclude
+# free/subscription spend from budget calculations, and by record_cost()
+# to record $0 for these providers.
+# "claude_cli" = calls routed through the Claude Code CLI (subscription-based).
+FREE_PROVIDERS: frozenset[str] = frozenset({
+    "gemini", "ollama", "ollm", "sambanova",
+    "groq", "cerebras", "claude_cli",
+})
+
 
 class BudgetExceededError(Exception):
     """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
@@ -126,9 +135,9 @@ def record_cost(
         provider: Provider name for attribution (default "anthropic").
 
     Returns:
-        Computed cost in USD.
+        Computed cost in USD (0.0 for free/subscription providers).
     """
-    cost_usd = compute_cost(model, input_tokens, output_tokens)
+    cost_usd = 0.0 if provider in FREE_PROVIDERS else compute_cost(model, input_tokens, output_tokens)
     timestamp = utc_now_iso()
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
@@ -207,12 +216,17 @@ def cost_gate(
 
     now = datetime.now(timezone.utc)
 
+    # Only count spend from per-call billed providers (exclude free/subscription)
+    free = tuple(FREE_PROVIDERS)
+    free_placeholders = ",".join("?" * len(free))
+
     # Monthly check
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) "
-        "FROM scoring_costs WHERE timestamp >= ?",
-        (month_start,),
+        f"SELECT COALESCE(SUM(cost_usd), 0.0) "
+        f"FROM scoring_costs WHERE timestamp >= ? "
+        f"AND provider NOT IN ({free_placeholders})",
+        (month_start, *free),
     ).fetchone()
     if (row[0] if row else 0.0) >= monthly_cap:
         return False
@@ -220,9 +234,10 @@ def cost_gate(
     # Daily check
     day_start = now.strftime("%Y-%m-%dT00:00:00Z")
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) "
-        "FROM scoring_costs WHERE timestamp >= ?",
-        (day_start,),
+        f"SELECT COALESCE(SUM(cost_usd), 0.0) "
+        f"FROM scoring_costs WHERE timestamp >= ? "
+        f"AND provider NOT IN ({free_placeholders})",
+        (day_start, *free),
     ).fetchone()
     if (row[0] if row else 0.0) >= daily_cap:
         return False
@@ -570,7 +585,7 @@ def call_claude(
     usage = envelope.get("usage", {})
     input_tokens: int = usage.get("input_tokens", 0)
     output_tokens: int = usage.get("output_tokens", 0)
-    cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens)
+    cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens, provider="claude_cli")
 
     # Parse result — structured_output when schema was provided,
     # otherwise parse the text result as JSON with fallback.
@@ -628,6 +643,7 @@ def call_claude(
                 conn, job_id, purpose, model,
                 retry_usage.get("input_tokens", 0),
                 retry_usage.get("output_tokens", 0),
+                provider="claude_cli",
             )
 
             # Parse retry result

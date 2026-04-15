@@ -37,10 +37,8 @@ _GDOC_MIME = "application/vnd.google-apps.document"
 def get_drive_service(token_path: str = "token.json"):
     """Build and return an authenticated Google Drive v3 service.
 
-    Loads credentials from token_path using scopes=None for honest scope
-    detection -- the actual granted scopes are read from the token file itself,
-    not masked by the scopes parameter. Validates that the drive.file scope is
-    present. Refreshes an expired token automatically.
+    Uses centralized credential loading from gmail_auth.get_credentials().
+    Validates that the drive.file scope is present before building the service.
 
     Args:
         token_path: Path to the saved OAuth token JSON file.
@@ -52,17 +50,11 @@ def get_drive_service(token_path: str = "token.json"):
         FileNotFoundError: If token_path does not exist.
         ValueError: If token lacks the drive.file scope, or if token refresh fails.
     """
-    from pathlib import Path
-
-    if not Path(token_path).exists():
-        raise FileNotFoundError(
-            f"Token file not found: '{token_path}'. "
-            "Run: python -m job_finder.gmail_auth"
-        )
-
-    # Load with scopes=None to read the actual granted scopes from token.json
-    # (not masked by the scopes parameter)
-    creds = Credentials.from_authorized_user_file(token_path, scopes=None)
+    try:
+        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        creds = get_credentials(token_path)
+    except AuthenticationError as exc:
+        raise ValueError(str(exc)) from exc
 
     # Validate that drive.file scope was actually granted during auth
     if not creds.scopes or _DRIVE_FILE_SCOPE not in creds.scopes:
@@ -70,16 +62,6 @@ def get_drive_service(token_path: str = "token.json"):
             f"Token at '{token_path}' lacks the required drive.file scope. "
             "Run: python -m job_finder.gmail_auth"
         )
-
-    # Refresh if expired
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-        except Exception as exc:
-            raise ValueError(
-                f"Failed to refresh token: {exc}. "
-                "Run: python -m job_finder.gmail_auth"
-            ) from exc
 
     return build("drive", "v3", credentials=creds)
 

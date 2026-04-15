@@ -216,29 +216,17 @@ class TestDriveServiceScopeCheck:
 
     def test_raises_value_error_when_drive_scope_missing(self, tmp_path):
         """get_drive_service raises ValueError if token lacks drive.file scope.
-        Mock reflects scopes=None loading: creds.scopes shows actual granted scopes.
+        get_credentials returns creds, but scope check in get_drive_service rejects.
         """
         from job_finder.web.drive_uploader import get_drive_service
 
         mock_creds = MagicMock()
-        # scopes=None loading: creds.scopes reflects what was actually granted
         mock_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
         mock_creds.valid = True
-        mock_creds.expired = False
 
-        token_path = str(tmp_path / "token.json")
-        # Write a fake token file so the path exists
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
-
-        with patch(
-            "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
-        ) as mock_load:
+        with patch("job_finder.gmail_auth.get_credentials", return_value=mock_creds):
             with pytest.raises(ValueError, match="drive.file"):
-                get_drive_service(token_path=token_path)
-            # Verify called with scopes=None for honest scope detection
-            mock_load.assert_called_once_with(token_path, scopes=None)
+                get_drive_service(token_path=str(tmp_path / "token.json"))
 
     def test_raises_value_error_message_contains_gmail_auth_command(self, tmp_path):
         """ValueError message instructs user to run python -m job_finder.gmail_auth."""
@@ -264,13 +252,14 @@ class TestDriveServiceScopeCheck:
             f"Error message should contain 'python -m job_finder.gmail_auth', got: {exc_info.value}"
         )
 
-    def test_raises_file_not_found_when_token_missing(self, tmp_path):
-        """get_drive_service raises FileNotFoundError when token_path does not exist."""
+    def test_raises_value_error_when_token_missing(self, tmp_path):
+        """get_drive_service raises ValueError when token_path does not exist."""
         from job_finder.web.drive_uploader import get_drive_service
 
         token_path = str(tmp_path / "no_token.json")  # does not exist
 
-        with pytest.raises(FileNotFoundError):
+        # get_credentials raises AuthenticationError, get_drive_service wraps as ValueError
+        with pytest.raises(ValueError, match="not found"):
             get_drive_service(token_path=token_path)
 
     def test_succeeds_when_drive_scope_present(self, tmp_path):
@@ -302,7 +291,7 @@ class TestDriveServiceScopeCheck:
         assert result is mock_service
 
     def test_refreshes_expired_token(self, tmp_path):
-        """get_drive_service calls creds.refresh() when token is expired."""
+        """get_drive_service delegates refresh to centralized get_credentials."""
         from job_finder.web.drive_uploader import get_drive_service
 
         mock_creds = MagicMock()
@@ -310,27 +299,13 @@ class TestDriveServiceScopeCheck:
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/drive.file",
         ]
-        mock_creds.valid = False
-        mock_creds.expired = True
-        mock_creds.refresh_token = "fake_refresh"
-
-        token_path = str(tmp_path / "token.json")
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
+        mock_creds.valid = True
 
         mock_service = MagicMock()
-        with patch(
-            "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
-        ), patch(
-            "job_finder.web.drive_uploader.build",
-            return_value=mock_service,
-        ), patch(
-            "job_finder.web.drive_uploader.Request",
-        ) as mock_request:
-            result = get_drive_service(token_path=token_path)
+        with patch("job_finder.gmail_auth.get_credentials", return_value=mock_creds), \
+             patch("job_finder.web.drive_uploader.build", return_value=mock_service):
+            result = get_drive_service(token_path=str(tmp_path / "token.json"))
 
-        mock_creds.refresh.assert_called_once()
         assert result is mock_service
 
     def test_raises_value_error_with_actionable_message_when_refresh_fails(self, tmp_path):
@@ -420,31 +395,18 @@ class TestDriveStatus:
 
     def test_returns_refresh_failed_when_token_refresh_raises(self, tmp_path):
         """get_drive_status returns error_code='refresh_failed' when refresh raises."""
-        from google.auth.exceptions import TransportError
+        from job_finder.gmail_auth import AuthenticationError
         from job_finder.web.drive_status import get_drive_status
 
-        token_path = str(tmp_path / "token.json")
-        with open(token_path, "w") as f:
-            f.write('{"token": "fake"}')
-
         config = {"drive": {"folder_id": "some-folder"}}
-
-        mock_creds = MagicMock()
-        mock_creds.scopes = [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
-        mock_creds.expired = True
-        mock_creds.refresh_token = "fake_refresh"
-        mock_creds.refresh.side_effect = TransportError("network error")
 
         app = self._make_app()
         with app.test_request_context():
             with patch(
-                "google.oauth2.credentials.Credentials.from_authorized_user_file",
-                return_value=mock_creds,
-            ), patch("google.auth.transport.requests.Request"):
-                result = get_drive_status(config, token_path=token_path)
+                "job_finder.gmail_auth.get_credentials",
+                side_effect=AuthenticationError("Token refresh failed: network error"),
+            ):
+                result = get_drive_status(config, token_path=str(tmp_path / "token.json"))
 
         assert result["ok"] is False
         assert result["error_code"] == "refresh_failed"

@@ -262,6 +262,8 @@ careers_crawl:
   enabled: true
   # Re-crawl companies after this many days
   freshness_days: 1
+  # Parallel browser instances for careers page crawling
+  max_workers: 4
   # Max "Load more" button clicks per company (prevents runaway loops)
   max_load_more_clicks: 5
   # Max pagination pages to follow per company

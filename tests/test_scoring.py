@@ -166,6 +166,40 @@ class TestCostGate:
         # This month's spend is 0 -- should be allowed
         assert cost_gate(conn, gate_config, "sonnet") is True
 
+    def test_sonnet_ignores_free_provider_costs(self, migrated_db, gate_config):
+        """cost_gate excludes free/subscription providers from spend calculation."""
+        path, conn = migrated_db
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Insert $50 of costs from free providers — should NOT count toward budget
+        for provider in ("claude_cli", "ollama", "gemini", "groq"):
+            conn.execute(
+                "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (None, "test", "some-model", 100, 50, 50.0, now_str, provider),
+            )
+        conn.commit()
+        # $200 of free-provider spend, but budget gate should still pass
+        assert cost_gate(conn, gate_config, "sonnet") is True
+
+    def test_sonnet_still_gates_on_paid_provider_costs(self, migrated_db, gate_config):
+        """cost_gate still blocks when paid provider spend exceeds budget."""
+        path, conn = migrated_db
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Free provider costs — should be ignored
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (None, "test", "some-model", 100, 50, 50.0, now_str, "ollama"),
+        )
+        # Paid provider costs exceeding budget
+        conn.execute(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (None, "test", "claude-sonnet-4-6", 100, 50, 15.0, now_str, "anthropic"),
+        )
+        conn.commit()
+        assert cost_gate(conn, gate_config, "sonnet") is False
+
 # ---------------------------------------------------------------------------
 # Cost statistics tests
 # ---------------------------------------------------------------------------

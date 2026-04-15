@@ -191,6 +191,36 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             )
             conn.commit()
 
+        # Auto-trigger batch Haiku scoring if new jobs were ingested
+        if jobs_new > 0:
+            try:
+                from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
+                with app.app_context():
+                    config = app.config.get("JF_CONFIG", {})
+                with standalone_connection(db_path) as score_conn:
+                    total = score_conn.execute(
+                        "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
+                        "AND pipeline_status NOT IN ('dismissed', 'archived')"
+                    ).fetchone()[0]
+                    if total > 0:
+                        now = utc_now_iso()
+                        score_conn.execute(
+                            "INSERT INTO batch_score_sessions "
+                            "(session_type, status, total, scored, started_at) "
+                            "VALUES ('haiku', 'running', ?, 0, ?)",
+                            (total, now),
+                        )
+                        score_conn.commit()
+                        batch_session_id = score_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                        threading.Thread(
+                            target=_run_batch_haiku_bg,
+                            args=(db_path, batch_session_id, config),
+                            daemon=True,
+                        ).start()
+                        logger.info("Auto-triggered batch haiku scoring for %d unscored jobs", total)
+            except Exception:
+                pass  # Batch scoring failure doesn't invalidate the sync
+
         try:
             log_activity(
                 db_path,
@@ -249,6 +279,36 @@ def sync():
             f" Pipeline: {detection_auto_updated} auto-updated, {detection_queued} queued."
         )
 
+        # Auto-trigger batch Haiku scoring if new jobs were ingested
+        batch_msg = ""
+        if jobs_new > 0:
+            try:
+                from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
+                config = current_app.config.get("JF_CONFIG", {})
+                with standalone_connection(db_path) as score_conn:
+                    total = score_conn.execute(
+                        "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
+                        "AND pipeline_status NOT IN ('dismissed', 'archived')"
+                    ).fetchone()[0]
+                    if total > 0:
+                        now = utc_now_iso()
+                        score_conn.execute(
+                            "INSERT INTO batch_score_sessions "
+                            "(session_type, status, total, scored, started_at) "
+                            "VALUES ('haiku', 'running', ?, 0, ?)",
+                            (total, now),
+                        )
+                        score_conn.commit()
+                        session_id = score_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                        threading.Thread(
+                            target=_run_batch_haiku_bg,
+                            args=(db_path, session_id, config),
+                            daemon=True,
+                        ).start()
+                        batch_msg = f" Batch scoring {total} unscored jobs in background."
+            except Exception:
+                pass  # Batch scoring failure doesn't invalidate the sync
+
         try:
             log_activity(
                 db_path,
@@ -269,14 +329,14 @@ def sync():
             error_msgs = "; ".join(str(e) for e in errors[:3])
             flash(
                 f"Sync completed with errors: {error_msgs}. "
-                f"Fetched {total_fetched} jobs, {jobs_new} new.{pipeline_msg}",
+                f"Fetched {total_fetched} jobs, {jobs_new} new.{pipeline_msg}{batch_msg}",
                 "warning",
             )
         else:
             flash(
                 f"Sync complete: fetched {total_fetched} jobs "
                 f"({gmail_fetched} Gmail, {serpapi_fetched} SerpAPI, {thordata_fetched} Thordata), {jobs_new} new."
-                f"{pipeline_msg}",
+                f"{pipeline_msg}{batch_msg}",
                 "success",
             )
 
