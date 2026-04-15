@@ -10,7 +10,6 @@ requests~=2.31
 # Web
 Flask~=3.1
 APScheduler>=3.11,<4.0
-jinja2-fragments~=1.0
 anthropic~=0.84
 
 # Scoring
@@ -19,12 +18,6 @@ thefuzz[speedup]~=0.22  # fuzzy string matching (formerly fuzzywuzzy)
 # Multi-provider routing
 jsonschema>=4.0.0
 
-# Output
-rich~=13.7               # beautiful terminal tables
-tabulate~=0.9
-
-# Optional: SerpAPI
-google-search-results~=2.4
 
 # Optional: JSearch
 # (uses requests directly, no extra package)

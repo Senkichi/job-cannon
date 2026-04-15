@@ -190,8 +190,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # _make_adapter() derives its validation from this set — adding a new provider
 # requires updating both _SUPPORTED_PROVIDERS and the dispatch chain in _make_adapter().
 _SUPPORTED_PROVIDERS: frozenset[str] = frozenset({
-    "anthropic", "gemini", "ollama", "ollm", "cohere", "mistral", "sambanova",
-    "groq", "cerebras",
+    "anthropic", "gemini", "ollama",
 })
 
 # Alias for backward-compat — canonical definition is in claude_client.py.
@@ -412,13 +411,7 @@ def _make_adapter(
 
     # Lazy imports to avoid circular import: providers import from model_provider
     from job_finder.web.providers.anthropic_provider import AnthropicProvider
-    from job_finder.web.providers.cerebras_provider import CerebrasProvider
-    from job_finder.web.providers.cohere_provider import CohereProvider
-    from job_finder.web.providers.groq_provider import GroqProvider
-    from job_finder.web.providers.mistral_provider import MistralProvider
     from job_finder.web.providers.ollama_provider import OllamaProvider
-    from job_finder.web.providers.ollm_provider import OllmProvider
-    from job_finder.web.providers.sambanova_provider import SambanovaProvider
 
     if provider_name == "anthropic":
         if client is None:
@@ -432,23 +425,11 @@ def _make_adapter(
         return AnthropicProvider(
             client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
         )
-    if provider_name == "cerebras":
-        return CerebrasProvider(config=config)
-    if provider_name == "cohere":
-        return CohereProvider(config=config)
     if provider_name == "gemini":
         from job_finder.web.providers.gemini_provider import GeminiProvider
         return GeminiProvider(config=config)
-    if provider_name == "groq":
-        return GroqProvider(config=config)
-    if provider_name == "mistral":
-        return MistralProvider(config=config)
     if provider_name == "ollama":
         return OllamaProvider(config=config)
-    if provider_name == "ollm":
-        return OllmProvider(config=config)
-    if provider_name == "sambanova":
-        return SambanovaProvider(config=config)
 
 
 def _maybe_record_cost(
