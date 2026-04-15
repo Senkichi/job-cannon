@@ -55,9 +55,9 @@ class TestBaseTemplate:
         response = client.get("/jobs")
         assert b"@tailwindcss/browser@4" in response.data
 
-    def test_sortablejs_script_loaded(self, client):
-        """Base template includes SortableJS CDN script tag."""
-        response = client.get("/jobs")
+    def test_sortablejs_script_loaded_on_pipeline(self, client):
+        """SortableJS is loaded on the pipeline page (not globally)."""
+        response = client.get("/pipeline")
         assert b"Sortable" in response.data
 
     def test_dark_mode_class_on_html(self, client):
