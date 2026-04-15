@@ -1194,7 +1194,7 @@ class TestPhase17ActivityInstrumentation:
 # ---------------------------------------------------------------------------
 
 _REC_APP_CONFIG = {
-    "scoring": {"min_score_threshold": 40, "monthly_budget_usd": 25.0},
+    "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
     "profile": {
         "target_titles": ["Staff Data Scientist"],
         "target_locations": ["Remote"],

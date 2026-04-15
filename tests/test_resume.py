@@ -536,7 +536,7 @@ class TestSinglePassGeneration:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
 
         with patch("job_finder.web.resume_generator.call_claude", return_value=(canned_resume, 0.05)):
@@ -575,7 +575,7 @@ class TestSinglePassGeneration:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
 
         result = generate_resume_single(job_row, sample_resume_data, conn, config)
@@ -614,7 +614,7 @@ class TestSinglePassGeneration:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
 
         with patch("job_finder.web.resume_generator.call_claude") as mock_call:
@@ -654,7 +654,7 @@ class TestClosedWorldConstraint:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
 
         captured_system = {}
@@ -721,7 +721,7 @@ class TestGenerationHistoryTracking:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
         }
 
@@ -776,7 +776,7 @@ class TestGenerationHistoryTracking:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder"},
         }
 
@@ -818,7 +818,7 @@ class TestGenerationHistoryTracking:
             "fit_analysis": None,
         }
         config = {
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder"},
         }
 
@@ -882,7 +882,7 @@ class TestResumeRoutes:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
         }
         app = create_app(config=cfg)
@@ -951,7 +951,7 @@ class TestResumeRoutes:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -1088,7 +1088,7 @@ class TestMultiVersionStrategySelection:
         config = {
             "scoring": {
                 "models": {"haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1121,7 +1121,7 @@ class TestMultiVersionStrategySelection:
         config = {
             "scoring": {
                 "models": {"haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1159,7 +1159,7 @@ class TestMultiVersionStrategySelection:
         config = {
             "scoring": {
                 "models": {"haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1214,7 +1214,7 @@ class TestParallelVariantGeneration:
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
                 },
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1258,7 +1258,7 @@ class TestParallelVariantGeneration:
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
                 },
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1321,7 +1321,7 @@ class TestThreadSafety:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1388,7 +1388,7 @@ class TestPartialFailure:
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
                 },
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1443,7 +1443,7 @@ class TestPartialFailure:
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
                 },
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1478,7 +1478,7 @@ class TestSynthesisPass:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1538,7 +1538,7 @@ class TestSynthesisPass:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1592,7 +1592,7 @@ class TestSynthesisPass:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
         job_row = {
@@ -1684,7 +1684,7 @@ class TestScoreThresholdDispatch:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "multi_version_threshold": 80,
             },
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
@@ -1740,7 +1740,7 @@ class TestScoreThresholdDispatch:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "multi_version_threshold": 80,
             },
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
@@ -1796,7 +1796,7 @@ class TestScoreThresholdDispatch:
         config = {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "multi_version_threshold": 80,
             },
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
@@ -1887,7 +1887,7 @@ class TestQuickApply:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
         }
         app = create_app(config=cfg)
@@ -1980,7 +1980,7 @@ class TestQuickApply:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
         }
         app = create_app(config=cfg)
@@ -2049,7 +2049,7 @@ class TestQuickApply:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -2113,7 +2113,7 @@ class TestQuickApply:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -2182,7 +2182,7 @@ class TestQuickApplyResponse:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -2247,7 +2247,7 @@ class TestQuickApplyResponse:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -2363,7 +2363,7 @@ class TestInterviewPrepTrigger:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
             "drive": {"folder_id": "test-folder", "convert_to_gdoc": True},
         }
         app = create_app(config=cfg)
@@ -2431,7 +2431,7 @@ class TestSettingsResumeFormat:
                     "recency": 0.05,
                 },
                 "min_score_threshold": 40,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "haiku_threshold": 55,
                 "models": {"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-6"},
                 "multi_version_threshold": 80,
@@ -2487,7 +2487,7 @@ class TestSettingsResumeFormat:
             "weight_company_signals": "0.05",
             "weight_recency": "0.05",
             "min_score_threshold": "40",
-            "monthly_budget_usd": "25.0",
+            "daily_budget_usd": "25.0",
             "haiku_threshold": "55",
             "model_haiku": "claude-haiku-4-5",
             "model_sonnet": "claude-sonnet-4-6",
@@ -2641,7 +2641,7 @@ class TestPreferenceInjection:
         return {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
             }
         }
 
@@ -2932,7 +2932,7 @@ class TestStyleGuideInjection:
         return {
             "scoring": {
                 "models": {"sonnet": "claude-sonnet-4-6"},
-                "monthly_budget_usd": 50.0,
+                "daily_budget_usd": 50.0,
             }
         }
 
@@ -3212,7 +3212,7 @@ class TestValidationBadge:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True
@@ -3377,7 +3377,7 @@ class TestStatusPollingBadge:
 
         cfg = {
             "db": {"path": tmp_db_path},
-            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "monthly_budget_usd": 25.0},
+            "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
         app = create_app(config=cfg)
         app.config["TESTING"] = True

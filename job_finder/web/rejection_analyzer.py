@@ -112,7 +112,7 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
 
     Args:
         db_path: Path to the SQLite database file.
-        config: Application config dict (reads scoring.monthly_budget_usd and
+        config: Application config dict (reads scoring.daily_budget_usd and
                 scoring.models.opus).
 
     Returns:

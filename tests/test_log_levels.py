@@ -74,7 +74,7 @@ class TestPipelineRunnerLogLevels:
 
         config = {
             "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
-            "scoring": {"monthly_budget_usd": 25.0, "haiku_threshold": 42},
+            "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
             "profile": {"target_titles": [], "target_locations": [],
                         "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
         }
@@ -194,7 +194,7 @@ class TestRejectionAnalyzerLogLevels:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         try:
             with patch("job_finder.web.rejection_analyzer.cost_gate", return_value=False):
@@ -287,7 +287,7 @@ class TestInterviewPrepLogLevels:
         conn.commit()
         conn.close()
 
-        config = {"scoring": {"monthly_budget_usd": 25.0}}
+        config = {"scoring": {"daily_budget_usd": 25.0}}
 
         try:
             with patch("job_finder.web.interview_prep.cost_gate", return_value=False):

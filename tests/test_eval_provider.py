@@ -19,8 +19,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import sys
+
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import eval_provider
 from eval_provider import (
     compute_metrics,

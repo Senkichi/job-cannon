@@ -118,7 +118,7 @@ class TestCostGate:
 
     @pytest.fixture
     def gate_config(self):
-        return {"scoring": {"monthly_budget_usd": 10.0}}
+        return {"scoring": {"daily_budget_usd": 10.0}}
 
     def test_haiku_always_allowed_when_under_budget(self, migrated_db, gate_config):
         path, conn = migrated_db
@@ -171,7 +171,7 @@ class TestCostGate:
         path, conn = migrated_db
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         # Insert $50 of costs from free providers — should NOT count toward budget
-        for provider in ("claude_cli", "ollama", "gemini", "groq"):
+        for provider in ("claude_cli", "ollama", "gemini"):
             conn.execute(
                 "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -296,7 +296,7 @@ class TestBudgetExceededError:
 
     def test_raises_when_budget_exceeded(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"monthly_budget_usd": 0.0}}  # zero budget -- always blocked
+        config = {"scoring": {"daily_budget_usd": 0.0}}  # zero budget -- always blocked
         # Insert any spend > 0
         _insert_cost_row(conn, cost_usd=0.01)
         with pytest.raises(BudgetExceededError):
@@ -314,7 +314,7 @@ class TestBudgetExceededError:
 
     def test_haiku_succeeds_even_at_zero_budget(self, migrated_db, mock_anthropic_client):
         path, conn = migrated_db
-        config = {"scoring": {"monthly_budget_usd": 0.0}}
+        config = {"scoring": {"daily_budget_usd": 0.0}}
         _insert_cost_row(conn, cost_usd=999.0)
         # Should not raise for haiku
         result, cost = call_claude(
@@ -381,7 +381,7 @@ class TestHaikuScorer:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -631,7 +631,7 @@ class TestHaikuPipelineIntegration:
             },
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -817,7 +817,7 @@ class TestExclusionFilterIntegration:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -982,7 +982,7 @@ class TestSonnetEvaluator:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1142,7 +1142,7 @@ class TestSonnetPipelineIntegration:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1360,7 +1360,7 @@ class TestSonnetPreferences:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1407,7 +1407,7 @@ class TestSonnetPreferences:
         empty_config = {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5", "sonnet": "claude-sonnet-4-6"},
             },
             "profile": {},  # empty profile section
@@ -1623,7 +1623,7 @@ class TestBorderlineReeval:
             },
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -1808,7 +1808,7 @@ class TestBatchHaikuBorderlineReeval:
         return {
             "scoring": {
                 "haiku_threshold": 42,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {
                     "haiku": "claude-haiku-4-5",
                     "sonnet": "claude-sonnet-4-6",
@@ -2195,7 +2195,7 @@ class TestHaikuCompensationContext:
         return {
             "scoring": {
                 "haiku_threshold": 55,
-                "monthly_budget_usd": 25.0,
+                "daily_budget_usd": 25.0,
                 "models": {"haiku": "claude-haiku-4-5"},
             }
         }

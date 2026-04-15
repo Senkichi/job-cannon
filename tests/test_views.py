@@ -1194,7 +1194,7 @@ class TestSettingsAtsScanSection:
                     "weight_company_signals": "0.05",
                     "weight_recency": "0.05",
                     "min_score_threshold": "40",
-                    "monthly_budget_usd": "25.0",
+                    "daily_budget_usd": "25.0",
                     "haiku_threshold": "42",
                     "model_haiku": "claude-haiku-4-5",
                     "model_sonnet": "claude-sonnet-4-6",

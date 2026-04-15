@@ -159,7 +159,7 @@ class TestAutoDismiss:
 
         config = {
             "db": {"path": tmp_db_path},
-            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "monthly_budget_usd": 25.0},
+            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "daily_budget_usd": 25.0},
             "profile": {
                 "target_titles": ["Data Scientist"],
                 "target_locations": ["Remote"],
@@ -208,7 +208,7 @@ class TestAutoDismiss:
 
         config = {
             "db": {"path": tmp_db_path},
-            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "monthly_budget_usd": 25.0},
+            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "daily_budget_usd": 25.0},
             "profile": {
                 "target_titles": ["Data Scientist"],
                 "target_locations": ["Remote"],

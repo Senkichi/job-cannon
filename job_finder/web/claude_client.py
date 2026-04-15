@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
 
 try:
@@ -58,8 +58,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # to record $0 for these providers.
 # "claude_cli" = calls routed through the Claude Code CLI (subscription-based).
 FREE_PROVIDERS: frozenset[str] = frozenset({
-    "gemini", "ollama", "ollm", "sambanova",
-    "groq", "cerebras", "claude_cli",
+    "gemini", "ollama", "claude_cli",
 })
 
 
@@ -185,23 +184,19 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
 # Budget gating
 # ---------------------------------------------------------------------------
 
-DEFAULT_DAILY_BUDGET_USD: float = 10.0
-
-
 def cost_gate(
     conn: sqlite3.Connection,
     config: dict,
     model_tier: str = "sonnet",
 ) -> bool:
-    """Check whether a model tier call is allowed under daily and monthly budgets.
+    """Check whether a model tier call is allowed under the daily budget.
 
     Haiku calls are always allowed regardless of spend.
-    Sonnet/Opus calls are blocked when daily or monthly spend >= budget cap.
+    Sonnet/Opus calls are blocked when daily spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        config: Application config dict (reads scoring.monthly_budget_usd,
-            scoring.daily_budget_usd).
+        config: Application config dict (reads scoring.daily_budget_usd).
         model_tier: "haiku" or "sonnet" (or "opus"). Defaults to "sonnet".
 
     Returns:
@@ -211,7 +206,6 @@ def cost_gate(
         return True
 
     scoring_cfg = config.get("scoring", {})
-    monthly_cap: float = scoring_cfg.get("monthly_budget_usd", DEFAULT_MONTHLY_BUDGET_USD)
     daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
     now = datetime.now(timezone.utc)
@@ -219,17 +213,6 @@ def cost_gate(
     # Only count spend from per-call billed providers (exclude free/subscription)
     free = tuple(FREE_PROVIDERS)
     free_placeholders = ",".join("?" * len(free))
-
-    # Monthly check
-    month_start = now.strftime("%Y-%m-01T00:00:00Z")
-    row = conn.execute(
-        f"SELECT COALESCE(SUM(cost_usd), 0.0) "
-        f"FROM scoring_costs WHERE timestamp >= ? "
-        f"AND provider NOT IN ({free_placeholders})",
-        (month_start, *free),
-    ).fetchone()
-    if (row[0] if row else 0.0) >= monthly_cap:
-        return False
 
     # Daily check
     day_start = now.strftime("%Y-%m-%dT00:00:00Z")
@@ -258,18 +241,18 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         month (float): Total spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
         by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose.
-        budget_cap (float): The monthly budget cap.
+        budget_cap (float): The daily budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
-        budget_cap: Override the default monthly budget cap.  When None,
-            uses DEFAULT_MONTHLY_BUDGET_USD from config.
+        budget_cap: Override the default daily budget cap.  When None,
+            uses DEFAULT_DAILY_BUDGET_USD from config.
 
     Returns:
         Stats dict as described above.
     """
     if budget_cap is None:
-        budget_cap = DEFAULT_MONTHLY_BUDGET_USD
+        budget_cap = DEFAULT_DAILY_BUDGET_USD
     now = datetime.now(timezone.utc)
 
     today_start = now.strftime("%Y-%m-%dT00:00:00Z")
