@@ -86,21 +86,14 @@ class TestGetDriveStatusRefreshFailed:
 
     def test_refresh_failure_returns_error(self, tmp_path):
         """Returns ok=False, error_code='refresh_failed' when refresh raises."""
+        from job_finder.gmail_auth import AuthenticationError
         from job_finder.web.drive_status import _compute_drive_status
 
-        token_file = tmp_path / "token.json"
-        token_file.write_text("{}")
-
-        creds = _make_creds(
-            scopes=[_DRIVE_FILE_SCOPE],
-            expired=True,
-            refresh_token="some-refresh-token",
-        )
-        creds.refresh.side_effect = Exception("Token expired")
-
-        with patch(_PATCH_CREDENTIALS, return_value=creds), \
-             patch(_PATCH_REQUEST):
-            result = _compute_drive_status({}, token_path=str(token_file))
+        with patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=AuthenticationError("Token refresh failed: Token expired"),
+        ):
+            result = _compute_drive_status({}, token_path=str(tmp_path / "token.json"))
 
         assert result["ok"] is False
         assert result["error_code"] == "refresh_failed"

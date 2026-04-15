@@ -33,52 +33,42 @@ class TestGetDriveServiceErrors:
 
     def test_raises_file_not_found_when_no_token(self, tmp_path):
         """Raises FileNotFoundError when token.json does not exist."""
+        from job_finder.gmail_auth import AuthenticationError
         from job_finder.web.drive_uploader import get_drive_service
 
         missing = str(tmp_path / "no_token.json")
+        # get_credentials raises AuthenticationError, which get_drive_service wraps as ValueError
         try:
             get_drive_service(token_path=missing)
-            assert False, "Expected FileNotFoundError"
-        except FileNotFoundError as exc:
-            assert "token" in str(exc).lower() or "not found" in str(exc).lower()
+            assert False, "Expected ValueError"
+        except ValueError as exc:
+            assert "not found" in str(exc).lower()
 
     def test_raises_value_error_when_scope_missing(self, tmp_path):
         """Raises ValueError when drive.file scope is absent from token."""
         from job_finder.web.drive_uploader import get_drive_service
 
-        token_file = tmp_path / "token.json"
-        token_file.write_text("{}")
-
         creds = _make_creds(scopes=["https://www.googleapis.com/auth/gmail.readonly"])
+        creds.valid = True
 
-        with patch("job_finder.web.drive_uploader.Credentials") as mock_creds_cls, \
-             patch("job_finder.web.drive_uploader.Request"):
-            mock_creds_cls.from_authorized_user_file.return_value = creds
+        with patch("job_finder.gmail_auth.get_credentials", return_value=creds):
             try:
-                get_drive_service(token_path=str(token_file))
+                get_drive_service(token_path=str(tmp_path / "token.json"))
                 assert False, "Expected ValueError"
             except ValueError as exc:
                 assert "scope" in str(exc).lower() or "drive.file" in str(exc)
 
     def test_raises_value_error_when_refresh_fails(self, tmp_path):
         """Raises ValueError when token refresh fails."""
+        from job_finder.gmail_auth import AuthenticationError
         from job_finder.web.drive_uploader import get_drive_service
 
-        token_file = tmp_path / "token.json"
-        token_file.write_text("{}")
-
-        creds = _make_creds(
-            scopes=[_DRIVE_FILE_SCOPE],
-            expired=True,
-            refresh_token="some-token",
-        )
-        creds.refresh.side_effect = Exception("Auth server unavailable")
-
-        with patch("job_finder.web.drive_uploader.Credentials") as mock_creds_cls, \
-             patch("job_finder.web.drive_uploader.Request"):
-            mock_creds_cls.from_authorized_user_file.return_value = creds
+        with patch(
+            "job_finder.gmail_auth.get_credentials",
+            side_effect=AuthenticationError("Token refresh failed: Auth server unavailable"),
+        ):
             try:
-                get_drive_service(token_path=str(token_file))
+                get_drive_service(token_path=str(tmp_path / "token.json"))
                 assert False, "Expected ValueError"
             except ValueError as exc:
                 assert "refresh" in str(exc).lower() or "failed" in str(exc).lower()
@@ -90,17 +80,13 @@ class TestGetDriveServiceSuccess:
         """Returns a Drive service when credentials are valid."""
         from job_finder.web.drive_uploader import get_drive_service
 
-        token_file = tmp_path / "token.json"
-        token_file.write_text("{}")
-
         creds = _make_creds(scopes=[_DRIVE_FILE_SCOPE], expired=False)
+        creds.valid = True
         mock_service = MagicMock()
 
-        with patch("job_finder.web.drive_uploader.Credentials") as mock_creds_cls, \
-             patch("job_finder.web.drive_uploader.Request"), \
+        with patch("job_finder.gmail_auth.get_credentials", return_value=creds), \
              patch("job_finder.web.drive_uploader.build", return_value=mock_service):
-            mock_creds_cls.from_authorized_user_file.return_value = creds
-            service = get_drive_service(token_path=str(token_file))
+            service = get_drive_service(token_path=str(tmp_path / "token.json"))
 
         assert service is mock_service
 

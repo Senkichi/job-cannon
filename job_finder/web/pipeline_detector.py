@@ -213,7 +213,8 @@ def _get_gmail_service(config: dict):
         source = GmailSource(token_path=TOKEN_PATH)
         return source.service
     except Exception as e:
-        logger.warning("Pipeline detection: Gmail auth failed: %s", e)
+        from job_finder.web.log_throttle import throttled_log
+        throttled_log(logger, logging.WARNING, "Pipeline detection: Gmail auth failed: %s", e)
         return None
 
 def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:

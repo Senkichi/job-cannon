@@ -1,6 +1,6 @@
 """ATS platform job scanning.
 
-Provides keyword-matched job scanning for Lever, Greenhouse, and Ashby.
+Provides keyword-matched job scanning for Lever, Greenhouse, Ashby, and Workday.
 Extracted from ats_scanner.py (Plan 02 split).
 """
 
@@ -278,5 +278,113 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
     logger.debug(
         "scan_ashby('%s'): %d postings fetched, %d matched",
         job_board_name, len(postings), len(results),
+    )
+    return results
+
+
+def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Workday CXS API for keyword-matched job postings.
+
+    Workday exposes a standardized POST JSON API across all tenants.
+    Slug format: "{subdomain}/{board}" (e.g. "walmart.wd5/WalmartExternal").
+
+    API: POST https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs
+    Body: {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": ""}
+    Response: {"total": N, "jobPostings": [{title, externalPath, locationsText, ...}]}
+
+    Args:
+        slug: Workday slug in "subdomain/board" format.
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with keys: title, company_source, location,
+        description, source_url, salary_min, salary_max, comp_json.
+        Empty list on error or no matches.
+    """
+    parts = slug.split("/", 1)
+    if len(parts) != 2:
+        logger.warning("scan_workday: invalid slug format '%s'", slug)
+        return []
+
+    subdomain, board = parts
+
+    # Derive tenant from subdomain: prefix before ".wd"
+    dot_wd_idx = subdomain.find(".wd")
+    tenant = subdomain[:dot_wd_idx] if dot_wd_idx > 0 else subdomain
+
+    api_url = f"https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs"
+    page_size = 20
+    max_results = 200
+    offset = 0
+    results = []
+    total_fetched = 0
+
+    while offset < max_results:
+        body = {
+            "appliedFacets": {},
+            "limit": page_size,
+            "offset": offset,
+            "searchText": "",
+        }
+        try:
+            resp = requests.post(
+                api_url,
+                json=body,
+                headers={"Content-Type": "application/json"},
+                timeout=_PROBE_TIMEOUT,
+            )
+        except Exception as e:
+            logger.warning("scan_workday('%s') request failed: %s", slug, e)
+            break
+
+        if resp.status_code != 200:
+            logger.debug("scan_workday('%s') returned HTTP %d", slug, resp.status_code)
+            break
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.warning("scan_workday('%s') JSON parse error: %s", slug, e)
+            break
+
+        total = data.get("total", 0)
+        postings = data.get("jobPostings", [])
+        if not postings:
+            break
+
+        for posting in postings:
+            title = posting.get("title", "")
+            if not _title_matches(title, target_titles, exclusions):
+                continue
+
+            location = posting.get("locationsText", "")
+            external_path = posting.get("externalPath", "")
+            source_url = (
+                f"https://{subdomain}.myworkdayjobs.com/en-US/{board}/job/{external_path}"
+                if external_path else ""
+            )
+
+            results.append({
+                "title": title,
+                "company_source": "Workday",
+                "location": location,
+                "description": "",
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            })
+
+        total_fetched += len(postings)
+        offset += page_size
+
+        # Stop if we've fetched all available results
+        if total_fetched >= total:
+            break
+
+    logger.debug(
+        "scan_workday('%s'): %d total, %d fetched, %d matched",
+        slug, total_fetched, total_fetched, len(results),
     )
     return results

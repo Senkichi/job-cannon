@@ -140,6 +140,46 @@ def _ensure_drive_folder(creds, config_path: str = "config.yaml") -> None:
     print(f"Saved folder_id to {config_path}")
 
 
+class AuthenticationError(Exception):
+    """Raised when Google OAuth credentials are unavailable or expired."""
+
+
+def get_credentials(token_path: str = TOKEN_PATH) -> Credentials:
+    """Load and refresh Google OAuth credentials.
+
+    Non-interactive — suitable for background services. Raises
+    AuthenticationError if the token is missing, revoked, or
+    cannot be refreshed.
+    """
+    if not Path(token_path).exists():
+        raise AuthenticationError(
+            f"Token file not found: {token_path}. "
+            "Run: python -m job_finder.gmail_auth"
+        )
+
+    creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
+    if creds.valid:
+        return creds
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            # Persist refreshed token so next caller doesn't re-refresh
+            Path(token_path).write_text(creds.to_json())
+            return creds
+        except Exception as exc:
+            raise AuthenticationError(
+                f"Token refresh failed: {exc}. "
+                "Run: python -m job_finder.gmail_auth"
+            ) from exc
+
+    raise AuthenticationError(
+        "Token is invalid and cannot be refreshed. "
+        "Run: python -m job_finder.gmail_auth"
+    )
+
+
 def authenticate():
     """Run the OAuth flow for Gmail + Google Drive APIs and save the token.
 

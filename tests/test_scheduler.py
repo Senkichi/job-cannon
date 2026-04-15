@@ -177,7 +177,7 @@ class TestSchedulerJobConfig:
             init_scheduler(app)
 
             # Verify CronTrigger was created with hour="0,8,16" and Pacific timezone
-            MockCronTrigger.assert_any_call(hour="0,8,16", timezone="US/Pacific")
+            MockCronTrigger.assert_any_call(hour="0,8,16")
 
             # Verify add_job was called at least 3 times (ingestion + stale + pipeline_detection)
             assert mock_sched.add_job.call_count >= 3

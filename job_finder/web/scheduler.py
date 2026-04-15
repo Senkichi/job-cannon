@@ -1,6 +1,6 @@
 """APScheduler background scheduler for automatic job ingestion.
 
-Runs Gmail, SerpAPI, and Thordata ingestion 3x/day (midnight, 8am, 4pm Pacific).
+Runs Gmail, SerpAPI, and Thordata ingestion 3x/day (midnight, 8am, 4pm local).
 The scheduler is started once per process via init_scheduler(app).
 
 Guards:
@@ -189,7 +189,7 @@ def init_scheduler(app) -> None:
 
         scheduler.add_job(
             run_pipeline,
-            trigger=CronTrigger(hour="0,8,16", timezone="US/Pacific"),
+            trigger=CronTrigger(hour="0,8,16"),
             id="ingestion_poll",
             replace_existing=True,
             max_instances=1,   # prevents overlap on long runs
@@ -362,6 +362,21 @@ def init_scheduler(app) -> None:
             _make_simple_job(app, "ATS slug probe", _import_slug_probe),
             trigger=CronTrigger(hour=7, minute=30),
             id="ats_slug_probe",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # -- ATS source-URL promotion (daily 4:45 AM) -------------------------
+
+        def _import_ats_promote():
+            from job_finder.web.ats_scanner import promote_ats_from_source_urls
+            return promote_ats_from_source_urls
+
+        scheduler.add_job(
+            _make_simple_job(app, "ATS source-URL promotion", _import_ats_promote),
+            trigger=CronTrigger(hour=4, minute=45),
+            id="ats_source_url_promote",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -557,7 +572,7 @@ def init_scheduler(app) -> None:
 
         scheduler.add_job(
             _run_enrichment_backfill,
-            trigger=CronTrigger(hour="1,9,17", timezone="US/Pacific"),
+            trigger=CronTrigger(hour="1,9,17"),
             id="enrichment_backfill",
             replace_existing=True,
             max_instances=1,
@@ -596,9 +611,72 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
+        # -- Health heartbeat (daily 6:00 AM) --------------------------------
+
+        def _run_health_check():
+            """Daily health heartbeat — verify key subsystems ran recently."""
+            with app.app_context():
+                db_path = app.config.get("DB_PATH", "jobs.db")
+                issues = []
+
+                try:
+                    from job_finder.web.db_helpers import standalone_connection as _sc
+                    with _sc(db_path) as conn:
+                        # 1. Did ingestion run in the last 14 hours?
+                        row = conn.execute(
+                            "SELECT MAX(occurred_at) FROM user_activity "
+                            "WHERE action IN ('scheduled_sync', 'sync') "
+                            "AND occurred_at >= datetime('now', '-14 hours')"
+                        ).fetchone()
+                        if not row[0]:
+                            issues.append("No ingestion in last 14h")
+
+                        # 2. Did stale detection run last night?
+                        row = conn.execute(
+                            "SELECT MAX(occurred_at) FROM user_activity "
+                            "WHERE action = 'scheduled_stale_detection' "
+                            "AND occurred_at >= datetime('now', '-26 hours')"
+                        ).fetchone()
+                        if not row[0]:
+                            issues.append("Stale detection missed last night")
+
+                        # 3. Are there recent consecutive errors from the same source?
+                        rows = conn.execute(
+                            "SELECT action, COUNT(*) as cnt FROM user_activity "
+                            "WHERE json_extract(metadata, '$.status') = 'failed' "
+                            "AND occurred_at >= datetime('now', '-24 hours') "
+                            "GROUP BY action HAVING cnt >= 5"
+                        ).fetchall()
+                        for r in rows:
+                            issues.append(f"{r[0]}: {r[1]} failures in 24h")
+
+                        # 4. OAuth token validity
+                        try:
+                            from job_finder.gmail_auth import get_credentials
+                            get_credentials()
+                        except Exception as e:
+                            issues.append(f"OAuth token invalid: {e}")
+
+                except Exception as e:
+                    issues.append(f"Health check DB error: {e}")
+
+                if issues:
+                    logger.warning("HEALTH_DEGRADED: %s", "; ".join(issues))
+                else:
+                    logger.info("HEALTH_OK: ingestion, stale detection, OAuth all nominal")
+
+        scheduler.add_job(
+            _run_health_check,
+            trigger=CronTrigger(hour=6, minute=0),
+            id="health_heartbeat",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         scheduler.start()
         _scheduler = scheduler
-        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 Pacific); enrichment 1h after each (1:00, 9:00, 17:00 Pacific)")
+        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 local); enrichment 1h after each (1:00, 9:00, 17:00 local)")
 
 def run_sync_now(app) -> dict:
     """Trigger an immediate ingestion run (for the Sync Now button).
@@ -617,7 +695,7 @@ def run_sync_now(app) -> dict:
     db_path = app.config.get("DB_PATH", "jobs.db")
 
     try:
-        summary = run_ingestion(db_path, config)
+        summary = run_ingestion(db_path, config, score=False)
         logger.info("Manual sync triggered: %d new jobs", summary.get("jobs_new", 0))
     except Exception as e:
         logger.error("Manual sync failed: %s", e)

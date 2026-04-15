@@ -212,6 +212,27 @@ def probe_single_company(
                 url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
             elif platform == "ashby":
                 url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
+            elif platform == "workday":
+                # Workday uses POST — delegate to dedicated probe function
+                try:
+                    if _probe_workday(slug):
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'hit' WHERE id = ?",
+                            (company_id,),
+                        )
+                        _reset_retry_state(conn, company_id, now)
+                        logger.info("probe_single_company: %s -> hit (workday)", company_name)
+                        return {"status": "hit", "jobs_found": 0}
+                    else:
+                        conn.execute(
+                            "UPDATE companies SET ats_probe_status = 'miss' WHERE id = ?",
+                            (company_id,),
+                        )
+                        conn.commit()
+                        return {"status": "miss"}
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    _handle_scan_error(conn, company_id, company_name, str(e), now)
+                    return {"status": "error", "detail": str(e)}
             else:
                 return {"status": "miss", "detail": f"unknown platform: {platform}"}
 
@@ -363,6 +384,42 @@ def _probe_greenhouse(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_greenhouse('%s') failed: %s", slug, e)
         return False
+
+def _probe_workday(slug: str) -> bool:
+    """Return True if Workday slug has active job postings.
+
+    Slug format: "{subdomain}/{board}" (e.g. "walmart.wd5/WalmartExternal").
+    Parses subdomain to derive tenant (prefix before ".wd"), then POSTs to
+    the standardized Workday CXS jobs API.
+
+    Args:
+        slug: Workday slug in "subdomain/board" format.
+
+    Returns:
+        True if the API returns 200 with jobPostings data.
+    """
+    parts = slug.split("/", 1)
+    if len(parts) != 2:
+        return False
+    subdomain, board = parts
+
+    # Derive tenant from subdomain: everything before ".wd" (e.g. "walmart" from "walmart.wd5")
+    dot_wd_idx = subdomain.find(".wd")
+    tenant = subdomain[:dot_wd_idx] if dot_wd_idx > 0 else subdomain
+
+    url = f"https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs"
+    try:
+        r = requests.post(
+            url,
+            json={"limit": 1, "offset": 0, "searchText": ""},
+            headers={"Content-Type": "application/json"},
+            timeout=_PROBE_TIMEOUT,
+        )
+        return r.status_code == 200
+    except Exception as e:
+        logger.debug("_probe_workday('%s') failed: %s", slug, e)
+        return False
+
 
 def _probe_ashby(slug: str) -> bool:
     """Return True if slug is a valid Ashby job board name.

@@ -21,9 +21,10 @@ _LEVER_API_URL = re.compile(
     re.IGNORECASE,
 )
 
-# Greenhouse: human-facing boards.greenhouse.io and API boards-api.greenhouse.io
+# Greenhouse: human-facing boards.greenhouse.io / job-boards.greenhouse.io
+# and API boards-api.greenhouse.io
 _GREENHOUSE_BOARDS_URL = re.compile(
-    r"https?://boards\.greenhouse\.io/([^/?#]+)",
+    r"https?://(?:job-)?boards\.greenhouse\.io/([^/?#]+)",
     re.IGNORECASE,
 )
 _GREENHOUSE_API_URL = re.compile(
@@ -35,6 +36,19 @@ _GREENHOUSE_API_URL = re.compile(
 _ASHBY_URL = re.compile(
     r"https?://jobs\.ashbyhq\.com/([^/?#]+)",
     # NOTE: No re.IGNORECASE — Ashby slugs are case-sensitive
+)
+
+# Workday: human-facing and API URL patterns
+# Human-facing: https://{sub}.myworkdayjobs.com/{board}
+# API:          https://{sub}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs
+# Slug format: "{subdomain}/{board}" (e.g. "walmart.wd5/WalmartExternal")
+_WORKDAY_HUMAN_URL = re.compile(
+    r"https?://([^/]+)\.myworkdayjobs\.com/(?:en-US/)?([^/?#]+)",
+    re.IGNORECASE,
+)
+_WORKDAY_API_URL = re.compile(
+    r"https?://([^/]+)\.myworkdayjobs\.com/wday/cxs/[^/]+/([^/?#]+)",
+    re.IGNORECASE,
 )
 
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Optional[str]]:
@@ -74,6 +88,17 @@ def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Option
         m = _ASHBY_URL.search(url)
         if m:
             return "ashby", m.group(1)
+
+        # Check Workday (API URL first — more specific pattern)
+        m = _WORKDAY_API_URL.search(url)
+        if m:
+            return "workday", f"{m.group(1)}/{m.group(2)}"
+
+        m = _WORKDAY_HUMAN_URL.search(url)
+        if m:
+            # Skip if this matched the /wday/ API path (handled above)
+            if "/wday/" not in url:
+                return "workday", f"{m.group(1)}/{m.group(2)}"
 
     return None, None
 

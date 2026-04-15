@@ -23,6 +23,106 @@ if "google_auth_oauthlib" not in sys.modules:
     sys.modules["google_auth_oauthlib"] = _mock_oauthlib
     sys.modules["google_auth_oauthlib.flow"] = _mock_oauthlib.flow
 
+class TestGetCredentials:
+    """get_credentials() loads and refreshes OAuth credentials non-interactively."""
+
+    def test_returns_valid_credentials(self, tmp_path):
+        """get_credentials returns credentials when token is valid."""
+        from job_finder.gmail_auth import get_credentials
+
+        token_path = str(tmp_path / "token.json")
+        Path(token_path).write_text('{"token": "fake"}')
+
+        mock_creds = MagicMock()
+        mock_creds.valid = True
+
+        with patch(
+            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+            return_value=mock_creds,
+        ):
+            result = get_credentials(token_path)
+
+        assert result is mock_creds
+
+    def test_refreshes_expired_token(self, tmp_path):
+        """get_credentials refreshes an expired token and persists it."""
+        from job_finder.gmail_auth import get_credentials
+
+        token_path = str(tmp_path / "token.json")
+        Path(token_path).write_text('{"token": "fake"}')
+
+        mock_creds = MagicMock()
+        mock_creds.valid = False
+        mock_creds.expired = True
+        mock_creds.refresh_token = "refresh_tok"
+        mock_creds.to_json.return_value = '{"token": "refreshed"}'
+
+        # After refresh, make it valid
+        def _refresh(request):
+            mock_creds.valid = True
+
+        mock_creds.refresh.side_effect = _refresh
+
+        with patch(
+            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+            return_value=mock_creds,
+        ):
+            result = get_credentials(token_path)
+
+        assert result is mock_creds
+        mock_creds.refresh.assert_called_once()
+        # Token should be persisted
+        assert Path(token_path).read_text() == '{"token": "refreshed"}'
+
+    def test_raises_on_missing_token(self, tmp_path):
+        """get_credentials raises AuthenticationError when token file is missing."""
+        from job_finder.gmail_auth import get_credentials, AuthenticationError
+
+        token_path = str(tmp_path / "no_token.json")
+
+        with pytest.raises(AuthenticationError, match="not found"):
+            get_credentials(token_path)
+
+    def test_raises_on_refresh_failure(self, tmp_path):
+        """get_credentials raises AuthenticationError when token refresh fails."""
+        from job_finder.gmail_auth import get_credentials, AuthenticationError
+
+        token_path = str(tmp_path / "token.json")
+        Path(token_path).write_text('{"token": "fake"}')
+
+        mock_creds = MagicMock()
+        mock_creds.valid = False
+        mock_creds.expired = True
+        mock_creds.refresh_token = "refresh_tok"
+        mock_creds.refresh.side_effect = Exception("network error")
+
+        with patch(
+            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+            return_value=mock_creds,
+        ):
+            with pytest.raises(AuthenticationError, match="refresh failed"):
+                get_credentials(token_path)
+
+    def test_raises_on_invalid_no_refresh_token(self, tmp_path):
+        """get_credentials raises when token is invalid and has no refresh token."""
+        from job_finder.gmail_auth import get_credentials, AuthenticationError
+
+        token_path = str(tmp_path / "token.json")
+        Path(token_path).write_text('{"token": "fake"}')
+
+        mock_creds = MagicMock()
+        mock_creds.valid = False
+        mock_creds.expired = False
+        mock_creds.refresh_token = None
+
+        with patch(
+            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+            return_value=mock_creds,
+        ):
+            with pytest.raises(AuthenticationError, match="cannot be refreshed"):
+                get_credentials(token_path)
+
+
 class TestCheckTokenScopes:
     """_check_token_scopes reads actual granted scopes from token.json."""
 

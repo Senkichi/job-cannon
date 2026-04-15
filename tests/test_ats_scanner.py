@@ -2553,3 +2553,128 @@ class TestHtmlFallbackDescriptionPassthrough:
 
         assert job is not None
         assert job["description"] == "Full JD text here"
+
+
+class TestPromoteAtsFromSourceUrls:
+    """Tests for promote_ats_from_source_urls — retroactive ATS detection from job URLs."""
+
+    def _insert_company(self, conn, name, probe_status="miss"):
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies
+               (name, name_raw, ats_probe_status, scan_enabled, created_at, updated_at)
+               VALUES (?, ?, ?, 1, ?, ?)""",
+            (name.lower(), name, probe_status, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def _insert_job(self, conn, company_id, title, source_urls_json):
+        conn.execute(
+            """INSERT INTO jobs
+               (dedup_key, title, company, location, sources, source_urls,
+                first_seen, last_seen, company_id)
+               VALUES (?, ?, 'test', '', '["test"]', ?, datetime('now'), datetime('now'), ?)""",
+            (f"test|{title}", title, source_urls_json, company_id),
+        )
+        conn.commit()
+
+    def test_promotes_miss_company_with_greenhouse_url(self, migrated_db_path):
+        """Company with miss status + Greenhouse job URL gets promoted to hit."""
+        from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        cid = self._insert_company(conn, "TestCorp", "miss")
+        self._insert_job(conn, cid, "Data Scientist",
+                         '["https://job-boards.greenhouse.io/testcorp/jobs/123"]')
+        conn.close()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"jobs": [{"title": "x"}]}
+
+        with patch("job_finder.web.ats_prober.requests.get", return_value=mock_resp):
+            result = promote_ats_from_source_urls(migrated_db_path, config={})
+
+        assert result["promoted"] == 1
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT ats_probe_status, ats_platform, ats_slug FROM companies WHERE id = ?", (cid,)).fetchone()
+        conn.close()
+
+        assert row["ats_probe_status"] == "hit"
+        assert row["ats_platform"] == "greenhouse"
+        assert row["ats_slug"] == "testcorp"
+
+    def test_skips_company_without_ats_urls(self, migrated_db_path):
+        """Company with miss status but only Glassdoor URLs stays miss."""
+        from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        cid = self._insert_company(conn, "NoAtsCo", "miss")
+        self._insert_job(conn, cid, "Analyst",
+                         '["https://www.glassdoor.com/job-listing/j?jl=123"]')
+        conn.close()
+
+        result = promote_ats_from_source_urls(migrated_db_path, config={})
+
+        assert result["promoted"] == 0
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)).fetchone()
+        conn.close()
+
+        assert row["ats_probe_status"] == "miss"
+
+    def test_skips_hit_companies(self, migrated_db_path):
+        """Companies already at hit status are not re-checked."""
+        from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        cid = self._insert_company(conn, "AlreadyHit", "hit")
+        self._insert_job(conn, cid, "Engineer",
+                         '["https://job-boards.greenhouse.io/alreadyhit/jobs/1"]')
+        conn.close()
+
+        result = promote_ats_from_source_urls(migrated_db_path, config={})
+
+        assert result["checked"] == 0
+
+    def test_skips_when_verification_fails(self, migrated_db_path):
+        """Company stays miss when slug verification returns 404."""
+        from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        cid = self._insert_company(conn, "DeadSlug", "miss")
+        self._insert_job(conn, cid, "Analyst",
+                         '["https://jobs.lever.co/deadslug/abc-123"]')
+        conn.close()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+
+        with patch("job_finder.web.ats_prober.requests.get", return_value=mock_resp):
+            result = promote_ats_from_source_urls(migrated_db_path, config={})
+
+        assert result["promoted"] == 0
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)).fetchone()
+        conn.close()
+
+        assert row["ats_probe_status"] == "miss"
+
+    def test_testing_mode_skips(self, migrated_db_path):
+        """TESTING mode returns immediately without DB queries."""
+        from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
+        result = promote_ats_from_source_urls(migrated_db_path, config={"TESTING": True})
+        assert result == {"checked": 0, "promoted": 0}

@@ -331,7 +331,8 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
         try:
             service = get_drive_service()
         except Exception as e:
-            logger.error("Drive service unavailable for feedback poll: %s", e)
+            from job_finder.web.log_throttle import throttled_log
+            throttled_log(logger, logging.ERROR, "Drive service unavailable for feedback poll: %s", e)
             return {
                 "resumes_polled": 0,
                 "changes_detected": 0,

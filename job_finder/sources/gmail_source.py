@@ -114,25 +114,12 @@ class GmailSource:
 
     def _authenticate(self, token_path: str):
         """Load saved OAuth credentials and build the Gmail service."""
-        if not os.path.exists(token_path):
-            raise FileNotFoundError(
-                f"Gmail OAuth token not found: {token_path}\n\n"
-                f"Run this command to authenticate:\n"
-                f"  python -m job_finder.gmail_auth\n\n"
-                f"This will open a browser for Google sign-in.\n"
-                f"See docs/SETUP.md for full OAuth setup instructions."
-            )
         try:
-            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+            from job_finder.gmail_auth import get_credentials, AuthenticationError
+            creds = get_credentials(token_path)
             return build("gmail", "v1", credentials=creds)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to authenticate with Gmail: {exc}\n\n"
-                f"Try deleting {token_path} and re-running:\n"
-                f"  python -m job_finder.gmail_auth"
-            ) from exc
+        except AuthenticationError as exc:
+            raise RuntimeError(str(exc)) from exc
 
     def fetch_jobs(
         self,

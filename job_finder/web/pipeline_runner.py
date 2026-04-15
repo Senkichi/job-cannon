@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 _budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
 
-def run_ingestion(db_path: str, config: dict) -> dict:
+def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
 
     Creates its own SQLite connection (thread-safe: called from APScheduler
@@ -155,7 +155,7 @@ def run_ingestion(db_path: str, config: dict) -> dict:
                 logger.warning("Failed to log SerpAPI run: %s", e)
 
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
-    if new_job_keys:
+    if score and new_job_keys:
         sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
         summary["haiku_scored"] = haiku_scored_count
         summary["sonnet_queue"] = sonnet_queue

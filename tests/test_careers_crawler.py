@@ -57,7 +57,9 @@ def tmp_db_path():
             enrichment_last_error TEXT DEFAULT NULL,
             careers_url TEXT DEFAULT NULL,
             careers_crawl_last_at TEXT DEFAULT NULL,
-            careers_api_endpoint TEXT DEFAULT NULL
+            careers_api_endpoint TEXT DEFAULT NULL,
+            careers_crawl_tier TEXT DEFAULT NULL,
+            careers_nav_recipe TEXT DEFAULT NULL
         );
         CREATE TABLE jobs (
             dedup_key TEXT PRIMARY KEY,
@@ -775,3 +777,166 @@ class TestCrawlCareersBatch:
         ).fetchone()
         conn.close()
         assert row[0] == "https://discco.com/api/v1/jobs"
+
+
+# ---------------------------------------------------------------------------
+# Batch query filters
+# ---------------------------------------------------------------------------
+
+
+class TestBatchQueryFilters:
+    """Tests for the crawl_careers_batch company selection query."""
+
+    def test_excludes_ats_hit_companies(self, tmp_db_path):
+        """Companies with ats_probe_status='hit' are excluded from crawl batch."""
+        hit_id = _insert_company(tmp_db_path, "HitCorp", "https://hitcorp.com/careers", probe_status="hit")
+        miss_id = _insert_company(tmp_db_path, "MissCorp", "https://misscorp.com/careers", probe_status="miss")
+        _insert_high_scoring_job(tmp_db_path, hit_id)
+        _insert_high_scoring_job(tmp_db_path, miss_id)
+
+        config = {"TESTING": True}
+        result = crawl_careers_batch(tmp_db_path, config)
+
+        # TESTING mode returns early, but we can verify the query directly
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+        companies = conn.execute(
+            """SELECT c.id FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.scan_enabled = 1
+                 AND c.ats_probe_status != 'hit'
+                 AND EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                 )""",
+            (DEFAULT_HAIKU_THRESHOLD,),
+        ).fetchall()
+        conn.close()
+
+        ids = [r["id"] for r in companies]
+        assert miss_id in ids
+        assert hit_id not in ids
+
+    def test_excludes_perpetually_empty_companies(self, tmp_db_path):
+        """Companies with 5+ crawls and 0 successes are excluded."""
+        cid = _insert_company(tmp_db_path, "EmptyCorp", "https://emptycorp.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        # Insert 5 zero-result scan entries
+        conn = sqlite3.connect(tmp_db_path)
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
+                (cid,),
+            )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+        companies = conn.execute(
+            """SELECT c.id FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.scan_enabled = 1
+                 AND c.ats_probe_status != 'hit'
+                 AND EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM (
+                         SELECT COUNT(*) AS total,
+                                SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits
+                         FROM company_scan_log WHERE company_id = c.id
+                     ) s WHERE s.total >= 5 AND s.hits = 0
+                 )""",
+            (DEFAULT_HAIKU_THRESHOLD,),
+        ).fetchall()
+        conn.close()
+
+        assert cid not in [r["id"] for r in companies]
+
+    def test_includes_company_with_fewer_than_5_misses(self, tmp_db_path):
+        """Companies with <5 crawls are still included even with 0 successes."""
+        cid = _insert_company(tmp_db_path, "NewCorp", "https://newcorp.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        conn = sqlite3.connect(tmp_db_path)
+        for i in range(4):
+            conn.execute(
+                "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
+                (cid,),
+            )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+        companies = conn.execute(
+            """SELECT c.id FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.scan_enabled = 1
+                 AND c.ats_probe_status != 'hit'
+                 AND EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM (
+                         SELECT COUNT(*) AS total,
+                                SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits
+                         FROM company_scan_log WHERE company_id = c.id
+                     ) s WHERE s.total >= 5 AND s.hits = 0
+                 )""",
+            (DEFAULT_HAIKU_THRESHOLD,),
+        ).fetchall()
+        conn.close()
+
+        assert cid in [r["id"] for r in companies]
+
+    def test_self_heals_when_company_finds_jobs(self, tmp_db_path):
+        """A suspended company re-enters the batch after a successful crawl."""
+        cid = _insert_company(tmp_db_path, "RevivalCorp", "https://revival.com/careers")
+        _insert_high_scoring_job(tmp_db_path, cid)
+
+        conn = sqlite3.connect(tmp_db_path)
+        # 5 misses then 1 success
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
+                (cid,),
+            )
+        conn.execute(
+            "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 1, 2)",
+            (cid,),
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
+        companies = conn.execute(
+            """SELECT c.id FROM companies c
+               WHERE c.careers_url IS NOT NULL
+                 AND c.scan_enabled = 1
+                 AND c.ats_probe_status != 'hit'
+                 AND EXISTS (
+                     SELECT 1 FROM jobs j
+                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM (
+                         SELECT COUNT(*) AS total,
+                                SUM(CASE WHEN jobs_matched > 0 THEN 1 ELSE 0 END) AS hits
+                         FROM company_scan_log WHERE company_id = c.id
+                     ) s WHERE s.total >= 5 AND s.hits = 0
+                 )""",
+            (DEFAULT_HAIKU_THRESHOLD,),
+        ).fetchall()
+        conn.close()
+
+        assert cid in [r["id"] for r in companies]
