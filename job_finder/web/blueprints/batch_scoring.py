@@ -474,31 +474,6 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
     except Exception:
         pass
 
-def _fail_session(conn, db_path: str, session_id: int, error: Exception, session_type: str) -> None:
-    """Mark a batch session as errored and log the failure."""
-    try:
-        conn.execute(
-            "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? WHERE id = ?",
-            (str(error), utc_now_iso(), session_id),
-        )
-        conn.commit()
-    except Exception:
-        pass
-    try:
-        from job_finder.web.activity_tracker import (
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
-            log_activity,
-        )
-        action = ACTION_BATCH_SCORE_HAIKU if session_type == "haiku" else ACTION_BATCH_SCORE_SONNET
-        log_activity(
-            db_path,
-            action,
-            metadata={"session_type": session_type, "status": "failed", "error": type(error).__name__},
-        )
-    except Exception:
-        pass
-
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
     """Mark a batch session as errored. Used for background thread import failures."""
     try:
