@@ -9,7 +9,7 @@
   <div class="flex items-center justify-between">
     <div>
       <div class="flex items-center gap-2 mb-1">
-        <a href="/profile" class="text-slate-400 hover:text-slate-200 text-sm transition-colors">&larr; Back to Profile</a>
+        <a href="{{ url_for('profile.index') }}" class="text-slate-400 hover:text-slate-200 text-sm transition-colors">&larr; Back to Profile</a>
       </div>
       <h1 class="text-2xl font-bold text-slate-100">Review Conflicts</h1>
       <p class="text-slate-400 text-sm mt-1">{{ upload.filename }}</p>
@@ -42,7 +42,7 @@
     </svg>
     <h2 class="text-lg font-semibold text-slate-100 mb-2">No conflicts found</h2>
     <p class="text-slate-400 text-sm mb-6">Your PDF content matches your profile well.</p>
-    <form method="post" action="/profile/extract-style/{{ upload_id }}">
+    <form method="post" action="{{ url_for('resume_review.extract_style', upload_id=upload_id) }}">
       <button type="submit"
               class="px-6 py-3 bg-violet-700 hover:bg-violet-600 text-white font-medium rounded-lg transition-colors">
         Continue to Style Extraction &rarr;
@@ -221,14 +221,14 @@ function saveConflicts() {
     decisions: Object.values(stagedDecisions),
   };
 
-  fetch('/profile/save-conflicts/' + UPLOAD_ID, {
+  fetch('{{ url_for("resume_review.save_conflicts", upload_id=upload_id) }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
   .then(function(r) {
     if (r.ok || r.redirected) {
-      window.location.href = '/profile';
+      window.location.href = '{{ url_for("profile.index") }}';
     } else {
       return r.text().then(function(t) { alert('Save failed: ' + t); });
     }

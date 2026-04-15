@@ -1,6 +1,6 @@
 {# Resume generating fragment -- HTMX polls every 600ms until done/error.
    hx-trigger is intentionally present so polling continues. #}
-<div hx-get="/jobs/{{ dedup_key | urlencode }}/resume/status/{{ gen_id }}"
+<div hx-get="{{ url_for('resume.status', dedup_key=dedup_key, gen_id=gen_id) }}"
      hx-trigger="every 600ms"
      hx-target="this"
      hx-swap="outerHTML"

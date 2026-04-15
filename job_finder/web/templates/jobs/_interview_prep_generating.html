@@ -1,5 +1,5 @@
 {# Interview prep generating state — polls every 2s via HTMX until status changes. #}
-<div hx-get="/jobs/{{ job.dedup_key | urlencode }}/interview-prep/status"
+<div hx-get="{{ url_for('jobs.interview_prep_status', dedup_key=job.dedup_key) }}"
      hx-trigger="every 2s"
      hx-swap="outerHTML"
      class="flex items-center gap-2 text-xs text-slate-400 animate-pulse p-3 bg-slate-800/30 rounded border border-slate-700/30">

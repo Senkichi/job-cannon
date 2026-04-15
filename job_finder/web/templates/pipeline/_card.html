@@ -16,7 +16,7 @@
      data-job-id="{{ job.dedup_key }}">
 
   <!-- Title row -->
-  <a href="/jobs/{{ job.dedup_key }}"
+  <a href="{{ url_for('jobs.detail', dedup_key=job.dedup_key) }}"
      class="block text-slate-100 text-sm font-medium leading-snug hover:text-emerald-400 transition-colors mb-1"
      onclick="event.stopPropagation()">
     {{ job.title | truncate(45, true) }}
@@ -44,7 +44,7 @@
     {% endif %}
 
     <!-- Days in stage (pushed to right) -->
-    <span class="ml-auto text-xs text-slate-500">{{ job.days_in_stage or 0 }}d</span>
+    <span class="ml-auto text-xs text-slate-500">{{ job.days_in_stage }}d</span>
 
   </div>
 

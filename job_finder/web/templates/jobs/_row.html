@@ -15,8 +15,8 @@
 {% set posted = job.posted_date if job.posted_date else job.first_seen %}
 
 <tr class="border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors {% if job.is_stale %}opacity-50{% endif %}"
-    data-expand-url="/jobs/{{ job.dedup_key | urlencode }}/expand"
-    data-collapse-url="/jobs/{{ job.dedup_key | urlencode }}/collapse"
+    data-expand-url="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
+    data-collapse-url="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
     hx-push-url="false"
     onclick="
       var compactRow = this;

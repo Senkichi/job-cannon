@@ -155,11 +155,18 @@ def expand(company_id):
         (company_id,),
     ).fetchall()
 
+    # Most recent research row (for showing cached results inline)
+    research = conn.execute(
+        "SELECT * FROM company_research WHERE company_id = ? ORDER BY requested_at DESC LIMIT 1",
+        (company_id,),
+    ).fetchone()
+
     return render_template(
         "companies/_row_expanded.html",
         company=company,
         jobs=jobs,
         scan_history=scan_history,
+        research=research,
     )
 
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
@@ -291,11 +298,17 @@ def update_slug(company_id):
         (company_id,),
     ).fetchall()
 
+    research = conn.execute(
+        "SELECT * FROM company_research WHERE company_id = ? ORDER BY requested_at DESC LIMIT 1",
+        (company_id,),
+    ).fetchone()
+
     return render_template(
         "companies/_row_expanded.html",
         company=updated_company,
         jobs=jobs,
         scan_history=scan_history,
+        research=research,
     )
 
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)

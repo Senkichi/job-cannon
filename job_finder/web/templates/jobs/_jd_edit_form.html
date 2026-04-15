@@ -8,7 +8,7 @@
               class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-slate-100 focus:border-violet-500 focus:outline-none resize-y">{{ job.jd_full or '' }}</textarea>
     <div class="flex gap-2 mt-1">
       <button type="button"
-              hx-post="/jobs/{{ job.dedup_key | urlencode }}/save-jd"
+              hx-post="{{ url_for('jobs.save_jd', dedup_key=job.dedup_key) }}"
               hx-target="closest tr"
               hx-swap="outerHTML"
               hx-include="closest form"
@@ -20,7 +20,7 @@
         </span>
       </button>
       <button type="button"
-              hx-post="/jobs/{{ job.dedup_key | urlencode }}/paste-jd"
+              hx-post="{{ url_for('jobs.paste_jd', dedup_key=job.dedup_key) }}"
               hx-target="closest tr"
               hx-swap="outerHTML"
               hx-include="closest form"

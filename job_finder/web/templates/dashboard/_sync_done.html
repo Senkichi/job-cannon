@@ -1,7 +1,7 @@
 {# Sync done/error terminal fragment. Auto-dismisses after 10s via hx-trigger load delay:10s.
    NO polling trigger -- omitting hx-trigger="every" stops HTMX polling. #}
 <div id="sync-status"
-     hx-get="/dashboard/sync/dismiss"
+     hx-get="{{ url_for('sync.sync_dismiss') }}"
      hx-trigger="load delay:10s"
      hx-target="this"
      hx-swap="outerHTML"

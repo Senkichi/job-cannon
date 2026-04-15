@@ -1,6 +1,6 @@
 {# Polling fragment for in-progress company research. Stops polling on terminal states. #}
 <div class="bg-slate-800/60 border border-slate-700 rounded px-3 py-2 text-xs text-slate-400"
-     hx-get="/companies/{{ company_id }}/research/status/{{ research_id }}"
+     hx-get="{{ url_for('companies.research_status', company_id=company_id, research_id=research_id) }}"
      hx-trigger="every 3s"
      hx-swap="outerHTML">
   <span class="inline-block w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin mr-2"></span>
