@@ -212,6 +212,8 @@ def probe_single_company(
                 url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
             elif platform == "ashby":
                 url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
+            elif platform == "smartrecruiters":
+                url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1"
             elif platform == "workday":
                 # Workday uses POST — delegate to dedicated probe function
                 try:
@@ -418,6 +420,36 @@ def _probe_workday(slug: str) -> bool:
         return r.status_code == 200
     except Exception as e:
         logger.debug("_probe_workday('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_smartrecruiters(slug: str) -> bool:
+    """Return True if SmartRecruiters company has active job postings.
+
+    SmartRecruiters exposes a public Posting API (no auth required).
+    Returns 200 with {"totalFound": N, "content": [...]} for valid companies.
+
+    API: GET https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1
+
+    Args:
+        slug: SmartRecruiters company identifier (e.g. 'LinkedIn3', 'AbbVie').
+
+    Returns:
+        True if the slug resolves to a company with active postings.
+    """
+    url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1"
+    try:
+        r = requests.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=_PROBE_TIMEOUT,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("totalFound", 0) > 0
+        return False
+    except Exception as e:
+        logger.debug("_probe_smartrecruiters('%s') failed: %s", slug, e)
         return False
 
 

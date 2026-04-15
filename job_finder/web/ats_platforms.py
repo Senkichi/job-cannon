@@ -388,3 +388,97 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
         slug, total_fetched, total_fetched, len(results),
     )
     return results
+
+
+def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan SmartRecruiters Posting API for keyword-matched job postings.
+
+    SmartRecruiters exposes a public REST API (no auth required) that returns
+    JSON job listings with offset-based pagination.
+
+    API: GET https://api.smartrecruiters.com/v1/companies/{slug}/postings?offset={N}&limit=100
+
+    Args:
+        slug: SmartRecruiters company identifier (e.g. 'LinkedIn3', 'AbbVie').
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with keys: title, company_source, location,
+        description, source_url, salary_min, salary_max, comp_json.
+        Empty list on error or no matches.
+    """
+    base_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+    page_size = 100
+    max_results = 500
+    offset = 0
+    results = []
+    total_fetched = 0
+
+    while offset < max_results:
+        try:
+            resp = requests.get(
+                base_url,
+                params={"offset": offset, "limit": page_size},
+                headers={"Accept": "application/json"},
+                timeout=_PROBE_TIMEOUT,
+            )
+        except Exception as e:
+            logger.warning("scan_smartrecruiters('%s') request failed: %s", slug, e)
+            break
+
+        if resp.status_code != 200:
+            logger.debug("scan_smartrecruiters('%s') returned HTTP %d", slug, resp.status_code)
+            break
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.warning("scan_smartrecruiters('%s') JSON parse error: %s", slug, e)
+            break
+
+        total_found = data.get("totalFound", 0)
+        postings = data.get("content", [])
+        if not postings:
+            break
+
+        for posting in postings:
+            title = posting.get("name", "")
+            if not _title_matches(title, target_titles, exclusions):
+                continue
+
+            loc = posting.get("location", {})
+            if isinstance(loc, dict):
+                parts = [loc.get("city", ""), loc.get("region", ""), loc.get("country", "")]
+                location = ", ".join(p for p in parts if p)
+            else:
+                location = ""
+
+            posting_id = posting.get("id", "")
+            source_url = (
+                f"https://jobs.smartrecruiters.com/{slug}/{posting_id}"
+                if posting_id else ""
+            )
+
+            results.append({
+                "title": title,
+                "company_source": "SmartRecruiters",
+                "location": location,
+                "description": "",
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            })
+
+        total_fetched += len(postings)
+        offset += page_size
+
+        if total_fetched >= total_found:
+            break
+
+    logger.debug(
+        "scan_smartrecruiters('%s'): %d total, %d fetched, %d matched",
+        slug, total_fetched, total_fetched, len(results),
+    )
+    return results

@@ -68,6 +68,7 @@ from job_finder.web.ats_prober import (  # noqa: E402
     _probe_greenhouse,
     _probe_ashby,
     _probe_workday,
+    _probe_smartrecruiters,
     _compute_retry_after,
     _is_transient_error,
     _handle_scan_error,
@@ -375,6 +376,8 @@ def promote_ats_from_source_urls(db_path: str, config: dict) -> dict:
                 verified = _probe_ashby(slug)
             elif platform == "workday":
                 verified = _probe_workday(slug)
+            elif platform == "smartrecruiters":
+                verified = _probe_smartrecruiters(slug)
 
             if not verified:
                 continue
@@ -736,6 +739,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 elif platform == "workday":
                     from job_finder.web.ats_platforms import scan_workday
                     job_dicts = scan_workday(slug, target_titles, title_exclusions)
+                elif platform == "smartrecruiters":
+                    from job_finder.web.ats_platforms import scan_smartrecruiters
+                    job_dicts = scan_smartrecruiters(slug, target_titles, title_exclusions)
                 else:
                     logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
                     job_dicts = []
