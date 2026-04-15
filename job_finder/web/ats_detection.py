@@ -51,6 +51,16 @@ _WORKDAY_API_URL = re.compile(
     re.IGNORECASE,
 )
 
+# SmartRecruiters: public career pages and API
+_SMARTRECRUITERS_JOBS_URL = re.compile(
+    r"https?://(?:jobs|careers)\.smartrecruiters\.com/([^/?#]+)",
+    re.IGNORECASE,
+)
+_SMARTRECRUITERS_API_URL = re.compile(
+    r"https?://api\.smartrecruiters\.com/v1/companies/([^/?#]+)",
+    re.IGNORECASE,
+)
+
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Optional[str]]:
     """Extract ATS platform and slug from a list of job source URLs.
 
@@ -99,6 +109,15 @@ def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Option
             # Skip if this matched the /wday/ API path (handled above)
             if "/wday/" not in url:
                 return "workday", f"{m.group(1)}/{m.group(2)}"
+
+        # Check SmartRecruiters (API URL first — more specific)
+        m = _SMARTRECRUITERS_API_URL.search(url)
+        if m:
+            return "smartrecruiters", m.group(1)
+
+        m = _SMARTRECRUITERS_JOBS_URL.search(url)
+        if m:
+            return "smartrecruiters", m.group(1)
 
     return None, None
 
