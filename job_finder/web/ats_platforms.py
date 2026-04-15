@@ -262,7 +262,7 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
         if not location and posting.get("isRemote"):
             location = "Remote"
 
-        description = posting.get("descriptionHtml") or posting.get("descriptionPlain") or ""
+        description = posting.get("descriptionPlain") or posting.get("descriptionHtml") or ""
 
         results.append({
             "title": title,

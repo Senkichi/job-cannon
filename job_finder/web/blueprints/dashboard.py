@@ -1,6 +1,7 @@
 """Dashboard blueprint — overview stats, activity feed, pipeline summary."""
 
 import logging
+import time
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
@@ -78,73 +79,187 @@ def _get_rejection_context(conn):
     }
 
 
+def _get_stats_context(conn, config):
+    """Build template context for dashboard stat cards.
+
+    Used by both the full page render and the HTMX stats fragment.
+    """
+    stats = get_dashboard_stats(conn)
+    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
+    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
+    pending_count = stats.get("pending_detections", 0)
+    ats_ctx = _get_ats_context(conn)
+    return {
+        "stats": stats,
+        "cost_stats": cost_stats,
+        "budget_cap": budget_cap,
+        "pending_count": pending_count,
+        "ats_last_scan": ats_ctx["last_scan"],
+        "company_count": ats_ctx["company_count"],
+        "ats_tracked_count": ats_ctx["ats_tracked_count"],
+    }
+
+
+def _get_anthropic_client():
+    """Return an Anthropic client instance, or None if unavailable."""
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        return None
+    try:
+        return _anthropic.Anthropic()
+    except Exception:
+        return None
+
+
+# Cache provider availability for 5 minutes to avoid Ollama health check
+# on every dashboard load (5s timeout × 2 tiers = up to 10s per page load).
+_provider_cache: dict = {}
+_PROVIDER_CACHE_TTL = 300  # seconds
+
+
+def _cached_tier_available(tier: str, config: dict, client) -> bool:
+    """Return tier availability from cache, refreshing every 5 minutes.
+
+    Fast-path: if an Anthropic client is available and Anthropic is anywhere
+    in the provider chain, return True immediately without probing other
+    providers (avoids 2-5s Ollama health check timeouts on cold start).
+    """
+    now = time.monotonic()
+    entry = _provider_cache.get(tier)
+    if entry and (now - entry[1]) < _PROVIDER_CACHE_TTL:
+        return entry[0]
+
+    # Fast path: Anthropic client exists and is in the chain → available
+    if client is not None:
+        from job_finder.web.model_provider import resolve_provider_config
+        resolved = resolve_provider_config(tier, config)
+        providers = [resolved["provider"]] + [e["provider"] for e in resolved["fallback_chain"]]
+        if "anthropic" in providers:
+            _provider_cache[tier] = (True, now)
+            return True
+
+    result = tier_has_configured_provider(tier, config, client)
+    _provider_cache[tier] = (result, now)
+    return result
+
+
+def _get_quick_actions_context(conn, config):
+    """Build template context for quick actions section.
+
+    Detects active sessions and computes button counts/availability.
+    Used by both the full page render and the HTMX quick-actions fragment.
+    """
+    # Detect active (non-terminal) sessions
+    active_sync = None
+    active_haiku = None
+    active_sonnet = None
+    try:
+        active_sessions = conn.execute(
+            "SELECT id, session_type, status, total, scored, skipped "
+            "FROM batch_score_sessions "
+            "WHERE status NOT IN ('done', 'error', 'cancelled') "
+            "ORDER BY id DESC"
+        ).fetchall()
+        for s in active_sessions:
+            stype = s["session_type"]
+            if stype == "sync" and active_sync is None:
+                active_sync = s
+            elif stype == "haiku" and active_haiku is None:
+                active_haiku = s
+            elif stype == "sonnet" and active_sonnet is None:
+                active_sonnet = s
+    except Exception:
+        pass
+
+    # Button counts (only needed when no active session for that tier)
+    haiku_scorable_count = 0
+    if not active_haiku:
+        haiku_scorable_count = count_haiku_scorable(conn, config)
+
+    sonnet_eligible_count = 0
+    if not active_sonnet:
+        threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
+        try:
+            sonnet_eligible_count = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
+                "AND sonnet_score IS NULL AND jd_full IS NOT NULL",
+                (threshold,),
+            ).fetchone()[0]
+        except Exception:
+            pass
+
+    client = _get_anthropic_client()
+    haiku_available = _cached_tier_available("haiku", config, client)
+    sonnet_available = _cached_tier_available("sonnet", config, client)
+
+    return {
+        "active_sync": active_sync,
+        "active_haiku": active_haiku,
+        "active_sonnet": active_sonnet,
+        "haiku_scorable_count": haiku_scorable_count,
+        "sonnet_eligible_count": sonnet_eligible_count,
+        "haiku_available": haiku_available,
+        "sonnet_available": sonnet_available,
+    }
+
+
 @dashboard_bp.route("/", strict_slashes=False)
 def index():
     """Dashboard landing page — stat cards, activity feed, pipeline summary."""
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
+    config = current_app.config.get("JF_CONFIG", {})
 
-    stats = get_dashboard_stats(conn)
+    stats_ctx = _get_stats_context(conn, config)
+    qa_ctx = _get_quick_actions_context(conn, config)
+
     recent_runs = get_recent_runs(conn, limit=10)
     user_activity = get_recent_activity(conn, limit=15)
     pipeline_summary = get_pipeline_summary(conn)
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
-    config = current_app.config.get("JF_CONFIG", {})
-    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
-    cost_stats = get_cost_stats(conn, budget_cap=budget_cap)
-    pending_count = stats.get("pending_detections", 0)
     rejection_ctx = _get_rejection_context(conn)
-    ats_ctx = _get_ats_context(conn)
-
-    haiku_scorable_count = count_haiku_scorable(conn, config)
-
-    # Count jobs eligible for Sonnet evaluation (haiku_score >= threshold, no sonnet_score)
-    threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-    try:
-        sonnet_eligible_count = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
-            "AND sonnet_score IS NULL AND jd_full IS NOT NULL",
-            (threshold,),
-        ).fetchone()[0]
-    except Exception:
-        sonnet_eligible_count = 0
-
-    # Check tier availability for batch scoring buttons
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        _anthropic = None
-    client = None
-    if _anthropic is not None:
-        try:
-            client = _anthropic.Anthropic()
-        except Exception:
-            pass
-    haiku_available = tier_has_configured_provider("haiku", config, client)
-    sonnet_available = tier_has_configured_provider("sonnet", config, client)
 
     return render_template(
         "dashboard/index.html",
-        stats=stats,
+        **stats_ctx,
+        **qa_ctx,
         recent_runs=recent_runs,
         user_activity=user_activity,
         pipeline_summary=pipeline_summary,
-        cost_stats=cost_stats,
-        budget_cap=budget_cap,
         pending_detections=pending_detections,
-        pending_count=pending_count,
         pipeline_events=pipeline_events,
         latest_report=rejection_ctx["latest_report"],
         unreviewed_rejection_count=rejection_ctx["unreviewed_rejection_count"],
-        haiku_scorable_count=haiku_scorable_count,
-        sonnet_eligible_count=sonnet_eligible_count,
-        haiku_available=haiku_available,
-        sonnet_available=sonnet_available,
-        ats_last_scan=ats_ctx["last_scan"],
-        company_count=ats_ctx["company_count"],
-        ats_tracked_count=ats_ctx["ats_tracked_count"],
     )
+
+
+@dashboard_bp.route("/stats", strict_slashes=False)
+def stats_fragment():
+    """HTMX fragment — returns refreshed stat cards.
+
+    Triggered by dashboard-refresh event after sync/batch scoring completes.
+    """
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    config = current_app.config.get("JF_CONFIG", {})
+    ctx = _get_stats_context(conn, config)
+    return render_template("dashboard/_stats_cards.html", **ctx)
+
+
+@dashboard_bp.route("/quick-actions", strict_slashes=False)
+def quick_actions_fragment():
+    """HTMX fragment — returns refreshed quick actions with active session detection.
+
+    Triggered by dashboard-refresh event (with 5s delay) after sync/batch scoring completes.
+    Detects active sessions and shows progress bars or fresh buttons with updated counts.
+    """
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    config = current_app.config.get("JF_CONFIG", {})
+    ctx = _get_quick_actions_context(conn, config)
+    return render_template("dashboard/_quick_actions.html", **ctx)
 
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
 def cost_detail():

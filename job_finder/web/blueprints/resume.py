@@ -155,6 +155,27 @@ def status(dedup_key: str, gen_id: int):
             error_msg=row["error_msg"],
         )
 
+    # Timeout safety net: auto-error if generating for >15 minutes
+    if gen_status in ("pending", "generating") and row["generated_at"]:
+        try:
+            gen_at = datetime.fromisoformat(row["generated_at"])
+            elapsed_min = (datetime.now(timezone.utc).replace(tzinfo=None) - gen_at).total_seconds() / 60
+            if elapsed_min > 15:
+                logger.warning("Resume gen %d timed out after %.1f min", gen_id, elapsed_min)
+                conn.execute(
+                    "UPDATE resume_generations SET status='error', error_msg=? WHERE id=? AND status IN ('pending', 'generating')",
+                    ("Timed out (>15 min)", gen_id),
+                )
+                conn.commit()
+                return render_template(
+                    "jobs/_resume_error.html",
+                    dedup_key=dedup_key,
+                    gen_id=gen_id,
+                    error_msg="Timed out (>15 min)",
+                )
+        except (ValueError, TypeError):
+            pass
+
     # Still generating (pending or generating)
     return render_template(
         "jobs/_resume_generating.html",

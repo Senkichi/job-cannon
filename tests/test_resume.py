@@ -995,16 +995,18 @@ class TestResumeRoutes:
     def test_status_returns_generating_template_with_polling(self, app_with_resume_bp, tmp_db_path):
         """GET status returns generating template with hx-trigger when status='generating'."""
         import sqlite3 as _sqlite3
+        from datetime import datetime, timezone
         from urllib.parse import quote
 
         app = app_with_resume_bp
         dedup_key = "acme|senior-ds|remote"
+        recent_ts = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         conn = _sqlite3.connect(tmp_db_path)
         conn.execute(
             "INSERT INTO resume_generations (job_id, generated_at, model, status) "
             "VALUES (?, ?, ?, ?)",
-            (dedup_key, "2026-03-11T00:00:00", "claude-sonnet-4-6", "generating"),
+            (dedup_key, recent_ts, "claude-sonnet-4-6", "generating"),
         )
         conn.commit()
         gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

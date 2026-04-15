@@ -2,7 +2,7 @@
 
 import logging
 import time as _time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, abort, current_app, make_response, redirect, render_template, request, url_for
 
@@ -75,7 +75,7 @@ def _get_filter_kwargs() -> dict:
         "sort_by": args.get("sort_by", "score"),
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,
-        "hide_stale": args.get("hide_stale") == "on",
+        "hide_stale": args.get("hide_stale") == "on" if args else True,
         "show_hidden": args.get("show_hidden") == "on",
     }
 
@@ -301,6 +301,12 @@ def update_status(dedup_key: str):
         ).fetchone()[0]
         oob_counter = f'<span id="archived-count" hx-swap-oob="innerHTML">{archived_count}</span>'
         resp = make_response(status_html + oob_counter)
+    elif new_status in ("dismissed", "withdrawn", "rejected"):
+        # Trigger table re-fetch so the row disappears from the filtered view.
+        # Unlike archived (which has a fadeout animation), these statuses
+        # simply remove the row immediately.
+        resp = make_response(status_html)
+        resp.headers["HX-Trigger-After-Settle"] = "jobs-updated"
     else:
         resp = make_response(status_html)
 
@@ -544,8 +550,8 @@ def interview_prep_status(dedup_key: str):
         return "", 404
 
     prep_row = conn.execute(
-        "SELECT status, company_brief, predicted_questions, gap_mitigation, "
-        "questions_to_ask, error_msg "
+        "SELECT id, status, company_brief, predicted_questions, gap_mitigation, "
+        "questions_to_ask, error_msg, generated_at "
         "FROM interview_preps WHERE job_id = ? ORDER BY id DESC LIMIT 1",
         (dedup_key,),
     ).fetchone()
@@ -555,7 +561,25 @@ def interview_prep_status(dedup_key: str):
 
     status = prep_row["status"] if prep_row else None
 
+    # Timeout safety net: auto-error if generating for >15 minutes
     if status == "generating":
+        try:
+            generated_at = datetime.fromisoformat(prep_row["generated_at"] if "generated_at" in prep_row.keys() else "")
+            elapsed_min = (datetime.now(timezone.utc).replace(tzinfo=None) - generated_at).total_seconds() / 60
+            if elapsed_min > 15:
+                logger.warning("Interview prep for %s timed out after %.1f min", dedup_key, elapsed_min)
+                conn.execute(
+                    "UPDATE interview_preps SET status='error', error_msg=? WHERE id=? AND status='generating'",
+                    ("Timed out (>15 min)", prep_row["id"]),
+                )
+                conn.commit()
+                return (
+                    '<div class="text-xs text-red-400 p-3">Interview prep error: Timed out (&gt;15 min)</div>',
+                    200,
+                )
+        except (ValueError, TypeError, KeyError):
+            pass
+
         return render_template(
             "jobs/_interview_prep_generating.html",
             job=job,

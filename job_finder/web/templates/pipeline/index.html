@@ -123,10 +123,23 @@
       onEnd: function(evt) {
         var jobId = evt.item.dataset.jobId;
         var newStatus = evt.to.dataset.status;
+        var oldParent = evt.from;
+        var oldIndex = evt.oldIndex;
         if (!jobId || !newStatus) return;
         htmx.ajax('POST', '/pipeline/move', {
           values: { job_id: jobId, new_status: newStatus },
           swap: 'none'
+        }).catch(function() {
+          // Revert card position on network failure
+          var item = evt.item;
+          var children = oldParent.children;
+          if (oldIndex < children.length) {
+            oldParent.insertBefore(item, children[oldIndex]);
+          } else {
+            oldParent.appendChild(item);
+          }
+          updatePlaceholder(evt.to);
+          updatePlaceholder(oldParent);
         });
       }
     });
