@@ -123,16 +123,30 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
     if len(lines) < 2:
         return None
 
-    # Filter out metadata lines (alumni counts, "actively hiring", salary snippets)
-    # and preamble lines from the new LinkedIn digest format (count line, section headers).
+    # Filter out metadata lines (alumni counts, "actively hiring", salary snippets),
+    # preamble lines from the new LinkedIn digest format (count line, section headers),
+    # HTML tags LinkedIn embeds in plain-text bodies, and navigation/footer noise.
     content_lines = []
     for line in lines:
-        # Legacy metadata
+        # --- HTML tags embedded in text/plain body ---
+        # LinkedIn's "New jobs from your other alerts" sections inject raw HTML
+        # (e.g. <strong class="font-bold">senior data scientist</strong>) into
+        # the plain-text body as section headers.  Strip them entirely.
+        if "<" in line and ("</strong>" in line or "</a>" in line or "style=" in line):
+            continue
+        # Also catch standalone opening HTML tags that may appear on their own line
+        if re.match(r"^\s*<\w+[\s>]", line):
+            continue
+        # --- Legacy metadata ---
         if re.match(r"^\d+ school alum", line, re.IGNORECASE):
+            continue
+        if re.match(r"^\d+ connection", line, re.IGNORECASE):
             continue
         if "actively hiring" in line.lower():
             continue
-        # Preamble: "Your job alert for …"
+        if "apply with resume" in line.lower():
+            continue
+        # --- Preamble lines ---
         if re.match(r"^Your job alert", line, re.IGNORECASE):
             continue
         # Count lines: "30+ new jobs match…" / "New jobs match…"
@@ -140,17 +154,55 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
             continue
         if re.match(r"^New jobs", line, re.IGNORECASE):
             continue
-        # New digest format section headers and navigation links
+        # --- Section headers from "Expand your search" emails ---
+        # Category labels like "Medical jobs", "AI/ML jobs", "Remote jobs"
+        # that appear above job blocks in jobs-noreply emails.
+        if re.match(r"^(Medical|AI/ML|Remote|Hybrid|Recent)\s+jobs?\b", line, re.IGNORECASE):
+            continue
+        # Generic pattern: "<topic> jobs" as a standalone section header
+        if re.match(r"^[\w/]+\s+jobs$", line, re.IGNORECASE):
+            continue
+        # Broader fallback: "X jobs" or "X Devices jobs" (e.g. "Medical Devices jobs")
+        if re.match(r"^[\w\s/&-]+\s+jobs$", line, re.IGNORECASE) and len(line) < 40:
+            continue
+        # --- Navigation/footer noise ---
         if re.match(r"^Manage\b", line, re.IGNORECASE):
             continue
         if re.match(r"^Results from\b", line, re.IGNORECASE):
             continue
-        # Navigation/footer links that bleed into blocks — never job titles
+        if re.match(r"^Expand your search", line, re.IGNORECASE):
+            continue
+        if re.match(r"^Recommendations based on", line, re.IGNORECASE):
+            continue
         if re.match(r"^See all jobs", line, re.IGNORECASE):
             continue
         if re.match(r"^View all jobs", line, re.IGNORECASE):
             continue
+        if re.match(r"^Edit alert\b", line, re.IGNORECASE):
+            continue
+        # "Jobs similar to X at Y" recommendations — navigation, not job listings
+        if re.match(r"^Jobs similar to\b", line, re.IGNORECASE):
+            continue
+        # "You'll receive notifications" — confirmation noise
+        if re.match(r"^You.ll receive", line, re.IGNORECASE):
+            continue
+        # URLs on their own line
         if re.match(r"^https?://", line):
+            continue
+        # "Try Premium" / upsell lines
+        if re.match(r"^(Try Premium|Unlock personalized)", line, re.IGNORECASE):
+            continue
+        # Section transitions: "New jobs from your other alerts"
+        if re.match(r"^New jobs from\b", line, re.IGNORECASE):
+            continue
+        # Footer identification lines
+        if re.match(r"^This email was intended for\b", line, re.IGNORECASE):
+            continue
+        if re.match(r"^(Unsubscribe|Help|Learn why)\b", line, re.IGNORECASE):
+            continue
+        if re.match(r"^Jobs where you", line, re.IGNORECASE):
+            continue
+        if re.match(r"^Based on your profile", line, re.IGNORECASE):
             continue
         content_lines.append(line)
 
@@ -162,9 +214,15 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
     company = content_lines[1]
     location = content_lines[2] if len(content_lines) >= 3 else "Unknown"
 
-    # Sanity check: a job title must not contain a URL (catches any navigation
-    # lines that survived the filter loop above, e.g. mid-line URL patterns)
+    # Sanity checks — reject blocks where the title is clearly not a real job title
+    # URL in title: navigation line survived the filter
     if "https://" in title or "http://" in title:
+        return None
+    # HTML tags in title: LinkedIn plain-text body corruption
+    if "<" in title and (">" in title or "style=" in title):
+        return None
+    # Title is a LinkedIn section header (category labels that survived filters)
+    if re.match(r"^(See all|View all|Jobs similar|Expand|Manage|Edit alert)", title, re.IGNORECASE):
         return None
 
     # Try to extract salary from the email snippet/subject if present
