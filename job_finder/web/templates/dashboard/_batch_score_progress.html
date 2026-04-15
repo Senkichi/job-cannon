@@ -1,7 +1,7 @@
 {# Batch score progress fragment — HTMX polls every 2s until done/cancelled/error.
    hx-trigger is intentionally present so polling continues. #}
 <div id="batch-score-{{ label | lower }}-status"
-     hx-get="/dashboard/batch-score/status/{{ session_id }}"
+     hx-get="{{ url_for('batch_scoring.batch_score_status', session_id=session_id) }}"
      hx-trigger="every 2s"
      hx-target="this"
      hx-swap="outerHTML"
@@ -15,7 +15,7 @@
       {% endif %}
     </span>
     {% if not cancelling %}
-    <form hx-post="/dashboard/batch-score/cancel/{{ session_id }}"
+    <form hx-post="{{ url_for('batch_scoring.batch_score_cancel', session_id=session_id) }}"
           hx-target="#batch-score-{{ label | lower }}-status"
           hx-swap="outerHTML">
       <button type="submit" class="text-xs text-red-400 hover:text-red-300">Cancel</button>

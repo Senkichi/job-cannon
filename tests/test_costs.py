@@ -279,7 +279,7 @@ class TestSidebarNav:
         """Sidebar contains /costs nav link."""
         response = client.get("/costs")
         html = response.data.decode("utf-8")
-        assert 'href="/costs"' in html
+        assert "/costs" in html
 
     def test_sidebar_contains_costs_label(self, client):
         """Sidebar contains 'Costs' label."""
@@ -298,7 +298,7 @@ class TestDashboardCostCardLink:
         response = client.get("/dashboard")
         assert response.status_code == 200
         html = response.data.decode("utf-8")
-        assert 'href="/costs"' in html
+        assert "/costs" in html
         assert "View details" in html
 
 

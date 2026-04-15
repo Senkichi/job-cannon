@@ -10,7 +10,7 @@
   <!-- Company name (clickable to expand) -->
   <div class="col-span-2 flex items-center gap-2">
     <button
-      hx-get="/companies/{{ company.id }}/expand"
+      hx-get="{{ url_for('companies.expand', company_id=company.id) }}"
       hx-target="#company-{{ company.id }}"
       hx-swap="innerHTML"
       class="text-left text-sm font-medium text-slate-100 hover:text-violet-300 transition-colors truncate">
@@ -73,7 +73,7 @@
   <div class="flex justify-center items-center gap-2">
     {% if company.ats_probe_status == 'error' or (company.ats_probe_status == 'miss' and company.miss_reason == 'unreachable') %}
     <button
-      hx-post="/companies/{{ company.id }}/retry"
+      hx-post="{{ url_for('companies.retry', company_id=company.id) }}"
       hx-target="#company-{{ company.id }}"
       hx-swap="innerHTML"
       hx-indicator="#retry-spinner-{{ company.id }}"
@@ -90,7 +90,7 @@
     </button>
     {% endif %}
     <button
-      hx-post="/companies/{{ company.id }}/toggle"
+      hx-post="{{ url_for('companies.toggle', company_id=company.id) }}"
       hx-target="#company-{{ company.id }}"
       hx-swap="innerHTML"
       title="{{ 'Disable scanning' if company.scan_enabled else 'Enable scanning' }}"

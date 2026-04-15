@@ -19,7 +19,7 @@
   </div>
   {% endfor %}
   {% if has_more %}
-  <div hx-get="/companies/?page={{ page + 1 }}{% if search %}&search={{ search | urlencode }}{% endif %}{% if ats_platform %}&ats_platform={{ ats_platform | urlencode }}{% endif %}&sort_by={{ sort_by | urlencode }}"
+  <div hx-get="{{ url_for('companies.index', page=page + 1, search=search or '', ats_platform=ats_platform or '', sort_by=sort_by) }}"
        hx-trigger="revealed"
        hx-swap="outerHTML"
        class="py-4 text-center text-slate-500 text-sm">

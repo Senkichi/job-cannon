@@ -8,7 +8,7 @@
 {% if job is none %}
 <div class="max-w-3xl mx-auto py-12 text-center">
   <p class="text-slate-400 text-lg">Job not found.</p>
-  <a href="/jobs" class="mt-4 inline-block text-indigo-400 hover:text-indigo-300 text-sm">
+  <a href="{{ url_for('jobs.index') }}" class="mt-4 inline-block text-indigo-400 hover:text-indigo-300 text-sm">
     &larr; Back to Job Board
   </a>
 </div>
@@ -28,7 +28,7 @@
 <div class="max-w-4xl mx-auto space-y-6">
 
   <!-- Back link -->
-  <a href="/jobs" class="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+  <a href="{{ url_for('jobs.index') }}" class="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
     &larr; Back to Job Board
   </a>
 
@@ -74,7 +74,7 @@
       <span class="text-xs text-slate-500">Status:</span>
       <select name="pipeline_status"
               aria-label="Pipeline status"
-              hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
+              hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
               hx-trigger="change"
               hx-target="this"
               hx-swap="outerHTML"
@@ -145,6 +145,22 @@
     {% endif %}
   </div>
 
+  <!-- Notes (placeholder) -->
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+    <h2 class="text-sm font-semibold text-slate-300 mb-3">Notes</h2>
+    <textarea class="w-full bg-slate-900 text-slate-300 text-sm rounded border border-slate-700 p-3 focus:outline-none focus:border-indigo-500 min-h-[80px] resize-y"
+              placeholder="Add notes about this job...">{{ job.notes or "" }}</textarea>
+  </div>
+
+  <!-- Placeholder tabs for Phase 2/4 -->
+  <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4 text-xs text-slate-600">
+    <div class="flex gap-4">
+      <span class="text-slate-500 font-medium">Claude Analysis</span>
+      <span class="text-slate-700">|</span>
+      <span class="text-slate-500 font-medium">Resume</span>
+    </div>
+    <p class="mt-2 text-slate-700">Coming in Phase 2 / Phase 4</p>
+  </div>
 
 </div>
 {% endif %}

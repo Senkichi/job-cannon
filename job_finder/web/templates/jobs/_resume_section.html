@@ -55,7 +55,7 @@
     {# Sonnet-scored: Generate Resume button enabled, wrapped in narrow target div #}
     <div id="resume-generate-wrapper-{{ key_safe }}" class="inline">
       <button type="button"
-              hx-post="/jobs/{{ job.dedup_key | urlencode }}/resume/generate"
+              hx-post="{{ url_for('resume.generate', dedup_key=job.dedup_key) }}"
               hx-target="#resume-generate-wrapper-{{ key_safe }}"
               hx-swap="innerHTML"
               hx-disable-elt="this"
@@ -80,7 +80,7 @@
     {% if job.sonnet_score is not none %}
     {# Quick Apply button -- prominent power action #}
     <button type="button"
-            hx-post="/jobs/{{ job.dedup_key | urlencode }}/quick-apply"
+            hx-post="{{ url_for('resume.quick_apply', dedup_key=job.dedup_key) }}"
             hx-target="#resume-section-{{ key_safe }}"
             hx-swap="innerHTML"
             hx-disable-elt="this"

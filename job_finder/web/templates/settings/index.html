@@ -11,7 +11,7 @@
     <p class="text-slate-400 text-sm mt-1">Configure job search preferences, sources, and scoring. Changes persist to config.yaml.</p>
   </div>
 
-  <form action="/settings/save" method="post" class="space-y-6">
+  <form action="{{ url_for('settings.save') }}" method="post" class="space-y-6">
     <input type="hidden" name="_config_mtime" value="{{ config_mtime | default(0) }}">
 
     <!-- Profile Targets section -->
@@ -659,7 +659,7 @@
       </p>
       <div id="style-guide-migrate-section">
         <button type="button"
-                hx-post="/settings/migrate-style-guide"
+                hx-post="{{ url_for('guidelines.migrate_style_guide_route') }}"
                 hx-target="#style-guide-migrate-section"
                 hx-swap="outerHTML"
                 hx-disabled-elt="this"
@@ -684,7 +684,7 @@
 
       <div class="flex items-center gap-3">
         <button type="button"
-                hx-post="/settings/preview-guidelines-merge"
+                hx-post="{{ url_for('guidelines.preview_guidelines_merge') }}"
                 hx-target="#guidelines-diff-container"
                 hx-swap="innerHTML"
                 hx-include="#guidelines-textarea"

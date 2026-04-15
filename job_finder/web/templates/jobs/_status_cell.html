@@ -1,7 +1,7 @@
 {# Inline status dropdown. hx-post to /jobs/<key>/status on change. #}
 {# This fragment is also returned by POST /jobs/<key>/status for HTMX swap. #}
 <select name="pipeline_status"
-        hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
+        hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
         hx-trigger="change"
         hx-target="this"
         hx-swap="outerHTML"

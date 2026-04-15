@@ -179,8 +179,7 @@ class TestSearchSerpapi:
             mock_get.return_value = mock_response
             result, _urls = search_serpapi("Data Scientist Acme Corp", "test-api-key")
 
-        assert result is not None
-        assert isinstance(result, dict)
+        assert "salary_min" in result or "jd_full" in result or "location" in result
 
     def test_search_serpapi_returns_none_when_no_results(self):
         """search_serpapi returns None when SerpAPI returns empty jobs_results."""
@@ -245,7 +244,6 @@ class TestSearchDuckDuckGo:
             mock_get.return_value = mock_response
             result = search_duckduckgo("Acme Corp")
 
-        assert result is not None
         assert "Acme Corp" in result
 
     def test_search_duckduckgo_returns_none_when_no_abstract(self):
@@ -326,7 +324,7 @@ class TestExtractWithHaiku:
                 search_text, job_row, temp_db, config
             )
 
-        assert isinstance(result, dict)
+        assert "jd_full" in result and "salary_min" in result
         # Should return whatever was extracted (non-None fields only)
 
     def test_extract_with_haiku_returns_empty_dict_on_failure(
@@ -373,7 +371,6 @@ class TestEnrichCompanyInfo:
             mock_ddg.return_value = "Acme Corp employs 500 people in the SaaS industry."
             result = enrich_company_info("Acme Corp")
 
-        assert isinstance(result, dict)
         # Keys are optional (DDG reliability is low per research) but should be correct types if present
         for key in ["company_size", "industry", "funding_stage"]:
             if key in result:

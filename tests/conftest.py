@@ -134,15 +134,6 @@ def sample_db_with_jobs():
         os.remove(path)
 
 @pytest.fixture
-def app_config():
-    """Return a dict with test configuration values."""
-    return {
-        "db": {"path": ":memory:"},
-        "scoring": {"min_score": 5.0},
-        "polling": {"interval_minutes": 30},
-    }
-
-@pytest.fixture
 def app(tmp_db_path):
     """Standard test Flask app with full config superset.
 
@@ -372,7 +363,3 @@ def mock_run_oneshot():
     with patch("job_finder.web.claude_client._run_oneshot", return_value=envelope) as mock:
         yield mock
 
-@pytest.fixture
-def mock_anthropic_client():
-    """Legacy fixture — returns None. The Claude CLI is used instead of the SDK."""
-    return None

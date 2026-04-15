@@ -20,7 +20,7 @@
             {{ matched | length }}/4 signals
           </span>
           {% if d.job_title %}
-            <a href="/jobs?expand={{ d.job_id | urlencode }}"
+            <a href="{{ url_for('jobs.index', expand=d.job_id) }}"
                class="text-sm font-semibold text-slate-100 hover:text-emerald-400 transition-colors truncate max-w-[300px]">
               {{ d.job_title }}
             </a>
@@ -57,13 +57,13 @@
 
     <!-- Right: Confirm + Dismiss buttons -->
     <div class="flex gap-2 flex-shrink-0">
-      <button hx-post="/detections/{{ d.id }}/confirm"
+      <button hx-post="{{ url_for('detections.confirm', detection_id=d.id) }}"
               hx-target="#detection-{{ d.id }}"
               hx-swap="outerHTML"
               class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium rounded-lg transition-colors">
         Confirm
       </button>
-      <button hx-post="/detections/{{ d.id }}/dismiss"
+      <button hx-post="{{ url_for('detections.dismiss', detection_id=d.id) }}"
               hx-target="#detection-{{ d.id }}"
               hx-swap="outerHTML"
               class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-lg transition-colors">

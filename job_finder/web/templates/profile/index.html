@@ -19,7 +19,7 @@
       {% if import_success %}
         <span class="text-green-400 text-sm font-medium">Import successful — review and save below.</span>
       {% endif %}
-      <form id="import-form" action="/profile/import" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
+      <form id="import-form" action="{{ url_for('profile.import_markdown') }}" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
         <input type="file" id="markdown-file-input" name="markdown_file" accept=".md,.txt" class="hidden"
                onchange="document.getElementById('import-form').submit()">
         <button type="button"
@@ -56,7 +56,7 @@
             <span class="text-amber-600 text-xs ml-2">{{ w.field }}</span>
           </div>
           <button type="button"
-                  hx-get="/profile/recommendation?field={{ w.field | urlencode }}&message={{ w.message | urlencode }}"
+                  hx-get="{{ url_for('profile_recommendations.recommendation', field=w.field, message=w.message) }}"
                   hx-target="#recommendation-slot-{{ loop.index0 }}"
                   hx-swap="innerHTML"
                   hx-disabled-elt="this"
@@ -72,7 +72,7 @@
     </ul>
     <div class="mt-3 pt-3 border-t border-amber-800/30 flex items-center gap-3">
       <button type="button"
-              hx-post="/profile/recommendations-all"
+              hx-post="{{ url_for('profile_recommendations.recommendations_all') }}"
               hx-target="#recommendations-batch-result"
               hx-swap="innerHTML"
               hx-disabled-elt="this"
@@ -100,7 +100,7 @@
         <h2 class="text-lg font-semibold text-slate-100">Resume Uploads</h2>
         <p class="text-slate-500 text-xs mt-1">Upload a PDF resume to compare against your profile and extract new content.</p>
       </div>
-      <form id="upload-pdf-form" action="/profile/upload-pdf" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
+      <form id="upload-pdf-form" action="{{ url_for('resume_review.upload_pdf') }}" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
         <input type="file" id="pdf-file-input" name="pdf_file" accept=".pdf" class="hidden"
                onchange="document.getElementById('upload-pdf-form').submit()">
         <button type="button"
@@ -130,11 +130,11 @@
           <span class="text-xs text-slate-500">{{ upload.uploaded_at | relative_date }}</span>
           {% if upload.review_status == 'pending' %}
           <span class="px-2 py-0.5 bg-amber-900/50 text-amber-300 border border-amber-700/50 rounded-full text-xs">pending</span>
-          <a href="/profile/review/{{ upload.id }}"
+          <a href="{{ url_for('resume_review.conflict_review', upload_id=upload.id) }}"
              class="px-3 py-1 bg-violet-800 hover:bg-violet-700 text-violet-100 text-xs rounded-lg transition-colors">Review Conflicts</a>
           {% elif upload.review_status == 'reviewed' %}
           <span class="px-2 py-0.5 bg-blue-900/50 text-blue-300 border border-blue-700/50 rounded-full text-xs">reviewed</span>
-          <form method="post" action="/profile/extract-style/{{ upload.id }}" class="inline">
+          <form method="post" action="{{ url_for('resume_review.extract_style', upload_id=upload.id) }}" class="inline">
             <button type="submit"
                     class="px-3 py-1 bg-violet-800 hover:bg-violet-700 text-violet-100 text-xs rounded-lg transition-colors">Extract Style</button>
           </form>
@@ -425,7 +425,7 @@
   <div class="bg-slate-800 rounded-lg p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-semibold text-slate-100">Learned Preferences</h2>
-      <a href="/feedback" class="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+      <a href="{{ url_for('feedback.index') }}" class="text-xs text-violet-400 hover:text-violet-300 transition-colors">
         Manage on Feedback page &rarr;
       </a>
     </div>
@@ -814,7 +814,7 @@ function saveProfile() {
     profile._mtime = mtimeEl.value;
   }
 
-  fetch('/profile/save', {
+  fetch('{{ url_for("profile.save") }}', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -824,7 +824,7 @@ function saveProfile() {
   })
   .then(function(r) {
     if (r.ok) {
-      window.location.href = '/profile';
+      window.location.href = '{{ url_for("profile.index") }}';
     } else if (r.status === 409) {
       alert('Profile was modified externally. The page will reload with the latest data.');
       window.location.reload();
@@ -866,14 +866,14 @@ function saveStyleGuide() {
     summary_style:  summaryStyle,
   };
 
-  fetch('/profile/save-style-guide', {
+  fetch('{{ url_for("resume_review.save_style_guide_route") }}', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
   .then(function(r) {
     if (r.ok || r.redirected) {
-      window.location.href = '/profile';
+      window.location.href = '{{ url_for("profile.index") }}';
     } else {
       return r.text().then(function(t) { alert('Save failed: ' + t); });
     }

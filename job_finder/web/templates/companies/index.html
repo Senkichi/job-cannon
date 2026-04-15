@@ -14,7 +14,7 @@
     <div class="flex items-center gap-3">
       <!-- Scan ATS button -->
       <button
-        hx-post="/companies/scan"
+        hx-post="{{ url_for('companies.scan') }}"
         hx-target="#scan-result"
         hx-swap="innerHTML"
         hx-indicator="#scan-spinner"
@@ -72,7 +72,7 @@
   <!-- Add company form (hidden by default) -->
   <div id="add-company-form" class="hidden bg-slate-800 rounded-xl border border-slate-700 p-5">
     <h3 class="text-sm font-semibold text-slate-200 mb-4">Add Company</h3>
-    <form action="/companies/add" method="post" class="flex items-end gap-3">
+    <form action="{{ url_for('companies.add') }}" method="post" class="flex items-end gap-3">
       <div class="flex-1">
         <label class="block text-xs font-medium text-slate-400 mb-1">Company Name</label>
         <input type="text" name="company_name" required placeholder="e.g. Stripe"
@@ -95,7 +95,7 @@
     <form class="flex items-center gap-3 flex-1">
       <input type="text" name="search" value="{{ search }}"
              placeholder="Search companies..."
-             hx-get="/companies"
+             hx-get="{{ url_for('companies.index') }}"
              hx-trigger="input changed delay:300ms"
              hx-target="#companies-table"
              hx-swap="innerHTML"
@@ -103,7 +103,7 @@
              class="filter-input flex-1 max-w-xs bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-violet-500 focus:outline-none">
 
       <select name="ats_platform"
-              hx-get="/companies"
+              hx-get="{{ url_for('companies.index') }}"
               hx-trigger="change"
               hx-target="#companies-table"
               hx-swap="innerHTML"

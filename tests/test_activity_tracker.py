@@ -266,7 +266,7 @@ class TestCallSiteIntegration:
         app = create_app(config={
             "TESTING": True,
             "db": {"path": db_path},
-            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
+            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "monthly_budget_usd": 25.0},
             "polling": {"interval_minutes": 30},
         })
 
@@ -344,35 +344,21 @@ class TestCallSiteIntegration:
         assert meta.get("new_status") == "applied"
 
     def test_sync_logs_activity(self, app_with_db):
-        """POST /dashboard/sync creates a user_activity row with action='sync'."""
-        from unittest.mock import patch
+        """POST /dashboard/sync/start creates a batch_score_sessions row (async sync).
 
+        The old synchronous POST /dashboard/sync route was removed.
+        The new async route creates a session row and spawns a background thread
+        (skipped in TESTING mode). Activity logging happens in the background
+        thread, so we verify the session creation instead.
+        """
         app, db_path, conn = app_with_db
 
-        mock_summary = {
-            "jobs_new": 3,
-            "gmail_fetched": 5,
-            "serpapi_fetched": 0,
-            "gmail_errors": [],
-            "serpapi_errors": [],
-            "jobs_updated": 0,
-            "jobs_scored": 0,
-            "job_errors": [],
-            "duration_seconds": 1.5,
-            "detection_auto_updated": 0,
-            "detection_queued": 0,
-        }
-
         with app.test_client() as client:
-            with patch("job_finder.web.scheduler.run_sync_now", return_value=mock_summary):
-                resp = client.post("/dashboard/sync")
-                # Sync redirects to dashboard
-                assert resp.status_code in (200, 302)
+            resp = client.post("/dashboard/sync/start")
+            assert resp.status_code == 200
 
         row = conn.execute(
-            "SELECT * FROM user_activity WHERE action = 'sync'",
+            "SELECT * FROM batch_score_sessions WHERE session_type = 'sync'",
         ).fetchone()
-        assert row is not None, "sync route should have logged a sync activity"
-        meta = json.loads(row["metadata"])
-        assert meta.get("jobs_new") == 3
-        assert meta.get("status") == "success"
+        assert row is not None, "sync/start should have created a batch_score_sessions row"
+        assert row["status"] in ("running", "done")

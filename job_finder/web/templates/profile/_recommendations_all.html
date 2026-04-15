@@ -12,7 +12,7 @@
   {% if rec.actions %}
   <div class="flex flex-wrap gap-2">
     {% for action in rec.actions %}
-    <form method="post" action="/profile/apply-fix" class="inline">
+    <form method="post" action="{{ url_for('profile_recommendations.apply_fix') }}" class="inline">
       <input type="hidden" name="action_type" value="{{ action.type }}">
       <input type="hidden" name="field" value="{{ action.field if action.field is defined else rec.field }}">
       <input type="hidden" name="value" value="{{ action.value }}">

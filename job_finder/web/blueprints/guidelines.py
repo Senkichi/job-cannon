@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 
-from flask import Blueprint, current_app, request
+from flask import Blueprint, current_app, request, url_for
 
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.db_helpers import get_db
@@ -42,7 +42,7 @@ def migrate_style_guide_route():
             return (
                 '<div id="style-guide-migrate-section" class="text-xs text-red-400">'
                 'Migration failed: Sonnet returned no result. Check logs for details.'
-                '<button type="button" hx-post="/settings/migrate-style-guide" '
+                f'<button type="button" hx-post="{url_for("guidelines.migrate_style_guide_route")}" '
                 'hx-target="#style-guide-migrate-section" hx-swap="outerHTML" '
                 'class="ml-2 text-xs text-violet-400 hover:text-violet-300">Retry</button>'
                 '</div>',
@@ -50,10 +50,11 @@ def migrate_style_guide_route():
             )
     except Exception as exc:
         logger.warning("migrate_style_guide_route: %s", exc)
+        migrate_url = url_for("guidelines.migrate_style_guide_route")
         return (
             f'<div id="style-guide-migrate-section" class="text-xs text-red-400">'
             f'Migration failed: {exc}. Check logs for details.'
-            f'<button type="button" hx-post="/settings/migrate-style-guide" '
+            f'<button type="button" hx-post="{migrate_url}" '
             f'hx-target="#style-guide-migrate-section" hx-swap="outerHTML" '
             f'class="ml-2 text-xs text-violet-400 hover:text-violet-300">Retry</button>'
             f'</div>',
@@ -162,7 +163,7 @@ def preview_guidelines_merge():
             f'<input type="hidden" name="merged_guide_json" value="{escaped_json}">'
             f'<input type="hidden" name="guidelines_text" id="stashed-guidelines-text" value="{html_module.escape(guidelines_text, quote=True)}">'
             f'<button type="button"'
-            f' hx-post="/settings/apply-guidelines-merge"'
+            f' hx-post="{url_for("guidelines.apply_guidelines_merge")}"'
             f' hx-target="#guidelines-diff-container"'
             f' hx-swap="innerHTML"'
             f" hx-include=\"[name='merged_guide_json'],[name='guidelines_text']\""

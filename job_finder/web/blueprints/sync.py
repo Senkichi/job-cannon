@@ -4,7 +4,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, flash, make_response, redirect, render_template, url_for
+from flask import Blueprint, current_app, render_template, url_for
 
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
@@ -105,31 +105,27 @@ def sync_status(session_id):
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                resp = make_response(render_template(
+                return render_template(
                     "dashboard/_sync_done.html",
                     status="error",
                     error_msg="Session timed out (>30 min)",
                     total=session["total"],
                     scored=session["scored"],
                     skipped=session["skipped"],
-                ))
-                resp.headers["HX-Trigger-After-Settle"] = "dashboard-refresh"
-                return resp
+                )
         except (ValueError, TypeError):
             logger.debug("Sync timeout check failed for session %s", session_id, exc_info=True)
 
     # Terminal states: done, error, cancelled — return done fragment (NO polling hx-trigger)
     if status in ("done", "error", "cancelled"):
-        resp = make_response(render_template(
+        return render_template(
             "dashboard/_sync_done.html",
             status=status,
             error_msg=session["error_msg"] if status == "error" else None,
             total=session["total"],
             scored=session["scored"],
             skipped=session["skipped"],
-        ))
-        resp.headers["HX-Trigger-After-Settle"] = "dashboard-refresh"
-        return resp
+        )
 
     # Still running — determine phase label from status field
     phase_labels = {
@@ -147,9 +143,10 @@ def sync_status(session_id):
 @sync_bp.route("/sync/dismiss", strict_slashes=False)
 def sync_dismiss():
     """Return the original Sync Now button so it reappears after auto-dismiss."""
+    start_url = url_for("sync.sync_start")
     return (
         '<div id="sync-status">'
-        '<form hx-post="/dashboard/sync/start" hx-target="#sync-status" hx-swap="outerHTML">'
+        f'<form hx-post="{start_url}" hx-target="#sync-status" hx-swap="outerHTML">'
         '<button type="submit" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 '
         'text-white text-sm font-medium rounded-lg transition-colors">Sync Now</button>'
         '</form></div>'
@@ -195,36 +192,6 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             )
             conn.commit()
 
-        # Auto-trigger batch Haiku scoring if new jobs were ingested
-        if jobs_new > 0:
-            try:
-                from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
-                with app.app_context():
-                    config = app.config.get("JF_CONFIG", {})
-                with standalone_connection(db_path) as score_conn:
-                    total = score_conn.execute(
-                        "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
-                        "AND pipeline_status NOT IN ('dismissed', 'archived')"
-                    ).fetchone()[0]
-                    if total > 0:
-                        now = utc_now_iso()
-                        score_conn.execute(
-                            "INSERT INTO batch_score_sessions "
-                            "(session_type, status, total, scored, started_at) "
-                            "VALUES ('haiku', 'running', ?, 0, ?)",
-                            (total, now),
-                        )
-                        score_conn.commit()
-                        batch_session_id = score_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                        threading.Thread(
-                            target=_run_batch_haiku_bg,
-                            args=(db_path, batch_session_id, config),
-                            daemon=True,
-                        ).start()
-                        logger.info("Auto-triggered batch haiku scoring for %d unscored jobs", total)
-            except Exception:
-                pass  # Batch scoring failure doesn't invalidate the sync
-
         try:
             log_activity(
                 db_path,
@@ -261,98 +228,3 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
         except Exception:
             pass
 
-@sync_bp.route("/sync", methods=["POST"], strict_slashes=False)
-def sync():
-    """Quick action: Sync Now — triggers immediate ingestion via pipeline runner."""
-    db_path = current_app.config["DB_PATH"]
-    try:
-        from job_finder.web.scheduler import run_sync_now
-
-        summary = run_sync_now(current_app._get_current_object())
-
-        jobs_new = summary.get("jobs_new", 0)
-        gmail_fetched = summary.get("gmail_fetched", 0)
-        serpapi_fetched = summary.get("serpapi_fetched", 0)
-        thordata_fetched = summary.get("thordata_fetched", 0)
-        total_fetched = gmail_fetched + serpapi_fetched + thordata_fetched
-        errors = summary.get("gmail_errors", []) + summary.get("serpapi_errors", []) + summary.get("thordata_errors", [])
-
-        detection_auto_updated = summary.get("detection_auto_updated", 0)
-        detection_queued = summary.get("detection_queued", 0)
-        pipeline_msg = (
-            f" Pipeline: {detection_auto_updated} auto-updated, {detection_queued} queued."
-        )
-
-        # Auto-trigger batch Haiku scoring if new jobs were ingested
-        batch_msg = ""
-        if jobs_new > 0:
-            try:
-                from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
-                config = current_app.config.get("JF_CONFIG", {})
-                with standalone_connection(db_path) as score_conn:
-                    total = score_conn.execute(
-                        "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NULL "
-                        "AND pipeline_status NOT IN ('dismissed', 'archived')"
-                    ).fetchone()[0]
-                    if total > 0:
-                        now = utc_now_iso()
-                        score_conn.execute(
-                            "INSERT INTO batch_score_sessions "
-                            "(session_type, status, total, scored, started_at) "
-                            "VALUES ('haiku', 'running', ?, 0, ?)",
-                            (total, now),
-                        )
-                        score_conn.commit()
-                        session_id = score_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                        threading.Thread(
-                            target=_run_batch_haiku_bg,
-                            args=(db_path, session_id, config),
-                            daemon=True,
-                        ).start()
-                        batch_msg = f" Batch scoring {total} unscored jobs in background."
-            except Exception:
-                pass  # Batch scoring failure doesn't invalidate the sync
-
-        try:
-            log_activity(
-                db_path,
-                ACTION_SYNC,
-                metadata={
-                    "jobs_new": jobs_new,
-                    "gmail_fetched": gmail_fetched,
-                    "serpapi_fetched": serpapi_fetched,
-                    "thordata_fetched": thordata_fetched,
-                    "duration_seconds": summary.get("duration_seconds", 0.0),
-                    "status": "success",
-                },
-            )
-        except Exception:
-            pass
-
-        if errors:
-            error_msgs = "; ".join(str(e) for e in errors[:3])
-            flash(
-                f"Sync completed with errors: {error_msgs}. "
-                f"Fetched {total_fetched} jobs, {jobs_new} new.{pipeline_msg}{batch_msg}",
-                "warning",
-            )
-        else:
-            flash(
-                f"Sync complete: fetched {total_fetched} jobs "
-                f"({gmail_fetched} Gmail, {serpapi_fetched} SerpAPI, {thordata_fetched} Thordata), {jobs_new} new."
-                f"{pipeline_msg}{batch_msg}",
-                "success",
-            )
-
-    except Exception as e:
-        flash(f"Sync failed: {e}", "error")
-        try:
-            log_activity(
-                db_path,
-                ACTION_SYNC,
-                metadata={"status": "failed", "error": type(e).__name__},
-            )
-        except Exception:
-            pass
-
-    return redirect(url_for("dashboard.index"))

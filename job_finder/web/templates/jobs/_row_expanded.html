@@ -105,7 +105,7 @@
               <span class="text-xs text-amber-400 border border-amber-500/50 rounded px-1">Saved — not scored</span>
               {% endif %}
               <button type="button"
-                      hx-get="/jobs/{{ job.dedup_key | urlencode }}/jd-edit-form"
+                      hx-get="{{ url_for('jobs.jd_edit_form', dedup_key=job.dedup_key) }}"
                       hx-target="#jd-section-{{ jd_key_safe }}"
                       hx-swap="outerHTML"
                       hx-on:click="event.stopPropagation(); event.preventDefault()"
@@ -114,7 +114,7 @@
               </button>
               {% if job.sonnet_score is none %}
               <button type="button"
-                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/rescore"
+                      hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
                       hx-target="closest tr"
                       hx-swap="outerHTML"
                       hx-disable-elt="this"
@@ -140,7 +140,7 @@
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-slate-100 focus:border-violet-500 focus:outline-none resize-y"></textarea>
             <div class="flex gap-2 mt-1">
               <button type="button"
-                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/save-jd"
+                      hx-post="{{ url_for('jobs.save_jd', dedup_key=job.dedup_key) }}"
                       hx-target="closest tr"
                       hx-swap="outerHTML"
                       hx-include="closest form"
@@ -152,7 +152,7 @@
                 </span>
               </button>
               <button type="button"
-                      hx-post="/jobs/{{ job.dedup_key | urlencode }}/paste-jd"
+                      hx-post="{{ url_for('jobs.paste_jd', dedup_key=job.dedup_key) }}"
                       hx-target="closest tr"
                       hx-swap="outerHTML"
                       hx-include="closest form"
@@ -255,7 +255,7 @@
       <!-- Action buttons -->
       <div class="flex items-center gap-3 text-xs">
         <button type="button"
-                hx-get="/jobs/{{ job.dedup_key | urlencode }}/detail-inline"
+                hx-get="{{ url_for('jobs.detail_inline', dedup_key=job.dedup_key) }}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"
                 hx-disable-elt="this"
@@ -267,7 +267,7 @@
         </button>
         {% if job.jd_full %}
         <button type="button"
-                hx-post="/jobs/{{ job.dedup_key | urlencode }}/rescore"
+                hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"
                 hx-disable-elt="this"
@@ -281,7 +281,7 @@
         {% endif %}
         <button type="button"
                 aria-label="Archive this job permanently"
-                hx-post="/jobs/{{ job.dedup_key | urlencode }}/status"
+                hx-post="{{ url_for('jobs.update_status', dedup_key=job.dedup_key) }}"
                 hx-vals='{"pipeline_status": "archived"}'
                 hx-target="#status-cell-{{ jd_key_safe }}"
                 hx-swap="innerHTML"
@@ -296,7 +296,7 @@
         </button>
         {% if job.company_id %}
         <button type="button"
-                hx-post="/companies/{{ job.company_id }}/research"
+                hx-post="{{ url_for('companies.research', company_id=job.company_id) }}"
                 hx-target="this"
                 hx-swap="outerHTML"
                 hx-disable-elt="this"
@@ -308,12 +308,13 @@
           </span>
         </button>
         {% endif %}
+        <span class="text-slate-600">Add Note (coming soon)</span>
       </div>
 
       <!-- Bottom collapse button (reachable without scrolling up) -->
       <div class="flex justify-end border-t border-slate-700 pt-2">
         <button type="button"
-                hx-get="/jobs/{{ job.dedup_key | urlencode }}/collapse"
+                hx-get="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"
                 hx-on::after-request="var cr = this.closest('tr').previousElementSibling; cr.dataset.expanded = 'false'; setTimeout(function(){ cr.scrollIntoView({behavior: 'smooth', block: 'nearest'}); cr.classList.remove('highlight-flash'); void cr.offsetWidth; cr.classList.add('highlight-flash'); }, 100);"

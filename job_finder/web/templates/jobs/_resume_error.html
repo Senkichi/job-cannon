@@ -8,7 +8,7 @@
     {% endif %}
   </div>
   <button type="button"
-          hx-post="/jobs/{{ dedup_key | urlencode }}/resume/generate"
+          hx-post="{{ url_for('resume.generate', dedup_key=dedup_key) }}"
           hx-target="this"
           hx-swap="outerHTML"
           class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors shrink-0">
