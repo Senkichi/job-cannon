@@ -677,6 +677,21 @@ MIGRATIONS = [
     [
         "ALTER TABLE companies ADD COLUMN careers_nav_recipe TEXT DEFAULT NULL",
     ],
+
+    # Migration 38: Dashboard performance — add missing indexes.
+    # Fixes 8-second dashboard load caused by full table scans on:
+    #   - scoring_costs (4 aggregation queries per page load)
+    #   - pipeline_events (ORDER BY timestamp with no index)
+    #   - pipeline_detections (ORDER BY created_at with no index)
+    #   - company_scan_log (MAX subquery with no index)
+    #   - jobs.first_seen (LIKE pattern match, now uses range query with index)
+    [
+        "CREATE INDEX IF NOT EXISTS idx_scoring_costs_timestamp ON scoring_costs(timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_pipeline_events_timestamp ON pipeline_events(timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_pipeline_detections_created_at ON pipeline_detections(created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_company_scan_log_scanned_at ON company_scan_log(scanned_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen DESC)",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:

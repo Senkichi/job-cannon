@@ -277,22 +277,18 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
                   timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
-    def _sum(query: str, params: tuple) -> float:
-        row = conn.execute(query, params).fetchone()
-        return float(row[0]) if row and row[0] is not None else 0.0
-
-    today_spend = _sum(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM scoring_costs WHERE timestamp >= ?",
-        (today_start,),
-    )
-    week_spend = _sum(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM scoring_costs WHERE timestamp >= ?",
-        (week_start,),
-    )
-    month_spend = _sum(
-        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM scoring_costs WHERE timestamp >= ?",
-        (month_start,),
-    )
+    # Single query computes all three time-window sums in one index scan
+    row = conn.execute(
+        "SELECT "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0) "
+        "FROM scoring_costs WHERE timestamp >= ?",
+        (today_start, week_start, month_start, month_start),
+    ).fetchone()
+    today_spend = float(row[0])
+    week_spend = float(row[1])
+    month_spend = float(row[2])
 
     # Projected monthly: month_spend / days_elapsed * 30
     days_elapsed = max(now.day, 1)  # day-of-month, at least 1 to avoid division by zero

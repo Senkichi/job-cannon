@@ -44,7 +44,7 @@
     {% endif %}
 
     <!-- Days in stage (pushed to right) -->
-    <span class="ml-auto text-xs text-slate-500">{{ job.days_in_stage }}d</span>
+    <span class="ml-auto text-xs text-slate-500">{{ job.days_in_stage or 0 }}d</span>
 
   </div>
 

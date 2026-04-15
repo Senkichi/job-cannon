@@ -1,0 +1,95 @@
+{# Quick actions partial — auto-refreshed via dashboard-refresh event.
+   Detects active sessions and shows progress bars or fresh buttons.
+   Required context: active_sync, active_haiku, active_sonnet,
+   haiku_available, haiku_scorable_count, sonnet_available, sonnet_eligible_count. #}
+
+<h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
+<div class="flex flex-wrap gap-3 items-start">
+
+  <!-- Sync Now -->
+  {% if active_sync %}
+    {% with session_id=active_sync.id,
+            phase_label={"running": "Starting...", "gmail": "Syncing..."}.get(active_sync.status, "Syncing...") %}
+      {% include "dashboard/_sync_progress.html" %}
+    {% endwith %}
+  {% else %}
+    <div id="sync-status">
+      <form hx-post="/dashboard/sync/start"
+            hx-target="#sync-status"
+            hx-swap="outerHTML">
+        <button type="submit"
+                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
+          Sync Now
+        </button>
+      </form>
+    </div>
+  {% endif %}
+
+  <!-- Batch Haiku Score -->
+  {% if active_haiku %}
+    {% with label="Haiku", session_id=active_haiku.id, total=active_haiku.total,
+            scored=active_haiku.scored, skipped=active_haiku.skipped,
+            cancelling=(active_haiku.status == 'cancelling') %}
+      {% include "dashboard/_batch_score_progress.html" %}
+    {% endwith %}
+  {% elif haiku_available and haiku_scorable_count > 0 %}
+    <div id="batch-score-haiku-status">
+      <form hx-post="/dashboard/batch-score/haiku/start"
+            hx-target="#batch-score-haiku-status"
+            hx-swap="outerHTML">
+        <button type="submit"
+                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
+                title="Run Haiku AI scoring on {{ haiku_scorable_count }} unscored jobs">
+          Batch Haiku Score
+          <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ haiku_scorable_count }}</span>
+        </button>
+      </form>
+    </div>
+  {% else %}
+    <div id="batch-score-haiku-status">
+      <button type="button"
+              disabled
+              class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
+              title="{{ 'No Haiku-tier provider configured' if not haiku_available else 'No unscored jobs to process' }}">
+        Batch Haiku Score
+      </button>
+    </div>
+  {% endif %}
+
+  <!-- Batch Sonnet Eval -->
+  {% if active_sonnet %}
+    {% with label="Sonnet", session_id=active_sonnet.id, total=active_sonnet.total,
+            scored=active_sonnet.scored, skipped=active_sonnet.skipped,
+            cancelling=(active_sonnet.status == 'cancelling') %}
+      {% include "dashboard/_batch_score_progress.html" %}
+    {% endwith %}
+  {% elif sonnet_available and sonnet_eligible_count > 0 %}
+    <div id="batch-score-sonnet-status">
+      <form hx-post="/dashboard/batch-score/sonnet/start"
+            hx-target="#batch-score-sonnet-status"
+            hx-swap="outerHTML">
+        <button type="submit"
+                class="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium rounded-lg transition-colors"
+                title="Run Sonnet deep evaluation on jobs with Haiku score above threshold">
+          Batch Sonnet Eval
+          <span class="ml-1 bg-indigo-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ sonnet_eligible_count }}</span>
+        </button>
+      </form>
+    </div>
+  {% else %}
+    <div id="batch-score-sonnet-status">
+      <button type="button"
+              disabled
+              class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
+              title="{{ 'No Sonnet-tier provider configured' if not sonnet_available else 'No jobs with Haiku score above threshold and full job description available' }}">
+        Batch Sonnet Eval
+      </button>
+    </div>
+  {% endif %}
+
+  <!-- Add Job Manually -->
+  <a href="/jobs/add"
+     class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors">
+    Add Job Manually
+  </a>
+</div>

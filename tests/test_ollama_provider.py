@@ -77,13 +77,13 @@ def test_ollama_provider_is_base_provider_subclass():
 
 
 def test_init_calls_health_check():
-    """Health check should hit http://localhost:11434/api/tags with timeout=5.0."""
+    """Health check should hit http://localhost:11434/api/tags with timeout=2.0."""
     with patch("requests.get", return_value=_make_response({})) as mock_get:
         OllamaProvider(config={})
 
     mock_get.assert_called_once_with(
         "http://localhost:11434/api/tags",
-        timeout=5.0,
+        timeout=2.0,
     )
 
 
@@ -113,7 +113,7 @@ def test_init_custom_base_url():
 
     mock_get.assert_called_once_with(
         "http://myhost:9999/api/tags",
-        timeout=5.0,
+        timeout=2.0,
     )
 
 

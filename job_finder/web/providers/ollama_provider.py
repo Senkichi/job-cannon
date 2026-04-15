@@ -104,7 +104,7 @@ def _schema_to_field_instructions(schema: dict, indent: int = 0) -> str:
 
     return "\n".join(lines)
 _DEFAULT_TIMEOUT = 300.0
-_HEALTH_CHECK_TIMEOUT = 5.0
+_HEALTH_CHECK_TIMEOUT = 2.0
 
 
 class OllamaProvider(BaseProvider):

@@ -36,7 +36,7 @@ _bullet_re = re.compile(r'^\s*[-*]\s')
 # Matches any HTML tag
 _html_tag_re = re.compile(r'<[a-zA-Z/][^>]*>')
 
-def _strip_html_to_text(text: str) -> str:
+def strip_html_to_text(text: str) -> str:
     """Strip HTML tags from text, preserving structure via newlines and bullet markers.
 
     Converts block-level closing tags to newlines and <li> to bullet prefixes
@@ -162,7 +162,7 @@ def format_description_filter(value: str) -> str:
     # structure. Without this, escape() in the renderer would re-encode
     # the tags back to visible &lt;p&gt; entities.
     if _html_tag_re.search(value):
-        value = _strip_html_to_text(value)
+        value = strip_html_to_text(value)
 
     # Legacy pipe-separated format (no newlines, has pipes)
     if '\n' not in value and '|' in value:

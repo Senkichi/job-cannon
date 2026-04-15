@@ -235,6 +235,11 @@ def evaluate_job_sonnet(
         )
         return ScoringResult(data=None, status="skipped")
 
+    # Strip residual HTML to prevent CSS soup from inflating scores
+    if "<" in jd_full:
+        from job_finder.web.description_formatter import strip_html_to_text
+        jd_full = strip_html_to_text(jd_full)
+
     model = (
         config.get("scoring", {})
         .get("models", {})

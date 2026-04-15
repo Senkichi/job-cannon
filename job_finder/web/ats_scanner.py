@@ -29,6 +29,7 @@ import requests
 
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.dedup_normalizer import normalize_company
+from job_finder.web.description_formatter import strip_html_to_text
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
 # Uses the centralized orchestrator instead of pipeline_runner's private functions,
@@ -785,12 +786,14 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             is_new = upsert_job(scan_conn, job)
 
                             # Promote ATS description to jd_full (DQ-03)
+                            # Strip HTML to prevent CSS soup from inflating AI scores
                             raw_desc = job_dict.get("description") or ""
-                            if len(raw_desc) > 200:
+                            clean_desc = strip_html_to_text(raw_desc) if "<" in raw_desc else raw_desc
+                            if len(clean_desc) > 200:
                                 try:
                                     conn.execute(
                                         "UPDATE jobs SET jd_full = COALESCE(jd_full, ?) WHERE dedup_key = ?",
-                                        (raw_desc[:8000], job.dedup_key),
+                                        (clean_desc[:8000], job.dedup_key),
                                     )
                                     conn.commit()
                                 except Exception as e:

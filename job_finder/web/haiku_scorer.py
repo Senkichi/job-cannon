@@ -218,6 +218,10 @@ def score_job_haiku(
     salary_min = job_row.get("salary_min")
     salary_max = job_row.get("salary_max")
     description = job_row.get("description") or ""
+    # Strip residual HTML to prevent CSS soup from inflating scores
+    if "<" in description:
+        from job_finder.web.description_formatter import strip_html_to_text
+        description = strip_html_to_text(description)
 
     # Build an intelligent snippet (C1): first 1200 chars + skill keyword summary
     # + requirements section extraction (replaces old 500-char truncation).

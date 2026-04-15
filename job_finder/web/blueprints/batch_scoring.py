@@ -4,7 +4,9 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, render_template
+import json
+
+from flask import Blueprint, current_app, make_response, render_template
 
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
@@ -169,7 +171,7 @@ def batch_score_status(session_id):
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                return render_template(
+                resp = make_response(render_template(
                     "dashboard/_batch_score_done.html",
                     label=label,
                     scored=session["scored"],
@@ -177,13 +179,17 @@ def batch_score_status(session_id):
                     status="error",
                     message=None,
                     error_msg="Session timed out (>30 min)",
+                ))
+                resp.headers["HX-Trigger-After-Settle"] = json.dumps(
+                    {"dashboard-refresh": None, "jobs-updated": None}
                 )
+                return resp
         except (ValueError, TypeError):
             pass
 
     # Terminal states: done, error, cancelled — return done fragment (NO hx-trigger)
     if status in ("done", "error", "cancelled"):
-        return render_template(
+        resp = make_response(render_template(
             "dashboard/_batch_score_done.html",
             label=label,
             scored=session["scored"],
@@ -191,7 +197,12 @@ def batch_score_status(session_id):
             status=status,
             message=None,
             error_msg=session["error_msg"] if status == "error" else None,
+        ))
+        # Trigger dashboard stats refresh + jobs table refresh (if on jobs page)
+        resp.headers["HX-Trigger-After-Settle"] = json.dumps(
+            {"dashboard-refresh": None, "jobs-updated": None}
         )
+        return resp
 
     # Still running (running or cancelling) — return progress fragment (WITH hx-trigger)
     return render_template(

@@ -4,7 +4,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from flask import Blueprint, current_app, flash, redirect, render_template, url_for
+from flask import Blueprint, current_app, flash, make_response, redirect, render_template, url_for
 
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
@@ -105,27 +105,31 @@ def sync_status(session_id):
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                return render_template(
+                resp = make_response(render_template(
                     "dashboard/_sync_done.html",
                     status="error",
                     error_msg="Session timed out (>30 min)",
                     total=session["total"],
                     scored=session["scored"],
                     skipped=session["skipped"],
-                )
+                ))
+                resp.headers["HX-Trigger-After-Settle"] = "dashboard-refresh"
+                return resp
         except (ValueError, TypeError):
             logger.debug("Sync timeout check failed for session %s", session_id, exc_info=True)
 
     # Terminal states: done, error, cancelled — return done fragment (NO polling hx-trigger)
     if status in ("done", "error", "cancelled"):
-        return render_template(
+        resp = make_response(render_template(
             "dashboard/_sync_done.html",
             status=status,
             error_msg=session["error_msg"] if status == "error" else None,
             total=session["total"],
             scored=session["scored"],
             skipped=session["skipped"],
-        )
+        ))
+        resp.headers["HX-Trigger-After-Settle"] = "dashboard-refresh"
+        return resp
 
     # Still running — determine phase label from status field
     phase_labels = {

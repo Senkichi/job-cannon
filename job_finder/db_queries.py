@@ -22,8 +22,8 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
 
     total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
     new_today = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE first_seen LIKE ?",
-        (f"{today_prefix}%",),
+        "SELECT COUNT(*) FROM jobs WHERE first_seen >= ? AND first_seen < ?",
+        (f"{today_prefix}T00:00:00", f"{today_prefix}T23:59:60"),
     ).fetchone()[0]
     reviewing_count = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'reviewing'",
