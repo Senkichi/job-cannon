@@ -15,5 +15,5 @@ class ScaleSerpSource(SerpAPISource):
 
     BASE_URL = "https://api.scaleserp.com/search"
 
-    def __init__(self, api_key: str):
-        super().__init__(api_key, source_name="scaleserp")
+    def __init__(self, api_key: str, max_pages: int = 5):
+        super().__init__(api_key, source_name="scaleserp", max_pages=max_pages)

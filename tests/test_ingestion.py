@@ -1039,3 +1039,145 @@ class TestGmailPaginationCap:
         assert page_call_count <= 6, (
             f"Expected at most 6 API pages fetched, got {page_call_count}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: DataForSEO e2e — jobs flow through run_ingestion into database
+# ---------------------------------------------------------------------------
+
+class TestDataForSEOIngestion:
+    """E2E: DataForSEO submit/collect pipeline is wired into run_ingestion."""
+
+    @pytest.fixture
+    def dataforseo_config(self, migrated_db_path):
+        """Config with DataForSEO enabled and other sources disabled."""
+        return {
+            "db": {"path": migrated_db_path},
+            "sources": {
+                "gmail": {"enabled": False},
+                "serpapi": {"enabled": False},
+                "dataforseo": {
+                    "enabled": True,
+                    "api_key": "dGVzdDp0ZXN0",  # base64("test:test")
+                    "depth": 10,
+                    "max_age_days": 7,
+                    "priority": 1,
+                    "poll_interval_seconds": 0,
+                    "poll_timeout_seconds": 10,
+                    "queries": [
+                        {"query": "Data Scientist", "location": "Remote"},
+                    ],
+                },
+            },
+            "profile": {
+                "target_titles": ["Data Scientist"],
+                "target_locations": ["Remote"],
+                "min_salary": 100000,
+                "exclusions": {"title_keywords": [], "companies": []},
+                "industries": [],
+                "skills": [],
+            },
+            "scoring": {
+                "weights": {
+                    "title_match": 0.30,
+                    "seniority_alignment": 0.20,
+                    "location_fit": 0.15,
+                    "salary_range": 0.15,
+                    "industry_relevance": 0.10,
+                    "company_signals": 0.05,
+                    "recency": 0.05,
+                },
+                "min_score_threshold": 0,
+            },
+        }
+
+    def _make_dataforseo_jobs(self, n=3):
+        return [
+            Job(
+                title=f"Data Scientist {i}",
+                company=f"DfseCompany{i}",
+                location="Remote",
+                source="dataforseo",
+                source_url=f"https://example.com/dfse-{i}",
+                source_id=f"dfse-job-{i}",
+            )
+            for i in range(n)
+        ]
+
+    def test_dataforseo_jobs_persisted_in_database(self, dataforseo_config, migrated_db_path):
+        """DataForSEO jobs flow through run_ingestion and land in the jobs table."""
+        fake_jobs = self._make_dataforseo_jobs(3)
+
+        mock_source = MagicMock()
+        mock_source.submit_tasks.return_value = ["task-001"]
+        mock_source.collect_results.return_value = fake_jobs
+
+        with patch(
+            "job_finder.sources.dataforseo_source.DataForSEOSource",
+            return_value=mock_source,
+        ):
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, dataforseo_config)
+
+        assert summary["dataforseo_fetched"] == 3
+        assert summary["jobs_new"] == 3
+
+        # Verify jobs are in the database
+        conn = sqlite3.connect(migrated_db_path)
+        rows = conn.execute(
+            "SELECT title, company FROM jobs WHERE sources LIKE '%dataforseo%'"
+        ).fetchall()
+        conn.close()
+
+        assert len(rows) == 3
+        companies = {r[1] for r in rows}
+        assert companies == {"DfseCompany0", "DfseCompany1", "DfseCompany2"}
+
+    def test_dataforseo_logged_in_runs_table(self, dataforseo_config, migrated_db_path):
+        """DataForSEO run is recorded in the runs table."""
+        mock_source = MagicMock()
+        mock_source.submit_tasks.return_value = ["task-001"]
+        mock_source.collect_results.return_value = self._make_dataforseo_jobs(2)
+
+        with patch(
+            "job_finder.sources.dataforseo_source.DataForSEOSource",
+            return_value=mock_source,
+        ):
+            from job_finder.web.pipeline_runner import run_ingestion
+            run_ingestion(migrated_db_path, dataforseo_config)
+
+        conn = sqlite3.connect(migrated_db_path)
+        row = conn.execute(
+            "SELECT source, jobs_fetched FROM runs WHERE source = 'dataforseo'"
+        ).fetchone()
+        conn.close()
+
+        assert row is not None, "Expected a 'dataforseo' entry in runs table"
+        assert row[1] == 2
+
+    def test_dataforseo_disabled_skips_silently(self, dataforseo_config, migrated_db_path):
+        """When DataForSEO is disabled in config, no tasks are submitted."""
+        dataforseo_config["sources"]["dataforseo"]["enabled"] = False
+
+        with patch(
+            "job_finder.sources.dataforseo_source.DataForSEOSource",
+        ) as MockCls:
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, dataforseo_config)
+
+        MockCls.assert_not_called()
+        assert summary["dataforseo_fetched"] == 0
+
+    def test_dataforseo_submit_failure_does_not_crash_ingestion(
+        self, dataforseo_config, migrated_db_path
+    ):
+        """If DataForSEO submit_tasks raises, other sources still run."""
+        with patch(
+            "job_finder.sources.dataforseo_source.DataForSEOSource",
+            side_effect=Exception("API auth failed"),
+        ):
+            from job_finder.web.pipeline_runner import run_ingestion
+            summary = run_ingestion(migrated_db_path, dataforseo_config)
+
+        assert summary["dataforseo_fetched"] == 0
+        assert len(summary["dataforseo_errors"]) >= 1

@@ -61,6 +61,8 @@ sources:
     enabled: false
     # Get your key at: https://serpapi.com/manage-api-key
     api_key: ""
+    # Max pages to fetch per query (10 results/page, each page = 1 API credit)
+    max_pages: 5
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
@@ -83,6 +85,8 @@ sources:
     enabled: false
     # Get your key at: https://www.scaleserp.com/
     api_key: ""
+    # Max pages to fetch per query (10 results/page)
+    max_pages: 5
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area

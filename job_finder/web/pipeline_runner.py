@@ -120,6 +120,11 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     scorer = JobScorer(config)
 
     with standalone_connection(db_path) as runner_conn:
+        # --- DataForSEO: submit tasks early (non-blocking ~2s) ---
+        # Async task-queue API: submit now, collect after other sources finish.
+        # Other sources run while DataForSEO processes server-side (~60-90s).
+        dfse_task_ids, dfse_source = _submit_dataforseo_tasks(config, summary)
+
         # --- Gmail ingestion ---
         gmail_jobs = _fetch_gmail(config, runner_conn, summary)
 
@@ -131,8 +136,14 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         scaleserp_jobs = _fetch_scaleserp(config, summary)
         portal_jobs = _fetch_portal_search(config, summary)
 
+        # --- DataForSEO: collect results (blocks until ready or timeout) ---
+        dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)
+
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + scaleserp_jobs + portal_jobs
+        all_jobs = (
+            gmail_jobs + serpapi_jobs + thordata_jobs
+            + scaleserp_jobs + portal_jobs + dataforseo_jobs
+        )
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -154,6 +165,12 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
             except Exception as e:
                 logger.warning("Failed to log SerpAPI run: %s", e)
 
+        if summary["dataforseo_fetched"] > 0 or summary["dataforseo_errors"]:
+            try:
+                log_run(runner_conn, "dataforseo", summary["dataforseo_fetched"], jobs_new, jobs_scored)
+            except Exception as e:
+                logger.warning("Failed to log DataForSEO run: %s", e)
+
     # --- Two-tier AI scoring (runs after DB connection is closed) ---
     if score and new_job_keys:
         sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
@@ -170,7 +187,11 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
 
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
-    total_fetched = summary["gmail_fetched"] + summary["serpapi_fetched"]
+    total_fetched = (
+        summary["gmail_fetched"] + summary["serpapi_fetched"]
+        + summary.get("thordata_fetched", 0) + summary.get("scaleserp_fetched", 0)
+        + summary.get("dataforseo_fetched", 0) + summary.get("portal_search_fetched", 0)
+    )
     logger.info(
         "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
         total_fetched,
