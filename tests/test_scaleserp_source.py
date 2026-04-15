@@ -104,6 +104,7 @@ class TestScaleSerpHTTPRequests:
 
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
+        # Single result → partial page → no pagination
         mock_response.json.return_value = {"jobs_results": [SAMPLE_SCALESERP_RESULT]}
 
         with patch("requests.get", return_value=mock_response) as mock_get:

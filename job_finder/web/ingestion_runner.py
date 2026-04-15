@@ -177,7 +177,8 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
     try:
         from job_finder.sources.serpapi_source import SerpAPISource
 
-        source = SerpAPISource(api_key)
+        max_pages = serpapi_config.get("max_pages", 5)
+        source = SerpAPISource(api_key, max_pages=max_pages)
         jobs = source.fetch_jobs(queries)
         summary["serpapi_fetched"] = len(jobs)
 
@@ -267,7 +268,8 @@ def _fetch_scaleserp(config: dict, summary: dict) -> list[Job]:
     try:
         from job_finder.sources.scaleserp_source import ScaleSerpSource
 
-        source = ScaleSerpSource(api_key)
+        max_pages = scaleserp_config.get("max_pages", 5)
+        source = ScaleSerpSource(api_key, max_pages=max_pages)
         jobs = source.fetch_jobs(queries)
         summary["scaleserp_fetched"] = len(jobs)
 

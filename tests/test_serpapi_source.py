@@ -183,9 +183,10 @@ class TestSerpAPIFormatAudit:
         assert job is None
 
     def test_fetch_jobs_calls_search_per_query(self):
-        """fetch_jobs runs one HTTP request per query and combines results."""
+        """fetch_jobs runs HTTP requests per query (1 page each) and combines results."""
         source = _make_source()
 
+        # Single result per page → no pagination (< PAGE_SIZE results)
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {
@@ -199,6 +200,7 @@ class TestSerpAPIFormatAudit:
             ]
             jobs = source.fetch_jobs(queries, delay=0)
 
+        # 1 page per query (partial page stops pagination)
         assert mock_get.call_count == 2
         assert len(jobs) == 2
 
@@ -219,7 +221,7 @@ class TestSerpAPIFormatAudit:
                 ]
                 source.fetch_jobs(queries, delay=1.5)
 
-        # 3 queries → 2 sleeps (never before the first query)
+        # 3 queries → 2 inter-query sleeps (empty results = no intra-page sleeps)
         assert mock_sleep.call_count == 2
         mock_sleep.assert_called_with(1.5)
 
@@ -265,3 +267,162 @@ class TestSerpAPIFormatAudit:
 
         assert job is not None
         assert job.source == "serpapi"
+
+
+class TestSerpAPIPagination:
+    """Tests for multi-page result fetching via the start parameter."""
+
+    def test_paginates_when_full_page_returned(self):
+        """Fetches multiple pages when each returns a full page of results."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=3)
+
+        # Build 10 distinct results per page (full page triggers next fetch)
+        def _make_page(n):
+            return [_result_with(job_id=f"job-p{n}-{i}") for i in range(10)]
+
+        call_count = 0
+
+        def _mock_get(*args, **kwargs):
+            nonlocal call_count
+            resp = MagicMock()
+            resp.raise_for_status.return_value = None
+            if call_count < 3:
+                resp.json.return_value = {"jobs_results": _make_page(call_count)}
+            else:
+                resp.json.return_value = {"jobs_results": []}
+            call_count += 1
+            return resp
+
+        with patch("requests.get", side_effect=_mock_get) as mock_get:
+            with patch("job_finder.sources.serpapi_source.time.sleep"):
+                jobs = source._search("data scientist", "SF")
+
+        # 3 full pages → 3 requests (max_pages=3 stops further pagination)
+        assert mock_get.call_count == 3
+        assert len(jobs) == 30
+
+    def test_stops_on_partial_page(self):
+        """Stops paginating when a page returns fewer than 10 results."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=5)
+
+        call_count = 0
+
+        def _mock_get(*args, **kwargs):
+            nonlocal call_count
+            resp = MagicMock()
+            resp.raise_for_status.return_value = None
+            if call_count == 0:
+                resp.json.return_value = {
+                    "jobs_results": [_result_with(job_id=f"job-{i}") for i in range(10)]
+                }
+            elif call_count == 1:
+                # Partial page — only 3 results
+                resp.json.return_value = {
+                    "jobs_results": [_result_with(job_id=f"job-p2-{i}") for i in range(3)]
+                }
+            else:
+                resp.json.return_value = {"jobs_results": []}
+            call_count += 1
+            return resp
+
+        with patch("requests.get", side_effect=_mock_get) as mock_get:
+            with patch("job_finder.sources.serpapi_source.time.sleep"):
+                jobs = source._search("data scientist", "SF")
+
+        # Full page + partial page → stops after 2 requests
+        assert mock_get.call_count == 2
+        assert len(jobs) == 13
+
+    def test_stops_on_empty_page(self):
+        """Stops paginating when a page returns zero results."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=5)
+
+        call_count = 0
+
+        def _mock_get(*args, **kwargs):
+            nonlocal call_count
+            resp = MagicMock()
+            resp.raise_for_status.return_value = None
+            if call_count == 0:
+                resp.json.return_value = {
+                    "jobs_results": [_result_with(job_id=f"job-{i}") for i in range(10)]
+                }
+            else:
+                resp.json.return_value = {"jobs_results": []}
+            call_count += 1
+            return resp
+
+        with patch("requests.get", side_effect=_mock_get) as mock_get:
+            with patch("job_finder.sources.serpapi_source.time.sleep"):
+                jobs = source._search("data scientist", "SF")
+
+        assert mock_get.call_count == 2
+        assert len(jobs) == 10
+
+    def test_passes_start_parameter(self):
+        """Each page request includes the correct start offset."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=3)
+
+        call_count = 0
+
+        def _mock_get(url, **kwargs):
+            nonlocal call_count
+            resp = MagicMock()
+            resp.raise_for_status.return_value = None
+            if call_count < 2:
+                resp.json.return_value = {
+                    "jobs_results": [_result_with(job_id=f"job-{call_count}-{i}") for i in range(10)]
+                }
+            else:
+                resp.json.return_value = {"jobs_results": []}
+            call_count += 1
+            return resp
+
+        with patch("requests.get", side_effect=_mock_get) as mock_get:
+            with patch("job_finder.sources.serpapi_source.time.sleep"):
+                source._search("data scientist", "SF")
+
+        # Verify start param: page 0 → start=0, page 1 → start=10, page 2 → start=20
+        starts = [call.kwargs["params"]["start"] for call in mock_get.call_args_list]
+        assert starts == [0, 10, 20]
+
+    def test_max_pages_one_disables_pagination(self):
+        """max_pages=1 fetches only the first page (backward-compatible behavior)."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=1)
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "jobs_results": [_result_with(job_id=f"job-{i}") for i in range(10)]
+        }
+
+        with patch("requests.get", return_value=mock_response) as mock_get:
+            jobs = source._search("data scientist", "SF")
+
+        assert mock_get.call_count == 1
+        assert len(jobs) == 10
+
+    def test_http_error_mid_pagination_returns_partial(self):
+        """HTTP error on page 2 returns results from page 1."""
+        source = SerpAPISource(api_key=_TEST_API_KEY, max_pages=5)
+
+        call_count = 0
+
+        def _mock_get(*args, **kwargs):
+            nonlocal call_count
+            resp = MagicMock()
+            if call_count == 0:
+                resp.raise_for_status.return_value = None
+                resp.json.return_value = {
+                    "jobs_results": [_result_with(job_id=f"job-{i}") for i in range(10)]
+                }
+            else:
+                resp.raise_for_status.side_effect = Exception("429 Rate Limited")
+            call_count += 1
+            return resp
+
+        with patch("requests.get", side_effect=_mock_get):
+            with patch("job_finder.sources.serpapi_source.time.sleep"):
+                jobs = source._search("data scientist", "SF")
+
+        assert len(jobs) == 10

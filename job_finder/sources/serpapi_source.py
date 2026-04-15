@@ -19,10 +19,12 @@ class SerpAPISource:
     """Fetch jobs from Google Jobs via SerpAPI."""
 
     BASE_URL = "https://serpapi.com/search.json"
+    _PAGE_SIZE = 10  # Google Jobs returns 10 results per page
 
-    def __init__(self, api_key: str, source_name: str = "serpapi"):
+    def __init__(self, api_key: str, source_name: str = "serpapi", max_pages: int = 5):
         self.api_key = api_key
         self.source_name = source_name
+        self.max_pages = max_pages
 
     def fetch_jobs(self, queries: list[dict], delay: float = 1.0) -> list[Job]:
         """Run multiple search queries and return combined results.
@@ -45,30 +47,56 @@ class SerpAPISource:
         return all_jobs
 
     def _search(self, query: str, location: str = "") -> list[Job]:
-        """Execute a single Google Jobs search."""
-        params = {
-            "engine": "google_jobs",
-            "q": query,
-            "location": location,
-            "api_key": self.api_key,
-            "hl": "en",
-        }
+        """Execute a single Google Jobs search with pagination.
 
-        try:
-            resp = requests.get(self.BASE_URL, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning("SerpAPI search failed for '%s': %s", query, e)
-            return []
+        Google Jobs returns 10 results per page. Paginates using the `start`
+        parameter until no more results or max_pages is reached.
+        Each page costs one API credit.
+        """
+        all_jobs: list[Job] = []
 
-        jobs = []
-        for result in data.get("jobs_results", []):
-            job = self._parse_result(result)
-            if job:
-                jobs.append(job)
+        for page in range(self.max_pages):
+            params = {
+                "engine": "google_jobs",
+                "q": query,
+                "location": location,
+                "api_key": self.api_key,
+                "hl": "en",
+                "start": page * self._PAGE_SIZE,
+            }
 
-        return jobs
+            try:
+                resp = requests.get(self.BASE_URL, params=params, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.warning(
+                    "SerpAPI search failed for '%s' (page %d): %s", query, page, e,
+                )
+                break
+
+            results = data.get("jobs_results", [])
+            if not results:
+                break
+
+            for result in results:
+                job = self._parse_result(result)
+                if job:
+                    all_jobs.append(job)
+
+            # Stop if this page had fewer results than a full page
+            if len(results) < self._PAGE_SIZE:
+                break
+
+            # Small delay between pages to respect rate limits
+            if page < self.max_pages - 1:
+                time.sleep(0.5)
+
+        logger.info(
+            "%s '%s': %d jobs across %d page(s)",
+            self.source_name, query, len(all_jobs), min(page + 1, self.max_pages),
+        )
+        return all_jobs
 
     def _parse_result(self, result: dict) -> Optional[Job]:
         """Parse a single SerpAPI Google Jobs result into a Job."""
