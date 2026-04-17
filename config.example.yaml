@@ -273,6 +273,31 @@ stale_detection:
   # Days since last_seen before a passive-stage job is auto-archived
   archive_threshold_days: 30
 
+# --- Unified staleness orchestrator (nightly 2:00 AM) ---
+# Replaces the older trio of stale_detection / expiry_check / liveness_check
+# scheduled jobs with one run that does:
+#   B) batch ATS reconciliation (one API call per company with an ATS slug)
+#   A) time-based stale marking + passive-stage archive
+#   C) parallel HTTP cascade for remaining unchecked jobs
+# See job_finder.web.expiry_checker.run_staleness_check for details.
+staleness:
+  # Master toggle. Also honored by the deprecated expiry.enabled key for
+  # backward compatibility during the migration window.
+  enabled: true
+  # Phase B: call Lever/Greenhouse/Ashby/Workday/SmartRecruiters list endpoints
+  # once per company instead of once per tracked job. Posting-ID set-diff
+  # marks jobs missing from the live board as expired.
+  batch_ats_enabled: true
+  # Phase C: re-check threshold — jobs whose expiry_checked_at is older than
+  # this are queued for the cascade. Legacy key expiry.recheck_days is read
+  # as a fallback.
+  cascade_recheck_days: 3
+  # Phase C: ThreadPoolExecutor size. Each worker runs HTTP + regex only;
+  # DB writes happen on the orchestrator thread.
+  cascade_parallel_workers: 10
+  # Phase C: per-request HTTP timeout (seconds).
+  cascade_request_timeout_seconds: 8
+
 # --- Filtering ---
 filters:
   # Additional companies to auto-exclude (merged with built-in denylist)

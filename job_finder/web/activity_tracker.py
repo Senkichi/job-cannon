@@ -43,6 +43,11 @@ ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
 ACTION_SCHEDULED_CAREERS_CRAWL = "scheduled_careers_crawl"
 ACTION_LIVENESS_CHECK = "liveness_check"
+# Unified staleness orchestrator (replaces SCHEDULED_STALE_DETECTION +
+# SCHEDULED_EXPIRY_CHECK + scheduled liveness). Those constants above
+# are kept as aliases so existing user_activity rows and test assertions
+# (tests/test_activity_tracker.py) remain valid.
+ACTION_SCHEDULED_STALENESS = "scheduled_staleness"
 
 # ---------------------------------------------------------------------------
 # Core helper

@@ -1,0 +1,482 @@
+"""Tests for batch ATS reconciliation (Phase B of the staleness orchestrator).
+
+Covers:
+- Posting-ID extraction for all 5 supported platforms.
+- Set-diff happy path: tracked job's URL matches live board → LIVE + last_seen refresh.
+- Set-diff expired path: tracked job's ID missing from live board → EXPIRED + archive.
+- Safety guards: scan-empty, scan-exception, unsupported-platform, Workday truncation,
+  scan returns postings but none parseable.
+- reconcile_all_companies orchestrator aggregates per-company results.
+"""
+
+import sqlite3
+from datetime import datetime, timezone
+from unittest.mock import patch
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# _extract_posting_id
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPostingId:
+    def test_lever_url(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id(
+            "https://jobs.lever.co/acme/abc-123-def", "lever"
+        ) == "abc-123-def"
+
+    def test_greenhouse_url(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id(
+            "https://boards.greenhouse.io/airbnb/jobs/12345", "greenhouse"
+        ) == "12345"
+
+    def test_ashby_url_case_sensitive(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        # Ashby slugs are case-sensitive — pattern preserves case
+        assert _extract_posting_id(
+            "https://jobs.ashbyhq.com/OpenAI/abc-123-def", "ashby"
+        ) == "abc-123-def"
+
+    def test_workday_url_extracts_tail(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Software-Engineer_R-123456"
+        assert _extract_posting_id(url, "workday") == "Software-Engineer_R-123456"
+
+    def test_workday_url_handles_location_prefix(self):
+        """Real stored URLs often include a location segment like
+        '.../job/Remote-United-States/Senior-Data-Scientist_JR101664'.
+        The regex must capture only the final (role-slug) segment."""
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        url = "https://stord.wd503.myworkdayjobs.com/Stord_External_Career/job/Remote-United-States/Senior-Data-Scientist_JR101664"
+        assert _extract_posting_id(url, "workday") == "Senior-Data-Scientist_JR101664"
+
+    def test_workday_url_survives_scan_doubled_job_path(self):
+        """scan_workday has a quirk that produces '.../job//job/<location>/<slug>'
+        because Workday's externalPath already starts with /job/. The regex must
+        still land on the final (role-slug) segment so scan and stored URLs
+        normalize to the same ID."""
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        url = "https://stord.wd503.myworkdayjobs.com/en-US/Stord_External_Career/job//job/Remote-United-States/Data-Analyst_JR101972"
+        assert _extract_posting_id(url, "workday") == "Data-Analyst_JR101972"
+
+    def test_workday_regex_rejects_non_workday_domains(self):
+        """Guard against the 'unanchored /job/' bug: Google search and
+        ZipRecruiter URLs contain '/job/' substrings but are not Workday
+        postings. They must return None so they can't pollute live_id_set
+        or a tracked job's job_ids set."""
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id(
+            "https://www.google.com/search?source=sh/x/job/li/m1/1", "workday"
+        ) is None
+        assert _extract_posting_id(
+            "https://www.ziprecruiter.com/c/Walmart/Job/Manager,-Advanced-Analytics/-in-Oakland,CA",
+            "workday",
+        ) is None
+        assert _extract_posting_id(
+            "https://www.linkedin.com/jobs/view/4379178105/", "workday"
+        ) is None
+
+    def test_smartrecruiters_url(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id(
+            "https://jobs.smartrecruiters.com/AbbVie/744000123456789", "smartrecruiters"
+        ) == "744000123456789"
+
+    def test_smartrecruiters_url_strips_slug_suffix(self):
+        """Stored URLs often keep the '-<slug-text>' SEO suffix that
+        scan_smartrecruiters' constructed URLs omit. The regex must stop
+        at the first dash so both forms normalize to the same ID."""
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id(
+            "https://jobs.smartrecruiters.com/WNSGlobalServices144/744000118077858-assistant-manager-analytics",
+            "smartrecruiters",
+        ) == "744000118077858"
+
+    def test_unknown_platform_returns_none(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id("https://jobs.lever.co/acme/abc", "icims") is None
+
+    def test_non_matching_url_returns_none(self):
+        from job_finder.web.ats_reconciler import _extract_posting_id
+        assert _extract_posting_id("https://random.com/jobs/x", "lever") is None
+
+
+# ---------------------------------------------------------------------------
+# Test DB helper
+# ---------------------------------------------------------------------------
+
+
+def _setup_company_and_jobs(
+    path,
+    *,
+    platform="lever",
+    slug="acme",
+    job_urls=None,
+    old_last_seen=False,
+):
+    """Seed a migrated DB with one company and N discovered jobs.
+
+    Args:
+        path: tmp_db_path
+        platform: ats_platform value
+        slug: ats_slug value
+        job_urls: list of source URLs (one job per URL)
+        old_last_seen: if True, use a timestamp long in the past (to test refresh)
+
+    Returns: (company_id, [dedup_keys])
+    """
+    from job_finder.web.db_migrate import run_migrations
+    run_migrations(path)
+
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    old_iso = "2026-01-01T00:00:00" if old_last_seen else now_iso
+
+    conn.execute(
+        "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, ats_slug, "
+        "ats_probe_status, scan_enabled, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+        ("acme", "Acme Corp", "https://acme.com", platform, slug,
+         "hit", now_iso, now_iso),
+    )
+    company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    dedup_keys = []
+    for i, url in enumerate(job_urls or []):
+        dk = f"acme|job{i}"
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, first_seen, "
+            "last_seen, pipeline_status, company_id, source_urls) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (dk, f"Job {i}", "Acme Corp", "Remote",
+             old_iso, old_iso, "discovered", company_id,
+             f'["{url}"]'),
+        )
+        dedup_keys.append(dk)
+
+    conn.commit()
+    conn.close()
+    return company_id, dedup_keys
+
+
+# ---------------------------------------------------------------------------
+# reconcile_company
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileCompany:
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_live_job_refreshes_last_seen_and_clears_is_stale(
+        self, mock_scan, tmp_db_path,
+    ):
+        """A tracked job whose URL posting-ID matches the live board is
+        marked live, last_seen is refreshed to ~now, and is_stale is cleared."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://jobs.lever.co/acme/abc-123-def"
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path, job_urls=[url], old_last_seen=True,
+        )
+        # Artificially mark job as stale to verify Phase B clears it
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute("UPDATE jobs SET is_stale = 1 WHERE dedup_key = ?", (dedup_keys[0],))
+        conn.commit()
+        conn.close()
+
+        mock_scan.return_value = [
+            {"source_url": url, "title": "Job 0", "company_source": "Lever"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["live"] == 1
+        assert result["expired"] == 0
+        assert result["skipped"] is False
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status, is_stale, last_seen FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] == "live"
+        assert row["is_stale"] == 0
+        # last_seen must be a fresh timestamp (not the old one we seeded)
+        assert not row["last_seen"].startswith("2026-01-01")
+
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_missing_job_is_archived(self, mock_scan, tmp_db_path):
+        """A tracked job whose posting-ID is NOT in the live board is
+        marked expired and archived via update_pipeline_status."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path, job_urls=["https://jobs.lever.co/acme/111-222-aaa"],
+        )
+        mock_scan.return_value = [
+            # Different hex-only ID — tracked job is NOT on the live board
+            {"source_url": "https://jobs.lever.co/acme/333-444-bbb"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["expired"] == 1
+        assert result["live"] == 0
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT expiry_status, pipeline_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["expiry_status"] == "expired"
+        assert row["pipeline_status"] == "archived"
+
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_scan_empty_skips_company(self, mock_scan, tmp_db_path):
+        """Safety guard: scan returning [] must NOT mass-expire tracked jobs."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+        )
+        mock_scan.return_value = []
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "scan_empty"
+        assert result["expired"] == 0  # no false-expire
+
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_scan_exception_skips_company(self, mock_scan, tmp_db_path):
+        """Safety guard: scan raising must NOT mass-expire tracked jobs."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+        )
+        mock_scan.side_effect = RuntimeError("network blew up")
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert "scan_exception" in result["skip_reason"]
+        assert result["expired"] == 0
+
+    def test_unsupported_platform_skips_silently(self, tmp_db_path):
+        """iCIMS/Phenom/UKG/custom: no scan_* exists; skip without network call."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path, platform="icims", slug="acme_icims",
+            job_urls=["https://acme.icims.com/jobs/1234"],
+        )
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "unsupported_platform"
+
+    def test_workday_is_unsupported_platform(self, tmp_db_path):
+        """Workday is intentionally excluded from batch reconciliation
+        because scan_workday's pagination can return partial results
+        (observed returning only 40 postings for Walmart during e2e),
+        which would cause false-expires. Workday jobs must fall through
+        to Phase C per-URL HTTP GET. See _SUPPORTED_PLATFORMS note in
+        ats_reconciler.py.
+        """
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/R-1"
+        _setup_company_and_jobs(
+            tmp_db_path, platform="workday", slug="walmart.wd5/WalmartExternal",
+            job_urls=[url],
+        )
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "unsupported_platform"
+        assert result["expired"] == 0
+
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_scan_returns_postings_but_no_parseable_ids_skips(
+        self, mock_scan, tmp_db_path,
+    ):
+        """If scan output has no source_urls matching the platform's ID
+        pattern (URL format drift), skip rather than falsely expire."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _setup_company_and_jobs(
+            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+        )
+        mock_scan.return_value = [
+            # Malformed source_url that doesn't match _LEVER_POSTING_RE
+            {"source_url": "https://careers.acme.com/role?id=789"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["skipped"] is True
+        assert result["skip_reason"] == "no_parseable_live_ids"
+
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_unparseable_stored_url_defers_to_phase_c(self, mock_scan, tmp_db_path):
+        """If a tracked job's own source_urls don't yield a parseable posting-ID
+        (e.g. Gmail-mangled URL), the job is marked 'unparseable' and NOT
+        archived — Phase C (cascade) handles it later."""
+        from job_finder.web.ats_reconciler import reconcile_company
+        from job_finder.web.db_helpers import standalone_connection
+
+        _, dedup_keys = _setup_company_and_jobs(
+            tmp_db_path,
+            job_urls=["https://careers.acme.com/role?id=789"],  # can't parse as Lever
+        )
+        mock_scan.return_value = [
+            {"source_url": "https://jobs.lever.co/acme/abc-def-123"},
+        ]
+
+        with standalone_connection(tmp_db_path) as conn:
+            company_row = dict(conn.execute(
+                "SELECT id, ats_platform, ats_slug FROM companies"
+            ).fetchone())
+            result = reconcile_company(conn, company_row)
+
+        assert result["unparseable"] == 1
+        assert result["expired"] == 0  # no false-expire
+
+        # Job must remain discovered
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT pipeline_status, expiry_status FROM jobs WHERE dedup_key = ?",
+            (dedup_keys[0],),
+        ).fetchone()
+        conn.close()
+        assert row["pipeline_status"] == "discovered"
+        assert row["expiry_status"] is None
+
+
+# ---------------------------------------------------------------------------
+# reconcile_all_companies
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileAllCompanies:
+    @patch("job_finder.web.ats_reconciler.scan_lever")
+    def test_aggregates_per_company(self, mock_scan, tmp_db_path):
+        """Multiple companies are each reconciled; summary aggregates counts."""
+        from job_finder.web.ats_reconciler import reconcile_all_companies
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Two Lever companies, each with one discovered job.
+        # Hex-only posting IDs (Lever UUID format).
+        for i, (slug, url) in enumerate([
+            ("acme", "https://jobs.lever.co/acme/aaa-bbb-111"),
+            ("beta", "https://jobs.lever.co/beta/ccc-ddd-222"),
+        ]):
+            conn.execute(
+                "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, "
+                "ats_slug, ats_probe_status, scan_enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (slug, slug.title(), f"https://{slug}.com", "lever", slug,
+                 "hit", now_iso, now_iso),
+            )
+            company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT INTO jobs (dedup_key, title, company, location, first_seen, "
+                "last_seen, pipeline_status, company_id, source_urls) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (f"{slug}|job", f"Job at {slug}", slug.title(), "Remote",
+                 now_iso, now_iso, "discovered", company_id, f'["{url}"]'),
+            )
+        conn.commit()
+        conn.close()
+
+        # scan_lever returns the URL only for the first company, so company 2's
+        # job is missing from its live board → should be archived.
+        def _fake_scan(slug, targets, excl):
+            if slug == "acme":
+                return [{"source_url": "https://jobs.lever.co/acme/aaa-bbb-111"}]
+            # beta's tracked job ID (ccc-ddd-222) is absent → expired
+            return [{"source_url": "https://jobs.lever.co/beta/eee-fff-999"}]
+
+        mock_scan.side_effect = _fake_scan
+
+        summary = reconcile_all_companies(tmp_db_path, config={})
+
+        assert summary["companies_checked"] == 2
+        assert summary["live"] == 1
+        assert summary["expired"] == 1
+
+    def test_skips_companies_without_ats_slug(self, tmp_db_path):
+        """Companies with NULL ats_slug must not be queried at all."""
+        from job_finder.web.ats_reconciler import reconcile_all_companies
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, "
+            "ats_slug, ats_probe_status, scan_enabled, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            ("no_ats", "No ATS", "https://no-ats.com", None, None,
+             "miss", now_iso, now_iso),
+        )
+        conn.commit()
+        conn.close()
+
+        summary = reconcile_all_companies(tmp_db_path, config={})
+        # Zero companies queried (filtered by WHERE ats_platform/slug NOT NULL)
+        assert summary["companies_checked"] == 0
+        assert summary["companies_skipped"] == 0

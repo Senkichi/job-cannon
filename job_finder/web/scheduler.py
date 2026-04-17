@@ -196,29 +196,49 @@ def init_scheduler(app) -> None:
             coalesce=True,     # skip missed runs if app was down
         )
 
-        # -- Stale detection (nightly) -------------------------------------
+        # -- Unified staleness check (nightly 2:00 AM) ---------------------
+        # Replaces the old trio (stale_detection 2:00, expiry_check 2:30,
+        # liveness_check 3:00). Runs three phases in order:
+        #   B: batch ATS reconciliation
+        #   A: time-based stale / archive
+        #   C: parallel HTTP cascade
+        # See job_finder.web.expiry_checker.run_staleness_check.
 
-        def _import_stale():
-            from job_finder.web.stale_detector import run_stale_detection
-            return lambda db_path, config: run_stale_detection(db_path)
+        def _import_staleness():
+            from job_finder.web.expiry_checker import run_staleness_check
+            return run_staleness_check
 
-        def _import_stale_action():
-            from job_finder.web.activity_tracker import ACTION_SCHEDULED_STALE_DETECTION
-            return ACTION_SCHEDULED_STALE_DETECTION
+        def _import_staleness_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_STALENESS
+            return ACTION_SCHEDULED_STALENESS
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Stale detection",
-                import_func=_import_stale,
-                import_action=_import_stale_action,
+                app, "Staleness check",
+                import_func=_import_staleness,
+                import_action=_import_staleness_action,
                 extract_metadata=lambda r: {
-                    "stale_marked": r.get("stale_marked", 0),
-                    "stale_cleared": r.get("stale_cleared", 0),
-                    "archived": r.get("archived", 0),
+                    # Phase B (batch ATS reconciliation)
+                    "batch_companies_checked": r.get("phase_b", {}).get("companies_checked", 0),
+                    "batch_companies_skipped": r.get("phase_b", {}).get("companies_skipped", 0),
+                    "batch_live": r.get("phase_b", {}).get("live", 0),
+                    "batch_expired": r.get("phase_b", {}).get("expired", 0),
+                    # Phase A (time-based stale detector)
+                    "stale_marked": r.get("phase_a", {}).get("stale_marked", 0),
+                    "stale_cleared": r.get("phase_a", {}).get("stale_cleared", 0),
+                    "stale_archived": r.get("phase_a", {}).get("archived", 0),
+                    # Phase C (parallel HTTP cascade)
+                    "cascade_checked": r.get("phase_c", {}).get("checked", 0),
+                    "cascade_live": r.get("phase_c", {}).get("live", 0),
+                    "cascade_archived": r.get("phase_c", {}).get("archived", 0),
+                    "cascade_inconclusive": r.get("phase_c", {}).get("inconclusive", 0),
                 },
+                guard=lambda config: config.get("staleness", {}).get(
+                    "enabled", config.get("expiry", {}).get("enabled", True),
+                ),
             ),
             trigger=CronTrigger(hour=2, minute=0),
-            id="stale_detection",
+            id="staleness_check",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -409,63 +429,6 @@ def init_scheduler(app) -> None:
             ),
             trigger=CronTrigger(hour=5, minute=0),
             id="careers_crawl",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
-        # -- Expiry check (nightly 2:30 AM) --------------------------------
-
-        def _import_expiry():
-            from job_finder.web.expiry_checker import run_expiry_check
-            return run_expiry_check
-
-        def _import_expiry_action():
-            from job_finder.web.activity_tracker import ACTION_SCHEDULED_EXPIRY_CHECK
-            return ACTION_SCHEDULED_EXPIRY_CHECK
-
-        scheduler.add_job(
-            _make_tracked_job(
-                app, "Expiry check",
-                import_func=_import_expiry,
-                import_action=_import_expiry_action,
-                extract_metadata=lambda r: {
-                    "checked": r.get("checked", 0),
-                    "archived": r.get("archived", 0),
-                    "live": r.get("live", 0),
-                    "inconclusive": r.get("inconclusive", 0),
-                },
-                guard=lambda config: config.get("expiry", {}).get("enabled", True),
-            ),
-            trigger=CronTrigger(hour=2, minute=30),
-            id="expiry_check",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
-        # -- URL liveness check (nightly 3:00 AM) ----------------------------
-
-        def _import_liveness_check():
-            from job_finder.web.liveness_checker import run_liveness_check
-            return run_liveness_check
-
-        def _import_liveness_action():
-            from job_finder.web.activity_tracker import ACTION_LIVENESS_CHECK
-            return ACTION_LIVENESS_CHECK
-
-        scheduler.add_job(
-            _make_tracked_job(
-                app, "Liveness check",
-                import_func=_import_liveness_check,
-                import_action=_import_liveness_action,
-                extract_metadata=lambda r: {
-                    "checked": r.get("checked", 0),
-                    "expired": r.get("expired", 0),
-                },
-            ),
-            trigger=CronTrigger(hour=3, minute=0),
-            id="liveness_check",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

@@ -238,55 +238,19 @@ class TestCheckCareersPage:
         result = _check_careers_page(None, "Senior Data Scientist", ["data scientist"], [])
         assert result == INCONCLUSIVE
 
-class TestCheckSerpapi:
-    """Signal 3: SerpAPI re-search fallback."""
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_no_match_returns_expired(self, mock_get):
-        from job_finder.web.expiry_checker import _check_serpapi, EXPIRED
-        mock_get.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"jobs_results": [
-                {"title": "Backend Engineer", "company_name": "OtherCo"},
-            ]}),
-        )
-        config = {"sources": {"serpapi": {"enabled": True, "api_key": "test-key"}}}
-        result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
-        assert result == EXPIRED
-
-    @patch("job_finder.web.expiry_checker.requests.get")
-    def test_match_found_returns_live(self, mock_get):
-        from job_finder.web.expiry_checker import _check_serpapi, LIVE
-        mock_get.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"jobs_results": [
-                {"title": "Senior Data Scientist", "company_name": "Acme Corp"},
-            ]}),
-        )
-        config = {"sources": {"serpapi": {"enabled": True, "api_key": "test-key"}}}
-        result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
-        assert result == LIVE
-
-    def test_serpapi_disabled_returns_inconclusive(self):
-        from job_finder.web.expiry_checker import _check_serpapi, INCONCLUSIVE
-        config = {"sources": {"serpapi": {"enabled": False, "api_key": "test-key"}}}
-        result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
-        assert result == INCONCLUSIVE
-
-    def test_serpapi_no_key_returns_inconclusive(self):
-        from job_finder.web.expiry_checker import _check_serpapi, INCONCLUSIVE
-        config = {"sources": {"serpapi": {"enabled": True, "api_key": ""}}}
-        result = _check_serpapi("Senior Data Scientist", "Acme Corp", config)
-        assert result == INCONCLUSIVE
-
 class TestSignalCascade:
-    """_check_job_expiry runs signals in order and short-circuits."""
+    """_check_job_expiry runs signals in order and short-circuits.
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
+    SerpAPI (Signal 3) was removed from the cascade — absence from its index
+    is a weak signal that caused false positives, and per-job 30s timeouts
+    dominated wall-clock runtime. Signal 2 (careers page) is now the final
+    fallback; INCONCLUSIVE from it means we can't tell.
+    """
+
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_ats_expired_short_circuits(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_ats_expired_short_circuits(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, EXPIRED, INCONCLUSIVE
         mock_url.return_value = INCONCLUSIVE  # Signal 0 passes through
         mock_ats.return_value = EXPIRED
@@ -298,13 +262,11 @@ class TestSignalCascade:
         assert result == EXPIRED
         assert "lever" in evidence.lower() or "ats" in evidence.lower()
         mock_careers.assert_not_called()
-        mock_serpapi.assert_not_called()
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_ats_inconclusive_falls_through_to_careers(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_ats_inconclusive_falls_through_to_careers(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE, LIVE
         mock_url.return_value = INCONCLUSIVE  # Signal 0 passes through
         mock_ats.return_value = INCONCLUSIVE
@@ -316,18 +278,15 @@ class TestSignalCascade:
         result, evidence = _check_job_expiry(job, company, config)
         assert result == LIVE
         mock_careers.assert_called_once()
-        mock_serpapi.assert_not_called()
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_all_inconclusive_returns_inconclusive(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_all_inconclusive_returns_inconclusive(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE
         mock_url.return_value = INCONCLUSIVE
         mock_ats.return_value = INCONCLUSIVE
         mock_careers.return_value = INCONCLUSIVE
-        mock_serpapi.return_value = INCONCLUSIVE
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
                "source_urls": '["https://jobs.lever.co/acme/abc-123"]'}
         company = {"ats_platform": "lever", "ats_slug": "acme", "homepage_url": "https://acme.com"}
@@ -337,11 +296,10 @@ class TestSignalCascade:
 
     # --- Signal 0 tests ---
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_signal_0_expired_short_circuits_before_ats(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_signal_0_expired_short_circuits_before_ats(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, EXPIRED
         mock_url.return_value = EXPIRED
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
@@ -353,13 +311,11 @@ class TestSignalCascade:
         assert "url_check" in evidence
         mock_ats.assert_not_called()
         mock_careers.assert_not_called()
-        mock_serpapi.assert_not_called()
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_signal_0_live_short_circuits_before_ats(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_signal_0_live_short_circuits_before_ats(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, LIVE
         mock_url.return_value = LIVE
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
@@ -371,13 +327,11 @@ class TestSignalCascade:
         assert "url_check" in evidence
         mock_ats.assert_not_called()
         mock_careers.assert_not_called()
-        mock_serpapi.assert_not_called()
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
     @patch("job_finder.web.expiry_checker.quick_liveness_check")
-    def test_signal_0_inconclusive_falls_through_to_signal_1(self, mock_url, mock_ats, mock_careers, mock_serpapi):
+    def test_signal_0_inconclusive_falls_through_to_signal_1(self, mock_url, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE, EXPIRED
         mock_url.return_value = INCONCLUSIVE
         mock_ats.return_value = EXPIRED
@@ -389,14 +343,12 @@ class TestSignalCascade:
         assert result == EXPIRED
         mock_ats.assert_called_once()
 
-    @patch("job_finder.web.expiry_checker._check_serpapi")
     @patch("job_finder.web.expiry_checker._check_careers_page")
     @patch("job_finder.web.expiry_checker._check_ats_api")
-    def test_signal_0_skipped_when_no_source_urls(self, mock_ats, mock_careers, mock_serpapi):
+    def test_signal_0_skipped_when_no_source_urls(self, mock_ats, mock_careers):
         from job_finder.web.expiry_checker import _check_job_expiry, INCONCLUSIVE
         mock_ats.return_value = INCONCLUSIVE
         mock_careers.return_value = INCONCLUSIVE
-        mock_serpapi.return_value = INCONCLUSIVE
         job = {"dedup_key": "test", "title": "DS", "company": "Acme",
                "source_urls": "[]"}
         company = {"ats_platform": None, "ats_slug": None, "homepage_url": None}
@@ -406,8 +358,14 @@ class TestSignalCascade:
 
 
 
-class TestRunExpiryCheck:
-    """run_expiry_check batch runner queries DB and processes jobs."""
+class TestRunStalenessCheck:
+    """run_staleness_check orchestrates the three phases (B → A → C).
+
+    These tests disable Phase B (batch ATS) via config so they don't hit
+    real HTTP. Phase A runs naturally on fresh last_seen timestamps (no
+    time-based archives fire). Phase C is the focus — _check_job_expiry
+    is mocked per-test.
+    """
 
     def _setup_db(self, path):
         """Create a migrated DB with test jobs and companies."""
@@ -416,96 +374,103 @@ class TestRunExpiryCheck:
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
 
-        # Insert a company with ATS info
+        # Fresh last_seen so Phase A (time-based stale/archive) is a no-op.
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         conn.execute(
             "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, ats_slug, "
             "ats_probe_status, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("acme", "Acme Corp", "https://acme.com", "lever", "acme-corp",
-             "hit", "2026-03-01", "2026-03-01"),
+             "hit", now_iso, now_iso),
         )
         company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-        # Insert a discovered job linked to company
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, "
             "pipeline_status, company_id, source_urls) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             ("acme|ds|remote", "Data Scientist", "Acme Corp", "Remote",
-             "2026-03-01", "2026-03-10", "discovered", company_id,
+             now_iso, now_iso, "discovered", company_id,
              '["https://jobs.lever.co/acme-corp/abc-123-def"]'),
         )
 
-        # Insert an applied job (should NOT be checked)
+        # Applied job — must NEVER be touched by expiry check.
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, "
             "pipeline_status, company_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("acme|sde|remote", "Software Engineer", "Acme Corp", "Remote",
-             "2026-03-01", "2026-03-10", "applied", company_id),
+             now_iso, now_iso, "applied", company_id),
         )
         conn.commit()
         conn.close()
         return path
 
-    @patch("job_finder.web.expiry_checker.time.sleep")
+    def _base_config(self):
+        return {
+            "profile": {"target_titles": [], "exclusions": {"title_keywords": []}},
+            "staleness": {"batch_ats_enabled": False, "cascade_parallel_workers": 2},
+        }
+
     @patch("job_finder.web.expiry_checker._check_job_expiry")
-    def test_archives_expired_job(self, mock_check, mock_sleep, tmp_db_path):
-        from job_finder.web.expiry_checker import run_expiry_check
+    def test_archives_expired_job(self, mock_check, tmp_db_path):
+        from job_finder.web.expiry_checker import run_staleness_check
         self._setup_db(tmp_db_path)
         mock_check.return_value = ("expired", "lever_api 404")
 
-        config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
-        result = run_expiry_check(tmp_db_path, config)
+        result = run_staleness_check(tmp_db_path, self._base_config())
 
-        assert result["archived"] >= 1
+        assert result["phase_c"]["archived"] >= 1
 
-        # Verify the job was actually archived
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT pipeline_status FROM jobs WHERE dedup_key = ?", ("acme|ds|remote",)).fetchone()
+        row = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
+            ("acme|ds|remote",),
+        ).fetchone()
         assert row["pipeline_status"] == "archived"
         conn.close()
 
-    @patch("job_finder.web.expiry_checker.time.sleep")
     @patch("job_finder.web.expiry_checker._check_job_expiry")
-    def test_does_not_touch_applied_jobs(self, mock_check, mock_sleep, tmp_db_path):
-        from job_finder.web.expiry_checker import run_expiry_check
+    def test_does_not_touch_applied_jobs(self, mock_check, tmp_db_path):
+        from job_finder.web.expiry_checker import run_staleness_check
         self._setup_db(tmp_db_path)
         mock_check.return_value = ("expired", "lever_api 404")
 
-        config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
-        run_expiry_check(tmp_db_path, config)
+        run_staleness_check(tmp_db_path, self._base_config())
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT pipeline_status FROM jobs WHERE dedup_key = ?", ("acme|sde|remote",)).fetchone()
+        row = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
+            ("acme|sde|remote",),
+        ).fetchone()
         assert row["pipeline_status"] == "applied"
         conn.close()
 
-    @patch("job_finder.web.expiry_checker.time.sleep")
     @patch("job_finder.web.expiry_checker._check_job_expiry")
-    def test_updates_expiry_checked_at_on_live(self, mock_check, mock_sleep, tmp_db_path):
-        from job_finder.web.expiry_checker import run_expiry_check
+    def test_updates_expiry_checked_at_on_live(self, mock_check, tmp_db_path):
+        from job_finder.web.expiry_checker import run_staleness_check
         self._setup_db(tmp_db_path)
         mock_check.return_value = ("live", "lever_api 200")
 
-        config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
-        run_expiry_check(tmp_db_path, config)
+        run_staleness_check(tmp_db_path, self._base_config())
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT expiry_checked_at FROM jobs WHERE dedup_key = ?", ("acme|ds|remote",)).fetchone()
+        row = conn.execute(
+            "SELECT expiry_checked_at FROM jobs WHERE dedup_key = ?",
+            ("acme|ds|remote",),
+        ).fetchone()
         assert row["expiry_checked_at"] is not None
         conn.close()
 
-    @patch("job_finder.web.expiry_checker.time.sleep")
     @patch("job_finder.web.expiry_checker._check_job_expiry")
-    def test_skips_recently_checked_jobs(self, mock_check, mock_sleep, tmp_db_path):
-        from job_finder.web.expiry_checker import run_expiry_check
+    def test_skips_recently_checked_jobs(self, mock_check, tmp_db_path):
+        from job_finder.web.expiry_checker import run_staleness_check
         self._setup_db(tmp_db_path)
 
-        # Set expiry_checked_at to now (recently checked)
         conn = sqlite3.connect(tmp_db_path)
         conn.execute(
             "UPDATE jobs SET expiry_checked_at = ? WHERE dedup_key = ?",
@@ -514,10 +479,35 @@ class TestRunExpiryCheck:
         conn.commit()
         conn.close()
 
-        config = {"profile": {"target_titles": [], "exclusions": {"title_keywords": []}}, "expiry": {"recheck_days": 3}}
-        run_expiry_check(tmp_db_path, config)
+        config = {
+            **self._base_config(),
+            "staleness": {
+                "batch_ats_enabled": False,
+                "cascade_parallel_workers": 2,
+                "cascade_recheck_days": 3,
+            },
+        }
+        run_staleness_check(tmp_db_path, config)
 
         mock_check.assert_not_called()
+
+    def test_run_expiry_check_is_deprecated_alias(self, tmp_db_path):
+        """Legacy entry point emits DeprecationWarning and returns the
+        nested phase summary from run_staleness_check."""
+        import warnings
+        from job_finder.web.expiry_checker import run_expiry_check
+        self._setup_db(tmp_db_path)
+
+        with patch("job_finder.web.expiry_checker._check_job_expiry") as mock_check:
+            mock_check.return_value = ("inconclusive", "")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = run_expiry_check(tmp_db_path, self._base_config())
+
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
+        assert "phase_a" in result
+        assert "phase_b" in result
+        assert "phase_c" in result
 
 class TestCareersBackoff:
     """_record_careers_outcome tracks failures and sets skip-until timestamps."""

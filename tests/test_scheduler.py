@@ -317,14 +317,18 @@ class TestSchedulerAtsScan:
         assert "ats_slug_probe" in job_ids_kw
 
 # ---------------------------------------------------------------------------
-# Expiry check scheduler tests (Phase 31)
+# Staleness check scheduler tests (replaces old expiry_check/liveness_check)
 # ---------------------------------------------------------------------------
 
 class TestSchedulerExpiryCheck:
-    """Verify expiry check job is registered in APScheduler."""
+    """Verify unified staleness check job is registered in APScheduler.
 
-    def test_scheduler_registers_expiry_check_job(self):
-        """init_scheduler registers 'expiry_check' CronTrigger job (hour=2, minute=30)."""
+    Replaces the old trio (stale_detection / expiry_check / liveness_check).
+    See job_finder.web.expiry_checker.run_staleness_check.
+    """
+
+    def test_scheduler_registers_staleness_check_job(self):
+        """init_scheduler registers 'staleness_check' CronTrigger job (hour=2, minute=0)."""
         from job_finder.web.scheduler import reset_scheduler
         from unittest.mock import MagicMock, patch
 
@@ -344,7 +348,11 @@ class TestSchedulerExpiryCheck:
                 init_scheduler(mock_app)
 
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
-        assert "expiry_check" in job_ids_kw
+        assert "staleness_check" in job_ids_kw
+        # Old per-phase jobs must no longer be registered
+        assert "expiry_check" not in job_ids_kw
+        assert "liveness_check" not in job_ids_kw
+        assert "stale_detection" not in job_ids_kw
 
 # ---------------------------------------------------------------------------
 # Test: Arg-order regression (Phase 11 plan 01)
