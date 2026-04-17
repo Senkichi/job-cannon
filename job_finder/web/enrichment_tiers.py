@@ -771,16 +771,23 @@ def search_ddg_web(title: str, company: str) -> dict:
     seen_urls: set[str] = set()
 
     for i, query in enumerate(queries):
+        results: list[dict] = []
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=5))
-            for r in results:
-                href = r.get("href", "")
-                if href and href not in seen_urls:
-                    seen_urls.add(href)
-                    all_results.append(r)
         except Exception as exc:
             logger.debug("DDG web search failed for '%s': %s", query[:60], exc)
+
+        # Empty result without exception = all engines exhausted for this query.
+        # Surface as WARNING for operator visibility (was silent before).
+        if not results:
+            logger.warning("DDGS: all engines returned empty for query '%s'", query[:80])
+
+        for r in results:
+            href = r.get("href", "")
+            if href and href not in seen_urls:
+                seen_urls.add(href)
+                all_results.append(r)
 
         if i < len(queries) - 1:
             time.sleep(_DDG_SEARCH_DELAY_S)

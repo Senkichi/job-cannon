@@ -162,6 +162,10 @@ These files contain personal data and API keys. They are `.gitignore`d and must 
 
 **config.yaml must ONLY be modified with the Edit tool (surgical string replacement), NEVER with the Write tool (full-file overwrite).** This file has been accidentally wiped 3 times by full-file rewrites that intended to change a single value. The settings save route (`_write_config`) is safe because it reads→merges→writes. The risk is Claude/GSD execution doing full-file writes.
 
+## Environment Variables
+
+- `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH. The scheduler auto-starts Ollama at app boot so the nightly agentic backfill (3:30 AM) has a live service.
+
 ## Don't
 
 - Don't add an ORM — raw SQL is intentional for this project's scale

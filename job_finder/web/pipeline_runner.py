@@ -44,7 +44,6 @@ from job_finder.web.ingestion_runner import (  # noqa: E402
     _collect_dataforseo_results,
     _fetch_gmail,
     _fetch_portal_search,
-    _fetch_scaleserp,
     _fetch_serpapi,
     _fetch_thordata,
     _log_to_email_parse_log,
@@ -98,8 +97,6 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         "serpapi_errors": [],
         "thordata_fetched": 0,
         "thordata_errors": [],
-        "scaleserp_fetched": 0,
-        "scaleserp_errors": [],
         "dataforseo_fetched": 0,
         "dataforseo_errors": [],
         "portal_search_fetched": 0,
@@ -133,7 +130,6 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
 
         # --- Additional sources ---
         thordata_jobs = _fetch_thordata(config, summary)
-        scaleserp_jobs = _fetch_scaleserp(config, summary)
         portal_jobs = _fetch_portal_search(config, summary)
 
         # --- DataForSEO: collect results (blocks until ready or timeout) ---
@@ -142,7 +138,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         # --- Combine all jobs ---
         all_jobs = (
             gmail_jobs + serpapi_jobs + thordata_jobs
-            + scaleserp_jobs + portal_jobs + dataforseo_jobs
+            + portal_jobs + dataforseo_jobs
         )
 
         # --- Score and persist each job (per-job error isolation) ---
@@ -189,7 +185,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
 
     total_fetched = (
         summary["gmail_fetched"] + summary["serpapi_fetched"]
-        + summary.get("thordata_fetched", 0) + summary.get("scaleserp_fetched", 0)
+        + summary.get("thordata_fetched", 0)
         + summary.get("dataforseo_fetched", 0) + summary.get("portal_search_fetched", 0)
     )
     logger.info(

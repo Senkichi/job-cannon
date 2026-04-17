@@ -111,7 +111,7 @@ with app.app_context():
                 issues.append("No ingestion in last 14h (expected — we just ran catch-up)")
             row = conn.execute(
                 "SELECT MAX(occurred_at) FROM user_activity "
-                "WHERE action = 'scheduled_stale_detection' "
+                "WHERE action = 'scheduled_staleness' "
                 "AND occurred_at >= datetime('now', '-26 hours')"
             ).fetchone()
             if not row[0]:

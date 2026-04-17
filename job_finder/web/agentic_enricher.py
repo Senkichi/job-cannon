@@ -82,14 +82,25 @@ listing page with many jobs, or unrelated content.
 
 
 def _search_ddg(query: str, max_results: int = 5) -> list[dict]:
-    """Search DuckDuckGo and return results [{title, href, body}]."""
+    """Search DuckDuckGo and return results [{title, href, body}].
+
+    When DDGS exhausts every engine (google, yandex, yahoo, grokipedia, ...)
+    it returns an empty list without raising. Previously this was invisible
+    to operators — ddgs itself logs engine errors at INFO level from its
+    own logger, buried in noise. We surface the aggregate failure at WARNING
+    so it's greppable as 'DDGS: all engines returned empty'.
+    """
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=max_results))
+            results = list(ddgs.text(query, max_results=max_results))
     except Exception as exc:
         logger.debug("DDG search failed for '%s': %s", query[:60], exc)
         return []
+
+    if not results:
+        logger.warning("DDGS: all engines returned empty for query '%s'", query[:80])
+    return results
 
 
 def _rank_urls(search_results: list[dict]) -> list[str]:

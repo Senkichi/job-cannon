@@ -238,51 +238,6 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
         return []
 
 
-def _fetch_scaleserp(config: dict, summary: dict) -> list[Job]:
-    """Fetch jobs from ScaleSerp Google Jobs API with error isolation.
-
-    Args:
-        config: Full config dict.
-        summary: Mutable summary dict to update.
-
-    Returns:
-        List of Job objects from ScaleSerp.
-    """
-    scaleserp_config = config.get("sources", {}).get("scaleserp", {})
-    if not scaleserp_config.get("enabled", False):
-        logger.debug("ScaleSerp source disabled in config.")
-        return []
-
-    api_key = scaleserp_config.get("api_key", "")
-    if not api_key:
-        msg = "ScaleSerp key not configured"
-        summary["scaleserp_errors"].append(msg)
-        logger.warning(msg)
-        return []
-
-    queries = scaleserp_config.get("queries", [])
-    if not queries:
-        logger.debug("No ScaleSerp queries configured.")
-        return []
-
-    try:
-        from job_finder.sources.scaleserp_source import ScaleSerpSource
-
-        max_pages = scaleserp_config.get("max_pages", 5)
-        source = ScaleSerpSource(api_key, max_pages=max_pages)
-        jobs = source.fetch_jobs(queries)
-        summary["scaleserp_fetched"] = len(jobs)
-
-        logger.info("ScaleSerp: fetched %d jobs", len(jobs))
-        return jobs
-
-    except Exception as e:
-        error_msg = str(e)
-        summary["scaleserp_errors"].append(error_msg)
-        logger.warning("ScaleSerp ingestion failed: %s", error_msg)
-        return []
-
-
 def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
     """Fetch from niche job portals: free APIs first, DataForSEO SERP fallback.
 
