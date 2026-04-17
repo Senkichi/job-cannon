@@ -507,6 +507,73 @@ class TestHaikuScorer:
         assert result.status == "budget_exceeded"
         assert result.data is None
 
+    def test_score_job_haiku_skips_when_no_jd_or_description(
+        self, migrated_db, sample_profile, scoring_config
+    ):
+        """score_job_haiku must return skipped when both jd_full and description are empty.
+
+        Scoring a title-only shell produces meaningless numbers. This mirrors
+        the Sonnet guard and catches cases like careers_crawl where the
+        crawler intentionally produces empty-description jobs that must be
+        enriched before scoring.
+        """
+        from job_finder.web.haiku_scorer import score_job_haiku
+
+        empty_job = {
+            "dedup_key": "acme|ghost job|",
+            "title": "Ghost Job",
+            "company": "Acme",
+            "location": "",
+            "salary_min": None,
+            "salary_max": None,
+            "description": "",
+            "jd_full": None,
+        }
+        path, conn = migrated_db
+        result = score_job_haiku(empty_job, sample_profile, conn, scoring_config)
+        assert result.status == "skipped"
+        assert result.data is None
+        # Claude must NOT have been called when there's nothing to score
+        assert self._mock.call_count == 0
+
+    def test_score_job_haiku_skips_when_description_is_whitespace(
+        self, migrated_db, sample_profile, scoring_config
+    ):
+        """Whitespace-only description must be treated as no content."""
+        from job_finder.web.haiku_scorer import score_job_haiku
+
+        whitespace_job = {
+            "dedup_key": "acme|whitespace|",
+            "title": "Whitespace Job",
+            "company": "Acme",
+            "location": "",
+            "description": "   \n\t  ",
+            "jd_full": "",
+        }
+        path, conn = migrated_db
+        result = score_job_haiku(whitespace_job, sample_profile, conn, scoring_config)
+        assert result.status == "skipped"
+        assert self._mock.call_count == 0
+
+    def test_score_job_haiku_proceeds_when_jd_full_present_but_description_empty(
+        self, migrated_db, sample_profile, scoring_config
+    ):
+        """jd_full alone is sufficient — empty description should not block scoring."""
+        from job_finder.web.haiku_scorer import score_job_haiku
+
+        jd_only_job = {
+            "dedup_key": "acme|has jd|",
+            "title": "Has JD",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "",
+            "jd_full": "Build ML models. Requires Python, SQL. " * 20,
+        }
+        path, conn = migrated_db
+        result = score_job_haiku(jd_only_job, sample_profile, conn, scoring_config)
+        assert result.status == "success"
+        assert self._mock.call_count == 1
+
 # ---------------------------------------------------------------------------
 # build_description_snippet tests
 # ---------------------------------------------------------------------------

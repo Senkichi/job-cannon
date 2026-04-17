@@ -1191,6 +1191,11 @@ def _score_new_jobs(
         logger.debug("model_provider not available — skipping scoring")
         return
 
+    try:
+        from job_finder.web.data_enricher import enrich_job
+    except ImportError:
+        enrich_job = None  # type: ignore[assignment]
+
     # Build scoring client
     _scoring_client = None
     try:
@@ -1209,6 +1214,8 @@ def _score_new_jobs(
     )
     sonnet_queue: list[str] = []
 
+    serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+
     with standalone_connection(db_path) as conn:
         for dedup_key in new_job_keys:
             try:
@@ -1218,8 +1225,33 @@ def _score_new_jobs(
                 if row is None:
                     continue
 
+                job_row = dict(row)
+
+                # Enrich BEFORE scoring — careers_crawl produces title+URL only
+                # shells, so Haiku would otherwise score an empty description.
+                # Mirrors scoring_runner.run_haiku_scoring's enrichment path.
+                if enrich_job is not None and (
+                    not job_row.get("jd_full")
+                    or job_row.get("salary_min") is None
+                    or not job_row.get("location")
+                ):
+                    try:
+                        enriched = enrich_job(
+                            job_row,
+                            serpapi_key=serpapi_key,
+                            conn=conn,
+                            config=config,
+                        )
+                        if enriched:
+                            job_row.update(enriched)
+                    except Exception as enrich_err:
+                        logger.debug(
+                            "careers_crawl enrichment failed for '%s' "
+                            "(non-fatal): %s", dedup_key, enrich_err,
+                        )
+
                 result = score_and_persist_haiku(
-                    conn, dict(row), config, profile,
+                    conn, job_row, config, profile,
                 )
                 if result is None:
                     continue
