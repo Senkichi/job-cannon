@@ -155,7 +155,7 @@ class TestActionConstants:
     """ACTION_* constants exported with correct string values."""
 
     def test_constants_exported(self):
-        """All 19 ACTION_* constants are importable."""
+        """All ACTION_* constants are importable."""
         from job_finder.web.activity_tracker import (
             ACTION_SYNC,
             ACTION_SCHEDULED_SYNC,
@@ -167,7 +167,6 @@ class TestActionConstants:
             ACTION_BATCH_SCORE_SONNET,
             ACTION_GENERATE_RESUME,
             ACTION_QUICK_APPLY,
-            ACTION_SCHEDULED_STALE_DETECTION,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_UPLOAD_RESUME_PDF,
@@ -188,7 +187,6 @@ class TestActionConstants:
             ACTION_BATCH_SCORE_SONNET,
             ACTION_GENERATE_RESUME,
             ACTION_QUICK_APPLY,
-            ACTION_SCHEDULED_STALE_DETECTION,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_UPLOAD_RESUME_PDF,
@@ -199,10 +197,10 @@ class TestActionConstants:
             ACTION_SAVE_JD,
         ]
         # Unique string values
-        assert len(set(constants)) == 19, f"Duplicate ACTION_* values found: {constants}"
+        assert len(set(constants)) == 18, f"Duplicate ACTION_* values found: {constants}"
 
     def test_constants_match_expected_names(self):
-        """All 19 ACTION_* constants have the expected string values."""
+        """All ACTION_* constants have the expected string values."""
         from job_finder.web.activity_tracker import (
             ACTION_SYNC,
             ACTION_SCHEDULED_SYNC,
@@ -214,7 +212,6 @@ class TestActionConstants:
             ACTION_BATCH_SCORE_SONNET,
             ACTION_GENERATE_RESUME,
             ACTION_QUICK_APPLY,
-            ACTION_SCHEDULED_STALE_DETECTION,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_UPLOAD_RESUME_PDF,
@@ -234,7 +231,6 @@ class TestActionConstants:
         assert ACTION_BATCH_SCORE_SONNET == "batch_score_sonnet"
         assert ACTION_GENERATE_RESUME == "generate_resume"
         assert ACTION_QUICK_APPLY == "quick_apply"
-        assert ACTION_SCHEDULED_STALE_DETECTION == "scheduled_stale_detection"
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
         assert ACTION_SCHEDULED_REJECTION_ANALYSIS == "scheduled_rejection_analysis"
         # Constants added in later phases:

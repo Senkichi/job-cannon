@@ -12,9 +12,14 @@ Guards:
 3. Testing guard: scheduler is skipped when app.config["TESTING"] is True.
 """
 
+import atexit
 import logging
 import os
+import subprocess
+import sys
 import threading
+import time
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -27,6 +32,161 @@ logger = logging.getLogger(__name__)
 # Module-level singleton -- prevents double initialization
 _scheduler: BackgroundScheduler | None = None
 _scheduler_lock = threading.Lock()
+_pidfile_path: Path | None = None
+
+
+def _acquire_scheduler_pidfile(app) -> bool:
+    """Acquire a cross-process pidfile lock before starting the scheduler.
+
+    Prevents two independent Python processes (e.g. the user launching `run.py`
+    twice after a crashed session, or a stale background instance) from both
+    running the 0,8,16 cron schedule — which previously caused the 16:00 PT
+    ingestion to fire twice and double-bill Gmail/SerpAPI/DataForSEO.
+
+    Self-heals stale pidfiles: if the recorded PID is no longer alive, the
+    lock is taken cleanly. Cross-process liveness check uses psutil.
+
+    Returns:
+        True if the lock was acquired (safe to start scheduler), False if
+        another live instance is already running (caller must skip).
+    """
+    global _pidfile_path
+
+    db_path = app.config.get("DB_PATH", "jobs.db")
+    pidfile = Path(db_path).resolve().parent / "logs" / "scheduler.pid"
+
+    if pidfile.exists():
+        try:
+            existing_pid = int(pidfile.read_text().strip())
+        except (ValueError, OSError):
+            existing_pid = None  # corrupt pidfile — treat as stale
+
+        if existing_pid and existing_pid != os.getpid():
+            try:
+                import psutil
+                alive = psutil.pid_exists(existing_pid)
+            except Exception:
+                alive = False
+
+            if alive:
+                logger.warning(
+                    "Scheduler: another instance (PID %d) is already running — "
+                    "this process will NOT start a scheduler to prevent duplicate cron firings",
+                    existing_pid,
+                )
+                return False
+
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text(str(os.getpid()))
+    _pidfile_path = pidfile
+
+    def _cleanup_pidfile() -> None:
+        try:
+            if _pidfile_path and _pidfile_path.exists():
+                # Only remove if WE still own it (avoid racing with another process
+                # that may have taken over after a crash).
+                try:
+                    owner_pid = int(_pidfile_path.read_text().strip())
+                except Exception:
+                    owner_pid = None
+                if owner_pid == os.getpid():
+                    _pidfile_path.unlink()
+        except Exception:
+            pass  # best-effort cleanup; next start self-heals via liveness check
+
+    atexit.register(_cleanup_pidfile)
+    logger.info("Scheduler: acquired pidfile lock at %s (PID %d)", pidfile, os.getpid())
+    return True
+
+
+def _ensure_ollama_running(config: dict, *, poll_seconds: int = 30) -> None:
+    """Ensure Ollama is reachable; auto-start 'ollama serve' if not.
+
+    Agentic backfill runs nightly at 3:30 AM and requires Ollama. Previously
+    Ollama had to be started manually — if the user forgot or it crashed, the
+    entire backfill job aborted with a WARNING. This helper probes the service
+    at scheduler init and spawns a detached `ollama serve` process when the
+    probe fails. Best-effort; never raises.
+
+    Binary location resolves in order:
+      1. $OLLAMA_EXE environment variable (user override)
+      2. %LOCALAPPDATA%\\Programs\\Ollama\\ollama.exe (default Windows install)
+      3. 'ollama' on PATH
+
+    Args:
+        config: Full JF_CONFIG dict; passed to OllamaProvider for base_url.
+        poll_seconds: Max seconds to wait for Ollama to come up after spawning.
+    """
+    try:
+        from job_finder.web.providers.ollama_provider import OllamaProvider
+    except ImportError as exc:
+        logger.debug("Ollama auto-start skipped (provider import failed): %s", exc)
+        return
+
+    try:
+        OllamaProvider(config=config)  # health check inside __init__
+        logger.debug("Ollama: already running, skipping auto-start")
+        return
+    except RuntimeError:
+        pass  # not running — try to start it
+
+    # Locate the binary
+    ollama_exe = os.environ.get("OLLAMA_EXE", "").strip() or None
+    if not ollama_exe:
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        if localappdata:
+            default_path = Path(localappdata) / "Programs" / "Ollama" / "ollama.exe"
+            if default_path.exists():
+                ollama_exe = str(default_path)
+    if not ollama_exe:
+        # Fall back to PATH lookup (Linux/macOS or Windows with PATH entry)
+        import shutil
+        ollama_exe = shutil.which("ollama")
+
+    if not ollama_exe:
+        logger.warning(
+            "Ollama auto-start skipped: binary not found. Set OLLAMA_EXE env var or "
+            "install Ollama (https://ollama.com/download). Agentic backfill will be disabled."
+        )
+        return
+
+    try:
+        if sys.platform == "win32":
+            # Detach fully so Ollama outlives the Flask process
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            subprocess.Popen(
+                [ollama_exe, "serve"],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        else:
+            subprocess.Popen(
+                [ollama_exe, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+    except Exception as exc:
+        logger.warning("Ollama auto-start failed to spawn '%s serve': %s", ollama_exe, exc)
+        return
+
+    # Poll for readiness
+    for attempt in range(poll_seconds):
+        try:
+            OllamaProvider(config=config)
+            logger.info("Ollama auto-started successfully after %ds", attempt + 1)
+            return
+        except RuntimeError:
+            time.sleep(1)
+
+    logger.warning(
+        "Ollama did not become ready within %ds of auto-start. Agentic backfill may fail tonight.",
+        poll_seconds,
+    )
 
 # ---------------------------------------------------------------------------
 # Job closure factories -- reduce per-job boilerplate
@@ -132,10 +292,22 @@ def init_scheduler(app) -> None:
         return
 
     with _scheduler_lock:
-        # Guard 3: Already initialized
+        # Guard 3: Already initialized (same process)
         if _scheduler is not None:
             logger.debug("Scheduler: already initialized, skipping")
             return
+
+        # Guard 4: Cross-process pidfile lock. If another Python process has
+        # already claimed the pidfile and is still alive, skip scheduler start.
+        if not _acquire_scheduler_pidfile(app):
+            return
+
+        # Eagerly start Ollama so the nightly agentic backfill (3:30 AM) has
+        # a live service to talk to. Best-effort; never raises.
+        try:
+            _ensure_ollama_running(get_config_snapshot(app))
+        except Exception as exc:
+            logger.warning("Ollama auto-start helper raised unexpectedly: %s", exc)
 
         scheduler = BackgroundScheduler(daemon=True)
 
@@ -153,12 +325,11 @@ def init_scheduler(app) -> None:
                 try:
                     summary = run_ingestion(db_path, config)
                     logger.info(
-                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d, scaleserp: %d, dataforseo: %d)",
+                        "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d, dataforseo: %d)",
                         summary["jobs_new"],
                         summary["gmail_fetched"],
                         summary["serpapi_fetched"],
                         summary.get("thordata_fetched", 0),
-                        summary.get("scaleserp_fetched", 0),
                         summary.get("dataforseo_fetched", 0),
                     )
                     log_activity(
@@ -169,7 +340,6 @@ def init_scheduler(app) -> None:
                             "gmail_fetched": summary.get("gmail_fetched", 0),
                             "serpapi_fetched": summary.get("serpapi_fetched", 0),
                             "thordata_fetched": summary.get("thordata_fetched", 0),
-                            "scaleserp_fetched": summary.get("scaleserp_fetched", 0),
                             "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
                             "duration_seconds": round(_time.time() - t0, 2),
                             "status": "success",
@@ -595,9 +765,12 @@ def init_scheduler(app) -> None:
                             issues.append("No ingestion in last 14h")
 
                         # 2. Did stale detection run last night?
+                        # Writer uses ACTION_SCHEDULED_STALENESS = 'scheduled_staleness'
+                        # (see activity_tracker.py). The legacy 'scheduled_stale_detection'
+                        # string is no longer emitted by any code path.
                         row = conn.execute(
                             "SELECT MAX(occurred_at) FROM user_activity "
-                            "WHERE action = 'scheduled_stale_detection' "
+                            "WHERE action = 'scheduled_staleness' "
                             "AND occurred_at >= datetime('now', '-26 hours')"
                         ).fetchone()
                         if not row[0]:
@@ -669,8 +842,6 @@ def run_sync_now(app) -> dict:
             "serpapi_errors": [],
             "thordata_fetched": 0,
             "thordata_errors": [],
-            "scaleserp_fetched": 0,
-            "scaleserp_errors": [],
             "dataforseo_fetched": 0,
             "dataforseo_errors": [],
             "portal_search_fetched": 0,

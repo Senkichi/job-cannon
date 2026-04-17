@@ -30,7 +30,6 @@ ACTION_BATCH_SCORE_HAIKU = "batch_score_haiku"
 ACTION_BATCH_SCORE_SONNET = "batch_score_sonnet"
 ACTION_GENERATE_RESUME = "generate_resume"
 ACTION_QUICK_APPLY = "quick_apply"
-ACTION_SCHEDULED_STALE_DETECTION = "scheduled_stale_detection"
 ACTION_SCHEDULED_ATS_SCAN = "scheduled_ats_scan"
 ACTION_SCHEDULED_REJECTION_ANALYSIS = "scheduled_rejection_analysis"
 ACTION_UPLOAD_RESUME_PDF = "upload_resume_pdf"
@@ -43,10 +42,9 @@ ACTION_SCHEDULED_PIPELINE_DETECTION = "scheduled_pipeline_detection"
 ACTION_SCHEDULED_AGENTIC_BACKFILL = "scheduled_agentic_backfill"
 ACTION_SCHEDULED_CAREERS_CRAWL = "scheduled_careers_crawl"
 ACTION_LIVENESS_CHECK = "liveness_check"
-# Unified staleness orchestrator (replaces SCHEDULED_STALE_DETECTION +
-# SCHEDULED_EXPIRY_CHECK + scheduled liveness). Those constants above
-# are kept as aliases so existing user_activity rows and test assertions
-# (tests/test_activity_tracker.py) remain valid.
+# Unified staleness orchestrator — replaces SCHEDULED_EXPIRY_CHECK and the
+# legacy 'scheduled_stale_detection' action (removed). Historical user_activity
+# rows with the old action string remain in the DB as read-only history.
 ACTION_SCHEDULED_STALENESS = "scheduled_staleness"
 
 # ---------------------------------------------------------------------------

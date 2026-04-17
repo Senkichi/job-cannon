@@ -80,16 +80,6 @@ sources:
     queries:
       - query: Data Scientist
         location: San Francisco Bay Area
-  scaleserp:
-    # Optional: ScaleSerp Google Jobs API (~$2/1K, SerpAPI-compatible, full index access)
-    enabled: false
-    # Get your key at: https://www.scaleserp.com/
-    api_key: ""
-    # Max pages to fetch per query (10 results/page)
-    max_pages: 5
-    queries:
-      - query: Data Scientist
-        location: San Francisco Bay Area
   dataforseo:
     # Optional: DataForSEO Google Jobs SERP API — full index, ~$0.87/month at default settings
     # Task-queue API (async: submits tasks, polls for completion, no live endpoint).

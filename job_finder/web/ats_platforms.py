@@ -6,12 +6,18 @@ Extracted from ats_scanner.py (Plan 02 split).
 
 import json
 import logging
+import time
 
 import requests
 
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
+from job_finder.web.description_formatter import strip_html_to_text
 
 logger = logging.getLogger(__name__)
+
+# Delay between per-job detail fetches inside a single scanner run.
+# Keeps request rate polite; matches careers_crawler's inter-company sleep pattern.
+_DETAIL_FETCH_SLEEP_S = 0.1
 
 
 def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) -> bool:
@@ -365,16 +371,25 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
                 if external_path else ""
             )
 
+            # Fetch the full description via the Workday detail endpoint.
+            # Without this, Workday jobs land in the DB with jd_full=NULL and
+            # Sonnet can never evaluate them (skips on empty JD).
+            description = _fetch_workday_description(
+                subdomain, tenant, board, external_path
+            ) if external_path else ""
+
             results.append({
                 "title": title,
                 "company_source": "Workday",
                 "location": location,
-                "description": "",
+                "description": description,
                 "source_url": source_url,
                 "salary_min": None,
                 "salary_max": None,
                 "comp_json": None,
             })
+
+            time.sleep(_DETAIL_FETCH_SLEEP_S)
 
         total_fetched += len(postings)
         offset += page_size
@@ -388,6 +403,50 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
         slug, total_fetched, total_fetched, len(results),
     )
     return results
+
+
+def _fetch_workday_description(
+    subdomain: str, tenant: str, board: str, external_path: str
+) -> str:
+    """Fetch the full job description via Workday CXS detail endpoint.
+
+    Workday's list endpoint returns only titles and metadata; the full HTML
+    description lives at a separate per-job URL. Returns empty string on any
+    failure (no exceptions leak to the caller) so one broken job doesn't kill
+    a whole scan.
+
+    Args:
+        subdomain: Workday subdomain (e.g. 'walmart.wd5').
+        tenant: Derived tenant (prefix before '.wd').
+        board: Job board name (second half of slug).
+        external_path: Posting path from the list response (e.g. '/job/Analyst_R-123').
+
+    Returns:
+        Plain-text job description (HTML stripped), or "" if fetch failed.
+    """
+    detail_url = (
+        f"https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/job/{external_path}"
+    )
+    try:
+        resp = requests.get(
+            detail_url,
+            headers={"Accept": "application/json"},
+            timeout=_PROBE_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+    except Exception as exc:
+        logger.debug("scan_workday detail fetch failed for %s: %s", external_path, exc)
+        return ""
+
+    # Common shape: {"jobPostingInfo": {"jobDescription": "<html>..."}}
+    info = data.get("jobPostingInfo") or {}
+    html = info.get("jobDescription") or ""
+    if not html:
+        return ""
+
+    return strip_html_to_text(html) if "<" in html else html
 
 
 def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
@@ -460,16 +519,23 @@ def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[s
                 if posting_id else ""
             )
 
+            # Fetch the full description via the posting detail endpoint.
+            # The list endpoint returns only name + id + location; without a
+            # secondary fetch, jd_full stays NULL and Sonnet skips the job.
+            description = _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
+
             results.append({
                 "title": title,
                 "company_source": "SmartRecruiters",
                 "location": location,
-                "description": "",
+                "description": description,
                 "source_url": source_url,
                 "salary_min": None,
                 "salary_max": None,
                 "comp_json": None,
             })
+
+            time.sleep(_DETAIL_FETCH_SLEEP_S)
 
         total_fetched += len(postings)
         offset += page_size
@@ -482,3 +548,46 @@ def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[s
         slug, total_fetched, total_fetched, len(results),
     )
     return results
+
+
+def _fetch_smartrecruiters_description(slug: str, posting_id: str) -> str:
+    """Fetch the full job description via SmartRecruiters Posting detail API.
+
+    The posting detail response has `jobAd.sections.*.text` fields; we
+    concatenate the main job description and qualifications sections.
+    Returns empty string on any failure so one broken job doesn't kill the scan.
+
+    Args:
+        slug: SmartRecruiters company identifier.
+        posting_id: Posting UUID from the list response.
+
+    Returns:
+        Plain-text job description (HTML stripped), or "" on failure.
+    """
+    detail_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{posting_id}"
+    try:
+        resp = requests.get(
+            detail_url,
+            headers={"Accept": "application/json"},
+            timeout=_PROBE_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return ""
+        data = resp.json()
+    except Exception as exc:
+        logger.debug("scan_smartrecruiters detail fetch failed for %s: %s", posting_id, exc)
+        return ""
+
+    sections = (data.get("jobAd") or {}).get("sections") or {}
+    parts: list[str] = []
+    for key in ("companyDescription", "jobDescription", "qualifications", "additionalInformation"):
+        section = sections.get(key) or {}
+        text = section.get("text") or ""
+        if text:
+            parts.append(text)
+
+    combined = "\n\n".join(parts)
+    if not combined:
+        return ""
+
+    return strip_html_to_text(combined) if "<" in combined else combined
