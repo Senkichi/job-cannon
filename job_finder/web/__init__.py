@@ -67,6 +67,10 @@ def _setup_file_logging() -> None:
     if root_logger.level > logging.INFO:
         root_logger.setLevel(logging.INFO)
 
+    # Suppress noisy transitive dependency loggers at the source.
+    # primp is a Rust HTTP client pulled in via ddgs; it logs every request at INFO.
+    logging.getLogger("primp").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
