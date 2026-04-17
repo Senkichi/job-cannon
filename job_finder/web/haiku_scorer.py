@@ -217,7 +217,24 @@ def score_job_haiku(
     location = job_row.get("location", "Unknown Location")
     salary_min = job_row.get("salary_min")
     salary_max = job_row.get("salary_max")
-    description = job_row.get("description") or ""
+    # Prefer jd_full (enriched, full description) over description (raw ingest
+    # excerpt). Enrichment writes jd_full but not description, so careers_crawl
+    # and similar sparse-ingest sources end up with description="" but a
+    # populated jd_full after enrichment runs.
+    description = job_row.get("jd_full") or job_row.get("description") or ""
+
+    # Skip when there is no scorable content. Scoring on title alone (empty
+    # jd_full + empty description) produces meaningless numbers — especially
+    # dangerous for careers_crawl jobs where the crawler intentionally emits
+    # title-only shells and relies on enrichment to fill the rest. Callers
+    # must run enrich_job before scoring; this guard is the invariant.
+    if not description.strip():
+        logger.info(
+            "Haiku skipped for '%s' @ '%s': no jd_full or description — "
+            "run enrichment before scoring",
+            title, company,
+        )
+        return ScoringResult(data=None, status="skipped")
     # Strip residual HTML to prevent CSS soup from inflating scores
     if "<" in description:
         from job_finder.web.description_formatter import strip_html_to_text
