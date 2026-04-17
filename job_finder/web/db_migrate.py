@@ -692,6 +692,20 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_company_scan_log_scanned_at ON company_scan_log(scanned_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen DESC)",
     ],
+
+    # Migration 39: Drop dead liveness_* columns.
+    # liveness_checker.py has been removed — its functionality merged into
+    # expiry_checker.run_staleness_check (Phase C cascade writes expiry_status
+    # / expiry_checked_at instead). These columns are no longer written or
+    # read anywhere in the codebase.
+    # SQLite 3.35+ (Python 3.13 ships 3.40+) supports ALTER TABLE DROP COLUMN.
+    # _apply_migration swallows "no such column" errors for idempotency.
+    [
+        "DROP INDEX IF EXISTS idx_jobs_liveness",
+        "ALTER TABLE jobs DROP COLUMN liveness_checked_at",
+        "ALTER TABLE jobs DROP COLUMN liveness_status",
+        "ALTER TABLE jobs DROP COLUMN liveness_reason",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:
@@ -822,8 +836,10 @@ def _apply_migration(
             if "duplicate column name" in error_msg:
                 # Column already exists -- safe to skip for idempotent re-runs
                 continue
-            else:
-                raise
+            if "no such column" in error_msg:
+                # Column already dropped (migration 39+ re-run) -- safe to skip
+                continue
+            raise
 
     # Commit once per migration (not per statement)
     conn.commit()

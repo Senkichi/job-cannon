@@ -1,30 +1,41 @@
-"""Job expiry detection via tiered signal cascade.
+"""Job expiry detection and unified staleness orchestrator.
 
 Provides:
     _extract_posting_id   -- Extract individual posting ID from ATS URL
-    _check_ats_api        -- Signal 1: ATS API liveness check
-    _check_careers_page   -- Signal 2: Company careers page title search
-    _check_serpapi        -- Signal 3: SerpAPI re-search fallback
-    _check_job_expiry     -- Cascade orchestrator for a single job
-    run_expiry_check      -- Nightly batch runner (APScheduler entry point)
+    _check_ats_api        -- Per-posting ATS API liveness check (Lever/GH/Ashby)
+    _check_careers_page   -- Company careers page title-search signal
+    _check_job_expiry     -- Signal cascade orchestrator for a single job
+    quick_liveness_check  -- Lightweight HTTP GET check for a single URL
+    check_job_liveness    -- Scoring preflight wrapper around quick_liveness_check
+    run_staleness_check   -- Nightly unified orchestrator (B → A → C)
+    run_expiry_check      -- Deprecated alias retained for one release
 
 Architecture:
-- Thread-safe: creates own sqlite3 connection (same pattern as stale_detector.py)
-- Signal cascade short-circuits on first definitive answer (expired/live)
-- Only targets jobs in discovered/reviewing status
-- Consecutive careers page failures tracked in-memory (resets on restart)
+- Thread-safe: creates own sqlite3 connection (same pattern as stale_detector).
+- Signal cascade (per job): URL GET → per-posting ATS API → careers-page search.
+  SerpAPI was removed: absence from its index is a weak signal that caused false
+  positives, and the per-job 30-second timeout dominated runtime.
+- Unified orchestrator (run_staleness_check) runs three phases in order:
+    Phase B: batch ATS reconciliation (ats_reconciler.reconcile_all_companies)
+    Phase A: time-based stale marking (stale_detector.run_stale_detection)
+    Phase C: parallel HTTP cascade over jobs not yet resolved by Phase B
+  Order matters: B refreshes last_seen for ATS-live jobs so A doesn't mis-mark
+  them stale.
 """
 
 import json
 import logging
 import re
 import threading
-import time
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
 
+from job_finder.db import persist_job_expiry_state, update_pipeline_status
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -33,19 +44,22 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_TIMEOUT = 10  # seconds for HTTP requests
-_INTER_REQUEST_DELAY = 1  # seconds between jobs in batch
+_TIMEOUT = 10  # seconds for HTTP requests inside the cascade
 
 # Signal result constants
 EXPIRED = "expired"
 LIVE = "live"
 INCONCLUSIVE = "inconclusive"
 
-# SerpAPI base URL
-_SERPAPI_BASE_URL = "https://serpapi.com/search.json"
+# Default concurrency for Phase C (configurable)
+_DEFAULT_PARALLEL_WORKERS = 10
+
+# Greenhouse redirects to the board root with ?error=true when a posting is gone.
+# (Merged from liveness_checker._GREENHOUSE_ERROR_RE.)
+_GREENHOUSE_ERROR_RE = re.compile(r"[?&]error=true")
 
 # ---------------------------------------------------------------------------
-# Posting ID extraction (Signal 1 prerequisite)
+# Posting ID extraction
 # ---------------------------------------------------------------------------
 
 _LEVER_POSTING_RE = re.compile(
@@ -65,15 +79,14 @@ _POSTING_PATTERNS = {
     "ashby": _ASHBY_POSTING_RE,
 }
 
+
 def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
     """Extract the individual posting ID from an ATS URL.
 
-    Args:
-        url: A job source URL string.
-        ats_platform: One of 'lever', 'greenhouse', 'ashby'.
-
-    Returns:
-        The posting ID string, or None if the URL doesn't match the platform pattern.
+    Used by Signal 1 (per-posting ATS API). Covers the three platforms
+    whose APIs accept a posting-id lookup. Workday and SmartRecruiters
+    don't expose equivalent single-posting endpoints; they rely on Phase B
+    batch reconciliation via job_finder.web.ats_reconciler.
     """
     pattern = _POSTING_PATTERNS.get(ats_platform)
     if pattern is None:
@@ -81,23 +94,13 @@ def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
     match = pattern.search(url)
     return match.group(1) if match else None
 
+
 # ---------------------------------------------------------------------------
-# Signal 1: ATS API Check
+# Signal 1: ATS API Check (per-posting)
 # ---------------------------------------------------------------------------
 
 def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
-    """Check if a specific job posting is still live via ATS API.
-
-    Args:
-        slug: Company's ATS slug (e.g., 'acme-corp').
-        posting_id: Individual posting ID extracted from URL.
-        ats_platform: One of 'lever', 'greenhouse', 'ashby'.
-
-    Returns:
-        EXPIRED if the posting returns 404/410.
-        LIVE if the posting returns 200.
-        INCONCLUSIVE on network error or unknown platform.
-    """
+    """Check if a specific job posting is still live via the ATS API."""
     if ats_platform == "lever":
         url = f"https://api.lever.co/v0/postings/{slug}/{posting_id}"
     elif ats_platform == "greenhouse":
@@ -114,7 +117,6 @@ def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
             return EXPIRED
         if resp.status_code == 200:
             return LIVE
-        # Other status codes (403, 500, etc.) are inconclusive
         return INCONCLUSIVE
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
         return INCONCLUSIVE
@@ -122,23 +124,23 @@ def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
         logger.warning("_check_ats_api: unexpected error for %s/%s: %s", slug, posting_id, e)
         return INCONCLUSIVE
 
+
 # ---------------------------------------------------------------------------
 # Signal 2: Company Careers Page Check
 # ---------------------------------------------------------------------------
 
-# Lazy imports for careers scraper (may not be available in tests)
+# Lazy imports (careers scraper may not be available in all test configurations)
 try:
     from job_finder.web.careers_scraper import find_careers_url, scrape_careers_page
 except ImportError:
     find_careers_url = None  # type: ignore[assignment]
     scrape_careers_page = None  # type: ignore[assignment]
 
-# Lazy import of _title_matches from ats_scanner (per user decision:
-# reuse existing title matching for consistency with ATS scan behavior)
 try:
     from job_finder.web.ats_platforms import _title_matches
 except ImportError:
     _title_matches = None  # type: ignore[assignment]
+
 
 def _check_careers_page(
     homepage_url: Optional[str],
@@ -146,21 +148,7 @@ def _check_careers_page(
     target_titles: list[str],
     exclusions: list[str],
 ) -> str:
-    """Check if a job title appears on the company's careers page.
-
-    Uses _title_matches from ats_scanner for consistent title matching behavior.
-
-    Args:
-        homepage_url: Company homepage URL (from companies table). None if unknown.
-        job_title: The job title to search for.
-        target_titles: Title keywords for matching (from config).
-        exclusions: Title exclusion keywords (from config).
-
-    Returns:
-        LIVE if the job title is found on the careers page.
-        INCONCLUSIVE if no careers page, page unreachable, or title not found
-        (title absence is a weak signal — the page may not list all roles).
-    """
+    """Check if a job title appears on the company's careers page."""
     if not homepage_url:
         return INCONCLUSIVE
 
@@ -175,85 +163,26 @@ def _check_careers_page(
 
         results = scrape_careers_page(careers_url, target_titles, exclusions)
 
-        # Check if any result title is a close match to our job title
-        # using _title_matches for consistency with ATS scan behavior
         for item in results:
             result_title = item.get("title", "")
             if _title_matches is not None:
-                # Use [job_title] as single-element target so any result matching
-                # the job title returns True
                 if _title_matches(result_title, [job_title], []):
                     return LIVE
             else:
-                # Fallback: simple case-insensitive match
                 if job_title.lower() in result_title.lower() or result_title.lower() in job_title.lower():
                     return LIVE
 
-        # Title not found — but this is a weak signal (JS-rendered pages, etc.)
         return INCONCLUSIVE
 
     except Exception as e:
         logger.debug("_check_careers_page: error checking %s: %s", homepage_url, e)
         return INCONCLUSIVE
 
-# ---------------------------------------------------------------------------
-# Signal 3: SerpAPI Fallback
-# ---------------------------------------------------------------------------
-
-def _check_serpapi(job_title: str, company_name: str, config: dict) -> str:
-    """Re-search for a job via SerpAPI google_jobs engine.
-
-    Args:
-        job_title: The job title to search for.
-        company_name: The company name.
-        config: Application config dict (reads sources.serpapi.enabled and api_key).
-
-    Returns:
-        LIVE if a matching result is found.
-        EXPIRED if no matching result in the first batch.
-        INCONCLUSIVE if SerpAPI is disabled, has no key, or network error.
-    """
-    serpapi_config = config.get("sources", {}).get("serpapi", {})
-    if not serpapi_config.get("enabled", False):
-        return INCONCLUSIVE
-    api_key = serpapi_config.get("api_key", "")
-    if not api_key:
-        return INCONCLUSIVE
-
-    try:
-        from thefuzz import fuzz
-        params = {
-            "engine": "google_jobs",
-            "q": f'"{job_title}" "{company_name}"',
-            "api_key": api_key,
-            "hl": "en",
-        }
-        resp = requests.get(_SERPAPI_BASE_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-
-        company_lower = company_name.lower()
-
-        for result in data.get("jobs_results", []):
-            result_title = result.get("title", "")
-            result_company = result.get("company_name", "").lower()
-            # Match: company name appears in result AND substantial title overlap
-            if company_lower in result_company and fuzz.token_set_ratio(job_title, result_title) >= 60:
-                return LIVE
-
-        return EXPIRED
-
-    except Exception as e:
-        logger.warning("_check_serpapi: error searching for '%s' at '%s': %s", job_title, company_name, e)
-        return INCONCLUSIVE
 
 # ---------------------------------------------------------------------------
-# In-memory failure tracker (Signal 2 backoff)
+# In-memory careers-page failure tracker (Signal 2 backoff)
 # ---------------------------------------------------------------------------
 
-# Maps company_id -> consecutive failure count. Resets on app restart.
-# Thread-safety: protected by _careers_lock; APScheduler runs in a background
-# thread while Flask request handlers may trigger manual checks concurrently.
 _careers_lock = threading.Lock()
 _careers_failure_counts: dict[int, int] = {}
 _careers_skip_until: dict[int, datetime] = {}
@@ -261,16 +190,9 @@ _careers_skip_until: dict[int, datetime] = {}
 _MAX_CAREERS_FAILURES = 3
 _CAREERS_SKIP_DAYS = 7
 
+
 def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
-    """Track careers page check outcome for backoff logic.
-
-    On success: reset failure count. On failure: increment count and
-    set skip-until timestamp if threshold reached.
-
-    Args:
-        company_id: Company row ID (None if no company linked).
-        success: True if careers page was reachable and returned results.
-    """
+    """Track careers-page check outcome for backoff logic."""
     if company_id is None:
         return
     with _careers_lock:
@@ -287,16 +209,21 @@ def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
                     company_id, count, _CAREERS_SKIP_DAYS,
                 )
 
+
 # ---------------------------------------------------------------------------
-# Lightweight per-job liveness helpers (scoring preflight)
+# Signal 0: Direct URL liveness check
 # ---------------------------------------------------------------------------
 
+# Expired-page body markers. Lowercase — matched case-insensitively via body.lower().
+# Merged from liveness_checker._EXPIRED_PATTERNS (the unique strings that
+# weren't already here).
 _EXPIRED_BODY_MARKERS = (
     "position filled",
     "position has been filled",
     "no longer accepting",
     "this job is no longer available",
     "job has been removed",
+    "this job posting has been removed",
     "this position has been closed",
     "this job has expired",
     "this job posting has expired",
@@ -310,17 +237,29 @@ _EXPIRED_BODY_MARKERS = (
     "this job is closed",
     "this job has been closed",
     "sorry, this position has been filled",
+    "sorry, this job has already been filled",
     "this opportunity is no longer available",
+    # Merged from liveness_checker
+    "the position you are looking for is no longer available",
+    "this requisition is no longer active",
+    "job not found",
+    "posting not found",
+    "this opening has been closed",
+    # Greenhouse search-result page when board is empty
+    "there are no jobs matching your search",
+    # German
+    "diese stelle ist nicht mehr verfügbar",
+    "diese stelle ist nicht mehr verfugbar",
+    "diese position wurde bereits besetzt",
+    # French
+    "cette offre n'est plus disponible",
+    "cette offre n\u2019est plus disponible",
 )
 
 _EXPIRED_BODY_REGEXES = tuple(re.compile(p) for p in (
-    # Glassdoor: "This job from Jul 9, 2025 is no longer available for applications"
     r"this job\b.{0,50}\bis no longer available",
-    # "This job posting is no longer accepting applications"
     r"this job\b.{0,30}\bis no longer accepting",
-    # Generic date-interpolated: "Posted on <date> - No longer active"
     r"no longer active",
-    # "Expired on <date>"
     r"expired\s+on\s+\w+",
 ))
 
@@ -328,18 +267,13 @@ _EXPIRED_BODY_REGEXES = tuple(re.compile(p) for p in (
 def quick_liveness_check(url: str, timeout: int = 8) -> str:
     """Lightweight HTTP GET check for a single job URL.
 
-    Used by the scoring preflight to gate Sonnet evaluation. Independent
-    from the nightly ATS-specific signal cascade.
-
-    Args:
-        url: Job posting URL.
-        timeout: Request timeout in seconds.
-
-    Returns:
-        EXPIRED if 404/410 or body contains expired markers.
-        LIVE if 200 with no expired markers.
-        INCONCLUSIVE on error, timeout, or non-standard status.
+    Used by the scoring preflight to gate Sonnet evaluation AND by
+    Phase C's cascade. Independent from the ATS-specific signals.
     """
+    # Greenhouse error-redirect URL — expired boards redirect to ?error=true
+    if _GREENHOUSE_ERROR_RE.search(url):
+        return EXPIRED
+
     try:
         resp = requests.get(url, timeout=timeout, allow_redirects=True)
         if resp.status_code in (404, 410):
@@ -362,17 +296,7 @@ def quick_liveness_check(url: str, timeout: int = 8) -> str:
 
 
 def check_job_liveness(job_row: dict) -> str:
-    """Check if a job posting is still live by testing its first source URL.
-
-    Extracts the first URL from source_urls JSON and runs
-    quick_liveness_check. Returns INCONCLUSIVE if no URL is available.
-
-    Args:
-        job_row: Job row dict (must include source_urls).
-
-    Returns:
-        EXPIRED, LIVE, or INCONCLUSIVE.
-    """
+    """Check if a job posting is still live by testing its first source URL."""
     source_urls_raw = job_row.get("source_urls", "[]")
     if isinstance(source_urls_raw, str):
         try:
@@ -389,7 +313,7 @@ def check_job_liveness(job_row: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Signal cascade orchestrator
+# Signal cascade orchestrator (per job)
 # ---------------------------------------------------------------------------
 
 def _check_job_expiry(
@@ -400,24 +324,11 @@ def _check_job_expiry(
 ) -> tuple[str, str]:
     """Run the signal cascade for a single job.
 
-    Signals checked in order: ATS API -> careers page -> SerpAPI.
-    Short-circuits on first definitive answer (EXPIRED or LIVE).
-
-    Args:
-        job: Job row dict (must include dedup_key, title, company, source_urls).
-        company: Company row dict or None (from companies table join).
-        config: Application config dict.
-        skip_careers: If True, skip Signal 2 (careers page) due to backoff.
-
-    Returns:
-        Tuple of (result, evidence):
-            result: EXPIRED, LIVE, or INCONCLUSIVE.
-            evidence: Human-readable string describing which signal fired.
+    Signals in order: direct URL → per-posting ATS API → careers-page search.
+    Short-circuits on first definitive answer. Returns (result, evidence).
     """
     title = job.get("title", "")
-    company_name = job.get("company", "")
 
-    # Parse source_urls JSON
     source_urls_raw = job.get("source_urls", "[]")
     if isinstance(source_urls_raw, str):
         try:
@@ -434,13 +345,12 @@ def _check_job_expiry(
             return EXPIRED, "url_check expired_markers"
         if url_result == LIVE:
             return LIVE, "url_check 200_ok"
-        # INCONCLUSIVE falls through to ATS API
+        # INCONCLUSIVE falls through to Signal 1
 
-    # --- Signal 1: ATS API Check ---
+    # --- Signal 1: Per-posting ATS API Check ---
     if company and company.get("ats_platform") and company.get("ats_slug"):
         platform = company["ats_platform"]
         slug = company["ats_slug"]
-        # Try to extract posting ID from source URLs
         posting_id = None
         for url in source_urls:
             posting_id = _extract_posting_id(url, platform)
@@ -462,137 +372,228 @@ def _check_job_expiry(
         careers_result = _check_careers_page(homepage_url, title, target_titles, exclusions)
         if careers_result == LIVE:
             return LIVE, "careers_page title_found"
-        # Note: careers_page returning INCONCLUSIVE falls through to Signal 3
-
-    # --- Signal 3: SerpAPI Fallback ---
-    serpapi_result = _check_serpapi(title, company_name, config)
-    if serpapi_result == EXPIRED:
-        return EXPIRED, "serpapi no_match"
-    if serpapi_result == LIVE:
-        return LIVE, "serpapi match_found"
 
     return INCONCLUSIVE, ""
 
+
 # ---------------------------------------------------------------------------
-# Public API: Nightly batch runner
+# Parallel cascade worker
+# ---------------------------------------------------------------------------
+
+def _cascade_worker(job: dict, company: Optional[dict], config: dict) -> tuple[str, str, str]:
+    """Execute the cascade for one job in a ThreadPoolExecutor worker.
+
+    Returns (dedup_key, result, evidence). Worker path is fully read-only
+    against the DB; all writes happen on the orchestrator thread.
+    """
+    dedup_key = job["dedup_key"]
+    company_id = company.get("id") if company else None
+
+    # Check careers-page failure backoff (Signal 2 only)
+    skip_careers = False
+    with _careers_lock:
+        skip_until = _careers_skip_until.get(company_id) if company_id else None
+    if skip_until and datetime.now(timezone.utc) < skip_until:
+        skip_careers = True
+
+    try:
+        result, evidence = _check_job_expiry(job, company, config, skip_careers=skip_careers)
+    except Exception as e:
+        logger.warning("cascade_worker: error checking %s: %s", dedup_key, e)
+        return (dedup_key, INCONCLUSIVE, f"worker_error:{type(e).__name__}")
+
+    # Track careers-page outcome for backoff (thread-safe via _careers_lock)
+    if not skip_careers and company_id:
+        if "careers_page" in evidence:
+            _record_careers_outcome(company_id, success=True)
+        elif result == INCONCLUSIVE and company and company.get("homepage_url"):
+            _record_careers_outcome(company_id, success=False)
+
+    return (dedup_key, result, evidence)
+
+
+# ---------------------------------------------------------------------------
+# Phase C: parallel HTTP cascade
+# ---------------------------------------------------------------------------
+
+def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
+    """Parallel cascade for jobs not yet resolved by Phase B.
+
+    Workers run HTTP + regex only; writes happen on the main thread.
+    """
+    staleness_cfg = config.get("staleness", {})
+    legacy_expiry_cfg = config.get("expiry", {})
+
+    recheck_days = staleness_cfg.get(
+        "cascade_recheck_days",
+        legacy_expiry_cfg.get("recheck_days", 3),
+    )
+    max_workers = staleness_cfg.get(
+        "cascade_parallel_workers", _DEFAULT_PARALLEL_WORKERS,
+    )
+
+    summary = {"checked": 0, "archived": 0, "live": 0, "inconclusive": 0}
+
+    with standalone_connection(db_path) as conn:
+        recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
+        rows = conn.execute(
+            """
+            SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id AS company_row_id
+            FROM jobs j
+            LEFT JOIN companies c ON j.company_id = c.id
+            WHERE j.pipeline_status IN ('discovered', 'reviewing')
+              AND (j.expiry_status IS NULL OR j.expiry_status != 'expired')
+              AND (j.expiry_checked_at IS NULL OR j.expiry_checked_at < ?)
+            ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC
+            """,
+            (recheck_cutoff,),
+        ).fetchall()
+
+        summary["checked"] = len(rows)
+        if not rows:
+            logger.info("_run_phase_c_cascade: no jobs to check")
+            return summary
+
+        # Build work items: (job_dict, company_dict_or_none)
+        work_items: list[tuple[dict, Optional[dict]]] = []
+        for row in rows:
+            job = dict(row)
+            company: Optional[dict] = None
+            if job.get("ats_platform"):
+                company = {
+                    "ats_platform": job["ats_platform"],
+                    "ats_slug": job["ats_slug"],
+                    "homepage_url": job.get("homepage_url"),
+                    "id": job.get("company_row_id"),
+                }
+            elif job.get("homepage_url"):
+                company = {
+                    "homepage_url": job["homepage_url"],
+                    "ats_platform": None,
+                    "ats_slug": None,
+                    "id": job.get("company_row_id"),
+                }
+            work_items.append((job, company))
+
+        logger.info(
+            "_run_phase_c_cascade: %d jobs, %d workers", len(work_items), max_workers,
+        )
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_job = {
+                executor.submit(_cascade_worker, job, company, config): job
+                for job, company in work_items
+            }
+
+            for future in as_completed(future_to_job):
+                job = future_to_job[future]
+                try:
+                    dedup_key, result, evidence = future.result()
+                except Exception as e:
+                    logger.warning(
+                        "_run_phase_c_cascade: worker future failed for %s: %s",
+                        job.get("dedup_key"), e,
+                    )
+                    summary["inconclusive"] += 1
+                    continue
+
+                now = utc_now_iso()
+
+                if result == EXPIRED:
+                    persist_job_expiry_state(conn, dedup_key, EXPIRED, now)
+                    update_pipeline_status(
+                        conn, dedup_key, "archived",
+                        source="expiry_check", evidence=evidence,
+                    )
+                    summary["archived"] += 1
+                    logger.info(
+                        "_run_phase_c_cascade: archived %s (%s)", dedup_key, evidence,
+                    )
+                elif result == LIVE:
+                    persist_job_expiry_state(conn, dedup_key, LIVE, now)
+                    summary["live"] += 1
+                else:
+                    persist_job_expiry_state(conn, dedup_key, INCONCLUSIVE, now)
+                    summary["inconclusive"] += 1
+
+    logger.info("_run_phase_c_cascade complete: %s", summary)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Public API: unified staleness orchestrator
+# ---------------------------------------------------------------------------
+
+def run_staleness_check(db_path: str, config: dict) -> dict:
+    """Unified nightly staleness orchestrator.
+
+    Runs three phases in order:
+        Phase B: batch ATS reconciliation (one HTTP call per company)
+        Phase A: time-based stale marking + passive-stage archive
+        Phase C: parallel HTTP cascade for jobs not resolved by Phase B
+
+    Order matters: Phase B refreshes last_seen for ATS-confirmed-live jobs
+    so Phase A doesn't erroneously mark them stale for lack of a recent
+    ingestion sighting.
+    """
+    staleness_cfg = config.get("staleness", {})
+    if not staleness_cfg.get("enabled", True):
+        legacy_expiry_cfg = config.get("expiry", {})
+        if not legacy_expiry_cfg.get("enabled", True):
+            logger.info("run_staleness_check: disabled via config")
+            return {
+                "phase_b": {}, "phase_a": {}, "phase_c": {}, "disabled": True,
+            }
+
+    summary: dict = {"phase_b": {}, "phase_a": {}, "phase_c": {}}
+
+    # --- Phase B: batch ATS reconciliation ---
+    if staleness_cfg.get("batch_ats_enabled", True):
+        try:
+            from job_finder.web.ats_reconciler import reconcile_all_companies
+            summary["phase_b"] = reconcile_all_companies(db_path, config)
+        except Exception:
+            logger.exception("run_staleness_check: Phase B failed")
+            summary["phase_b"] = {"error": True}
+    else:
+        logger.info("run_staleness_check: Phase B disabled via config")
+
+    # --- Phase A: time-based stale / archive ---
+    try:
+        from job_finder.web.stale_detector import run_stale_detection
+        summary["phase_a"] = run_stale_detection(db_path)
+    except Exception:
+        logger.exception("run_staleness_check: Phase A failed")
+        summary["phase_a"] = {"error": True}
+
+    # --- Phase C: parallel HTTP cascade ---
+    try:
+        summary["phase_c"] = _run_phase_c_cascade(db_path, config)
+    except Exception:
+        logger.exception("run_staleness_check: Phase C failed")
+        summary["phase_c"] = {"error": True}
+
+    logger.info("run_staleness_check complete: %s", summary)
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Deprecated alias — retained for one release to avoid breaking callers
 # ---------------------------------------------------------------------------
 
 def run_expiry_check(db_path: str, config: dict) -> dict:
-    """Run expiry detection on discovered/reviewing jobs.
+    """DEPRECATED: use run_staleness_check instead.
 
-    Creates its own SQLite connection (thread-safe for APScheduler).
-
-    Args:
-        db_path: Path to the SQLite database file.
-        config: Application config dict.
-
-    Returns:
-        Dict with keys: checked (int), archived (int), live (int), inconclusive (int).
+    Kept as a thin wrapper so external callers (catch-up scripts, ad-hoc
+    backfills) continue to function while they migrate. The return shape
+    differs from the legacy shape — callers parsing top-level keys like
+    'archived'/'live'/'inconclusive' should switch to run_staleness_check
+    and read from summary['phase_c'].
     """
-    expiry_config = config.get("expiry", {})
-    if not expiry_config.get("enabled", True):
-        return {"checked": 0, "archived": 0, "live": 0, "inconclusive": 0}
-
-    recheck_days = expiry_config.get("recheck_days", 3)
-
-    with standalone_connection(db_path) as conn:
-        try:
-            # Query candidate jobs: discovered/reviewing, not recently checked.
-            # No LIMIT — recheck_days is the natural throttle. On the first run all
-            # unchecked jobs are eligible; subsequent nights only rechek stale ones.
-            recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
-            rows = conn.execute(
-                """SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id as company_row_id
-                   FROM jobs j
-                   LEFT JOIN companies c ON j.company_id = c.id
-                   WHERE j.pipeline_status IN ('discovered', 'reviewing')
-                     AND (j.expiry_checked_at IS NULL OR j.expiry_checked_at < ?)
-                   ORDER BY j.expiry_checked_at IS NULL DESC, j.expiry_checked_at ASC""",
-                (recheck_cutoff,),
-            ).fetchall()
-
-            from job_finder.db import update_pipeline_status, persist_job_expiry_state
-
-            archived = 0
-            live = 0
-            inconclusive = 0
-
-            for row in rows:
-                job = dict(row)
-                company = None
-                if job.get("ats_platform"):
-                    company = {
-                        "ats_platform": job["ats_platform"],
-                        "ats_slug": job["ats_slug"],
-                        "homepage_url": job.get("homepage_url"),
-                        "id": job.get("company_row_id"),
-                    }
-                elif job.get("homepage_url"):
-                    company = {
-                        "homepage_url": job["homepage_url"],
-                        "ats_platform": None,
-                        "ats_slug": None,
-                    }
-
-                # Check careers page failure backoff (Signal 2 only)
-                company_id = job.get("company_row_id")
-                skip_careers = False
-                with _careers_lock:
-                    skip_until = _careers_skip_until.get(company_id) if company_id else None
-                if skip_until and datetime.now(timezone.utc) < skip_until:
-                    skip_careers = True
-                    logger.debug(
-                        "run_expiry_check: skipping careers check for company %s (backoff)",
-                        company_id,
-                    )
-
-                try:
-                    result, evidence = _check_job_expiry(job, company, config, skip_careers=skip_careers)
-                except Exception as e:
-                    logger.warning("run_expiry_check: error checking %s: %s", job["dedup_key"], e)
-                    inconclusive += 1
-                    continue
-
-                now = datetime.now(timezone.utc).isoformat()
-
-                # Track careers page outcome for backoff
-                if not skip_careers and company_id:
-                    if "careers_page" in evidence:
-                        _record_careers_outcome(company_id, success=True)
-                    elif result == INCONCLUSIVE and company and company.get("homepage_url"):
-                        # Careers page was attempted but inconclusive (possible failure)
-                        _record_careers_outcome(company_id, success=False)
-
-                if result == EXPIRED:
-                    # Persist expiry state via the sole write path
-                    persist_job_expiry_state(conn, job["dedup_key"], EXPIRED, now)
-                    # update_pipeline_status commits internally (pipeline_events audit trail)
-                    update_pipeline_status(
-                        conn, job["dedup_key"], "archived",
-                        source="expiry_check", evidence=evidence,
-                    )
-                    archived += 1
-                    logger.info("run_expiry_check: archived %s (%s)", job["dedup_key"], evidence)
-
-                elif result == LIVE:
-                    persist_job_expiry_state(conn, job["dedup_key"], LIVE, now)
-                    live += 1
-
-                else:
-                    persist_job_expiry_state(conn, job["dedup_key"], INCONCLUSIVE, now)
-                    inconclusive += 1
-                    logger.debug("run_expiry_check: inconclusive for %s", job["dedup_key"])
-
-            result_summary = {
-                "checked": len(rows),
-                "archived": archived,
-                "live": live,
-                "inconclusive": inconclusive,
-            }
-            logger.info("run_expiry_check complete: %s", result_summary)
-            return result_summary
-
-        except Exception:
-            conn.rollback()
-            logger.exception("run_expiry_check failed")
-            raise
+    warnings.warn(
+        "run_expiry_check is deprecated; use run_staleness_check instead. "
+        "The return value shape has changed: it now nests Phase A/B/C summaries.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return run_staleness_check(db_path, config)
