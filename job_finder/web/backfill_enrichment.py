@@ -69,7 +69,9 @@ _OFFLINE_PROVIDERS: dict = {
     "haiku": {
         "provider": "ollama",
         "model": "qwen2.5:14b",
-        "fallback": "anthropic",
+        "fallback_chain": [
+            {"provider": "anthropic", "model": DEFAULT_MODEL_HAIKU},
+        ],
     },
     "sonnet": {
         "provider": "ollama",
@@ -217,7 +219,7 @@ def run_enrichment_pass(
             job_row,
             serpapi_key=serpapi_key,
             conn=conn,
-            config=config,
+            config=_offline_config(config),
         )
 
         if result:
