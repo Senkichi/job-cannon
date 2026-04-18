@@ -363,3 +363,37 @@ def mock_run_oneshot():
     with patch("job_finder.web.claude_client._run_oneshot", return_value=envelope) as mock:
         yield mock
 
+
+@pytest.fixture(autouse=True)
+def mock_liveness_check():
+    """Auto-mock check_job_liveness so no test accidentally issues real HTTP
+    probes during Sonnet's liveness gate.
+
+    Defaults to INCONCLUSIVE — the safe pass-through that neither archives
+    the job nor blocks evaluation. Tests that specifically exercise the gate
+    override this with a nested ``with patch.object(sr, "check_job_liveness", ...)``
+    which takes precedence until the inner context exits.
+    """
+    with patch(
+        "job_finder.web.scoring_runner.check_job_liveness",
+        return_value="inconclusive",
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_scheduler_pidfile():
+    """Auto-mock _acquire_scheduler_pidfile so tests do not collide with a
+    real run.py Flask instance that may be holding the pidfile.
+
+    The production pidfile prevents two live Python processes from both
+    running the 0,8,16 cron schedule. In tests we always want init_scheduler
+    to proceed as if it owns the lock — hermetic isolation from whatever
+    pidfile happens to exist on disk at test time.
+    """
+    with patch(
+        "job_finder.web.scheduler._acquire_scheduler_pidfile",
+        return_value=True,
+    ) as mock:
+        yield mock
+

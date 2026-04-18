@@ -292,41 +292,45 @@ def test_haiku_scoring_no_cli_returns_zero(migrated_db):
 
 
 # ---------------------------------------------------------------------------
-# Liveness gate tests (Fix 2: ingestion-time expiry check)
+# Liveness gate tests (Fix 2: ingestion-time expiry check — Sonnet-path gate)
+#
+# Per .planning/career-ops-adoption-plan.md the liveness gate is placed before
+# the expensive Sonnet call, not before Haiku. Haiku-path ingestion does not
+# make outbound HTTP for liveness — freshly-ingested URLs that transiently
+# return 404 are still scored and only archived once a Sonnet attempt probes
+# them (or the nightly stale_detector picks them up).
 # ---------------------------------------------------------------------------
 
 
-def test_liveness_gate_expired_archives_job_and_skips_haiku(migrated_db):
-    """Liveness gate archives expired jobs before Haiku scoring."""
+def test_liveness_gate_expired_archives_job_and_skips_sonnet(migrated_db):
+    """Liveness gate archives expired jobs before Sonnet evaluation."""
     import sqlite3
     db_path, setup_conn = migrated_db
-    _insert_job(setup_conn, "expired-job-1")
+    _insert_job(setup_conn, "expired-job-1", jd_full="Full job description.")
     setup_conn.commit()
 
     import job_finder.web.scoring_runner as sr
 
     scored_keys: list[str] = []
 
-    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+    def mock_persist_sonnet(conn, job_row, config, profile, evaluator_fn=None):
         scored_keys.append(job_row["dedup_key"])
-        return {"score": 7}
+        return {"score": 75}
 
     with (
         patch.object(sr, "shutil") as mock_shutil,
-        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
-        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
-        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "score_and_persist_sonnet", side_effect=mock_persist_sonnet),
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "check_job_liveness", return_value="expired"),
     ):
         mock_shutil.which.return_value = "/usr/bin/claude"
-        sonnet_queue, haiku_scored = sr.run_haiku_scoring(
+        sonnet_evaluated = sr.run_sonnet_evaluation(
             ["expired-job-1"], _TEST_CONFIG, db_path,
         )
 
-    # Job must not reach Haiku scoring
+    # Job must not reach Sonnet scoring
     assert "expired-job-1" not in scored_keys
-    assert haiku_scored == 0
+    assert sonnet_evaluated == 0
 
     # Job must be archived in DB
     conn = sqlite3.connect(db_path)
@@ -338,57 +342,53 @@ def test_liveness_gate_expired_archives_job_and_skips_haiku(migrated_db):
     conn.close()
 
 
-def test_liveness_gate_live_proceeds_to_haiku(migrated_db):
-    """Liveness gate passes LIVE jobs through to Haiku scoring."""
+def test_liveness_gate_live_proceeds_to_sonnet(migrated_db):
+    """Liveness gate passes LIVE jobs through to Sonnet evaluation."""
     db_path, setup_conn = migrated_db
-    _insert_job(setup_conn, "live-job-1")
+    _insert_job(setup_conn, "live-job-1", jd_full="Full job description.")
     setup_conn.commit()
 
     import job_finder.web.scoring_runner as sr
 
     scored_keys: list[str] = []
 
-    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+    def mock_persist_sonnet(conn, job_row, config, profile, evaluator_fn=None):
         scored_keys.append(job_row["dedup_key"])
-        return {"score": 7}
+        return {"score": 75}
 
     with (
         patch.object(sr, "shutil") as mock_shutil,
-        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
-        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
-        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "score_and_persist_sonnet", side_effect=mock_persist_sonnet),
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "check_job_liveness", return_value="live"),
     ):
         mock_shutil.which.return_value = "/usr/bin/claude"
-        sr.run_haiku_scoring(["live-job-1"], _TEST_CONFIG, db_path)
+        sr.run_sonnet_evaluation(["live-job-1"], _TEST_CONFIG, db_path)
 
     assert "live-job-1" in scored_keys
 
 
-def test_liveness_gate_inconclusive_proceeds_to_haiku(migrated_db):
-    """Liveness gate passes INCONCLUSIVE jobs through to Haiku scoring."""
+def test_liveness_gate_inconclusive_proceeds_to_sonnet(migrated_db):
+    """Liveness gate passes INCONCLUSIVE jobs through to Sonnet evaluation."""
     db_path, setup_conn = migrated_db
-    _insert_job(setup_conn, "inconclusive-job-1")
+    _insert_job(setup_conn, "inconclusive-job-1", jd_full="Full job description.")
     setup_conn.commit()
 
     import job_finder.web.scoring_runner as sr
 
     scored_keys: list[str] = []
 
-    def mock_persist_haiku(conn, job_row, config, profile, scorer_fn=None):
+    def mock_persist_sonnet(conn, job_row, config, profile, evaluator_fn=None):
         scored_keys.append(job_row["dedup_key"])
-        return {"score": 7}
+        return {"score": 75}
 
     with (
         patch.object(sr, "shutil") as mock_shutil,
-        patch.object(sr, "score_and_persist_haiku", side_effect=mock_persist_haiku),
-        patch.object(sr, "enrich_job", MagicMock(return_value=None)),
-        patch.object(sr, "should_exclude", return_value=(False, "")),
+        patch.object(sr, "score_and_persist_sonnet", side_effect=mock_persist_sonnet),
         patch.object(sr, "load_scoring_profile", return_value={}),
         patch.object(sr, "check_job_liveness", return_value="inconclusive"),
     ):
         mock_shutil.which.return_value = "/usr/bin/claude"
-        sr.run_haiku_scoring(["inconclusive-job-1"], _TEST_CONFIG, db_path)
+        sr.run_sonnet_evaluation(["inconclusive-job-1"], _TEST_CONFIG, db_path)
 
     assert "inconclusive-job-1" in scored_keys
