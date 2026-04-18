@@ -60,6 +60,43 @@ _ELIGIBLE_TIERS_QUERY = (
 _BORDERLINE_MIN = 40
 _BORDERLINE_MAX = 70
 
+# Offline-only provider routing. Live pipeline config intentionally has no
+# providers.haiku / providers.sonnet so scoring_runner stays on the Claude CLI
+# (lower latency after cold-start flag tuning). Backfill wraps its config
+# through _offline_config() to opt into Ollama with a CLI fallback, trading a
+# few extra seconds per call for zero API cost on nightly/manual batches.
+_OFFLINE_PROVIDERS: dict = {
+    "haiku": {
+        "provider": "ollama",
+        "model": "qwen2.5:14b",
+        "fallback": "anthropic",
+    },
+    "sonnet": {
+        "provider": "ollama",
+        "model": "qwen2.5:14b",
+        "fallback_chain": [
+            {"provider": "anthropic", "model": DEFAULT_MODEL_SONNET},
+        ],
+    },
+}
+
+
+def _offline_config(config: dict) -> dict:
+    """Return a shallow-copied config with Ollama routing injected for scoring.
+
+    Preserves every other field unchanged. Existing user-set providers.haiku
+    or providers.sonnet entries win over the defaults (lets a caller override
+    the routing on a per-run basis via CLI flags or env).
+    """
+    existing = config.get("providers", {}) or {}
+    merged_providers = {**_OFFLINE_PROVIDERS, **existing}
+    # Preserve cascade meta-keys if the caller set them
+    for meta in ("daily_limits", "throttle_delays"):
+        if meta in existing:
+            merged_providers[meta] = existing[meta]
+    return {**config, "providers": merged_providers}
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -278,7 +315,7 @@ def run_sonnet_backfill(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        scoring_result = evaluate_job_sonnet(job_row, profile, conn, config)
+        scoring_result = evaluate_job_sonnet(job_row, profile, conn, _offline_config(config))
 
         if scoring_result is None or scoring_result.status != "success" or scoring_result.data is None:
             logger.debug("Sonnet eval returned %s for '%s'",
@@ -349,7 +386,7 @@ def run_borderline_rescore(
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        scoring_result = score_job_haiku(job_row, profile, conn, config)
+        scoring_result = score_job_haiku(job_row, profile, conn, _offline_config(config))
 
         if scoring_result is None or scoring_result.status != "success" or scoring_result.data is None:
             logger.debug("Haiku re-score returned %s for '%s'",

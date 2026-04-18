@@ -20,9 +20,21 @@ from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude, BudgetExceededError, ClaudeContext
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic SDK.
+# AnthropicProvider forwards this to call_claude(), which ignores client and
+# routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
+
 
 # ---------------------------------------------------------------------------
 # Structured output schema for Haiku scoring
@@ -313,16 +325,37 @@ def score_job_haiku(
 
     job_id = job_row.get("dedup_key")
 
+    # Route via call_model() only when providers.haiku is configured (e.g. Ollama
+    # primary with CLI fallback). Without that config, stay on the direct
+    # call_claude() path so untouched deployments see zero behavior change.
+    use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+
     try:
-        result, cost_usd = call_claude(
-            model=model,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_schema=HAIKU_SCHEMA,
-            job_id=job_id,
-            purpose=purpose,
-            ctx=ctx or ClaudeContext(conn=conn, config=config),
-        )
+        if use_dispatcher:
+            model_result = call_model(
+                tier="haiku",
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+                conn=conn,
+                config=config,
+                output_schema=HAIKU_SCHEMA,
+                job_id=job_id,
+                purpose=purpose,
+                max_tokens=1024,
+                client=_CLI_CLIENT_STUB,
+            )
+            result = model_result.data
+            cost_usd = model_result.cost_usd
+        else:
+            result, cost_usd = call_claude(
+                model=model,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+                output_schema=HAIKU_SCHEMA,
+                job_id=job_id,
+                purpose=purpose,
+                ctx=ctx or ClaudeContext(conn=conn, config=config),
+            )
         logger.debug(
             "Haiku scored '%s' @ '%s': score=%s (cost=$%.5f)",
             title,
@@ -339,6 +372,32 @@ def score_job_haiku(
             company,
         )
         return ScoringResult(data=None, status="budget_exceeded")
+    except ProviderCascadeExhaustedError as exc:
+        # All providers in the cascade (Ollama primary + Anthropic fallback)
+        # failed. Log and fall through to the CLI path as a last resort so a
+        # scheduled run does not silently stop scoring when Ollama is down.
+        logger.warning(
+            "Haiku provider cascade exhausted for '%s' @ '%s' (%s); "
+            "retrying via CLI",
+            title, company, exc,
+        )
+        try:
+            result, cost_usd = call_claude(
+                model=model,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+                output_schema=HAIKU_SCHEMA,
+                job_id=job_id,
+                purpose=purpose,
+                ctx=ctx or ClaudeContext(conn=conn, config=config),
+            )
+            return ScoringResult(data=result, status="success")
+        except Exception as retry_exc:
+            logger.warning(
+                "Haiku CLI retry also failed for '%s' @ '%s': %s",
+                title, company, retry_exc,
+            )
+            return ScoringResult(data=None, status="error")
     except Exception as e:
         logger.warning(
             "Haiku scoring failed for '%s' @ '%s': %s",

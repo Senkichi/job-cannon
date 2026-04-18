@@ -25,9 +25,20 @@ from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import BudgetExceededError, ClaudeContext, call_claude
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 from job_finder.web.scoring_types import JobRow, ScoringResult, format_salary_range
 
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic SDK.
+# AnthropicProvider forwards this to call_claude(), which ignores client and
+# routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
 
 # ---------------------------------------------------------------------------
 # Structured output schema for Sonnet evaluation
@@ -315,17 +326,37 @@ def evaluate_job_sonnet(
         f"Provide structured output."
     )
 
+    # Route via call_model() only when providers.sonnet is configured (e.g. Ollama
+    # primary with CLI fallback_chain). Without that config, stay on the direct
+    # call_claude() path so untouched deployments see zero behavior change.
+    use_dispatcher = bool(config.get("providers", {}).get("sonnet"))
+
     try:
-        result, _cost = call_claude(
-            model=model,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-            output_schema=SONNET_SCHEMA,
-            job_id=job_row.get("dedup_key"),
-            purpose="sonnet_eval",
-            max_tokens=2048,
-            ctx=ctx or ClaudeContext(conn=conn, config=config),
-        )
+        if use_dispatcher:
+            model_result = call_model(
+                tier="sonnet",
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+                conn=conn,
+                config=config,
+                output_schema=SONNET_SCHEMA,
+                job_id=job_row.get("dedup_key"),
+                purpose="sonnet_eval",
+                max_tokens=2048,
+                client=_CLI_CLIENT_STUB,
+            )
+            result = model_result.data
+        else:
+            result, _cost = call_claude(
+                model=model,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+                output_schema=SONNET_SCHEMA,
+                job_id=job_row.get("dedup_key"),
+                purpose="sonnet_eval",
+                max_tokens=2048,
+                ctx=ctx or ClaudeContext(conn=conn, config=config),
+            )
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",
             job_row.get("title"),
@@ -341,6 +372,32 @@ def evaluate_job_sonnet(
             job_row.get("company"),
         )
         return ScoringResult(data=None, status="budget_exceeded")
+
+    except ProviderCascadeExhaustedError as exc:
+        # All providers in the cascade failed. Fall through to the CLI path as
+        # a last resort so a down Ollama does not silently halt evaluation.
+        logger.warning(
+            "Sonnet provider cascade exhausted for '%s' @ '%s' (%s); retrying via CLI",
+            job_row.get("title"), job_row.get("company"), exc,
+        )
+        try:
+            result, _cost = call_claude(
+                model=model,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+                output_schema=SONNET_SCHEMA,
+                job_id=job_row.get("dedup_key"),
+                purpose="sonnet_eval",
+                max_tokens=2048,
+                ctx=ctx or ClaudeContext(conn=conn, config=config),
+            )
+            return ScoringResult(data=result, status="success")
+        except Exception as retry_exc:
+            logger.warning(
+                "Sonnet CLI retry also failed for '%s' @ '%s': %s",
+                job_row.get("title"), job_row.get("company"), retry_exc,
+            )
+            return ScoringResult(data=None, status="error")
 
     except Exception as e:
         logger.warning(

@@ -107,31 +107,6 @@ def run_haiku_scoring(
                             enrich_err,
                         )
 
-                # --- Liveness gate (after enrichment discovers direct URLs) ---
-                # enrich_job may have written updated source_urls directly to DB
-                # via merge_apply_urls without returning them in the enriched dict.
-                # Re-read to ensure we check the most current URL.
-                refreshed = conn.execute(
-                    "SELECT source_urls FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                ).fetchone()
-                if refreshed:
-                    job_row["source_urls"] = refreshed["source_urls"]
-
-                liveness = check_job_liveness(job_row)
-                now_iso = datetime.now(timezone.utc).isoformat()
-                persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
-
-                if liveness == _EXPIRED:
-                    logger.info(
-                        "Liveness gate: archiving expired '%s' @ '%s'",
-                        job_row.get("title"), job_row.get("company"),
-                    )
-                    update_pipeline_status(
-                        conn, dedup_key, "archived",
-                        source="ingestion_liveness", evidence="quick_liveness_check expired",
-                    )
-                    continue
-
                 # --- Pre-Haiku exclusion filter (C3) ---
                 exclusions = config.get("profile", {}).get("exclusions", {})
                 profile_min_salary = config.get("profile", {}).get("min_salary")
@@ -256,6 +231,26 @@ def run_sonnet_evaluation(
                         "No JD available for '%s' @ '%s' after enrichment, skipping Sonnet eval",
                         job_row.get("title"),
                         job_row.get("company"),
+                    )
+                    continue
+
+                # --- Liveness gate (before the expensive Sonnet call) ---
+                # Per .planning/career-ops-adoption-plan.md: gate Sonnet eval, not
+                # Haiku. Ingestion-time URL probes are fragile (network flakes, deep
+                # links that 404 despite the job being live in its ATS), so we only
+                # pay their cost before the expensive call — Haiku runs regardless.
+                liveness = check_job_liveness(job_row)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
+
+                if liveness == _EXPIRED:
+                    logger.info(
+                        "Liveness gate: archiving expired '%s' @ '%s'",
+                        job_row.get("title"), job_row.get("company"),
+                    )
+                    update_pipeline_status(
+                        conn, dedup_key, "archived",
+                        source="sonnet_liveness", evidence="quick_liveness_check expired",
                     )
                     continue
 

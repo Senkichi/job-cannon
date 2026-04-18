@@ -22,6 +22,7 @@ Model pricing (per million tokens) — informational, for cost tracking:
 
 import json
 import logging
+import os
 import sqlite3
 import subprocess
 import tempfile
@@ -418,11 +419,21 @@ def _run_oneshot(
         "--output-format", "json",
         "--no-session-persistence",
         "--tools", "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
         "--system-prompt", system,
     ]
 
     if json_schema is not None:
         cmd.extend(["--json-schema", json.dumps(json_schema)])
+
+    # Cold-start tuning. --bare is intentionally avoided: it forces ANTHROPIC_API_KEY
+    # auth and bypasses the OAuth/subscription path, which would reroute billing.
+    cli_env = {
+        **os.environ,
+        "MCP_CONNECTION_NONBLOCKING": "true",
+        "MAX_STRUCTURED_OUTPUT_RETRIES": "1",
+    }
 
     try:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
@@ -435,6 +446,7 @@ def _run_oneshot(
                 encoding="utf-8",
                 errors="replace",
                 cwd=tmpdir,
+                env=cli_env,
             )
     except subprocess.TimeoutExpired:
         raise TimeoutError(
