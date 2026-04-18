@@ -20,8 +20,19 @@ from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude, cost_gate
 from ddgs import DDGS
 from job_finder.web.domain_policy import is_blocked_domain, domain_priority
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
+# SDK. AnthropicProvider forwards this to call_claude(), which ignores
+# client and routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -320,17 +331,51 @@ def extract_with_sonnet(
 
         job_id = job_row.get("dedup_key")
 
-        result, _cost = call_claude(
-            model=model,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
-            conn=conn,
-            job_id=job_id,
-            purpose="enrich_job_sonnet",
-            config=config,
-            max_tokens=1024,
-        )
+        use_dispatcher = bool(config.get("providers", {}).get("sonnet"))
+
+        if use_dispatcher:
+            try:
+                model_result = call_model(
+                    tier="sonnet",
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    conn=conn,
+                    config=config,
+                    output_schema=None,
+                    job_id=job_id,
+                    purpose="enrich_job_sonnet",
+                    max_tokens=1024,
+                    client=_CLI_CLIENT_STUB,
+                )
+                result = model_result.data
+            except ProviderCascadeExhaustedError:
+                logger.warning(
+                    "enrich_job_sonnet: cascade exhausted for '%s', retrying via CLI",
+                    job_id,
+                )
+                result, _cost = call_claude(
+                    model=model,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    output_schema=None,
+                    conn=conn,
+                    job_id=job_id,
+                    purpose="enrich_job_sonnet",
+                    config=config,
+                    max_tokens=1024,
+                )
+        else:
+            result, _cost = call_claude(
+                model=model,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                output_schema=None,
+                conn=conn,
+                job_id=job_id,
+                purpose="enrich_job_sonnet",
+                config=config,
+                max_tokens=1024,
+            )
 
         if isinstance(result, dict):
             enriched = {}
@@ -507,17 +552,51 @@ def extract_with_haiku(
 
         job_id = job_row.get("dedup_key")
 
-        result, _cost = call_claude(
-            model=model,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            output_schema=None,
-            conn=conn,
-            job_id=job_id,
-            purpose="enrich_job",
-            config=config,
-            max_tokens=512,
-        )
+        use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+
+        if use_dispatcher:
+            try:
+                model_result = call_model(
+                    tier="haiku",
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    conn=conn,
+                    config=config,
+                    output_schema=None,
+                    job_id=job_id,
+                    purpose="enrich_job",
+                    max_tokens=512,
+                    client=_CLI_CLIENT_STUB,
+                )
+                result = model_result.data
+            except ProviderCascadeExhaustedError:
+                logger.warning(
+                    "enrich_job: Haiku cascade exhausted for '%s', retrying via CLI",
+                    job_id,
+                )
+                result, _cost = call_claude(
+                    model=model,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                    output_schema=None,
+                    conn=conn,
+                    job_id=job_id,
+                    purpose="enrich_job",
+                    config=config,
+                    max_tokens=512,
+                )
+        else:
+            result, _cost = call_claude(
+                model=model,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                output_schema=None,
+                conn=conn,
+                job_id=job_id,
+                purpose="enrich_job",
+                config=config,
+                max_tokens=512,
+            )
 
         if isinstance(result, dict):
             # Remove None values and ensure salary fields are integers
