@@ -25,7 +25,21 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.claude_client import call_claude
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
+
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
+# SDK. AnthropicProvider forwards this to call_claude(), which ignores
+# client and routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -137,9 +151,6 @@ def _find_careers_url_with_haiku(
     Returns:
         Absolute URL to the careers page, or None if not found.
     """
-    from job_finder.config import DEFAULT_MODEL_HAIKU
-    from job_finder.web.claude_client import call_claude
-
     truncated_html = homepage_html[:_HAIKU_HTML_CHARS]
 
     system = (
@@ -154,36 +165,70 @@ def _find_careers_url_with_haiku(
         }
     ]
 
+    use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+
     try:
-        result, cost = call_claude(
-            model=DEFAULT_MODEL_HAIKU,
-            system=system,
-            messages=messages,
-            output_schema=_CAREERS_URL_SCHEMA,
-            conn=conn,
-            job_id=None,
-            purpose="careers_scrape",
-            config=config,
-            max_tokens=256,
-        )
-
-        url_text = result.get("url", "").strip()
-        if not url_text or url_text.lower() == "none":
-            return None
-
-        # Resolve relative URL
-        if url_text.startswith("/"):
-            url_text = urljoin(homepage_url, url_text)
-
-        # Basic validation: must start with http
-        if url_text.startswith("http"):
-            logger.debug("Haiku found careers URL for '%s': %s", homepage_url, url_text)
-            return url_text
-
-        return None
+        if use_dispatcher:
+            try:
+                model_result = call_model(
+                    tier="haiku",
+                    system=system,
+                    messages=messages,
+                    conn=conn,
+                    config=config,
+                    output_schema=_CAREERS_URL_SCHEMA,
+                    job_id=None,
+                    purpose="careers_scrape",
+                    max_tokens=256,
+                    client=_CLI_CLIENT_STUB,
+                )
+                result = model_result.data
+            except ProviderCascadeExhaustedError:
+                logger.warning(
+                    "careers_scrape: cascade exhausted for URL discovery of '%s', retrying via CLI",
+                    homepage_url,
+                )
+                result, _cost = call_claude(
+                    model=DEFAULT_MODEL_HAIKU,
+                    system=system,
+                    messages=messages,
+                    output_schema=_CAREERS_URL_SCHEMA,
+                    conn=conn,
+                    job_id=None,
+                    purpose="careers_scrape",
+                    config=config,
+                    max_tokens=256,
+                )
+        else:
+            result, _cost = call_claude(
+                model=DEFAULT_MODEL_HAIKU,
+                system=system,
+                messages=messages,
+                output_schema=_CAREERS_URL_SCHEMA,
+                conn=conn,
+                job_id=None,
+                purpose="careers_scrape",
+                config=config,
+                max_tokens=256,
+            )
     except Exception as e:
         logger.debug("Haiku careers URL fallback failed for '%s': %s", homepage_url, e)
         return None
+
+    url_text = (result.get("url", "") if isinstance(result, dict) else "").strip()
+    if not url_text or url_text.lower() == "none":
+        return None
+
+    # Resolve relative URL
+    if url_text.startswith("/"):
+        url_text = urljoin(homepage_url, url_text)
+
+    # Basic validation: must start with http
+    if url_text.startswith("http"):
+        logger.debug("Haiku found careers URL for '%s': %s", homepage_url, url_text)
+        return url_text
+
+    return None
 
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
@@ -238,9 +283,6 @@ def _extract_jobs_with_haiku(
     Returns:
         List of dicts with title, url, description keys. May be empty.
     """
-    from job_finder.config import DEFAULT_MODEL_HAIKU
-    from job_finder.web.claude_client import call_claude
-
     truncated_html = careers_html[:_HAIKU_HTML_CHARS]
 
     system = (
@@ -256,20 +298,54 @@ def _extract_jobs_with_haiku(
         }
     ]
 
-    try:
-        result, cost = call_claude(
-            model=DEFAULT_MODEL_HAIKU,
-            system=system,
-            messages=messages,
-            output_schema=_CAREERS_JOBS_SCHEMA,
-            conn=conn,
-            job_id=None,
-            purpose="careers_scrape",
-            config=config,
-            max_tokens=1024,
-        )
+    use_dispatcher = bool(config.get("providers", {}).get("haiku"))
 
-        jobs = result.get("jobs", [])
+    try:
+        if use_dispatcher:
+            try:
+                model_result = call_model(
+                    tier="haiku",
+                    system=system,
+                    messages=messages,
+                    conn=conn,
+                    config=config,
+                    output_schema=_CAREERS_JOBS_SCHEMA,
+                    job_id=None,
+                    purpose="careers_scrape",
+                    max_tokens=1024,
+                    client=_CLI_CLIENT_STUB,
+                )
+                result = model_result.data
+            except ProviderCascadeExhaustedError:
+                logger.warning(
+                    "careers_scrape: cascade exhausted for job extraction at '%s', retrying via CLI",
+                    careers_url,
+                )
+                result, _cost = call_claude(
+                    model=DEFAULT_MODEL_HAIKU,
+                    system=system,
+                    messages=messages,
+                    output_schema=_CAREERS_JOBS_SCHEMA,
+                    conn=conn,
+                    job_id=None,
+                    purpose="careers_scrape",
+                    config=config,
+                    max_tokens=1024,
+                )
+        else:
+            result, _cost = call_claude(
+                model=DEFAULT_MODEL_HAIKU,
+                system=system,
+                messages=messages,
+                output_schema=_CAREERS_JOBS_SCHEMA,
+                conn=conn,
+                job_id=None,
+                purpose="careers_scrape",
+                config=config,
+                max_tokens=1024,
+            )
+
+        jobs = result.get("jobs", []) if isinstance(result, dict) else []
         if not isinstance(jobs, list):
             return []
 
