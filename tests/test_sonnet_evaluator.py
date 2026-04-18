@@ -34,9 +34,22 @@ def test_base_system_prompt_has_no_fewshot():
 
 
 def test_eval_provider_fewshot_variant_not_doubled():
-    """eval_provider PROMPT_VARIANTS['fewshot'] does not double-include fewshot examples."""
-    from eval_provider import PROMPT_VARIANTS
-    fewshot_prompt = PROMPT_VARIANTS["fewshot"]
-    # Count occurrences of a unique fewshot marker
+    """eval_provider PROMPT_VARIANTS['fewshot'] does not double-include fewshot examples.
+
+    scripts/ is not a package (no __init__.py), so import via importlib to
+    load eval_provider.py by path — `from eval_provider import ...` only
+    works when a stale pyc happens to sit in the repo root, which is
+    machine-dependent and masks the real behavior on fresh clones.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "eval_provider.py"
+    spec = importlib.util.spec_from_file_location("eval_provider", path)
+    assert spec and spec.loader, f"cannot load eval_provider from {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fewshot_prompt = module.PROMPT_VARIANTS["fewshot"]
     count = fewshot_prompt.count("Score 15 (Poor fit)")
     assert count == 1, f"Fewshot examples appear {count} times (expected 1)"
