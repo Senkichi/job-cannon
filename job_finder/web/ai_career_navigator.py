@@ -16,8 +16,21 @@ import logging
 from datetime import datetime
 
 from job_finder.web.ats_platforms import _title_matches
+from job_finder.web.claude_client import call_claude
+from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
+# SDK. AnthropicProvider forwards this to call_claude(), which ignores
+# client and routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
 
 # Stop words excluded when deriving a search term from target titles
 _TITLE_STOP_WORDS = frozenset({
@@ -337,11 +350,9 @@ def discover_navigation_recipe(
         f"Produce a navigation recipe JSON to find job listings on this page."
     )
 
-    # Call Haiku via claude_client
+    # Dispatch through call_model when providers.haiku is configured; fall
+    # back to direct call_claude otherwise or when the cascade is exhausted.
     try:
-        from job_finder.web.claude_client import call_claude
-        from job_finder.web.db_helpers import standalone_connection
-
         db_path = config.get("db_path", "jobs.db")
         with standalone_connection(db_path) as conn:
             recipe_schema = {
@@ -373,16 +384,49 @@ def discover_navigation_recipe(
                 "required": ["steps", "extraction"],
             }
 
-            result, cost = call_claude(
-                model="claude-haiku-4-5",
-                system=_DISCOVERY_SYSTEM,
-                messages=[{"role": "user", "content": user_message}],
-                output_schema=recipe_schema,
-                conn=conn,
-                purpose="ai_nav_discovery",
-                config=config,
-                max_tokens=1024,
-            )
+            use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+
+            if use_dispatcher:
+                try:
+                    model_result = call_model(
+                        tier="haiku",
+                        system=_DISCOVERY_SYSTEM,
+                        messages=[{"role": "user", "content": user_message}],
+                        conn=conn,
+                        config=config,
+                        output_schema=recipe_schema,
+                        job_id=None,
+                        purpose="ai_nav_discovery",
+                        max_tokens=1024,
+                        client=_CLI_CLIENT_STUB,
+                    )
+                    result = model_result.data
+                except ProviderCascadeExhaustedError:
+                    logger.warning(
+                        "ai_nav: cascade exhausted for %s, retrying via CLI",
+                        careers_url,
+                    )
+                    result, _cost = call_claude(
+                        model="claude-haiku-4-5",
+                        system=_DISCOVERY_SYSTEM,
+                        messages=[{"role": "user", "content": user_message}],
+                        output_schema=recipe_schema,
+                        conn=conn,
+                        purpose="ai_nav_discovery",
+                        config=config,
+                        max_tokens=1024,
+                    )
+            else:
+                result, _cost = call_claude(
+                    model="claude-haiku-4-5",
+                    system=_DISCOVERY_SYSTEM,
+                    messages=[{"role": "user", "content": user_message}],
+                    output_schema=recipe_schema,
+                    conn=conn,
+                    purpose="ai_nav_discovery",
+                    config=config,
+                    max_tokens=1024,
+                )
 
     except Exception as e:
         logger.warning("ai_nav: Haiku discovery call failed for %s: %s", careers_url, e)
