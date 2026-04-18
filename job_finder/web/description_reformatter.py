@@ -27,8 +27,19 @@ from typing import Optional, Any
 from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
+
+
+# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
+# SDK. AnthropicProvider forwards this to call_claude(), which ignores
+# client and routes through the CLI — OAuth/subscription billing is preserved.
+class _CLIClientStub:
+    api_key = "cli-managed"
+
+
+_CLI_CLIENT_STUB = _CLIClientStub()
 
 # Regex pattern for common section headers (2+ indicates already formatted)
 _SECTION_HEADER_PATTERN = re.compile(
@@ -107,18 +118,53 @@ def reformat_description(
         .get("haiku", DEFAULT_MODEL_HAIKU)
     )
 
+    # call_model() requires a non-None conn for cost recording (_ensure_usage_current
+    # + _maybe_record_cost). When conn is None (e.g. single-shot callers not
+    # passing a DB handle), skip cascade routing and rely on call_claude's own
+    # conn=None handling, which raises ValueError and is caught below.
+    use_dispatcher = conn is not None and bool(config.get("providers", {}).get("haiku"))
+
     try:
-        result, _cost = call_claude(
-            model=model,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": description[:4000]}],
-            output_schema=_REFORMAT_SCHEMA,
-            conn=conn,
-            job_id=None,
-            purpose="description_reformat",
-            config=config,
-            max_tokens=2048,
-        )
+        if use_dispatcher:
+            try:
+                model_result = call_model(
+                    tier="haiku",
+                    system=_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": description[:4000]}],
+                    conn=conn,
+                    config=config,
+                    output_schema=_REFORMAT_SCHEMA,
+                    job_id=None,
+                    purpose="description_reformat",
+                    max_tokens=2048,
+                    client=_CLI_CLIENT_STUB,
+                )
+                result = model_result.data
+            except ProviderCascadeExhaustedError:
+                logger.warning("description_reformat: cascade exhausted, retrying via CLI")
+                result, _cost = call_claude(
+                    model=model,
+                    system=_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": description[:4000]}],
+                    output_schema=_REFORMAT_SCHEMA,
+                    conn=conn,
+                    job_id=None,
+                    purpose="description_reformat",
+                    config=config,
+                    max_tokens=2048,
+                )
+        else:
+            result, _cost = call_claude(
+                model=model,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": description[:4000]}],
+                output_schema=_REFORMAT_SCHEMA,
+                conn=conn,
+                job_id=None,
+                purpose="description_reformat",
+                config=config,
+                max_tokens=2048,
+            )
 
         # Both providers return {"text": ...} under _REFORMAT_SCHEMA
         if isinstance(result, dict):
