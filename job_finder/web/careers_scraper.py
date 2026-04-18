@@ -63,6 +63,43 @@ _ATS_DOMAINS = [
 # Subdomains that indicate a careers site (checked after ATS exclusion)
 _CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.", "apply.")
 
+# Structured output schemas for the two Haiku call sites below. Both providers
+# (Anthropic CLI + Ollama) return the same dict shape when a schema is
+# supplied — without it, Ollama's forced "format":"json" yields arbitrary keys
+# while the CLI wraps freeform text in {"text": ...}, which would silently
+# produce empty results once a cascade routes the call through Ollama.
+_CAREERS_URL_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "url": {
+            "type": "string",
+            "description": "Absolute URL to the careers/jobs page, or the word 'none' if not found",
+        },
+    },
+    "required": ["url"],
+    "additionalProperties": False,
+}
+
+_CAREERS_JOBS_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "jobs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string"},
+                    "location": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    "required": ["jobs"],
+    "additionalProperties": False,
+}
+
 
 def _extract_base_domain(url: str) -> str | None:
     """Extract registrable domain from URL, stripping www. prefix.
@@ -105,7 +142,11 @@ def _find_careers_url_with_haiku(
 
     truncated_html = homepage_html[:_HAIKU_HTML_CHARS]
 
-    system = "You identify careers/jobs page URLs from company website HTML. Return ONLY the URL, or the word 'none' if no careers page is found. Do not explain."
+    system = (
+        "You identify careers/jobs page URLs from company website HTML. "
+        "Return the absolute URL in the 'url' field, or the string 'none' in "
+        "the 'url' field when no careers page is found."
+    )
     messages = [
         {
             "role": "user",
@@ -118,7 +159,7 @@ def _find_careers_url_with_haiku(
             model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
-            output_schema=None,
+            output_schema=_CAREERS_URL_SCHEMA,
             conn=conn,
             job_id=None,
             purpose="careers_scrape",
@@ -126,8 +167,7 @@ def _find_careers_url_with_haiku(
             max_tokens=256,
         )
 
-        # call_claude returns (dict, float) — when no output_schema, result has "text" key
-        url_text = result.get("text", "").strip()
+        url_text = result.get("url", "").strip()
         if not url_text or url_text.lower() == "none":
             return None
 
@@ -198,13 +238,17 @@ def _extract_jobs_with_haiku(
     Returns:
         List of dicts with title, url, description keys. May be empty.
     """
-    import json as _json
     from job_finder.config import DEFAULT_MODEL_HAIKU
     from job_finder.web.claude_client import call_claude
 
     truncated_html = careers_html[:_HAIKU_HTML_CHARS]
 
-    system = "You extract job listings from careers page HTML. Return a JSON array of objects, each with 'title' (string), 'url' (string or null), and 'location' (string or null) fields. If no jobs are found, return an empty array []."
+    system = (
+        "You extract job listings from careers page HTML. Populate the 'jobs' "
+        "array with objects containing 'title' (string, required), 'url' "
+        "(string, optional), and 'location' (string, optional). If no jobs are "
+        "found, return an empty 'jobs' array."
+    )
     messages = [
         {
             "role": "user",
@@ -217,7 +261,7 @@ def _extract_jobs_with_haiku(
             model=DEFAULT_MODEL_HAIKU,
             system=system,
             messages=messages,
-            output_schema=None,
+            output_schema=_CAREERS_JOBS_SCHEMA,
             conn=conn,
             job_id=None,
             purpose="careers_scrape",
@@ -225,12 +269,7 @@ def _extract_jobs_with_haiku(
             max_tokens=1024,
         )
 
-        # Parse Haiku response — expect JSON array
-        text = result.get("text", "").strip()
-        # Handle markdown code blocks
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        jobs = _json.loads(text)
+        jobs = result.get("jobs", [])
         if not isinstance(jobs, list):
             return []
 

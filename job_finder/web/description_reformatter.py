@@ -39,6 +39,22 @@ _SECTION_HEADER_PATTERN = re.compile(
 # Minimum number of section headers to consider a description already formatted
 _ALREADY_FORMATTED_THRESHOLD = 2
 
+# Structured output schema so both the Anthropic CLI and any Ollama cascade
+# entry return the same {"text": ...} shape. Without this, Ollama's forced
+# "format":"json" would invent arbitrary keys and result.get("text", "")
+# would silently read empty strings.
+_REFORMAT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "text": {
+            "type": "string",
+            "description": "Reformatted job description with clear section headers and paragraphs",
+        },
+    },
+    "required": ["text"],
+    "additionalProperties": False,
+}
+
 # System prompt for Haiku reformatting
 _SYSTEM_PROMPT = (
     "You are a job description formatter. Reformat the following job description into "
@@ -46,7 +62,8 @@ _SYSTEM_PROMPT = (
     "Use section headers like 'About the Role', 'Responsibilities', 'Requirements', "
     "'Qualifications', 'Benefits', etc. as appropriate. Convert bullet lists and "
     "pipe-separated items into proper paragraphs or clean bullet lists. Preserve all "
-    "factual content — do not add or remove information. Return ONLY the reformatted text."
+    "factual content — do not add or remove information. Return the reformatted text "
+    "in the 'text' field."
 )
 
 def reformat_description(
@@ -95,7 +112,7 @@ def reformat_description(
             model=model,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": description[:4000]}],
-            output_schema=None,
+            output_schema=_REFORMAT_SCHEMA,
             conn=conn,
             job_id=None,
             purpose="description_reformat",
@@ -103,7 +120,7 @@ def reformat_description(
             max_tokens=2048,
         )
 
-        # call_claude returns dict — extract the text field
+        # Both providers return {"text": ...} under _REFORMAT_SCHEMA
         if isinstance(result, dict):
             reformatted = result.get("text", "")
         else:
