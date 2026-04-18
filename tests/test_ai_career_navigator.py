@@ -349,3 +349,121 @@ class TestExtractWithRecipe:
         )
         assert len(jobs) == 1
         assert "Senior" in jobs[0]["title"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: discover_navigation_recipe cascade dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverNavigationRecipeCascade:
+    """Dispatch pattern tests for discover_navigation_recipe.
+
+    The function creates its own DB connection via standalone_connection(db_path),
+    so each test patches it to yield a MagicMock connection. The pre-extract
+    probe and post-execution validation extractor are also mocked: pre returns
+    no jobs (forces an AI call), validation returns a non-empty list so the
+    recipe is accepted and not discarded as "0 jobs found".
+    """
+
+    _RECIPE = {
+        "steps": [
+            {"action": "goto", "url": "https://example.com/careers/search"},
+        ],
+        "extraction": {"method": "links_in_page"},
+    }
+
+    def _build_page_mock(self):
+        page = MagicMock()
+        page.url = "https://example.com/careers"
+        return page
+
+    def _patched_extract(self, returns_jobs):
+        # pre-check returns empty, validation returns jobs on second call
+        return [[], [{"title": "Data Scientist", "url": "/jobs/1"}]]
+
+    def _run_discovery(self, config, careers_url="https://example.com/careers"):
+        from job_finder.web.ai_career_navigator import discover_navigation_recipe
+        return discover_navigation_recipe(
+            page=self._build_page_mock(),
+            careers_url=careers_url,
+            target_titles=["data scientist"],
+            config=config,
+        )
+
+    def _stub_connection(self, cm_mock):
+        # Context-manager mock whose __enter__ yields a conn
+        mock_conn = MagicMock()
+        cm_mock.return_value.__enter__.return_value = mock_conn
+        cm_mock.return_value.__exit__.return_value = False
+        return mock_conn
+
+    def test_uses_call_model_when_providers_configured(
+        self, cascade_config_haiku, make_model_result,
+    ):
+        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
+             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
+             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
+             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
+             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
+                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+            self._stub_connection(mock_sc)
+            mock_cm.return_value = make_model_result(self._RECIPE)
+
+            recipe = self._run_discovery(cascade_config_haiku)
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["purpose"] == "ai_nav_discovery"
+        mock_cc.assert_not_called()
+        assert recipe is not None
+        assert recipe["extraction"]["method"] == "links_in_page"
+
+    def test_uses_call_claude_when_no_providers(self):
+        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
+             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
+             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
+             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
+             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
+                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+            self._stub_connection(mock_sc)
+            mock_cc.return_value = (self._RECIPE, 0.001)
+
+            recipe = self._run_discovery(config={})
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert recipe is not None
+
+    def test_cascade_exhausted_falls_back_to_cli(self, cascade_config_haiku):
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
+             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
+             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
+             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
+             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
+                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+            self._stub_connection(mock_sc)
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = (self._RECIPE, 0.001)
+
+            recipe = self._run_discovery(cascade_config_haiku)
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert recipe is not None
+
+    def test_cascade_and_cli_both_fail_returns_none(self, cascade_config_haiku):
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
+             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
+             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
+             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
+             patch("job_finder.web.ai_career_navigator._extract_with_recipe", return_value=[]):
+            self._stub_connection(mock_sc)
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+
+            recipe = self._run_discovery(cascade_config_haiku)
+
+        assert recipe is None

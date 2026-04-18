@@ -381,6 +381,66 @@ def mock_liveness_check():
         yield mock
 
 
+@pytest.fixture
+def cascade_config_haiku():
+    """Config with Ollama primary + Anthropic CLI fallback for the haiku tier.
+
+    Mirrors backfill_enrichment._OFFLINE_PROVIDERS so call_model() takes the
+    cascade branch (non-empty fallback_chain) and raises
+    ProviderCascadeExhaustedError — not generic RuntimeError — when every
+    provider fails.
+    """
+    return {
+        "providers": {
+            "haiku": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [
+                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
+                ],
+            },
+        },
+    }
+
+
+@pytest.fixture
+def cascade_config_sonnet():
+    """Config with Ollama primary + Anthropic CLI fallback for the sonnet tier."""
+    return {
+        "providers": {
+            "sonnet": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [
+                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+                ],
+            },
+        },
+    }
+
+
+@pytest.fixture
+def make_model_result():
+    """Factory for ModelResult instances used by cascade-dispatch tests.
+
+    Returns a callable that accepts ``data`` and optional provider/cost/token
+    overrides. Keeps the defaults Ollama-shaped so a test using only
+    ``make_model_result({"score": 80})`` reads as "cascade primary succeeded".
+    """
+    from job_finder.web.model_provider import ModelResult
+
+    def _factory(data, *, provider="ollama", cost_usd=0.0,
+                 input_tokens=100, output_tokens=50,
+                 model="qwen2.5:14b", schema_valid=True):
+        return ModelResult(
+            data=data, cost_usd=cost_usd,
+            input_tokens=input_tokens, output_tokens=output_tokens,
+            model=model, provider=provider, schema_valid=schema_valid,
+        )
+
+    return _factory
+
+
 @pytest.fixture(autouse=True)
 def mock_scheduler_pidfile():
     """Auto-mock _acquire_scheduler_pidfile so tests do not collide with a

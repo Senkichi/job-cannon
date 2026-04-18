@@ -772,3 +772,174 @@ class TestSubdomainProbing:
                 result = find_careers_url("https://www.example.com/")
 
         assert result == "https://jobs.example.com/"
+
+
+# ---------------------------------------------------------------------------
+# Cascade dispatch tests — _find_careers_url_with_haiku + _extract_jobs_with_haiku
+# ---------------------------------------------------------------------------
+
+class TestFindCareersUrlCascade:
+    """Dispatch pattern tests for _find_careers_url_with_haiku."""
+
+    def test_uses_call_model_when_providers_configured(
+        self, migrated_db, cascade_config_haiku, make_model_result,
+    ):
+        from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.return_value = make_model_result(
+                {"url": "https://example.com/careers"}
+            )
+            result = _find_careers_url_with_haiku(
+                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["purpose"] == "careers_scrape"
+        mock_cc.assert_not_called()
+        assert result == "https://example.com/careers"
+
+    def test_uses_call_claude_when_no_providers(self, migrated_db):
+        from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
+            result = _find_careers_url_with_haiku(
+                "https://example.com/", "<html></html>", conn, config={},
+            )
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert result == "https://example.com/careers"
+
+    def test_cascade_exhausted_falls_back_to_cli(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
+            result = _find_careers_url_with_haiku(
+                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert result == "https://example.com/careers"
+
+    def test_cascade_and_cli_both_fail_returns_none(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+            result = _find_careers_url_with_haiku(
+                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+            )
+
+        assert result is None
+
+
+class TestExtractJobsCascade:
+    """Dispatch pattern tests for _extract_jobs_with_haiku."""
+
+    _JOBS_PAYLOAD = {
+        "jobs": [
+            {"title": "Data Scientist", "url": "/jobs/1", "location": "Remote"},
+            {"title": "Junior Analyst", "url": "/jobs/2", "location": "NYC"},
+        ]
+    }
+
+    def test_uses_call_model_when_providers_configured(
+        self, migrated_db, cascade_config_haiku, make_model_result,
+    ):
+        from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.return_value = make_model_result(self._JOBS_PAYLOAD)
+            results = _extract_jobs_with_haiku(
+                "https://example.com/careers", "<html></html>",
+                target_titles=["data scientist"], exclusions=["junior"],
+                conn=conn, config=cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["purpose"] == "careers_scrape"
+        mock_cc.assert_not_called()
+        titles = [j["title"] for j in results]
+        assert "Data Scientist" in titles
+        assert "Junior Analyst" not in titles  # excluded
+
+    def test_uses_call_claude_when_no_providers(self, migrated_db):
+        from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
+            results = _extract_jobs_with_haiku(
+                "https://example.com/careers", "<html></html>",
+                target_titles=["data scientist"], exclusions=[],
+                conn=conn, config={},
+            )
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert results and results[0]["title"] == "Data Scientist"
+
+    def test_cascade_exhausted_falls_back_to_cli(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
+            results = _extract_jobs_with_haiku(
+                "https://example.com/careers", "<html></html>",
+                target_titles=["data scientist"], exclusions=[],
+                conn=conn, config=cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert results and results[0]["title"] == "Data Scientist"
+
+    def test_cascade_and_cli_both_fail_returns_empty_list(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
+             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+            results = _extract_jobs_with_haiku(
+                "https://example.com/careers", "<html></html>",
+                target_titles=["data scientist"], exclusions=[],
+                conn=conn, config=cascade_config_haiku,
+            )
+
+        assert results == []
