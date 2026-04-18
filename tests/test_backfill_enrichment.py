@@ -509,3 +509,60 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
     assert "job_sonnet" not in eligible_keys
     # NULL tier (unenriched) must be eligible
     assert "job_null_tier" in eligible_keys
+
+
+# ---------------------------------------------------------------------------
+# Offline-config plumbing tests
+# ---------------------------------------------------------------------------
+
+def test_run_enrichment_pass_wraps_config_through_offline_providers(migrated_db):
+    """run_enrichment_pass must pass the cascade-enabled config to enrich_job.
+
+    Without the _offline_config wrapper, enrich_job would call enrichment_tiers
+    with the raw user config and the Haiku/Sonnet tiers would stay on the
+    direct CLI path even after the tier migrations — defeating backfill's
+    whole reason for opting into Ollama.
+    """
+    path, conn = migrated_db
+    insert_job(conn, "job_offline_probe")
+
+    captured_configs: list[dict] = []
+
+    def _capture(job_row, serpapi_key=None, conn=None, config=None):
+        captured_configs.append(config)
+        # Advance to exhausted so the pass terminates cleanly
+        if conn is not None:
+            conn.execute(
+                "UPDATE jobs SET enrichment_tier = 'exhausted' WHERE dedup_key = ?",
+                (job_row["dedup_key"],),
+            )
+            conn.commit()
+        return {"jd_full": "done"}
+
+    with patch.object(be_module, "enrich_job", side_effect=_capture):
+        be_module.run_enrichment_pass(conn, serpapi_key=None, config={})
+
+    assert captured_configs, "enrich_job was never called"
+    injected = captured_configs[0]
+    providers = injected.get("providers", {})
+    assert "haiku" in providers
+    assert "sonnet" in providers
+    assert providers["haiku"]["provider"] == "ollama"
+    assert providers["sonnet"]["provider"] == "ollama"
+
+
+def test_offline_providers_use_fallback_chain_not_fallback():
+    """_OFFLINE_PROVIDERS entries must use fallback_chain (list) — not the
+    singular fallback (string), which triggers call_model's backward-compat
+    path and raises generic RuntimeError instead of
+    ProviderCascadeExhaustedError."""
+    from job_finder.web.backfill_enrichment import _OFFLINE_PROVIDERS
+
+    for tier, cfg in _OFFLINE_PROVIDERS.items():
+        assert "fallback_chain" in cfg, f"{tier!r} should use fallback_chain"
+        assert isinstance(cfg["fallback_chain"], list)
+        assert cfg["fallback_chain"], f"{tier!r} fallback_chain must be non-empty"
+        assert "fallback" not in cfg, (
+            f"{tier!r} still uses the singular fallback key; "
+            "call_model cascade path won't activate"
+        )

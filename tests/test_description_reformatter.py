@@ -361,3 +361,93 @@ class TestRunDescriptionReformatPass:
         # Check that call_claude was called for each reformatted job
         # (2 jobs with description_reformatted=0 and non-NULL descriptions)
         assert mock_call.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Cascade dispatch tests — reformat_description
+# ---------------------------------------------------------------------------
+
+
+class TestReformatDescriptionCascade:
+    """Dispatch pattern tests plus the conn=None guard for reformat_description."""
+
+    _RAW = "Build ML models | Deploy pipelines | Monitor performance"
+
+    def test_uses_call_model_when_providers_configured(
+        self, migrated_db, cascade_config_haiku, make_model_result,
+    ):
+        from job_finder.web.description_reformatter import reformat_description
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
+             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+            mock_cm.return_value = make_model_result(
+                {"text": "About the Role\n\nBuild models.\n\nResponsibilities\n\n- Deploy"}
+            )
+            result = reformat_description(self._RAW, conn=conn, config=cascade_config_haiku)
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["purpose"] == "description_reformat"
+        mock_cc.assert_not_called()
+        assert result.startswith("About the Role")
+
+    def test_uses_call_claude_when_no_providers(self, migrated_db):
+        from job_finder.web.description_reformatter import reformat_description
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
+             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+            mock_cc.return_value = ({"text": "About the Role\n\nReformatted content"}, 0.0002)
+            result = reformat_description(self._RAW, conn=conn, config={})
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert result.startswith("About the Role")
+
+    def test_cascade_exhausted_falls_back_to_cli(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.description_reformatter import reformat_description
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
+             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = ({"text": "CLI fallback reformatted text"}, 0.0002)
+            result = reformat_description(self._RAW, conn=conn, config=cascade_config_haiku)
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert result == "CLI fallback reformatted text"
+
+    def test_cascade_and_cli_both_fail_returns_original(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.description_reformatter import reformat_description
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
+             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+            result = reformat_description(self._RAW, conn=conn, config=cascade_config_haiku)
+
+        assert result == self._RAW
+
+    def test_conn_none_skips_dispatcher_even_with_providers(self, cascade_config_haiku):
+        """conn=None must NOT route through call_model (would AttributeError inside
+        _ensure_usage_current / _maybe_record_cost). Guard keeps the caller on
+        the direct call_claude path regardless of providers config."""
+        from job_finder.web.description_reformatter import reformat_description
+
+        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
+             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+            mock_cc.return_value = ({"text": "Reformatted via CLI"}, 0.0002)
+            result = reformat_description(self._RAW, conn=None, config=cascade_config_haiku)
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert result == "Reformatted via CLI"

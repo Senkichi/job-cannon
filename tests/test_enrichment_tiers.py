@@ -570,3 +570,185 @@ class TestFetchDdgJds:
         mock_direct.assert_not_called()
         mock_li.assert_not_called()
         assert jd_text is None
+
+
+# ---------------------------------------------------------------------------
+# Cascade dispatch tests — extract_with_haiku + extract_with_sonnet
+# ---------------------------------------------------------------------------
+
+
+class TestExtractWithHaikuCascade:
+    """Dispatch pattern tests for extract_with_haiku."""
+
+    _JOB_ROW = {
+        "dedup_key": "acme|data-scientist|remote",
+        "title": "Data Scientist",
+        "company": "Acme",
+    }
+    _HAIKU_PAYLOAD = {
+        "jd_full": "Full job description text from the model.",
+        "salary_min": 120000,
+        "salary_max": 180000,
+        "location": "Remote",
+    }
+
+    def test_uses_call_model_when_providers_configured(
+        self, migrated_db, cascade_config_haiku, make_model_result,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.return_value = make_model_result(self._HAIKU_PAYLOAD)
+            result = extract_with_haiku(
+                "ddg snippet text", self._JOB_ROW, conn, cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["purpose"] == "enrich_job"
+        mock_cc.assert_not_called()
+        assert result["jd_full"].startswith("Full job description")
+        assert result["salary_min"] == 120000
+
+    def test_uses_call_claude_when_no_providers(self, migrated_db):
+        from job_finder.web.enrichment_tiers import extract_with_haiku
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cc.return_value = (self._HAIKU_PAYLOAD, 0.001)
+            result = extract_with_haiku(
+                "ddg snippet", self._JOB_ROW, conn, config={},
+            )
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert result["jd_full"].startswith("Full job description")
+
+    def test_cascade_exhausted_falls_back_to_cli(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = (self._HAIKU_PAYLOAD, 0.001)
+            result = extract_with_haiku(
+                "ddg snippet", self._JOB_ROW, conn, cascade_config_haiku,
+            )
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert result["jd_full"].startswith("Full job description")
+
+    def test_cascade_and_cli_both_fail_returns_empty_dict(
+        self, migrated_db, cascade_config_haiku,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_haiku
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+            result = extract_with_haiku(
+                "ddg snippet", self._JOB_ROW, conn, cascade_config_haiku,
+            )
+
+        assert result == {}
+
+
+class TestExtractWithSonnetCascade:
+    """Dispatch pattern tests for extract_with_sonnet."""
+
+    _JOB_ROW = {
+        "dedup_key": "acme|data-scientist|remote",
+        "title": "Data Scientist",
+        "company": "Acme",
+    }
+    _SONNET_PAYLOAD = {
+        "jd_full": "Aggregated full JD.",
+        "salary_min": 150000,
+        "salary_max": 200000,
+    }
+    _FRAGMENTS = {
+        "ddg_snippet": "Snippet about the role.",
+        "ats_text": "ATS API text.",
+    }
+
+    def test_uses_call_model_when_providers_configured(
+        self, migrated_db, cascade_config_sonnet, make_model_result,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_sonnet
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.return_value = make_model_result(self._SONNET_PAYLOAD)
+            result = extract_with_sonnet(
+                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+            )
+
+        mock_cm.assert_called_once()
+        assert mock_cm.call_args.kwargs["tier"] == "sonnet"
+        assert mock_cm.call_args.kwargs["purpose"] == "enrich_job_sonnet"
+        mock_cc.assert_not_called()
+        assert result["jd_full"] == "Aggregated full JD."
+        assert result["salary_min"] == 150000
+
+    def test_uses_call_claude_when_no_providers(self, migrated_db):
+        from job_finder.web.enrichment_tiers import extract_with_sonnet
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cc.return_value = (self._SONNET_PAYLOAD, 0.004)
+            result = extract_with_sonnet(
+                self._FRAGMENTS, self._JOB_ROW, conn, config={},
+            )
+
+        mock_cm.assert_not_called()
+        mock_cc.assert_called_once()
+        assert result["jd_full"] == "Aggregated full JD."
+
+    def test_cascade_exhausted_falls_back_to_cli(
+        self, migrated_db, cascade_config_sonnet,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_sonnet
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.return_value = (self._SONNET_PAYLOAD, 0.004)
+            result = extract_with_sonnet(
+                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+            )
+
+        mock_cm.assert_called_once()
+        mock_cc.assert_called_once()
+        assert result["jd_full"] == "Aggregated full JD."
+
+    def test_cascade_and_cli_both_fail_returns_empty_dict(
+        self, migrated_db, cascade_config_sonnet,
+    ):
+        from job_finder.web.enrichment_tiers import extract_with_sonnet
+        from job_finder.web.model_provider import ProviderCascadeExhaustedError
+        _path, conn = migrated_db
+
+        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
+             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+            mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
+            mock_cc.side_effect = RuntimeError("CLI unavailable")
+            result = extract_with_sonnet(
+                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+            )
+
+        assert result == {}
