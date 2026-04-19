@@ -1,33 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: Cascading Free Provider Routing
-status: verifying
-stopped_at: Completed 32-integration-config-wiring/32-01-PLAN.md
-last_updated: "2026-04-03T20:30:00.000Z"
-last_activity: 2026-04-03
+milestone: v3.0
+milestone_name: Single-Tier Ordinal Scoring
+status: defining_requirements
+stopped_at: Milestone v3.0 started — REQUIREMENTS.md not yet written
+last_updated: "2026-04-18T00:00:00.000Z"
+last_activity: 2026-04-18
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # State
 
 ## Current Position
 
-Phase: 32
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-03-30
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-18 — Milestone v3.0 Single-Tier Ordinal Scoring started
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-29)
+See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 32 — Integration & Config Wiring
+**Current focus:** Milestone v3.0 — collapsing the two-tier scoring architecture into a single-pass ordinal rubric scorer
 
 ## Performance Metrics
 
