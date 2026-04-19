@@ -1,12 +1,15 @@
-"""Ollama provider adapter — local REST API with JSON format.
+"""Ollama provider adapter — local REST API with grammar-constrained structured output.
 
-Phase 25 deliverable — part of the multi-provider routing system.
+v3.0 upgrade (Phase 33 Plan 1): when a JSON schema dict is passed via
+output_schema, it is forwarded directly to Ollama's `format=` parameter
+(llama.cpp GBNF grammar enforcement). The legacy `format='json'` path
+remains for backward compatibility but all v3.0 scoring calls use the
+schema-dict path.
 
-Uses the Ollama local REST API via the `requests` library. Structured
-output is achieved by:
-  1. Setting "format": "json" in the request payload (guarantees valid JSON)
-  2. Embedding the output_schema in the system prompt as instructions
-     (Ollama does not have native schema enforcement, so this is best-effort)
+Default inference options are deterministic-and-reproducible (temperature=0,
+seed=42, num_ctx=8192, top_p=0.9, num_predict from max_tokens,
+repeat_penalty=1.05). Callers may override any option via the `options=`
+kwarg without leaking state across calls.
 
 Health check on init prevents silent failures when Ollama is not running.
 """
@@ -36,6 +39,10 @@ _TYPE_PLACEHOLDERS = {
 # token to imitate, dramatically improving enum adherence.
 
 
+# LEGACY: used only when output_schema is None + format='json' string path.
+# Scheduled for deletion in Phase 34 Plan 4 — v3.0 scoring uses the schema-dict
+# branch which lets llama.cpp GBNF grammar enforce field names at the token
+# level, making this prompt injection redundant.
 def _schema_to_example(schema: dict) -> str:
     """Build a concrete JSON example from a schema so the model copies field names exactly."""
 
@@ -54,6 +61,10 @@ def _schema_to_example(schema: dict) -> str:
     return json.dumps(_build(schema), indent=2)
 
 
+# LEGACY: used only when output_schema is None + format='json' string path.
+# Scheduled for deletion in Phase 34 Plan 4 — v3.0 scoring uses the schema-dict
+# branch which lets llama.cpp GBNF grammar enforce field names at the token
+# level, making this field-instruction injection redundant.
 def _schema_to_field_instructions(schema: dict, indent: int = 0) -> str:
     """Convert a JSON schema into explicit field-name instructions.
 
@@ -153,23 +164,42 @@ class OllamaProvider(BaseProvider):
         output_schema: dict | None = None,
         max_tokens: int = 1024,
         timeout: float | None = None,
+        options: dict | None = None,
     ) -> ModelResult:
         """Make a chat completion call to Ollama /api/chat.
 
         CRITICAL: "stream" is always False — Ollama sends SSE chunks
         without this, making resp.json() hang or fail.
 
-        Schema is embedded in the system prompt as instructions because
-        Ollama does not support native schema enforcement. "format": "json"
-        guarantees the response is valid JSON; schema adherence is best-effort.
+        Structured output strategy (v3.0):
+          * When output_schema is a dict, it is forwarded unchanged via
+            payload["format"] = <schema>. Ollama v0.5+ compiles the schema
+            into a GBNF grammar (llama.cpp path), enforcing field names at
+            the token level. No schema-to-field-instructions injection is
+            needed — the prompt stays clean.
+          * When output_schema is None, payload["format"] = "json" (legacy
+            string path). This preserves backward compat for existing callers
+            (haiku_scorer, sonnet_evaluator, enrich_job, etc.) that don't yet
+            pass a schema dict.
+
+        Default inference options are deterministic-and-reproducible:
+            temperature=0, seed=42, num_ctx=8192, top_p=0.9,
+            num_predict=max_tokens, repeat_penalty=1.05
 
         Args:
             model: Ollama model tag, e.g. "qwen2.5:32b" or "llama3.1:8b".
             system: System prompt string.
             messages: List of message dicts [{role, content}].
             output_schema: JSON schema dict for structured output (or None).
+                When a dict, forwarded via payload.format (grammar-enforced).
+                When None, payload.format = "json" (JSON-shape-only enforcement).
             max_tokens: Maximum output tokens (mapped to options.num_predict).
-            timeout: Request timeout in seconds. Defaults to 120.0.
+            timeout: Request timeout in seconds. Defaults to 300.0.
+            options: Per-call overrides for any inference parameter. Merged
+                INTO the deterministic defaults: caller-specified keys win,
+                unspecified keys retain defaults. No state leaks across calls
+                (a fresh dict is built per call). Example use:
+                    options={"temperature": 0.8, "top_p": 1.0}
 
         Returns:
             ModelResult with cost_usd=0.0, provider="ollama", schema_valid=True.
@@ -178,28 +208,44 @@ class OllamaProvider(BaseProvider):
         Raises:
             requests.HTTPError: On non-2xx response from /api/chat.
             json.JSONDecodeError: If response content is not valid JSON
-                (unexpected given format=json, but possible if model misbehaves).
+                (unexpected given format=json/schema, but possible if the
+                model misbehaves).
         """
         effective_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
 
-        # Embed schema in system prompt when provided
-        system_with_schema = system
-        if output_schema is not None:
-            schema_instructions = _schema_to_field_instructions(output_schema)
-            example_json = _schema_to_example(output_schema)
-            system_with_schema = (
-                f"{system}\n\n## Required Output Format\n\n"
-                f"Respond with valid JSON using EXACTLY these fields (no renaming, no extras):\n\n"
-                f"{schema_instructions}\n\n"
-                f"Example structure (fill in real values):\n{example_json}"
-            )
+        # Format handling — v3.0 schema-dict path vs legacy 'json' string path.
+        format_param: dict | str
+        if isinstance(output_schema, dict):
+            # v3.0 path: forward schema dict unchanged. llama.cpp GBNF grammar
+            # enforces field names at the token level — system prompt stays clean.
+            format_param = output_schema
+            system_with_schema = system
+        else:
+            # Legacy path: format='json' string tells Ollama to produce valid
+            # JSON shape only. If the caller also needs field-name guidance,
+            # it must live in their own system prompt (or upgrade to schema-dict).
+            format_param = "json"
+            system_with_schema = system
+
+        # Deterministic default inference options. Built fresh every call —
+        # no instance state, no cross-call leak. Per-call overrides merge in
+        # via {**defaults, **overrides} so caller keys win.
+        default_options = {
+            "num_predict": max_tokens,
+            "temperature": 0,
+            "seed": 42,
+            "num_ctx": 8192,
+            "top_p": 0.9,
+            "repeat_penalty": 1.05,
+        }
+        effective_options = {**default_options, **(options or {})}
 
         payload = {
             "model": model,
             "messages": [{"role": "system", "content": system_with_schema}] + messages,
-            "format": "json",
+            "format": format_param,
             "stream": False,
-            "options": {"num_predict": max_tokens},
+            "options": effective_options,
         }
 
         resp = requests.post(
