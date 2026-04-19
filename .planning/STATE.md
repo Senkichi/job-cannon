@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
-status: roadmap_created
-stopped_at: Roadmap created — ready to discuss/plan Phase 33
-last_updated: "2026-04-18T00:00:00.000Z"
-last_activity: 2026-04-18
+status: context_gathered
+stopped_at: Phase 33 context gathered — ready to plan
+last_updated: "2026-04-19T00:00:00.000Z"
+last_activity: 2026-04-19
 progress:
   total_phases: 2
   completed_phases: 0
@@ -19,8 +19,8 @@ progress:
 
 Phase: 33
 Plan: —
-Status: Roadmap created — ready to discuss/plan Phase 33
-Last activity: 2026-04-18 — ROADMAP.md written (Phase 33: Local-LLM Site-Fitness Survey; Phase 34: Greenfield Scorer Rewrite with 5 dependency-ordered plans)
+Status: Context gathered — ready to plan Phase 33
+Last activity: 2026-04-19 — 33-CONTEXT.md written. 27 implementation decisions captured across shootout tooling, statistical methodology (n=100, Opus 4.6 fresh ordinal gold, paired design, per-dimension MAE, BCa bootstrap), determinism/retry gates, winner matrix shape, prompt freeze location, and artifact retention. Two-plan structure locked: Plan 1 (SCORER-11/12 preconditions + model pulls + prompt freeze), Plan 2 (shootout driver + run + matrix).
 
 ## Project Reference
 

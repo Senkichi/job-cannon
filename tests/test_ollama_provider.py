@@ -6,14 +6,17 @@ Tests cover:
 - RuntimeError on connection failure/timeout/HTTP error
 - Custom base_url via config
 - call() returns correct ModelResult fields
-- Request payload structure: stream=False, format="json", model, num_predict
-- Schema embedded in system prompt when output_schema provided
-- No schema appended when output_schema=None
+- Request payload structure: stream=False, format=<"json"|schema-dict>, model, num_predict
+- Schema embedded in system prompt ONLY when output_schema is None (legacy path)
+- Schema dict forwarded via payload.format unchanged when output_schema is a dict (v3.0)
 - Messages format (system first, then user messages)
 - Timeout handling (default and custom)
 - Missing token counts defaulting to 0
 - HTTP errors from requests.post raise requests.HTTPError
 - Trailing slash stripped from base_url
+- Deterministic default inference options (temperature=0, seed=42, num_ctx=8192,
+  top_p=0.9, num_predict from max_tokens, repeat_penalty=1.05)
+- Per-call options override merge without cross-call state leak
 """
 
 import json
@@ -146,11 +149,12 @@ def test_call_returns_model_result():
 
 
 # ---------------------------------------------------------------------------
-# Request payload tests
+# Request payload tests (legacy format='json' string path)
 # ---------------------------------------------------------------------------
 
 
 def test_call_request_payload_has_stream_false_and_format_json():
+    """Legacy path: output_schema=None → format='json' string in payload."""
     provider = _make_provider()
 
     with patch("requests.post", return_value=_make_chat_response({"score": 50})) as mock_post:
@@ -196,12 +200,24 @@ def test_call_request_payload_has_num_predict():
 
 
 # ---------------------------------------------------------------------------
-# Schema embedding tests
+# Schema embedding tests — legacy path (output_schema is None)
 # ---------------------------------------------------------------------------
 
 
 def test_call_embeds_schema_in_system():
-    """Schema should be embedded as field instructions and example in system message."""
+    """Schema should be embedded as field instructions and example in system message.
+
+    Legacy path: this only applies when the caller passes output_schema BUT the
+    v3.0 branch is not taken — historically all callers passed a schema and got
+    the string prompt injection. We keep this branch live for the schema-present
+    legacy string-format path (format='json') until Phase 34 Plan 4 deletes it.
+    However, the v3.0 refactor unifies the rule: schema present → forward as dict.
+    So the old field-instruction path is only reachable when test harnesses
+    explicitly ask for it. This test now asserts the CURRENT post-v3 behavior:
+    when output_schema is a dict, payload.format IS the dict and the system
+    prompt is NOT polluted with the "EXACTLY these fields" block (grammar-
+    constrained decoding handles field names at the token level).
+    """
     provider = _make_provider()
     schema = {"type": "object", "properties": {"score": {"type": "integer"}}}
 
@@ -215,10 +231,12 @@ def test_call_embeds_schema_in_system():
 
     payload = mock_post.call_args.kwargs["json"]
     system_content = payload["messages"][0]["content"]
+    # v3.0: system prompt is NOT polluted — grammar handles the schema.
     assert "Rate this job." in system_content
-    assert "EXACTLY these fields" in system_content
-    assert '"score"' in system_content
-    assert "Example structure" in system_content
+    assert "EXACTLY these fields" not in system_content
+    assert "Example structure" not in system_content
+    # And payload.format IS the schema dict
+    assert payload["format"] == schema
 
 
 def test_call_without_schema_no_schema_in_system():
@@ -361,3 +379,133 @@ def test_init_strips_trailing_slash():
     else:
         called_url = mock_get.call_args[0][0]
     assert "//" not in called_url.replace("http://", "").replace("https://", "")
+
+
+# ---------------------------------------------------------------------------
+# v3.0 upgrade: schema-dict forwarding via format=<dict>
+# ---------------------------------------------------------------------------
+
+
+def test_call_forwards_schema_dict_via_format_unchanged():
+    """When output_schema is a dict, payload.format IS that dict (NOT 'json', NOT re-serialized)."""
+    provider = _make_provider()
+    schema = {
+        "type": "object",
+        "properties": {"x": {"type": "integer"}},
+        "required": ["x"],
+    }
+
+    with patch("requests.post", return_value=_make_chat_response({"x": 1})) as mock_post:
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema=schema,
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+    # format must be the dict — same object reference (not stringified, not 'json' literal)
+    assert payload["format"] == schema
+    assert payload["format"] is schema
+    # And it is emphatically NOT the string literal
+    assert payload["format"] != "json"
+
+
+def test_call_legacy_format_json_string_when_schema_none():
+    """Backward compat: output_schema=None → payload.format == 'json' string."""
+    provider = _make_provider()
+
+    with patch("requests.post", return_value=_make_chat_response({"ok": True})) as mock_post:
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "hi"}],
+            output_schema=None,
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["format"] == "json"
+    assert isinstance(payload["format"], str)
+
+
+# ---------------------------------------------------------------------------
+# v3.0 upgrade: deterministic default inference options
+# ---------------------------------------------------------------------------
+
+
+def test_call_default_options_are_deterministic():
+    """Every call sends temperature=0, seed=42, num_ctx=8192, top_p=0.9,
+    num_predict (from max_tokens), repeat_penalty=1.05 by default.
+    """
+    provider = _make_provider()
+
+    with patch("requests.post", return_value=_make_chat_response({"ok": True})) as mock_post:
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=777,
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+    opts = payload["options"]
+    assert opts["temperature"] == 0
+    assert opts["seed"] == 42
+    assert opts["num_ctx"] == 8192
+    assert opts["top_p"] == 0.9
+    assert opts["num_predict"] == 777
+    assert opts["repeat_penalty"] == 1.05
+
+
+def test_call_per_call_options_override_merges_into_defaults():
+    """Passing options={...} merges into defaults; overridden keys win, unspecified keys retain defaults."""
+    provider = _make_provider()
+
+    with patch("requests.post", return_value=_make_chat_response({"ok": True})) as mock_post:
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "hi"}],
+            options={"temperature": 0.3, "seed": 99},
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+    opts = payload["options"]
+    # overrides win
+    assert opts["temperature"] == 0.3
+    assert opts["seed"] == 99
+    # defaults for unspecified keys still present
+    assert opts["num_ctx"] == 8192
+    assert opts["top_p"] == 0.9
+    assert opts["repeat_penalty"] == 1.05
+
+
+def test_call_options_override_does_not_leak_across_calls():
+    """Two sequential calls with different options produce independent payloads — no instance state mutation."""
+    provider = _make_provider()
+
+    with patch("requests.post", return_value=_make_chat_response({"ok": True})) as mock_post:
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "a"}],
+            options={"temperature": 0.8, "num_ctx": 4096},
+        )
+        provider.call(
+            model="qwen2.5:14b",
+            system="s",
+            messages=[{"role": "user", "content": "b"}],
+        )
+
+    # Two calls → two payloads
+    assert mock_post.call_count == 2
+    first_opts = mock_post.call_args_list[0].kwargs["json"]["options"]
+    second_opts = mock_post.call_args_list[1].kwargs["json"]["options"]
+
+    # First call used overrides
+    assert first_opts["temperature"] == 0.8
+    assert first_opts["num_ctx"] == 4096
+    # Second call used defaults — no leak from first call
+    assert second_opts["temperature"] == 0
+    assert second_opts["num_ctx"] == 8192
+    assert second_opts["seed"] == 42
