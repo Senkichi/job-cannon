@@ -345,6 +345,7 @@ def score_job_haiku(
                 client=_CLI_CLIENT_STUB,
             )
             result = model_result.data
+            result["provider"] = model_result.provider
             cost_usd = model_result.cost_usd
         else:
             result, cost_usd = call_claude(
@@ -356,6 +357,7 @@ def score_job_haiku(
                 purpose=purpose,
                 ctx=ctx or ClaudeContext(conn=conn, config=config),
             )
+            result["provider"] = "anthropic"
         logger.debug(
             "Haiku scored '%s' @ '%s': score=%s (cost=$%.5f)",
             title,
@@ -391,6 +393,7 @@ def score_job_haiku(
                 purpose=purpose,
                 ctx=ctx or ClaudeContext(conn=conn, config=config),
             )
+            result["provider"] = "anthropic"
             return ScoringResult(data=result, status="success")
         except Exception as retry_exc:
             logger.warning(

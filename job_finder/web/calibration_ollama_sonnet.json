@@ -1,5 +1,6 @@
 {
   "provider": "ollama",
+  "tier": "sonnet",
   "model": "qwen2.5:14b",
   "prompt_variant": "fewshot-comparative",
   "eval_source": "eval_results/ollama_20260329_205740.json",

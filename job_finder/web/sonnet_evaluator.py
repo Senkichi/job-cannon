@@ -346,6 +346,7 @@ def evaluate_job_sonnet(
                 client=_CLI_CLIENT_STUB,
             )
             result = model_result.data
+            result["provider"] = model_result.provider
         else:
             result, _cost = call_claude(
                 model=model,
@@ -357,6 +358,7 @@ def evaluate_job_sonnet(
                 max_tokens=2048,
                 ctx=ctx or ClaudeContext(conn=conn, config=config),
             )
+            result["provider"] = "anthropic"
         logger.debug(
             "Sonnet evaluated '%s' @ '%s': score=%s",
             job_row.get("title"),
@@ -391,6 +393,7 @@ def evaluate_job_sonnet(
                 max_tokens=2048,
                 ctx=ctx or ClaudeContext(conn=conn, config=config),
             )
+            result["provider"] = "anthropic"
             return ScoringResult(data=result, status="success")
         except Exception as retry_exc:
             logger.warning(
