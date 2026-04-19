@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
-status: context_gathered
-stopped_at: Phase 33 context gathered — ready to plan
-last_updated: "2026-04-19T00:00:00.000Z"
-last_activity: 2026-04-19
+status: executing
+stopped_at: Wave 1 complete — awaiting user model pulls (qwen3.5:27b, phi4:14b) before Wave 2
+last_updated: "2026-04-19T21:30:00.000Z"
+last_activity: 2026-04-19 -- Phase 33 Wave 1 executed (Plan 01 preconditions)
 progress:
   total_phases: 2
   completed_phases: 0
-  total_plans: 6
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 50
 ---
 
 # State
@@ -18,9 +19,9 @@ progress:
 ## Current Position
 
 Phase: 33
-Plan: —
-Status: Context gathered — ready to plan Phase 33
-Last activity: 2026-04-19 — 33-CONTEXT.md written. 27 implementation decisions captured across shootout tooling, statistical methodology (n=100, Opus 4.6 fresh ordinal gold, paired design, per-dimension MAE, BCa bootstrap), determinism/retry gates, winner matrix shape, prompt freeze location, and artifact retention. Two-plan structure locked: Plan 1 (SCORER-11/12 preconditions + model pulls + prompt freeze), Plan 2 (shootout driver + run + matrix).
+Plan: 01 complete (code); 02 pending (blocked on user model pulls)
+Status: Wave 1 complete — awaiting user to pull qwen3.5:27b + phi4:14b before Wave 2
+Last activity: 2026-04-19 -- Phase 33 Wave 1 executed (Plan 01 preconditions)
 
 ## Project Reference
 
@@ -73,11 +74,13 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 - **Zero new Python dependencies.** `jsonschema 4.26.0` and `pydantic 2.12.5` already installed. pydantic generates JSON schema via `model_json_schema()`; `@dataclass(frozen=True) JobAssessment` is the in-code value type.
 
 **Phase structure (locked):**
+
 - Phase 33 = Phase 1 (shootout). SCORER-11 and SCORER-12 are preconditions; land inside Phase 33.
 - Phase 34 = Phase 2 (rewrite). FIVE atomic plans per ARCHITECTURE.md. Each independently revertable. Test suite green at every plan boundary.
 - Phases NOT split into 6 separate phases — irreducible couplings (scorer-write + shim, read-swap + allowlist, column-drop + TypedDict) would cross phase boundaries.
 
 **Phase 33 preconditions (must complete before any shootout run):**
+
 1. Fix Ollama options in `ollama_provider.py:197-203` — add `temperature=0`, `seed=42`, `num_ctx=8192`.
 2. Pull `qwen3.5:27b` (17 GB) and `phi4:14b` (9.1 GB).
 3. Upgrade `OllamaProvider.call()` to pass schema dict to `format=`.
@@ -87,6 +90,7 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 7. Enforce per-site sample minima (n≥30/15/10/5 by site class).
 
 **Model shortlist (7 candidates):**
+
 - Primary new pulls: `qwen3.5:27b`, `phi4:14b`
 - Baselines already pulled: `qwen2.5:14b` (incumbent/control), `qwen2.5:32b`, `qwen3:14b`, `gemma3:27b`
 - Excluded with rationale: `qwen3.5:14b` (tag does not exist on Ollama), `gemma4:26b-moe` (open bug #15260), `deepseek-r1:14b` (reasoning overhead wasted on rubric task)

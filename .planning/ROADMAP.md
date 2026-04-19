@@ -115,7 +115,10 @@
   4. Sample-size minima enforced and reported: n≥30 for scoring sites, n≥15 for extraction sites, n≥10 for HTML-reasoning sites, n≥5 for transformation. Pearson r suppressed below n=20.
   5. Per-candidate schema-retry rate measured and models exceeding 20% retry rate on any site flagged for disqualify-or-accept user review. VRAM baseline verified (<1 GB non-Ollama use) before each run via `nvidia-smi`.
 
-**Plans**: TBD (single planning cycle expected; research flag: NEEDS deeper research-phase for multi-model benchmarking methodology — determinism preconditions, baseline curation, prompt freeze, and per-site statistical power all interlock and must be nailed before measurement)
+**Plans**: 2 plans
+
+- [x] 01-preconditions-PLAN.md — SCORER-11 (OllamaProvider format=<schema dict>) + SCORER-12 (deterministic inference options) + two Ollama model pulls (qwen3.5:27b, phi4:14b) + frozen v3.0 scoring prompt committed at job_finder/web/scoring_prompts/v3_scoring_prompt.py *(code complete 2026-04-19; model pulls deferred to user before Plan 02)*
+- [ ] 02-shootout-PLAN.md — scripts/v3_shootout.py + scripts/shootout_lib/ drive 6-candidate × 9-site shootout with Opus 4.6 gold baseline; commits per-site winner matrix to .planning/research/v3.0-shootout-results.md
 
 ### Phase 34: Greenfield Scorer Rewrite
 
