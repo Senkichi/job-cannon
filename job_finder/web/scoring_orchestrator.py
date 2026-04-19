@@ -31,9 +31,36 @@ from typing import Callable, Optional
 
 from job_finder.config import DEFAULT_BORDERLINE_HIGH, DEFAULT_HAIKU_THRESHOLD
 from job_finder.db import persist_haiku_score, persist_sonnet_score
+from job_finder.web.score_calibration import calibrate_score, has_calibration
 from job_finder.web.scoring_types import unwrap_scoring_result
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_calibration(result: dict, tier: str, dedup_key: str) -> float | int | None:
+    """Calibrate the raw score in `result` when a (provider, tier) table exists.
+
+    Non-destructively mutates `result`: writes `raw_score` (original) and
+    overwrites `score` with the calibrated value so downstream consumers
+    (UI, persistence, threshold gates) all see the baseline-scale number.
+    Passes the raw score back unchanged when no calibration is configured,
+    keeping Anthropic scores and uncalibrated providers on their native
+    scale.
+
+    Returns the value that should be persisted for the caller.
+    """
+    raw = result.get("score")
+    provider = result.get("provider")
+    if raw is None or not provider or not has_calibration(provider, tier):
+        return raw
+    calibrated = calibrate_score(raw, provider, tier)
+    result["raw_score"] = raw
+    result["score"] = calibrated
+    logger.info(
+        "Calibrated %s/%s score for '%s': %s -> %s",
+        provider, tier, dedup_key, raw, calibrated,
+    )
+    return calibrated
 
 def load_scoring_profile(config: dict) -> dict:
     """Load experience profile from disk via the canonical loader.
@@ -99,7 +126,10 @@ def score_and_persist_haiku(
     if result is None:
         return None
 
-    score = result.get("score", 0)
+    # Calibration runs BEFORE the threshold gate so the borderline band is
+    # evaluated on baseline-scale numbers (otherwise Ollama's inflated 65-85
+    # range would push nearly every job into re-eval).
+    score = _apply_calibration(result, tier="haiku", dedup_key=dedup_key) or 0
     summary_text = result.get("summary", "")
 
     persist_haiku_score(conn, dedup_key, score, summary_text)
@@ -119,7 +149,7 @@ def score_and_persist_haiku(
         reeval_result = unwrap_scoring_result(reeval_scoring)
 
         if reeval_result is not None:
-            score = reeval_result.get("score", 0)
+            score = _apply_calibration(reeval_result, tier="haiku", dedup_key=dedup_key) or 0
             summary_text = reeval_result.get("summary", "")
             persist_haiku_score(conn, dedup_key, score, summary_text)
             logger.info(
@@ -168,9 +198,10 @@ def score_and_persist_sonnet(
     if result is None:
         return None
 
-    sonnet_score = result.get("score")
+    sonnet_score = _apply_calibration(result, tier="sonnet", dedup_key=dedup_key)
     fit_analysis = json.dumps(result.get("fit_analysis", {}))
+    provider = result.get("provider")
 
-    persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis)
+    persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis, provider=provider)
 
     return result
