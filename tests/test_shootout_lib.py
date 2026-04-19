@@ -84,7 +84,8 @@ def mem_conn():
             company TEXT,
             jd_full TEXT,
             location TEXT,
-            salary TEXT,
+            salary_min INTEGER,
+            salary_max INTEGER,
             sonnet_score REAL,
             haiku_score REAL,
             scoring_provider TEXT,
@@ -111,12 +112,13 @@ def _insert_job(conn, dedup_key, score, provider="anthropic", cost_provider="ant
     If cost_provider is None, no cost row is inserted (simulates contamination).
     """
     conn.execute(
-        "INSERT INTO jobs(dedup_key, title, company, jd_full, location, salary, "
-        "sonnet_score, haiku_score, scoring_provider, legitimacy_note, job_archetype) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO jobs(dedup_key, title, company, jd_full, location, "
+        "salary_min, salary_max, sonnet_score, haiku_score, "
+        "scoring_provider, legitimacy_note, job_archetype) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             dedup_key, f"Engineer {dedup_key}", f"Co{dedup_key}",
-            "x" * jd_len, "Remote", "$100k", score, score - 5,
+            "x" * jd_len, "Remote", 100000, 150000, score, score - 5,
             provider, None, "data_science_ic",
         ),
     )

@@ -66,12 +66,23 @@ def _format_job_for_scoring(row: dict, config: dict) -> str:
             profile_parts.append(f"{key}: {profile[key]}")
     profile_block = "\n".join(profile_parts) if profile_parts else "(no profile fields available)"
 
+    sal_min = row.get("salary_min")
+    sal_max = row.get("salary_max")
+    if sal_min and sal_max:
+        salary_str = f"${sal_min:,} - ${sal_max:,}"
+    elif sal_min:
+        salary_str = f"${sal_min:,}+"
+    elif sal_max:
+        salary_str = f"up to ${sal_max:,}"
+    else:
+        salary_str = row.get("salary", "") or ""
+
     parts = [
         "# Job",
         f"Title: {row.get('title', '')}",
         f"Company: {row.get('company', '')}",
         f"Location: {row.get('location', '')}",
-        f"Salary: {row.get('salary', '')}",
+        f"Salary: {salary_str}",
         "",
         "## Description",
         (row.get("jd_full") or "")[:12000],  # cap to keep Opus call within ctx
