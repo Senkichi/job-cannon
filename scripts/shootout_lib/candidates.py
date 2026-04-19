@@ -122,12 +122,23 @@ def _format_fixture(fixture: dict, config: dict | None = None) -> str:
         f"target_titles: {profile.get('target_titles', '')}  "
         f"years_experience: {profile.get('years_experience', '')}"
     )
+    sal_min = fixture.get("salary_min")
+    sal_max = fixture.get("salary_max")
+    if sal_min and sal_max:
+        salary_str = f"${sal_min:,} - ${sal_max:,}"
+    elif sal_min:
+        salary_str = f"${sal_min:,}+"
+    elif sal_max:
+        salary_str = f"up to ${sal_max:,}"
+    else:
+        salary_str = fixture.get("salary", "") or ""
+
     return "\n".join([
         "# Job",
         f"Title: {fixture.get('title', '')}",
         f"Company: {fixture.get('company', '')}",
         f"Location: {fixture.get('location', '')}",
-        f"Salary: {fixture.get('salary', '')}",
+        f"Salary: {salary_str}",
         "",
         "## Description",
         (fixture.get("jd_full") or "")[:12000],

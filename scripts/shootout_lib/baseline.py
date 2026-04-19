@@ -42,7 +42,8 @@ class BaselineSample:
 
 
 _BASELINE_POOL_SQL: str = """
-    SELECT j.dedup_key, j.title, j.company, j.jd_full, j.location, j.salary,
+    SELECT j.dedup_key, j.title, j.company, j.jd_full, j.location,
+           j.salary_min, j.salary_max,
            j.sonnet_score, j.haiku_score, j.scoring_provider,
            j.legitimacy_note, j.job_archetype
     FROM jobs j
