@@ -41,7 +41,29 @@ Surface the best-fit jobs fast and keep the application pipeline visible — eve
 
 ### Active
 
-(No active requirements — planning next milestone)
+(Milestone v3.0 requirements pending — see REQUIREMENTS.md after roadmap creation)
+
+## Current Milestone: v3.0 Single-Tier Ordinal Scoring
+
+**Goal:** Collapse the vestigial Haiku/Sonnet two-tier architecture into a single-pass, Ollama-native job scorer emitting ordinal rubric output, eliminating the calibration infrastructure and all cost-era scaffolding.
+
+**Target features:**
+- Local LLM site-fitness survey across 9 active AI call sites (scoring, extraction, HTML reasoning, transformation) with candidate shortlist benchmarked against site-appropriate metrics; output is a per-site winner matrix that drives model selection for the rewrite
+- Greenfield unified scorer emitting `JobAssessment` (ordinal 1-5 sub-scores per dimension + apply/consider/skip/reject classification + structured rationale), schema-validated, no calibration layer
+- DB schema migration — drop/rename tier-specific score columns, add rubric columns, migrate all downstream consumers (~15+ call sites in `careers_crawler`, `batch_scoring`, `dashboard`, filters, and test suite)
+- Deletion of Haiku tier (`haiku_scorer.py`, `score_and_persist_haiku`, borderline re-eval path), calibration infrastructure (`score_calibration.py`, `calibration_ollama_*.json`, `_apply_calibration`), cost-era scaffolding (`_CLIClientStub` duplication, `use_dispatcher` branches, tier-keyed provider configs)
+- Test modernization — migrate ~15-20 Haiku-referencing test files to the unified scorer; update fixtures, mocks, and integration tests
+
+**Key context:**
+
+- **Design decision (ordinal rubric over continuous 0-100)** is a direct response to a diagnosed LLM failure mode: qwen2.5:14b produces raw scores of 62-68 for Anthropic baselines spanning 9-72 (63-point spread at one raw value). Calibration cannot repair bimodal raw-to-baseline relationships; isotonic regression is one-to-one by construction. The n=48 refit in commit d80f486 established MAE floor of 13.66 at zero bias — the limit is intrinsic to continuous numeric judgment on sub-100B local models, not a fit inadequacy. Ordinal 1-5 ratings + classification are tasks LLMs reliably handle.
+- **All nine in-scope sites** use the same capability profile (read messy input, emit structured output, schema adherence, factual grounding). A single mid-tier generalist likely wins everything; cascade config may collapse to one model with CLI fallback.
+- **Four sites explicitly out of scope** (vestigial, non-functional in weeks): resume generation, interview prep, rejection analysis, profile extraction. Separate backlog cleanup, not part of this milestone.
+- **Baseline contamination mitigation**: 52% of `sonnet_score` rows and 27% of `haiku_score` rows are Ollama-origin post-cascade-flip. Scoring-site baselines must be filtered to `scoring_provider='anthropic'` during the survey; rescoring not required (Phase 2 schema migration resolves structurally).
+- **Hardware ceiling**: RTX 4070 Ti SUPER, 16 GB VRAM, 64 GB RAM. Constrains candidate models to ~27B dense at Q4 or smaller; CPU offload available for 32B.
+- **Planning discipline**: user directive — *"painstakingly methodical; any ambiguity or lazy specification is guaranteed to come back and bite us."* Each phase plan must specify acceptance criteria concretely, list all downstream call sites by file and line, and document rollback at each migration step.
+
+**Phase numbering:** continues from v2.0 (Phase 32). v3.0 phases start at Phase 33.
 
 ### Out of Scope
 
@@ -101,4 +123,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-30 after v2.0 milestone shipped (Cascading Free Provider Routing)*
+*Last updated: 2026-04-18 — milestone v3.0 Single-Tier Ordinal Scoring started*
