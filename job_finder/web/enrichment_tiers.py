@@ -34,6 +34,34 @@ class _CLIClientStub:
 
 _CLI_CLIENT_STUB = _CLIClientStub()
 
+# Structured output schemas for the two enrichment call sites. Anthropic
+# parses the "Return ONLY JSON" prompt deterministically; Ollama forces
+# format:"json" regardless and, absent a schema, can invent keys like
+# {"salary": 120000} instead of {"salary_min": ..., "salary_max": ...} —
+# the downstream filter silently drops those, losing data. Explicit schemas
+# + additionalProperties:false engage _sanitize_output's key-stripping and
+# type-coercion so both providers yield the same shape.
+_ENRICH_HAIKU_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "jd_full": {"type": "string"},
+        "salary_min": {"type": "integer"},
+        "salary_max": {"type": "integer"},
+        "location": {"type": "string"},
+    },
+    "additionalProperties": False,
+}
+
+_ENRICH_SONNET_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "jd_full": {"type": "string"},
+        "salary_min": {"type": "integer"},
+        "salary_max": {"type": "integer"},
+    },
+    "additionalProperties": False,
+}
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -341,7 +369,7 @@ def extract_with_sonnet(
                     messages=[{"role": "user", "content": user_prompt}],
                     conn=conn,
                     config=config,
-                    output_schema=None,
+                    output_schema=_ENRICH_SONNET_SCHEMA,
                     job_id=job_id,
                     purpose="enrich_job_sonnet",
                     max_tokens=1024,
@@ -357,7 +385,7 @@ def extract_with_sonnet(
                     model=model,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}],
-                    output_schema=None,
+                    output_schema=_ENRICH_SONNET_SCHEMA,
                     conn=conn,
                     job_id=job_id,
                     purpose="enrich_job_sonnet",
@@ -369,7 +397,7 @@ def extract_with_sonnet(
                 model=model,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                output_schema=None,
+                output_schema=_ENRICH_SONNET_SCHEMA,
                 conn=conn,
                 job_id=job_id,
                 purpose="enrich_job_sonnet",
@@ -562,7 +590,7 @@ def extract_with_haiku(
                     messages=[{"role": "user", "content": user_prompt}],
                     conn=conn,
                     config=config,
-                    output_schema=None,
+                    output_schema=_ENRICH_HAIKU_SCHEMA,
                     job_id=job_id,
                     purpose="enrich_job",
                     max_tokens=512,
@@ -578,7 +606,7 @@ def extract_with_haiku(
                     model=model,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_prompt}],
-                    output_schema=None,
+                    output_schema=_ENRICH_HAIKU_SCHEMA,
                     conn=conn,
                     job_id=job_id,
                     purpose="enrich_job",
@@ -590,7 +618,7 @@ def extract_with_haiku(
                 model=model,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                output_schema=None,
+                output_schema=_ENRICH_HAIKU_SCHEMA,
                 conn=conn,
                 job_id=job_id,
                 purpose="enrich_job",
