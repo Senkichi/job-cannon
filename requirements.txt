@@ -19,6 +19,10 @@ thefuzz[speedup]~=0.22  # fuzzy string matching (formerly fuzzywuzzy)
 # Multi-provider routing
 jsonschema>=4.0.0
 
+# Phase 33 shootout statistics — paired MAE + BCa bootstrap 95% CIs
+numpy~=2.4
+scipy~=1.17
+
 
 # Optional: JSearch
 # (uses requests directly, no extra package)
