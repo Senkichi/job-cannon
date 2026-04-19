@@ -528,6 +528,16 @@ def call_model(
             {"provider": provider_name, "model": model, "prompt_variant": primary_variant}
         ] + list(fallback_chain)
 
+        # Audit-log the cascade the caller is about to try. Paired with the
+        # "call_model ROUTED" entry below, this gives operators end-to-end
+        # visibility into which provider actually handled which tier/purpose.
+        logger.info(
+            "call_model CASCADE: tier=%s chain=[%s] purpose=%s job_id=%s",
+            tier,
+            ", ".join(f"{e['provider']}:{e['model']}" for e in chain),
+            purpose, job_id,
+        )
+
         # Track last-call time per provider for inter-request throttling
         _last_call: dict[str, float] = {}
 
@@ -620,6 +630,10 @@ def call_model(
                                 "Cascade: %s cost recording failed (non-fatal): %s",
                                 entry_provider, cost_exc,
                             )
+                        logger.info(
+                            "call_model ROUTED: tier=%s provider=%s model=%s purpose=%s job_id=%s",
+                            tier, result.provider, result.model, purpose, job_id,
+                        )
                         return result
                     # Schema still invalid after retry — skip to next provider
                     logger.warning(
