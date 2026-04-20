@@ -205,6 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip Opus gold generation entirely (use for testing with an "
              "empty gold dict — MAE will be SKIP everywhere).",
     )
+    parser.add_argument(
+        "--vram-threshold-mb", type=int, default=1000,
+        help="VRAM baseline threshold (MB) below which a candidate is "
+             "considered unloaded. Consumer GPUs with display may need "
+             "10000+ (default 1000 per D-03; consumer-GPU users: raise).",
+    )
     return parser
 
 
@@ -325,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_candidate(
                     model, sample, gold, sites_list, config,
                     cp_path, conn=conn,
+                    vram_threshold_mb=args.vram_threshold_mb,
                 )
             except Exception as exc:
                 logger.exception("[candidate] %s CRASHED: %s", model, exc)
@@ -359,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
                     holdout_result = run_candidate(
                         model, holdout_baseline, gold, sites_list, config,
                         cp_path, conn=conn,
+                        vram_threshold_mb=args.vram_threshold_mb,
                     )
                 all_results[model]["holdout"] = holdout_result
         except Exception as exc:

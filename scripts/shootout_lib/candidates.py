@@ -53,6 +53,11 @@ def reset_vram(
     Per D-03 — deterministic VRAM state between candidates, no
     concurrent-model contamination of benchmark measurements.
 
+    NOTE on threshold: the D-03 spec of 1000 MB assumes a dedicated-compute
+    GPU with no display attached. On consumer/shared GPUs (display +
+    browser + OS use baseline VRAM), pass threshold_mb=10_000 or similar
+    — what matters is that no candidate model (all 9 GB+) remains loaded.
+
     Args:
         model: Ollama model tag (e.g., "qwen3.5:27b").
         timeout_sec: Max wall-time to wait for VRAM to drop. Raises
@@ -430,6 +435,7 @@ def run_candidate(
     checkpoint_path: Path,
     *,
     conn: Any = None,
+    vram_threshold_mb: int = 1000,
 ) -> dict:
     """Per-candidate orchestrator — VRAM reset + determinism probe + 9 sites,
     with per-site checkpoint resumability (D-04).
@@ -468,7 +474,7 @@ def run_candidate(
 
     # Step 1: VRAM reset
     try:
-        vram = reset_vram(model)
+        vram = reset_vram(model, threshold_mb=vram_threshold_mb)
         state["vram_mb_after_reset"] = vram
     except TimeoutError as exc:
         state["vram_mb_after_reset"] = -1
