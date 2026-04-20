@@ -291,20 +291,25 @@ def main(argv: list[str] | None = None) -> int:
             except OpusBudgetExceededError as exc:
                 print(f"[fatal-opus-budget] {exc}", file=sys.stderr)
                 return 1
-        # Persist gold results + metadata
-        gold_path.write_text(
-            json.dumps(
-                {**gold, "_meta": {
-                    "model": "claude-opus-4-6",
-                    "budget_cap_usd": args.opus_budget,
-                    "prompt_sha256": _prompt_sha256(),
-                    "generated_at": start_iso,
-                }},
-                indent=2, default=str,
-            ),
-            encoding="utf-8",
-        )
-        logger.info("[gold] wrote %d entries to %s", len(gold), gold_path)
+        # Persist gold results + metadata — skip in dry-run to preserve any
+        # existing on-disk gold file from a prior real run.
+        if args.dry_run:
+            logger.info("[gold] dry-run: skipped writing gold file "
+                        "(existing file preserved)")
+        else:
+            gold_path.write_text(
+                json.dumps(
+                    {**gold, "_meta": {
+                        "model": "claude-opus-4-6",
+                        "budget_cap_usd": args.opus_budget,
+                        "prompt_sha256": _prompt_sha256(),
+                        "generated_at": start_iso,
+                    }},
+                    indent=2, default=str,
+                ),
+                encoding="utf-8",
+            )
+            logger.info("[gold] wrote %d entries to %s", len(gold), gold_path)
 
     if args.dry_run:
         print(
