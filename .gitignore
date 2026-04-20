@@ -74,3 +74,9 @@ AUDIT_LOG.md
 .planning/scoring_evaluation/
 .planning/todos/
 .planning/debug/
+
+# Phase 33 shootout runtime artifacts (logs, pid files — not reproducibility artifacts)
+.planning/research/shootout/_*.log
+.planning/research/shootout/_*.txt
+.planning/research/shootout/_stdout*
+.planning/research/shootout/_stderr*
