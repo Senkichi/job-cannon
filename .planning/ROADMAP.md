@@ -167,7 +167,13 @@
   4. Migration 41 gated on confirmed backup within 24 hours. Plan 5 runbook documents the gate; `bash backup_userdata.sh` timestamp verified before DROP COLUMN executes. No inline rollback path — DB restore from backup is the recovery strategy.
   5. One-off rescore of existing jobs completes. All existing jobs (`WHERE classification IS NULL AND jd_full IS NOT NULL`, ~3900 rows) scored through the unified scorer; post-rescore query `SELECT COUNT(*) FROM jobs WHERE classification IS NOT NULL AND jd_full IS NOT NULL` matches expected count. Acceptable wall-clock ~8-13 hours on Ollama, run overnight.
 
-**Plans**: TBD (5 plans corresponding to Plans 1-5 above)
+**Plans**: 5 plans
+
+- [ ] 34-01-PLAN.md — Additive schema (Migration 40) + JobAssessment/derive_classification/persist_job_assessment in db.py + job_scorer.py skeleton (no callers yet)
+- [ ] 34-02-PLAN.md — Orchestrator dual-write: score_and_persist_job + run_scoring + use_unified_scorer flag (2-step rollout A→B)
+- [ ] 34-03-PLAN.md — Read migration in 5 revertable sub-commits A→E (queries, batch_scoring merge, dashboard, templates, resume+summary)
+- [ ] 34-04-PLAN.md — Batched rescore (B1=150, B2=1000, B3=remaining ~2750) with G1-G4 gates + systematic-debugging loop, then legacy-write removal + module deletion sweep (A→E)
+- [ ] 34-05-PLAN.md — Migration 41 (destructive column drop) backup-gated + preflight-grep-gated; JOBS_ALL_COLUMNS/JobRow TypedDict/fixture cleanup
 **UI hint**: yes
 
 ## Progress
