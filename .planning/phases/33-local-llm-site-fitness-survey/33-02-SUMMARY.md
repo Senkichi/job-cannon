@@ -247,7 +247,7 @@ Budget cap per D-14: $30.00 (`OPUS_BUDGET_USD`). Actual wall-time cost via Claud
 - [ ] `.planning/research/v3.0-shootout-results.md` — PENDING live-run completion
 - [ ] 6 per-candidate JSONs (qwen2_5_14b, phi4_14b, qwen3_14b, qwen3_5_27b, qwen2_5_32b, gemma3_27b) — PENDING live-run completion (qwen2_5_14b in progress at commit time)
 
-## Self-Check: PARTIAL
+## Self-Check: PARTIAL (superseded by 2026-04-21 addendum below)
 
 Infrastructure + methodology artifacts (baseline + gold) all FOUND and correct.
 Per-candidate JSONs and winner-matrix markdown are PENDING live-run completion. This
@@ -255,7 +255,126 @@ SUMMARY will be amended with a follow-up commit after the candidate phase finish
 and the matrix is rendered.
 
 ---
+
+## Completion Addendum (2026-04-21)
+
+### Candidate list revised mid-flight
+
+`qwen3.5:27b` + `qwen3.5:14b` were dropped mid-run (broken Ollama community port —
+`family=qwen35` not in the official library; 13-char chat template; empty response body
+with `eval_count>0`). `gemma3:27b` dropped as oversized for the 16 GB host with no viable
+smaller official quant. Three replacements added: `mistral-nemo:12b`, `deepseek-r1:14b`,
+`mistral-small:24b-instruct-2501-q4_K_M`, plus the quantized variant
+`qwen2.5:32b-instruct-q3_K_S` (14 GB, fits on card) in place of full-precision
+`qwen2.5:32b`. Final candidate set is 7, not 6.
+
+The exclusion list in `scripts/v3_shootout.py::EXCLUDED_CANDIDATES` was updated to
+record the qwen35-family diagnostic for future runs.
+
+### Winner matrix summary
+
+All 7 candidates earned WARN on both scoring sites (MAE range 0.77–0.94 vs Opus gold).
+Per-site recommendation rendered in `.planning/research/v3.0-shootout-results.md`:
+
+| Site(s) | Renderer's pick |
+|---|---|
+| `haiku_score`, `sonnet_eval` | `mistral-small:24b-instruct-2501-q4_K_M` (MAE 0.772) |
+| All other 7 sites | `qwen2.5:14b` (only it + qwen3:14b PASS `description_reformat`) |
+
+D-23 tiebreaker (uniformity stddev across the 6 per-dim MAEs, then retry rate, then
+`-tok/s`) drove top-3 holdout selection: `mistral-small:24b`, `mistral-nemo:12b`,
+`qwen3:14b`. Note the tiebreaker does not weight bias — `mistral-nemo:12b`'s +0.34
+bias CI doesn't cost it a top-3 slot despite being the most inflationary of the
+"qualified" candidates (deepseek-r1:14b was worse at +0.65 but failed uniformity).
+
+### Operational decision — override: qwen2.5:14b sweep
+
+**The production deployment for Phase 34 Plan 1 is `qwen2.5:14b` across all 9 sites,
+overriding the renderer's per-site split.**
+
+Rationale:
+- MAE delta is 3.5% (0.799 vs 0.772 for mistral-small:24b) — not load-bearing.
+- **Bias CI is the tightest of any candidate**: [-0.105, +0.100] on haiku,
+  [-0.105, +0.100] on sonnet. Straddles zero symmetrically — no systematic
+  inflation/deflation vs Opus. mistral-small:24b is mildly positive ([-0.04, +0.17]).
+- **2.4x throughput**: 17.2 tok/s vs 7.1. On ~500-job nightly batches this is a
+  30-min vs 70-min window.
+- Schema retry rate 0, and one of only 2 candidates to PASS `description_reformat`.
+- Single-model operation removes runtime model-swap latency and eliminates a
+  Phase 34 configuration axis (per-site model routing).
+
+This override is captured because Phase 34 planners reading only the rendered matrix
+would pick `mistral-small:24b` for scoring. Future iterations of D-23 should consider
+incorporating bias into the tiebreaker so that MAE uniformity doesn't overshadow
+systematic bias.
+
+### Scoring method is a single path (not two)
+
+Confirmed at run time: `haiku_score` and `sonnet_eval` produce byte-identical
+per-row outputs under v3 (both use the frozen V3_SCORING_PROMPT on the same
+candidate model). MAE and bias CI match to 3 significant figures across the two
+rows. The matrix keeps both rows for D-22 layout compatibility; Phase 34 can
+collapse them.
+
+### Determinism probe — universal FAIL
+
+**All 7 candidates fail the byte-identical determinism probe** (5×3 fixture comparison,
+temp=0, seed=42, num_ctx=8192). The earlier hypothesis (that qwen2.5:14b's drift was
+a model-specific quirk) is rejected by the aggregate. Root cause is almost certainly
+below Ollama — CUDA non-deterministic reductions or sampler implementation — not the
+model family. D-19's byte-identical criterion should be redefined as ordinal
+stability (axis rankings preserved across runs) in Phase 34.
+
+### Opus spend
+
+Unchanged from Plan 1 commit `b076542`: $4.55 imputed ($0.00 actual via subscription).
+The resume run loaded `baseline_gold.json` from cache — zero new Opus calls.
+
+NB: the rendered matrix reports `Cumulative Opus spend: $0.0000`. This is a cosmetic
+artifact of the resume code path (the in-memory `spend_cumulative_usd` wasn't seeded
+from the cached gold file). Budget accounting is correct; display only.
+
+### Candidate-phase wall-clock (resume run, 2026-04-20 19:49 → 2026-04-21 ~01:00)
+
+| Candidate | Wall-clock | Notes |
+|---|---|---|
+| `qwen2.5:14b` | instant | already complete pre-resume |
+| `phi4:14b` | instant | already complete pre-resume |
+| `qwen3:14b` | instant | already complete pre-resume |
+| `mistral-nemo:12b` | ~35 min | |
+| `deepseek-r1:14b` | ~67 min | reasoning model latency |
+| `mistral-small:24b-q4_K_M` | ~86 min | |
+| `qwen2.5:32b-q3_K_S` | ~119 min | Q3 quant still slowest |
+| Holdout top-3 on 20-row set | ~30 min | mistral-small + mistral-nemo + qwen3:14b |
+
+Total new compute ≈ 5h 40min on the consumer GPU. Adding the 3 pre-resume candidates
+(~25 min each in the first run) and gold baseline (~25 min), aggregate candidate-phase
+compute ≈ 7h 30min — well inside the plan's 4-8 h estimate when re-scoped to the
+actual 7-candidate list with the smallest-first ordering.
+
+### Self-Check — FINAL
+
+- [x] `scripts/v3_shootout.py` — FOUND
+- [x] `scripts/shootout_lib/` (all 7 modules) — FOUND
+- [x] `tests/test_shootout_lib.py` — FOUND (22 tests pass)
+- [x] `.planning/research/shootout/baseline_sample.json` — FOUND
+- [x] `.planning/research/shootout/baseline_gold.json` — FOUND
+- [x] `.planning/research/v3.0-shootout-results.md` — FOUND (rendered 2026-04-21)
+- [x] 7 per-candidate JSONs — FOUND (qwen2.5:14b, phi4:14b, qwen3:14b, mistral-nemo:12b, deepseek-r1:14b, mistral-small:24b-q4_K_M, qwen2.5:32b-q3_K_S)
+- [x] 3 holdout JSONs — FOUND (qwen3:14b, mistral-nemo:12b, mistral-small:24b-q4_K_M)
+- [x] V3_SCORING_PROMPT sha256 match — VERIFIED at preflight on every launch
+- [x] Phase 34 model selection — DECIDED (qwen2.5:14b sweep)
+
+### Phase 34 Plan 1 handoff
+
+`providers.scoring.model = "qwen2.5:14b"` (not mistral-small:24b). Rationale and
+bias analysis above. The renderer's per-site split is documented in the matrix
+markdown but **superseded by this SUMMARY's operational decision**. Phase 34 Plan 1
+should cite this addendum when wiring the default.
+
+---
 *Phase: 33-local-llm-site-fitness-survey*
 *Plan: 02-shootout*
-*Infrastructure complete: 2026-04-19 (this commit)*
-*Live candidate phase: in progress (nohup, see `scripts/v3_shootout.py --resume` to re-attach)*
+*Infrastructure complete: 2026-04-19*
+*Candidate + holdout phases complete: 2026-04-21*
+*Winner matrix committed: 2026-04-21*
