@@ -72,7 +72,7 @@ logger = logging.getLogger("v3_shootout")
 # ---------------------------------------------------------------------------
 
 DEFAULT_CANDIDATES = (
-    "qwen3.5:27b,phi4:14b,qwen2.5:14b,qwen2.5:32b,qwen3:14b,gemma3:27b"
+    "phi4:14b,qwen2.5:14b,qwen2.5:32b,qwen3:14b,gemma3:27b"
 )
 DEFAULT_SITES = (
     "haiku_score,sonnet_eval,enrich_job,enrich_job_sonnet,"
@@ -81,8 +81,14 @@ DEFAULT_SITES = (
 )
 
 EXCLUDED_CANDIDATES: list[dict] = [
+    {"model": "qwen3.5:27b",
+     "reason": "Broken Ollama package — community port (family=qwen35, not in "
+               "official Ollama library), 13-char chat template, returns "
+               "empty response body with eval_count>0 across all prompts. "
+               "Confirmed via raw /api/generate on a clean GPU."},
     {"model": "qwen3.5:14b",
-     "reason": "Dominated by qwen3.5:27b on same-family benchmarks per STACK.md"},
+     "reason": "Same broken qwen35 community-port lineage as 27b — excluded "
+               "by inference; not retested."},
     {"model": "gemma4:26b-moe",
      "reason": "Ollama structured-output bug (issue #15260) blocks JSON schema path"},
     {"model": "deepseek-r1:14b",
