@@ -89,7 +89,7 @@
 
 ### 🚧 v3.0 Single-Tier Ordinal Scoring (Phases 33-34) — STARTED 2026-04-18
 
-- [ ] **Phase 33: Local-LLM Site-Fitness Survey** — Evidence-driven multi-model shootout across 9 active AI call sites, producing a per-site winner matrix that drives Phase 34 model selection
+- [x] **Phase 33: Local-LLM Site-Fitness Survey** — Evidence-driven multi-model shootout across 9 active AI call sites, producing a per-site winner matrix that drives Phase 34 model selection (completed 2026-04-21)
 - [ ] **Phase 34: Greenfield Scorer Rewrite** — Five atomic, dependency-ordered plans delivering `job_scorer.py`, Migration 40+41, complete deletion of Haiku/calibration/cost-era scaffolding, and downstream consumer migration
 
 ## Phase Details
@@ -118,7 +118,7 @@
 **Plans**: 2 plans
 
 - [x] 01-preconditions-PLAN.md — SCORER-11 (OllamaProvider format=<schema dict>) + SCORER-12 (deterministic inference options) + two Ollama model pulls (qwen3.5:27b, phi4:14b) + frozen v3.0 scoring prompt committed at job_finder/web/scoring_prompts/v3_scoring_prompt.py *(code complete 2026-04-19; model pulls deferred to user before Plan 02)*
-- [ ] 02-shootout-PLAN.md — scripts/v3_shootout.py + scripts/shootout_lib/ drive 6-candidate × 9-site shootout with Opus 4.6 gold baseline; commits per-site winner matrix to .planning/research/v3.0-shootout-results.md
+- [x] 02-shootout-PLAN.md — scripts/v3_shootout.py + scripts/shootout_lib/ drive 6-candidate × 9-site shootout with Opus 4.6 gold baseline; commits per-site winner matrix to .planning/research/v3.0-shootout-results.md
 
 ### Phase 34: Greenfield Scorer Rewrite
 
@@ -206,5 +206,5 @@
 | 30. Cascade Execution | v2.0 | 1/1 | Complete | 2026-03-29 |
 | 31. Prompts & Attribution | v2.0 | 3/3 | Complete | 2026-03-30 |
 | 32. Integration & Config Wiring | v2.0 | 1/1 | Complete | 2026-03-30 |
-| 33. Local-LLM Site-Fitness Survey | v3.0 | 0/1 (est.) | Not started | — |
+| 33. Local-LLM Site-Fitness Survey | v3.0 | 2/2 | Complete    | 2026-04-21 |
 | 34. Greenfield Scorer Rewrite | v3.0 | 0/5 | Not started | — |
