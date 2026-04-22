@@ -51,8 +51,8 @@
   <div class="flex items-center gap-3 text-xs">
     <span class="text-slate-500 font-semibold">Resume:</span>
 
-    {% if job.sonnet_score is not none %}
-    {# Sonnet-scored: Generate Resume button enabled, wrapped in narrow target div #}
+    {% if job.classification is not none %}
+    {# Scored (any classification): Generate Resume button enabled. #}
     <div id="resume-generate-wrapper-{{ key_safe }}" class="inline">
       <button type="button"
               hx-post="{{ url_for('resume.generate', dedup_key=job.dedup_key) }}"
@@ -67,17 +67,17 @@
       </button>
     </div>
     {% else %}
-    {# Haiku-only or unscored: disabled with tooltip #}
+    {# Unscored: disabled with tooltip. #}
     <button type="button"
             disabled
-            title="Score with Sonnet first"
+            title="Score this job first"
             class="px-3 py-1 bg-slate-700 text-slate-500 rounded cursor-not-allowed opacity-60">
       Generate Resume
     </button>
-    <span class="text-slate-600 italic">Requires Sonnet score</span>
+    <span class="text-slate-600 italic">Requires classification</span>
     {% endif %}
 
-    {% if job.sonnet_score is not none %}
+    {% if job.classification is not none %}
     {# Quick Apply button -- prominent power action #}
     <button type="button"
             hx-post="{{ url_for('resume.quick_apply', dedup_key=job.dedup_key) }}"

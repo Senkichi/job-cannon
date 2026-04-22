@@ -145,6 +145,11 @@
   }
 
   const FEATURE_COLORS = {
+    // v3.0 (Phase 34 Plan 3 Commit D): the unified scorer tracks cost under
+    // the 'scoring' purpose. Legacy haiku_score / sonnet_eval entries
+    // remain for historical rows written before Wave 2 flipped
+    // use_unified_scorer=true, so keep their colors as aliases.
+    'scoring':            'rgba(139, 92, 246, 0.8)',
     'haiku_score':        'rgba(139, 92, 246, 0.8)',
     'sonnet_eval':        'rgba(99, 102, 241, 0.8)',
     'resume_gen':         'rgba(16, 185, 129, 0.8)',

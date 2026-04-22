@@ -41,11 +41,10 @@
       </div>
       {% endif %}
 
-      <!-- Low-score warning banner -->
-      {% set effective_score = job.sonnet_score if job.sonnet_score is not none else (job.haiku_score if job.haiku_score is not none else job.score) %}
-      {% if effective_score is not none and effective_score < 40 %}
+      <!-- Low-priority warning banner (v3.0: classification in skip/reject) -->
+      {% if job.classification in ('skip', 'reject') %}
       <div class="bg-amber-900/30 border border-amber-700/50 rounded px-3 py-2 text-xs text-amber-300">
-        Low fit score ({{ effective_score | int }}/100). This job may not be a strong match for your profile.
+        Low fit ({{ job.classification }}). This job may not be a strong match for your profile.
       </div>
       {% endif %}
 
@@ -101,7 +100,7 @@
           <details class="border-t border-slate-700 pt-2">
             <summary class="text-xs text-slate-400 cursor-pointer hover:text-slate-300 select-none flex items-center gap-2">
               Job Description (full)
-              {% if job.sonnet_score is none %}
+              {% if job.classification is none %}
               <span class="text-xs text-amber-400 border border-amber-500/50 rounded px-1">Saved — not scored</span>
               {% endif %}
               <button type="button"
@@ -112,7 +111,7 @@
                       class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded ml-auto">
                 Edit
               </button>
-              {% if job.sonnet_score is none %}
+              {% if job.classification is none %}
               <button type="button"
                       hx-post="{{ url_for('jobs.rescore', dedup_key=job.dedup_key) }}"
                       hx-target="closest tr"
@@ -169,14 +168,46 @@
 
       </div>{# end jd-section #}
 
-      <!-- AI Fit Analysis (Sonnet-scored jobs) -->
-      {% if job.sonnet_score is not none and job.fit_analysis %}
+      <!-- Sub-score breakdown + AI Fit Analysis (v3.0 Plan 3 Commit D) -->
+      {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
+      {% if sub_scores %}
+      <div class="border-t border-slate-700 pt-2 space-y-1.5">
+        <div class="text-slate-400 font-semibold text-xs uppercase tracking-wide mb-1">Fit Breakdown</div>
+        {% for key, label in [
+          ('title_fit', 'Title fit'),
+          ('location_fit', 'Location fit'),
+          ('comp_fit', 'Compensation'),
+          ('domain_match', 'Domain'),
+          ('seniority_match', 'Seniority'),
+          ('skills_match', 'Skills'),
+        ] %}
+          {% set v = sub_scores.get(key, 0) %}
+          {% if v >= 4 %}
+            {% set bar_class = 'bg-green-500' %}
+          {% elif v == 3 %}
+            {% set bar_class = 'bg-amber-500' %}
+          {% elif v == 2 %}
+            {% set bar_class = 'bg-orange-500' %}
+          {% else %}
+            {% set bar_class = 'bg-red-500' %}
+          {% endif %}
+          <div class="flex items-center gap-2 text-xs">
+            <span class="w-24 text-slate-400">{{ label }}</span>
+            <div class="flex-1 bg-slate-900 h-2 rounded overflow-hidden">
+              <div class="h-2 rounded {{ bar_class }}" style="width: {{ (v * 20) }}%"></div>
+            </div>
+            <span class="w-6 text-right text-slate-300">{{ v }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if job.fit_analysis %}
         {% set analysis = job.fit_analysis | from_json %}
+        {% if analysis.strengths or analysis.gaps or analysis.resume_priority_skills or analysis.talking_points %}
         <div class="space-y-2 text-xs border-t border-slate-700 pt-2">
           <div class="text-slate-400 font-semibold text-xs uppercase tracking-wide mb-1">
             AI Fit Analysis
-            <span class="text-amber-400 ml-1">*</span>
-            <span class="text-slate-600 font-normal ml-1">(Sonnet score: {{ job.sonnet_score | int }})</span>
           </div>
           {% if analysis.strengths %}
           <div>
@@ -194,6 +225,14 @@
             </ul>
           </div>
           {% endif %}
+          {% if analysis.talking_points %}
+          <div>
+            <span class="text-sky-400 font-semibold">Talking Points</span>
+            <ul class="list-disc list-inside text-slate-300 mt-1">
+              {% for t in analysis.talking_points %}<li>{{ t }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
           {% if analysis.resume_priority_skills %}
           <div>
             <span class="text-blue-400 font-semibold">Resume Priority Skills</span>
@@ -205,17 +244,13 @@
           </div>
           {% endif %}
         </div>
-      {% elif job.haiku_summary %}
-      <!-- Haiku-only jobs: show one-line summary -->
-      <div class="text-xs text-slate-400 italic border-t border-slate-700 pt-2">
-        <span class="text-slate-500 not-italic">Haiku score: {{ job.haiku_score | int if job.haiku_score is not none else "?" }}/100 &mdash;</span> {{ job.haiku_summary }}
-      </div>
-      {% elif job.haiku_score is none %}
+        {% endif %}
+      {% elif job.classification is none %}
       <!-- Unscored job: explain AI scoring status -->
       <div class="text-xs text-slate-500 border-t border-slate-700 pt-2">
         <span class="text-violet-400 font-semibold">No AI score yet.</span>
-        Use "Score All Jobs" on the Dashboard to run Haiku AI scoring on all existing jobs,
-        or paste the job description below to score this job with Sonnet directly.
+        Use "Score All Jobs" on the Dashboard to run v3.0 classification scoring,
+        or paste the job description below to score this job directly.
       </div>
       {% endif %}
 

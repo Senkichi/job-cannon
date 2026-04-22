@@ -1,29 +1,43 @@
-{# Score cell partial. Renders the score <td> with color tiers and freshness star indicator.
+{# Score cell partial. Renders the classification <td> as a color-coded badge.
    Variables expected in scope:
-     job              — job object with sonnet_score, haiku_score, dedup_key, first_seen
+     job              — job object with classification (enum: apply/consider/skip/reject), sub_scores_json, dedup_key, first_seen
    Optional:
      oob              — when truthy, adds hx-swap-oob="outerHTML" for out-of-band targeting
      freshness_cutoff — ISO date string; jobs with first_seen >= this get a freshness star
+
+   v3.0 (Phase 34 Plan 3 Commit D): numeric-score rendering replaced with
+   classification-enum badge. apply=green, consider=amber, skip=gray,
+   reject=red. An 'Unscored' pill covers the NULL case (pre-score or pre-v3).
 #}
 
-{% set display_score = job.sonnet_score if job.sonnet_score is not none else job.haiku_score %}
+{% set cls = job.classification %}
 {% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
 
-{% if display_score is not none %}
-  {% if display_score >= 70 %}
-    {% set score_class = "text-green-400 font-bold" %}
-  {% elif display_score >= 50 %}
-    {% set score_class = "text-yellow-400" %}
-  {% else %}
-    {% set score_class = "text-red-400 opacity-60" %}
-  {% endif %}
+{% if cls == 'apply' %}
+  {% set badge_class = 'bg-green-900 text-green-200 border border-green-700' %}
+  {% set badge_text = 'Apply' %}
+  {% set sort_rank = 4 %}
+{% elif cls == 'consider' %}
+  {% set badge_class = 'bg-amber-900 text-amber-200 border border-amber-700' %}
+  {% set badge_text = 'Consider' %}
+  {% set sort_rank = 3 %}
+{% elif cls == 'skip' %}
+  {% set badge_class = 'bg-slate-800 text-slate-300 border border-slate-600' %}
+  {% set badge_text = 'Skip' %}
+  {% set sort_rank = 2 %}
+{% elif cls == 'reject' %}
+  {% set badge_class = 'bg-red-900 text-red-200 border border-red-700' %}
+  {% set badge_text = 'Reject' %}
+  {% set sort_rank = 1 %}
 {% else %}
-  {% set score_class = "text-slate-600" %}
+  {% set badge_class = 'bg-slate-900 text-slate-500 border border-slate-700' %}
+  {% set badge_text = 'Unscored' %}
+  {% set sort_rank = 0 %}
 {% endif %}
 
 <td id="score-{{ job.dedup_key | urlencode }}"
-    class="px-1 py-1.5 {{ score_class }} whitespace-nowrap"
-    data-sort-score="{{ display_score | int if display_score is not none else '' }}"
+    class="px-1 py-1.5 whitespace-nowrap"
+    data-sort-score="{{ sort_rank }}"
     {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
-  {{ display_score | int if display_score is not none else "---" }}{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
+  <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded {{ badge_class }}">{{ badge_text }}</span>{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
 </td>
