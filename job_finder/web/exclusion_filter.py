@@ -76,8 +76,13 @@ def should_exclude(
     return False, ""
 
 
-def count_haiku_scorable(conn, config: dict) -> int:
+def count_scorable(conn, config: dict) -> int:
     """Count unscored jobs that would pass the exclusion filter.
+
+    v3.0 (Phase 34 Plan 3 Commit A): predicate changed from
+    `haiku_score IS NULL` to `classification IS NULL` — the unified scorer
+    populates `classification` on every row it processes, so unclassified rows
+    are the correct "unscored" set.
 
     Replicates the three exclusion checks from should_exclude() in SQL so the
     count matches what the batch scorer will actually attempt to score:
@@ -87,7 +92,7 @@ def count_haiku_scorable(conn, config: dict) -> int:
     """
     try:
         conditions = [
-            "haiku_score IS NULL",
+            "classification IS NULL",
             "pipeline_status NOT IN ('dismissed', 'archived')",
         ]
         params: list = []
@@ -118,3 +123,8 @@ def count_haiku_scorable(conn, config: dict) -> int:
         return conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params).fetchone()[0]
     except Exception:
         return 0
+
+
+# Back-compat alias — Plan 4 removes along with the rest of the legacy nomenclature.
+# PLAN-4-REMOVE
+count_haiku_scorable = count_scorable

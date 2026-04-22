@@ -37,19 +37,20 @@ def make_migrated_db():
     return path, conn
 
 def insert_rejected_job(conn, dedup_key, title="Data Scientist", company="Acme",
-                        rejection_reviewed=0, haiku_score=70, sonnet_score=65.0,
+                        rejection_reviewed=0, classification="reject",
+                        sub_scores_json='{"title_fit": 3, "location_fit": 4, "comp_fit": 3, "domain_match": 3, "seniority_match": 2, "skills_match": 3}',
                         jd_full="Job description text"):
-    """Helper to insert a rejected job into the test DB."""
+    """Helper to insert a rejected job into the test DB (v3.0 Phase 34 Plan 3)."""
     conn.execute(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              source_id, first_seen, last_seen, score, pipeline_status,
-             rejection_reviewed, haiku_score, sonnet_score, jd_full)
+             rejection_reviewed, classification, sub_scores_json, jd_full)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dedup_key, title, company, "Remote", '["linkedin"]', '["https://example.com"]',
             "123", "2026-03-01T10:00:00", "2026-03-10T10:00:00",
-            7.5, "rejected", rejection_reviewed, haiku_score, sonnet_score, jd_full,
+            7.5, "rejected", rejection_reviewed, classification, sub_scores_json, jd_full,
         ),
     )
     conn.commit()

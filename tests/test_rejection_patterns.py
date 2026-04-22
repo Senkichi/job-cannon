@@ -80,6 +80,8 @@ def rejection_db(tmp_path):
         salary_max INTEGER DEFAULT NULL,
         haiku_score REAL DEFAULT NULL,
         sonnet_score REAL DEFAULT NULL,
+        classification TEXT DEFAULT NULL,
+        sub_scores_json TEXT DEFAULT NULL,
         pipeline_status TEXT DEFAULT 'discovered',
         is_stale INTEGER DEFAULT 0,
         first_seen TEXT NOT NULL DEFAULT (datetime('now')),
@@ -107,18 +109,56 @@ def rejection_db(tmp_path):
     return db_path
 
 
+def _score_to_sub_scores(score: float | None) -> str | None:
+    """Convert a legacy 0-100 numeric score into a sub_scores_json string.
+
+    v3.0 uses 6 ordinal sub-scores (1-5). The rejection_patterns score bucket
+    logic recomputes the approximate numeric score as mean*20, so we populate
+    all 6 dimensions with the same value computed from the target score:
+    value = round(score / 20) clamped to [1,5]. This preserves the test's
+    intent: inserting "haiku_score=90" should produce a sub-score mean of 4.5,
+    yielding score*20/5 ≈ 90 — landing in the 80-100 bucket.
+    """
+    if score is None:
+        return None
+    ordinal = max(1, min(5, round(score / 20)))
+    sub_scores = {
+        "title_fit": ordinal,
+        "location_fit": ordinal,
+        "comp_fit": ordinal,
+        "domain_match": ordinal,
+        "seniority_match": ordinal,
+        "skills_match": ordinal,
+    }
+    return json.dumps(sub_scores)
+
+
 def _insert_job(db_path, dedup_key, title, company, pipeline_status="rejected",
                 haiku_score=None, sonnet_score=None, salary_min=None,
-                location="Remote", company_id=None, first_seen=None):
+                location="Remote", company_id=None, first_seen=None,
+                classification=None, sub_scores_json=None):
+    """Insert a test rejection job.
+
+    v3.0 migration: legacy haiku_score/sonnet_score kwargs are translated into
+    the v3 classification + sub_scores_json shape so existing tests stay
+    readable. Direct classification/sub_scores_json kwargs take precedence if
+    passed.
+    """
     conn = sqlite3.connect(db_path)
     if first_seen is None:
         first_seen = datetime.now().isoformat()
+    # Translate legacy score kwargs to sub_scores_json if v3 kwargs not set.
+    if sub_scores_json is None:
+        effective_score = sonnet_score if sonnet_score is not None else haiku_score
+        sub_scores_json = _score_to_sub_scores(effective_score)
     conn.execute(
         """INSERT INTO jobs (dedup_key, title, company, location, pipeline_status,
-                            haiku_score, sonnet_score, salary_min, company_id, first_seen, last_seen)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            haiku_score, sonnet_score, classification, sub_scores_json,
+                            salary_min, company_id, first_seen, last_seen)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (dedup_key, title, company, location, pipeline_status,
-         haiku_score, sonnet_score, salary_min, company_id, first_seen, first_seen),
+         haiku_score, sonnet_score, classification, sub_scores_json,
+         salary_min, company_id, first_seen, first_seen),
     )
     conn.commit()
     conn.close()

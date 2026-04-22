@@ -1047,7 +1047,7 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 result = run_ats_scan(migrated_db_path, config=config)
 
         assert result["jobs_discovered"] == 1
@@ -1094,14 +1094,14 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None) as mock_haiku:
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None) as mock_haiku:
                 result = run_ats_scan(migrated_db_path, config=config)
 
         # score_and_persist_haiku called once per new job (1 job discovered)
         mock_haiku.assert_called_once()
 
-    def test_run_ats_scan_calls_sonnet_evaluation_for_above_threshold_jobs(self, migrated_db_path):
-        """run_ats_scan calls score_and_persist_sonnet when Haiku score >= threshold."""
+    def test_run_ats_scan_increments_classification_counters(self, migrated_db_path):
+        """run_ats_scan increments per-classification counters (v3.0 Plan 3)."""
         from job_finder.web.ats_scanner import run_ats_scan
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1109,8 +1109,6 @@ class TestRunAtsScan:
         self._insert_hit_company(conn, "Stripe", "lever", "stripe")
         conn.close()
 
-        # Description must be >200 chars so upsert_job populates jd_full
-        # (Sonnet loop skips jobs without jd_full)
         long_desc = "ML and Data Science role at Stripe. " * 8
 
         lever_jobs = [
@@ -1128,23 +1126,21 @@ class TestRunAtsScan:
 
         config = {
             "TESTING": False,
-            "scoring": {"haiku_threshold": 42},
             "profile": {
                 "target_titles": ["data scientist"],
                 "exclusions": {"title_keywords": []},
             },
         }
 
-        # Haiku returns score above threshold -> job enters sonnet_queue
-        haiku_result = {"score": 75, "summary": "Good match"}
+        # Unified scorer returns classification directly.
+        scorer_result = {"classification": "apply", "sub_scores": {}, "rationale": {}}
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=haiku_result):
-                with patch("job_finder.web.ats_scanner.score_and_persist_sonnet", return_value={"score": 80}) as mock_sonnet:
-                    result = run_ats_scan(migrated_db_path, config=config)
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=scorer_result):
+                result = run_ats_scan(migrated_db_path, config=config)
 
-        mock_sonnet.assert_called_once()
-        assert result["sonnet_evaluated"] == 1
+        assert result["scored"] == 1
+        assert result["classified_apply"] == 1
 
     def test_run_ats_scan_inserts_runs_table_entry(self, migrated_db_path):
         """run_ats_scan inserts a row into runs table with source='ats_scan'."""
@@ -1169,7 +1165,7 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1204,7 +1200,7 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1240,7 +1236,7 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1263,7 +1259,11 @@ class TestRunAtsScan:
         assert "companies_scanned" in result
         assert "jobs_discovered" in result
         assert "jobs_new" in result
-        assert "haiku_scored" in result
+        assert "scored" in result
+        assert "classified_apply" in result
+        assert "classified_consider" in result
+        assert "classified_skip" in result
+        assert "classified_reject" in result
         assert "errors" in result
 
     def test_run_ats_scan_salary_first_seen_wins(self, migrated_db_path):
@@ -1310,7 +1310,7 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         # Existing salary should be preserved (upsert_job uses COALESCE for salary)
@@ -1375,7 +1375,7 @@ class TestRunAtsScanHtmlFallback:
 
                 mock_careers_get.side_effect = [mock_find_resp, mock_scrape_resp]
 
-                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                     with patch("job_finder.web.ats_scanner.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1398,7 +1398,7 @@ class TestRunAtsScanHtmlFallback:
 
         with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers") as mock_find:
             with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=[]) as mock_scrape:
-                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                     with patch("job_finder.web.ats_scanner.time.sleep"):
                         run_ats_scan(migrated_db_path, config=config)
 
@@ -1428,7 +1428,7 @@ class TestRunAtsScanHtmlFallback:
 
         with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
             with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs):
-                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                     with patch("job_finder.web.ats_scanner.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1463,7 +1463,7 @@ class TestRunAtsScanHtmlFallback:
         }
 
         with patch("job_finder.web.ats_scanner.find_careers_url") as mock_find:
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 with patch("job_finder.web.ats_scanner.time.sleep"):
                     result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1500,7 +1500,7 @@ class TestRunAtsScanHtmlFallback:
 
         with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://error.co/careers") as mock_find:
             with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=[]) as mock_scrape:
-                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                     with patch("job_finder.web.ats_scanner.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1533,7 +1533,7 @@ class TestRunAtsScanHtmlFallback:
 
         with patch("job_finder.web.ats_scanner.find_careers_url", return_value=None):
             with patch("job_finder.web.ats_scanner.scrape_careers_page") as mock_scrape:
-                with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                     with patch("job_finder.web.ats_scanner.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1625,7 +1625,7 @@ class TestHTMLJobsScoring:
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
                 with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs):
-                    with patch("job_finder.web.ats_scanner.score_and_persist_haiku", side_effect=capture_haiku_scoring):
+                    with patch("job_finder.web.ats_scanner.score_and_persist_job", side_effect=capture_haiku_scoring):
                         with patch("job_finder.web.ats_scanner.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1634,8 +1634,8 @@ class TestHTMLJobsScoring:
             f"Expected score_and_persist_haiku called 2 times (ATS + HTML), got {len(captured_keys)}: {captured_keys}"
         )
 
-    def test_haiku_scored_summary_count_includes_html_scraped_jobs(self, migrated_db_path):
-        """summary['haiku_scored'] reflects the count including HTML-scraped jobs."""
+    def test_scored_summary_count_includes_html_scraped_jobs(self, migrated_db_path):
+        """summary['scored'] reflects the count including HTML-scraped jobs (v3.0)."""
         from job_finder.web.ats_scanner import run_ats_scan
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1667,18 +1667,18 @@ class TestHTMLJobsScoring:
             },
         }
 
-        # score_and_persist_haiku returns a result for each call -> haiku_scored increments
-        haiku_result = {"score": 30, "summary": "Below threshold"}
+        # score_and_persist_job returns classification -> scored + classified_* increment
+        scorer_result = {"classification": "skip", "sub_scores": {}, "rationale": {}}
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
                 with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs):
-                    with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=haiku_result):
+                    with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=scorer_result):
                         with patch("job_finder.web.ats_scanner.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
-        assert result["haiku_scored"] == 2, (
-            f"Expected haiku_scored=2 (ATS + HTML jobs), got: {result['haiku_scored']}"
+        assert result["scored"] == 2, (
+            f"Expected scored=2 (ATS + HTML jobs), got: {result['scored']}"
         )
 
 # ---------------------------------------------------------------------------
@@ -1719,7 +1719,11 @@ class TestScanRouteProbeBeforeScan:
                 "companies_scanned": 1,
                 "jobs_discovered": 2,
                 "jobs_new": 2,
-                "haiku_scored": 2,
+                "scored": 2,
+                "classified_apply": 0,
+                "classified_consider": 0,
+                "classified_skip": 2,
+                "classified_reject": 0,
                 "html_scraped": 0,
                 "errors": [],
                 "probe": {},
@@ -1742,7 +1746,11 @@ class TestScanRouteProbeBeforeScan:
             "companies_scanned": 1,
             "jobs_discovered": 0,
             "jobs_new": 0,
-            "haiku_scored": 0,
+            "scored": 0,
+            "classified_apply": 0,
+            "classified_consider": 0,
+            "classified_skip": 0,
+            "classified_reject": 0,
             "html_scraped": 0,
             "errors": [],
             "probe": probe_result,
@@ -2344,7 +2352,7 @@ class TestAtsJdFullStorage:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -2405,7 +2413,7 @@ class TestAtsJdFullStorage:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -2453,7 +2461,7 @@ class TestAtsJdFullStorage:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_haiku", return_value=None):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
                 run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)

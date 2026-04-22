@@ -493,11 +493,26 @@ def run_agentic_backfill(
     # Holding the connection open across minutes of network I/O is unsafe for
     # concurrent SQLite (WAL mode helps but doesn't eliminate lock contention).
     with standalone_connection(db_path) as conn:
+        # v3.0 (Phase 34 Plan 3 Commit A): ORDER BY classification_rank + sub_score_sum
+        # replaces ORDER BY haiku_score. Highest-priority (apply) rows processed first.
         rows = conn.execute(
             """SELECT * FROM jobs
                WHERE enrichment_tier = 'exhausted'
                  AND jd_full IS NULL
-               ORDER BY haiku_score DESC NULLS LAST
+               ORDER BY
+                   CASE classification
+                       WHEN 'apply'    THEN 4
+                       WHEN 'consider' THEN 3
+                       WHEN 'skip'     THEN 2
+                       WHEN 'reject'   THEN 1
+                       ELSE 0
+                   END DESC,
+                   (COALESCE(json_extract(sub_scores_json, '$.title_fit'), 0) +
+                    COALESCE(json_extract(sub_scores_json, '$.location_fit'), 0) +
+                    COALESCE(json_extract(sub_scores_json, '$.comp_fit'), 0) +
+                    COALESCE(json_extract(sub_scores_json, '$.domain_match'), 0) +
+                    COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) +
+                    COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0)) DESC
                LIMIT ?""",
             (limit,),
         ).fetchall()

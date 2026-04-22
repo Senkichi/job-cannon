@@ -592,6 +592,91 @@ def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
     return sorted(seen)
 
 
+# ---------------------------------------------------------------------------
+# v3.0 classification-rank ordering (Phase 34 Plan 3 Commit A)
+# ---------------------------------------------------------------------------
+# SQL CASE expression mapping classification enum -> numeric priority for ORDER BY.
+# Plan 4 deletes legacy score columns; this expression becomes the ONLY score-like
+# sort signal available.
+_CLASSIFICATION_RANK_CASE = (
+    "CASE classification "
+    "WHEN 'apply' THEN 4 "
+    "WHEN 'consider' THEN 3 "
+    "WHEN 'skip' THEN 2 "
+    "WHEN 'reject' THEN 1 "
+    "ELSE 0 END"
+)
+
+# Sum of the 6 sub-scores pulled from sub_scores_json — used as tiebreak within
+# a classification bucket. Each sub-score is 1-5, so the sum is 6-30 (or 0 if JSON
+# is NULL). COALESCE-wrapped so NULL sub_scores_json doesn't crash sort.
+_SUB_SCORE_SUM_SQL = (
+    "(COALESCE(json_extract(sub_scores_json, '$.title_fit'), 0) + "
+    "COALESCE(json_extract(sub_scores_json, '$.location_fit'), 0) + "
+    "COALESCE(json_extract(sub_scores_json, '$.comp_fit'), 0) + "
+    "COALESCE(json_extract(sub_scores_json, '$.domain_match'), 0) + "
+    "COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) + "
+    "COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0))"
+)
+
+
+def _classification_score_order(sort_dir: str) -> str:
+    """Compose the (classification_rank, sub_score_sum) composite ORDER BY clause.
+
+    Used by get_filtered_jobs() when the caller sorts by the generic 'score'
+    key OR a v3 alias ('classification', 'classification_rank', 'sub_score_sum')
+    OR a legacy alias ('haiku_score', 'sonnet_score') retained for bookmark
+    back-compat. Both keys share the same direction (ASC/DESC).
+
+    Plan 4 drops the legacy aliases (D-17).
+    """
+    direction = "DESC" if sort_dir.upper() != "ASC" else "ASC"
+    return f"{_CLASSIFICATION_RANK_CASE} {direction}, {_SUB_SCORE_SUM_SQL} {direction}"
+
+
+# Legacy URL sort-by keys kept as aliases during Plan 3 so bookmarks that use
+# ?sort=haiku_score or ?sort=sonnet_score continue to work. They translate to the
+# same classification + sub_score_sum composite ordering as the generic 'score'.
+# Plan 4 removes these aliases entirely.
+_LEGACY_SORT_ALIAS: set[str] = {"haiku_score", "sonnet_score"}
+
+# v3 classification-aware sort keys (preferred).
+_CLASSIFICATION_SORT_KEYS: set[str] = {
+    "classification",
+    "classification_rank",
+    "sub_score_sum",
+}
+
+
+# Map of >=-threshold min_score/max_score (legacy numeric filter API) -> list of
+# classifications that satisfy it. The numeric-score→classification mapping below
+# preserves the *monotonic shim math* from Plan 2 (mean(sub_scores) * 20, range
+# 20-100): apply rows have mean>=3 (>=60), consider rows may be 40-60, skip rows
+# may be 20-40, reject rows may be NULL-20. Plan 4 removes min_score/max_score
+# entirely; this shim only exists to keep existing callers (tests, URL params)
+# working throughout Plan 3.
+def _classifications_for_min_score(min_score: float) -> list[str]:
+    """Translate a legacy min_score threshold into a classification IN-list."""
+    if min_score >= 80:
+        return ["apply"]
+    if min_score >= 60:
+        return ["apply", "consider"]
+    if min_score >= 40:
+        return ["apply", "consider", "skip"]
+    return ["apply", "consider", "skip", "reject"]
+
+
+def _classifications_for_max_score(max_score: float) -> list[str]:
+    """Translate a legacy max_score threshold into a classification IN-list."""
+    if max_score < 40:
+        return ["skip", "reject"]
+    if max_score < 60:
+        return ["consider", "skip", "reject"]
+    if max_score < 80:
+        return ["apply", "consider", "skip", "reject"]
+    return ["apply", "consider", "skip", "reject"]
+
+
 def get_filtered_jobs(
     conn: sqlite3.Connection,
     status: str | list[str] | None = None,
@@ -609,33 +694,48 @@ def get_filtered_jobs(
     source: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    classification: str | list[str] | None = None,
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
     status: single string or list for IN-filter. sort_by validated against
-    allowlist (SQL injection guard). score sort uses COALESCE(sonnet, haiku,
-    heuristic). Hidden statuses excluded by default unless status set or
-    show_hidden=True.
+    allowlist (SQL injection guard). The default 'score' sort (and the v3
+    'classification'/'classification_rank'/'sub_score_sum' keys, plus the legacy
+    'haiku_score'/'sonnet_score' bookmark-back-compat aliases) map to the
+    classification-rank CASE + sub_score_sum composite order defined above.
+    Hidden statuses excluded by default unless status set or show_hidden=True.
+
+    Plan 34-03 Commit A: migrated from COALESCE(sonnet_score, haiku_score,
+    score) to classification-based ordering; min_score/max_score translate
+    to classification IN-list shim via the mapping above (Plan 4 removes).
+    The new explicit `classification=` kwarg is the preferred filter.
     """
-    allowed_sort_cols = {
-        "score",
-        "title",
-        "company",
-        "location",
-        "first_seen",
-        "salary_min",
-        "salary_max",
-        "pipeline_status",
-        "haiku_score",
-        "sonnet_score",
-    }
+    allowed_sort_cols = (
+        {
+            "score",
+            "title",
+            "company",
+            "location",
+            "first_seen",
+            "salary_min",
+            "salary_max",
+            "pipeline_status",
+        }
+        | _CLASSIFICATION_SORT_KEYS
+        | _LEGACY_SORT_ALIAS
+    )
     if sort_by not in allowed_sort_cols:
         sort_by = "score"
     sort_dir = "DESC" if sort_dir.upper() != "ASC" else "ASC"
 
-    # When sorting by score, use best available AI score (sonnet > haiku > heuristic)
-    if sort_by == "score":
-        sort_expr = f"COALESCE(sonnet_score, haiku_score, score) {sort_dir}"
+    # 'score' + 'classification*' + legacy aliases all collapse to the v3
+    # classification-rank + sub_score_sum composite ORDER BY (D-17 Commit A).
+    if (
+        sort_by == "score"
+        or sort_by in _CLASSIFICATION_SORT_KEYS
+        or sort_by in _LEGACY_SORT_ALIAS
+    ):
+        sort_expr = _classification_score_order(sort_dir)
     else:
         sort_expr = f"{sort_by} {sort_dir}"
 
@@ -685,11 +785,38 @@ def get_filtered_jobs(
     if hide_stale:
         conditions.append("is_stale = 0")
 
+    # Apply classification filter (preferred v3 path).
+    if classification is not None:
+        classification_candidates = (
+            {classification} if isinstance(classification, str) else set(classification)
+        )
+        placeholders = ", ".join("?" * len(classification_candidates))
+        conditions.append(f"classification IN ({placeholders})")
+        params.extend(sorted(classification_candidates))
+
+    # Legacy min_score/max_score back-compat — Plan 4 removes this shim entirely.
+    # The translation matches OR on either:
+    #   (a) the row has a classification that maps to the legacy threshold, OR
+    #   (b) the row has NULL classification but its heuristic `score` column
+    #       still satisfies the threshold (covers pre-v3 rows that never went
+    #       through the unified scorer).
     if min_score is not None:
-        conditions.append("COALESCE(sonnet_score, haiku_score, score) >= ?")
+        mapped = _classifications_for_min_score(min_score)
+        placeholders = ", ".join("?" * len(mapped))
+        conditions.append(
+            f"(classification IN ({placeholders}) "
+            f"OR (classification IS NULL AND score >= ?))"
+        )
+        params.extend(mapped)
         params.append(min_score)
     if max_score is not None:
-        conditions.append("COALESCE(sonnet_score, haiku_score, score) <= ?")
+        mapped = _classifications_for_max_score(max_score)
+        placeholders = ", ".join("?" * len(mapped))
+        conditions.append(
+            f"(classification IN ({placeholders}) "
+            f"OR (classification IS NULL AND score <= ?))"
+        )
+        params.extend(mapped)
         params.append(max_score)
     if salary_min is not None:
         conditions.append("salary_min >= ?")

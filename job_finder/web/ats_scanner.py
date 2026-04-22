@@ -37,13 +37,11 @@ from job_finder.web.description_formatter import strip_html_to_text
 try:
     from job_finder.web.scoring_orchestrator import (
         load_scoring_profile,
-        score_and_persist_haiku,
-        score_and_persist_sonnet,
+        score_and_persist_job,
     )
 except ImportError:
     load_scoring_profile = None  # type: ignore[assignment]
-    score_and_persist_haiku = None  # type: ignore[assignment]
-    score_and_persist_sonnet = None  # type: ignore[assignment]
+    score_and_persist_job = None  # type: ignore[assignment]
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)
 try:
@@ -672,7 +670,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
     Returns:
         Dict with keys: companies_scanned, jobs_discovered, jobs_new,
-        haiku_scored, sonnet_evaluated, errors.
+        scored, classified_apply, classified_consider, classified_skip,
+        classified_reject, errors.
     """
     # TESTING guard: skip real API calls during tests
     if config.get("TESTING"):
@@ -681,8 +680,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             "companies_scanned": 0,
             "jobs_discovered": 0,
             "jobs_new": 0,
-            "haiku_scored": 0,
-            "sonnet_evaluated": 0,
+            "scored": 0,
+            "classified_apply": 0,
+            "classified_consider": 0,
+            "classified_skip": 0,
+            "classified_reject": 0,
             "html_scraped": 0,
             "homepages_discovered": 0,
             "errors": [],
@@ -698,8 +700,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         "companies_scanned": 0,
         "jobs_discovered": 0,
         "jobs_new": 0,
-        "haiku_scored": 0,
-        "sonnet_evaluated": 0,
+        "scored": 0,
+        "classified_apply": 0,
+        "classified_consider": 0,
+        "classified_skip": 0,
+        "classified_reject": 0,
         "html_scraped": 0,
         "homepages_discovered": 0,
         "errors": [],
@@ -1006,20 +1011,15 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                 # Polite delay — HTML scraping is slower than ATS API calls
                 time.sleep(1.0)
 
-        # --- Haiku auto-scoring for newly discovered jobs ---
+        # --- Auto-scoring for newly discovered jobs ---
         # Runs AFTER both the ATS API loop and the HTML fallback loop so that
         # all_new_job_keys contains jobs from both sources before scoring begins.
-        # Uses scoring_orchestrator directly (no pipeline_runner dependency).
-        if all_new_job_keys and score_and_persist_haiku is not None:
+        # v3.0 (Phase 34 Plan 3 Commit A): uses unified score_and_persist_job;
+        # per-classification counters replace haiku_scored / sonnet_evaluated.
+        if all_new_job_keys and score_and_persist_job is not None:
             try:
-                from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-
                 profile = load_scoring_profile(config)
-                threshold = config.get("scoring", {}).get(
-                    "haiku_threshold", DEFAULT_HAIKU_THRESHOLD
-                )
-                sonnet_queue: list[str] = []
-                haiku_scored_count = 0
+                scored_count = 0
 
                 for dedup_key in all_new_job_keys:
                     try:
@@ -1030,50 +1030,26 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             continue
                         job_row = dict(row)
 
-                        result = score_and_persist_haiku(
+                        result = score_and_persist_job(
                             conn, job_row, config, profile,
                         )
                         if result is None:
                             continue
-                        haiku_scored_count += 1
-                        score = result.get("score", 0)
-                        if score >= threshold:
-                            sonnet_queue.append(dedup_key)
+                        scored_count += 1
+                        cls = result.get("classification")
+                        if cls in ("apply", "consider", "skip", "reject"):
+                            key = f"classified_{cls}"
+                            summary[key] = summary.get(key, 0) + 1
                     except Exception as job_err:
                         logger.warning(
-                            "ATS Haiku scoring error for '%s': %s -- continuing",
+                            "ATS scoring error for '%s': %s -- continuing",
                             dedup_key, job_err,
                         )
 
-                summary["haiku_scored"] = haiku_scored_count
-
-                # Sonnet evaluation for jobs above threshold
-                if sonnet_queue and score_and_persist_sonnet is not None:
-                    sonnet_evaluated = 0
-                    for dedup_key in sonnet_queue:
-                        try:
-                            row = conn.execute(
-                                "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                            ).fetchone()
-                            if row is None:
-                                continue
-                            job_row = dict(row)
-                            if not job_row.get("jd_full"):
-                                continue
-                            s_result = score_and_persist_sonnet(
-                                conn, job_row, config, profile,
-                            )
-                            if s_result is not None:
-                                sonnet_evaluated += 1
-                        except Exception as sonnet_err:
-                            logger.warning(
-                                "ATS Sonnet scoring error for '%s': %s -- continuing",
-                                dedup_key, sonnet_err,
-                            )
-                    summary["sonnet_evaluated"] = sonnet_evaluated
+                summary["scored"] = scored_count
 
             except Exception as score_err:
-                logger.warning("ATS scan Haiku scoring failed (non-fatal): %s", score_err)
+                logger.warning("ATS scan scoring failed (non-fatal): %s", score_err)
 
         # --- Activity feed entry ---
         # Insert into runs table so Dashboard Recent Activity shows 'ats_scan'
@@ -1085,7 +1061,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     "ats_scan",
                     summary["jobs_discovered"],
                     summary["jobs_new"],
-                    summary.get("haiku_scored", 0),
+                    summary.get("scored", 0),
                 ),
             )
             conn.commit()
@@ -1093,11 +1069,16 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             logger.warning("Failed to insert ATS scan activity feed entry: %s", runs_err)
 
     logger.info(
-        "ATS scan complete: %d companies scanned, %d jobs discovered, %d new, %d haiku-scored",
+        "ATS scan complete: %d companies scanned, %d jobs discovered, %d new, %d scored "
+        "(apply=%d, consider=%d, skip=%d, reject=%d)",
         summary["companies_scanned"],
         summary["jobs_discovered"],
         summary["jobs_new"],
-        summary["haiku_scored"],
+        summary["scored"],
+        summary.get("classified_apply", 0),
+        summary.get("classified_consider", 0),
+        summary.get("classified_skip", 0),
+        summary.get("classified_reject", 0),
     )
     return summary
 

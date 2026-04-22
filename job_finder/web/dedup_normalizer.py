@@ -284,8 +284,8 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 salary_min = ?,
                 salary_max = ?,
                 pipeline_status = ?,
-                haiku_score = ?,
-                sonnet_score = ?,
+                classification = ?,
+                sub_scores_json = ?,
                 fit_analysis = ?
             WHERE dedup_key = ?
         """, (
@@ -299,8 +299,8 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
             merged_data["salary_min"],
             merged_data["salary_max"],
             merged_data["pipeline_status"],
-            merged_data["haiku_score"],
-            merged_data["sonnet_score"],
+            merged_data["classification"],
+            merged_data["sub_scores_json"],
             merged_data["fit_analysis"],
             old_canonical_key,
         ))
@@ -366,18 +366,11 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     # Merge pipeline_status: keep highest precedence
     pipeline_status = _merge_pipeline_status(all_rows)
 
-    # Merge scores: keep highest haiku_score, keep highest sonnet_score
-    haiku_scores = [r.get("haiku_score") for r in all_rows if r.get("haiku_score") is not None]
-    haiku_score = max(haiku_scores) if haiku_scores else None
-
-    sonnet_scores_rows = [r for r in all_rows if r.get("sonnet_score") is not None]
-    if sonnet_scores_rows:
-        best_sonnet_row = max(sonnet_scores_rows, key=lambda r: r["sonnet_score"])
-        sonnet_score = best_sonnet_row["sonnet_score"]
-        fit_analysis = best_sonnet_row.get("fit_analysis")
-    else:
-        sonnet_score = None
-        fit_analysis = None
+    # v3.0 (Phase 34 Plan 3 Commit A): merge classification by priority
+    # (apply > consider > skip > reject), merge sub_scores element-wise max,
+    # keep the fit_analysis of whichever row contributed the winning
+    # classification (or the first non-null fallback).
+    classification, fit_analysis, sub_scores_json = _merge_v3_scoring(all_rows)
 
     return {
         "sources": sources,
@@ -389,10 +382,98 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "pipeline_status": pipeline_status,
-        "haiku_score": haiku_score,
-        "sonnet_score": sonnet_score,
+        "classification": classification,
+        "sub_scores_json": sub_scores_json,
         "fit_analysis": fit_analysis,
     }
+
+
+# ---------------------------------------------------------------------------
+# v3.0 classification + sub-scores merge helpers (Phase 34 Plan 3 Commit A)
+# ---------------------------------------------------------------------------
+
+_CLASSIFICATION_RANK: dict = {
+    "apply": 4,
+    "consider": 3,
+    "skip": 2,
+    "reject": 1,
+    None: 0,
+    "": 0,
+}
+
+
+def _merge_classification(a, b):
+    """Pick the higher-priority classification. Ties prefer the left (a)."""
+    ra = _CLASSIFICATION_RANK.get(a, 0)
+    rb = _CLASSIFICATION_RANK.get(b, 0)
+    if ra >= rb:
+        return a or b
+    return b
+
+
+def _merge_sub_scores(a, b) -> dict:
+    """Element-wise max per key over two sub_scores dicts."""
+    a = a or {}
+    b = b or {}
+    keys = set(a) | set(b)
+    out = {}
+    for k in keys:
+        va = a.get(k, 0) or 0
+        vb = b.get(k, 0) or 0
+        out[k] = max(va, vb)
+    return out
+
+
+def _merge_v3_scoring(all_rows: list[dict]) -> tuple:
+    """Merge classification, fit_analysis, and sub_scores_json across rows.
+
+    Returns a 3-tuple (classification, fit_analysis, sub_scores_json).
+    classification is the highest-priority enum value across rows.
+    fit_analysis is the rationale payload from the row that contributed the
+    winning classification (or the first non-null rationale as fallback).
+    sub_scores_json is a JSON string with element-wise max sub-scores.
+    """
+    merged_class = None
+    winning_row = None
+    merged_sub_scores: dict = {}
+
+    for row in all_rows:
+        cls = row.get("classification")
+        new_merged = _merge_classification(merged_class, cls)
+        if new_merged != merged_class:
+            merged_class = new_merged
+            # Track which row contributed the winning classification (for fit_analysis).
+            if cls == new_merged:
+                winning_row = row
+
+        # Always merge sub_scores element-wise regardless of classification.
+        row_sub_scores_raw = row.get("sub_scores_json")
+        row_sub_scores: dict = {}
+        if row_sub_scores_raw:
+            if isinstance(row_sub_scores_raw, dict):
+                row_sub_scores = row_sub_scores_raw
+            elif isinstance(row_sub_scores_raw, str):
+                try:
+                    row_sub_scores = json.loads(row_sub_scores_raw)
+                except (json.JSONDecodeError, TypeError):
+                    row_sub_scores = {}
+        merged_sub_scores = _merge_sub_scores(merged_sub_scores, row_sub_scores)
+
+    # fit_analysis: prefer the winning classification's row; fall back to any row
+    # that has a non-null fit_analysis.
+    if winning_row is not None and winning_row.get("fit_analysis"):
+        fit_analysis = winning_row["fit_analysis"]
+    else:
+        fit_analysis = next(
+            (r.get("fit_analysis") for r in all_rows if r.get("fit_analysis")),
+            None,
+        )
+
+    # Serialize sub_scores_json only if we merged something; keep NULL otherwise
+    # so downstream ORDER BY json_extract reliably returns 0.
+    sub_scores_json = json.dumps(merged_sub_scores) if merged_sub_scores else None
+
+    return merged_class, fit_analysis, sub_scores_json
 
 def _merge_locations(rows: list[dict]) -> list[str]:
     """Collect unique locations from all rows, Remote/Hybrid first."""

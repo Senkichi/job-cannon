@@ -84,6 +84,9 @@ def tmp_db_path():
             haiku_summary TEXT,
             sonnet_score REAL,
             fit_analysis TEXT,
+            classification TEXT,
+            sub_scores_json TEXT,
+            scoring_model TEXT,
             jd_full TEXT,
             is_stale INTEGER DEFAULT 0,
             rejection_reviewed INTEGER DEFAULT 0,
@@ -140,14 +143,18 @@ def _insert_company(db_path, name, careers_url, probe_status="miss"):
     return company_id
 
 
-def _insert_high_scoring_job(db_path, company_id, title="Old Engineer Role", score=80):
-    """Insert a job with a high haiku_score so the company qualifies for crawling."""
+def _insert_high_scoring_job(db_path, company_id, title="Old Engineer Role", classification="apply"):
+    """Insert a job with a high-priority classification so the company qualifies for crawling.
+
+    v3.0 (Phase 34 Plan 3 Commit A): uses classification IN ('apply','consider')
+    rather than the legacy haiku_score >= threshold gate.
+    """
     conn = sqlite3.connect(db_path)
     dedup_key = f"test-{company_id}-{title.replace(' ', '-').lower()}"
     conn.execute(
-        """INSERT INTO jobs (dedup_key, title, company, haiku_score, company_id)
+        """INSERT INTO jobs (dedup_key, title, company, classification, company_id)
            VALUES (?, ?, ?, ?, ?)""",
-        (dedup_key, title, "test", score, company_id),
+        (dedup_key, title, "test", classification, company_id),
     )
     conn.commit()
     conn.close()
@@ -520,10 +527,15 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_crawler.sync_playwright", new_callable=MagicMock)
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_skips_companies_without_high_scoring_jobs(self, mock_static, mock_pw, tmp_db_path):
-        """Companies with no high-scoring jobs should not be crawled."""
+        """Companies with no high-priority classification jobs should not be crawled.
+
+        v3.0 (Phase 34 Plan 3 Commit A): replaces the legacy haiku_score >= 42
+        threshold with classification IN ('apply','consider'). A 'skip'-classified
+        job does not qualify the company for crawling.
+        """
         cid = _insert_company(tmp_db_path, "LowCo", "https://lowco.com/careers")
-        # Insert a job below threshold (default 42)
-        _insert_high_scoring_job(tmp_db_path, cid, score=20)
+        # Insert a low-priority job (skip classification — not apply/consider).
+        _insert_high_scoring_job(tmp_db_path, cid, classification="skip")
 
         mock_browser = MagicMock()
         mock_pw_instance = MagicMock()
@@ -800,7 +812,6 @@ class TestBatchQueryFilters:
         # TESTING mode returns early, but we can verify the query directly
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
         companies = conn.execute(
             """SELECT c.id FROM companies c
                WHERE c.careers_url IS NOT NULL
@@ -808,9 +819,9 @@ class TestBatchQueryFilters:
                  AND c.ats_probe_status != 'hit'
                  AND EXISTS (
                      SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
                  )""",
-            (DEFAULT_HAIKU_THRESHOLD,),
         ).fetchall()
         conn.close()
 
@@ -835,7 +846,6 @@ class TestBatchQueryFilters:
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
         companies = conn.execute(
             """SELECT c.id FROM companies c
                WHERE c.careers_url IS NOT NULL
@@ -843,7 +853,8 @@ class TestBatchQueryFilters:
                  AND c.ats_probe_status != 'hit'
                  AND EXISTS (
                      SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
                  )
                  AND NOT EXISTS (
                      SELECT 1 FROM (
@@ -852,7 +863,6 @@ class TestBatchQueryFilters:
                          FROM company_scan_log WHERE company_id = c.id
                      ) s WHERE s.total >= 5 AND s.hits = 0
                  )""",
-            (DEFAULT_HAIKU_THRESHOLD,),
         ).fetchall()
         conn.close()
 
@@ -874,7 +884,6 @@ class TestBatchQueryFilters:
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
         companies = conn.execute(
             """SELECT c.id FROM companies c
                WHERE c.careers_url IS NOT NULL
@@ -882,7 +891,8 @@ class TestBatchQueryFilters:
                  AND c.ats_probe_status != 'hit'
                  AND EXISTS (
                      SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
                  )
                  AND NOT EXISTS (
                      SELECT 1 FROM (
@@ -891,7 +901,6 @@ class TestBatchQueryFilters:
                          FROM company_scan_log WHERE company_id = c.id
                      ) s WHERE s.total >= 5 AND s.hits = 0
                  )""",
-            (DEFAULT_HAIKU_THRESHOLD,),
         ).fetchall()
         conn.close()
 
@@ -918,7 +927,6 @@ class TestBatchQueryFilters:
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
         companies = conn.execute(
             """SELECT c.id FROM companies c
                WHERE c.careers_url IS NOT NULL
@@ -926,7 +934,8 @@ class TestBatchQueryFilters:
                  AND c.ats_probe_status != 'hit'
                  AND EXISTS (
                      SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
                  )
                  AND NOT EXISTS (
                      SELECT 1 FROM (
@@ -935,7 +944,6 @@ class TestBatchQueryFilters:
                          FROM company_scan_log WHERE company_id = c.id
                      ) s WHERE s.total >= 5 AND s.hits = 0
                  )""",
-            (DEFAULT_HAIKU_THRESHOLD,),
         ).fetchall()
         conn.close()
 

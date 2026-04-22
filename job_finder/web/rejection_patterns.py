@@ -17,12 +17,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RejectionPattern:
-    """Structured rejection analysis for a single job."""
+    """Structured rejection analysis for a single job.
+
+    v3.0 (Phase 34 Plan 3 Commit A): `haiku_score` and `sonnet_score` replaced
+    with `classification` (enum string) and `sub_scores` (dict of the 6 ordinal
+    dimensions). Score distribution buckets derive from the sub-score mean.
+    """
     job_id: str
     company: str
     title: str
-    haiku_score: float | None
-    sonnet_score: float | None
+    classification: str | None
+    sub_scores: dict = field(default_factory=dict)
 
     # Classification dimensions
     seniority: str = ""          # junior/mid/senior/staff/principal/exec
@@ -114,10 +119,12 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
     report = PatternReport(period_days=period_days, total_rejections=0)
 
     with standalone_connection(db_path) as conn:
+        # v3.0 (Phase 34 Plan 3 Commit A): SELECT classification + sub_scores_json
+        # instead of legacy haiku_score/sonnet_score.
         rows = conn.execute(
             """
             SELECT j.dedup_key, j.company, j.title,
-                   j.haiku_score, j.sonnet_score,
+                   j.classification, j.sub_scores_json,
                    j.salary_min, j.pipeline_status,
                    j.first_seen, j.location,
                    c.company_size, c.ats_platform
@@ -148,12 +155,19 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
         min_salary = (config or {}).get("profile", {}).get("min_salary", 0)
 
         for row in rows:
+            sub_scores_raw = row["sub_scores_json"]
+            sub_scores: dict = {}
+            if sub_scores_raw:
+                try:
+                    sub_scores = json.loads(sub_scores_raw)
+                except (json.JSONDecodeError, TypeError):
+                    sub_scores = {}
             pattern = RejectionPattern(
                 job_id=row["dedup_key"],
                 company=row["company"],
                 title=row["title"],
-                haiku_score=row["haiku_score"],
-                sonnet_score=row["sonnet_score"],
+                classification=row["classification"],
+                sub_scores=sub_scores,
                 seniority=_detect_seniority(row["title"]),
                 domain=_detect_domain(row["title"]),
                 has_salary=row["salary_min"] is not None,
@@ -196,8 +210,18 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
                 if not pattern.salary_meets_floor:
                     salary_misses += 1
 
-            # Score buckets
-            score = pattern.sonnet_score or pattern.haiku_score or 0
+            # Score buckets — v3.0 derives from sub-score mean (1-5 scaled to
+            # 0-100 via mean*20 so bucket edges (80/60/40) roughly line up with
+            # the old haiku/sonnet numeric scale for continuity across the
+            # Plan 3 -> Plan 4 window).
+            if pattern.sub_scores:
+                values = [
+                    v for v in pattern.sub_scores.values()
+                    if isinstance(v, (int, float))
+                ]
+                score = (sum(values) / len(values) * 20) if values else 0
+            else:
+                score = 0
             if score >= 80:
                 score_buckets["80-100"] += 1
             elif score >= 60:
