@@ -129,9 +129,11 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     """Internal: run analysis within an open connection."""
 
     # Query all unreviewed rejected jobs
+    # v3.0 (Phase 34 Plan 3 Commit A): SELECT classification + sub_scores_json
+    # instead of legacy haiku_score/sonnet_score.
     rows = conn.execute(
         """
-        SELECT j.dedup_key, j.title, j.company, j.haiku_score, j.sonnet_score,
+        SELECT j.dedup_key, j.title, j.company, j.classification, j.sub_scores_json,
                j.fit_analysis, j.jd_full, j.pipeline_status
         FROM jobs j
         WHERE j.pipeline_status = 'rejected'
@@ -163,9 +165,13 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
         summary = {
             "title": job["title"],
             "company": job["company"],
-            "haiku_score": job["haiku_score"],
-            "sonnet_score": job["sonnet_score"],
+            "classification": job["classification"],
         }
+        if job.get("sub_scores_json"):
+            try:
+                summary["sub_scores"] = json.loads(job["sub_scores_json"])
+            except (json.JSONDecodeError, TypeError):
+                summary["sub_scores"] = job["sub_scores_json"]
         if job.get("fit_analysis"):
             try:
                 summary["fit_analysis"] = json.loads(job["fit_analysis"])

@@ -57,6 +57,8 @@ def mem_db():
             haiku_summary TEXT DEFAULT NULL,
             sonnet_score REAL DEFAULT NULL,
             fit_analysis TEXT DEFAULT NULL,
+            classification TEXT DEFAULT NULL,
+            sub_scores_json TEXT DEFAULT NULL,
             jd_full TEXT DEFAULT NULL,
             is_stale INTEGER DEFAULT 0,
             rejection_reviewed INTEGER DEFAULT 0,
@@ -155,8 +157,14 @@ def _insert_job(conn, dedup_key, title, company, location="Remote",
                 pipeline_status="discovered", first_seen=None, last_seen=None,
                 sources=None, source_urls=None, description=None,
                 haiku_score=None, sonnet_score=None, notes="",
-                salary_min=None, salary_max=None):
-    """Helper to insert a job row into the in-memory DB."""
+                salary_min=None, salary_max=None,
+                classification=None, sub_scores_json=None):
+    """Helper to insert a job row into the in-memory DB.
+
+    v3.0 (Phase 34 Plan 3 Commit A): classification + sub_scores_json are the
+    v3 scoring columns. Legacy haiku_score/sonnet_score kwargs still work
+    because the schema retains those columns (Plan 2 shim keeps them populated).
+    """
     now = datetime.now().isoformat()
     if first_seen is None:
         first_seen = now
@@ -170,11 +178,13 @@ def _insert_job(conn, dedup_key, title, company, location="Remote",
         INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              pipeline_status, first_seen, last_seen, description,
-             haiku_score, sonnet_score, notes, salary_min, salary_max)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             haiku_score, sonnet_score, classification, sub_scores_json,
+             notes, salary_min, salary_max)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (dedup_key, title, company, location, json.dumps(sources),
           json.dumps(source_urls), pipeline_status, first_seen, last_seen,
-          description, haiku_score, sonnet_score, notes, salary_min, salary_max))
+          description, haiku_score, sonnet_score, classification, sub_scores_json,
+          notes, salary_min, salary_max))
     conn.commit()
 
 # ---------------------------------------------------------------------------

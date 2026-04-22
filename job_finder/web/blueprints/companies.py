@@ -136,12 +136,27 @@ def expand(company_id):
     if company is None:
         return "Company not found", 404
 
-    # Jobs for this company (limit 20, ordered by score DESC)
+    # Jobs for this company (limit 20, ordered by classification_rank DESC,
+    # sub_score_sum DESC — v3.0 Phase 34 Plan 3 Commit A)
     jobs = conn.execute(
-        """SELECT *, COALESCE(sonnet_score, haiku_score, score) as effective_score
+        """SELECT *,
+                  CASE classification
+                      WHEN 'apply'    THEN 4
+                      WHEN 'consider' THEN 3
+                      WHEN 'skip'     THEN 2
+                      WHEN 'reject'   THEN 1
+                      ELSE 0
+                  END AS classification_rank,
+                  (COALESCE(json_extract(sub_scores_json, '$.title_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.location_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.comp_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.domain_match'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0))
+                  AS effective_score
            FROM jobs
            WHERE company_id = ?
-           ORDER BY COALESCE(sonnet_score, haiku_score, score) DESC
+           ORDER BY classification_rank DESC, effective_score DESC
            LIMIT 20""",
         (company_id,),
     ).fetchall()
@@ -289,8 +304,23 @@ def update_slug(company_id):
         "SELECT * FROM companies WHERE id = ?", (company_id,)
     ).fetchone()
     jobs = conn.execute(
-        """SELECT *, COALESCE(sonnet_score, haiku_score, score) as effective_score
-           FROM jobs WHERE company_id = ? ORDER BY COALESCE(sonnet_score, haiku_score, score) DESC LIMIT 20""",
+        """SELECT *,
+                  CASE classification
+                      WHEN 'apply'    THEN 4
+                      WHEN 'consider' THEN 3
+                      WHEN 'skip'     THEN 2
+                      WHEN 'reject'   THEN 1
+                      ELSE 0
+                  END AS classification_rank,
+                  (COALESCE(json_extract(sub_scores_json, '$.title_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.location_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.comp_fit'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.domain_match'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.seniority_match'), 0) +
+                   COALESCE(json_extract(sub_scores_json, '$.skills_match'), 0))
+                  AS effective_score
+           FROM jobs WHERE company_id = ?
+           ORDER BY classification_rank DESC, effective_score DESC LIMIT 20""",
         (company_id,),
     ).fetchall()
     scan_history = conn.execute(

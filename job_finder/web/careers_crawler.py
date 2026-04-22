@@ -1,7 +1,7 @@
 """Active careers page crawler for companies with proven relevance.
 
 Provides crawl_careers_batch() — a daily scheduled job that:
-1. Loads all companies that have ever had a high-scoring job (haiku_score >= threshold)
+1. Loads all companies that have ever had a high-scoring job (classification IN ('apply','consider'))
 2. Multi-tier extraction: cached API → static HTML → URL param search →
    Playwright with interaction (load-more, scroll, pagination, search)
 3. Feeds matched jobs into the existing upsert/score pipeline
@@ -556,7 +556,8 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
 
     Returns:
         Summary dict with companies_crawled, jobs_found, jobs_new,
-        haiku_scored, sonnet_evaluated, playwright_rendered, errors.
+        scored, classified_apply, classified_consider, classified_skip,
+        classified_reject, playwright_rendered, errors.
     """
     if config.get("TESTING"):
         logger.debug("crawl_careers_batch: TESTING mode — skipping")
@@ -564,8 +565,11 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
             "companies_crawled": 0,
             "jobs_found": 0,
             "jobs_new": 0,
-            "haiku_scored": 0,
-            "sonnet_evaluated": 0,
+            "scored": 0,
+            "classified_apply": 0,
+            "classified_consider": 0,
+            "classified_skip": 0,
+            "classified_reject": 0,
             "playwright_rendered": 0,
             "interactive": 0,
             "api_cached": 0,
@@ -588,8 +592,11 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         "companies_crawled": 0,
         "jobs_found": 0,
         "jobs_new": 0,
-        "haiku_scored": 0,
-        "sonnet_evaluated": 0,
+        "scored": 0,
+        "classified_apply": 0,
+        "classified_consider": 0,
+        "classified_skip": 0,
+        "classified_reject": 0,
         "playwright_rendered": 0,
         "interactive": 0,
         "api_cached": 0,
@@ -601,14 +608,11 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     all_new_job_keys: list[str] = []
 
     # Load all companies that have ever had a high-scoring job
+    # (v3.0 Phase 34 Plan 3 Commit A: classification IN ('apply','consider')
+    # replaces haiku_score >= threshold)
     with standalone_connection(db_path) as conn:
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
-
         freshness_days = config.get("careers_crawl", {}).get(
             "freshness_days", _FRESHNESS_DAYS
-        )
-        haiku_threshold = config.get("scoring", {}).get(
-            "haiku_threshold", DEFAULT_HAIKU_THRESHOLD
         )
 
         companies = conn.execute(
@@ -622,7 +626,8 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
                       OR c.careers_crawl_last_at < datetime('now', ? || ' days'))
                  AND EXISTS (
                      SELECT 1 FROM jobs j
-                     WHERE j.company_id = c.id AND j.haiku_score >= ?
+                     WHERE j.company_id = c.id
+                       AND j.classification IN ('apply', 'consider')
                  )
                  AND NOT EXISTS (
                      SELECT 1 FROM (
@@ -632,7 +637,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
                      ) s WHERE s.total >= 5 AND s.hits = 0
                  )
                ORDER BY c.careers_crawl_last_at ASC NULLS FIRST""",
-            (f"-{freshness_days}", haiku_threshold),
+            (f"-{freshness_days}",),
         ).fetchall()
 
     if not companies:
@@ -668,7 +673,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
                     "careers_crawl",
                     summary["jobs_found"],
                     summary["jobs_new"],
-                    summary["haiku_scored"],
+                    summary["scored"],
                 ),
             )
             conn.commit()
@@ -678,7 +683,8 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     logger.info(
         "careers_crawler complete: %d crawled, %d found, %d new, "
         "%d playwright, %d interactive, %d api-cached, %d url-param, "
-        "%d ai-navigated, %d ai-replayed, %d haiku-scored",
+        "%d ai-navigated, %d ai-replayed, %d scored "
+        "(apply=%d, consider=%d, skip=%d, reject=%d)",
         summary["companies_crawled"],
         summary["jobs_found"],
         summary["jobs_new"],
@@ -688,7 +694,11 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         summary.get("url_param_hits", 0),
         summary.get("ai_navigated", 0),
         summary.get("ai_replayed", 0),
-        summary["haiku_scored"],
+        summary["scored"],
+        summary.get("classified_apply", 0),
+        summary.get("classified_consider", 0),
+        summary.get("classified_skip", 0),
+        summary.get("classified_reject", 0),
     )
     return summary
 
@@ -699,8 +709,9 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
 
 
 _SUMMARY_KEYS = [
-    "companies_crawled", "jobs_found", "jobs_new", "haiku_scored",
-    "sonnet_evaluated", "playwright_rendered", "interactive",
+    "companies_crawled", "jobs_found", "jobs_new", "scored",
+    "classified_apply", "classified_consider", "classified_skip", "classified_reject",
+    "playwright_rendered", "interactive",
     "api_cached", "url_param_hits", "ai_navigated", "ai_replayed",
 ]
 
@@ -1170,22 +1181,22 @@ def _score_new_jobs(
     new_job_keys: list[str],
     summary: dict,
 ) -> None:
-    """Score newly discovered jobs via Haiku → Sonnet pipeline.
+    """Score newly discovered jobs via the unified v3.0 scorer.
 
-    Same pattern as ats_scanner.py scoring section.
+    v3.0 (Phase 34 Plan 3 Commit A): routes through score_and_persist_job so the
+    `classification` column populates on every scored row; per-classification
+    counters replace haiku_scored / sonnet_evaluated.
     """
     try:
         from job_finder.web.scoring_orchestrator import (
             load_scoring_profile,
-            score_and_persist_haiku,
-            score_and_persist_sonnet,
+            score_and_persist_job,
         )
     except ImportError:
         logger.debug("scoring_orchestrator not available — skipping scoring")
         return
 
     try:
-        from job_finder.config import DEFAULT_HAIKU_THRESHOLD
         from job_finder.web.model_provider import tier_has_configured_provider
     except ImportError:
         logger.debug("model_provider not available — skipping scoring")
@@ -1204,15 +1215,11 @@ def _score_new_jobs(
     except (ImportError, Exception):
         pass
 
-    if not tier_has_configured_provider("haiku", config, _scoring_client):
-        logger.debug("No routable haiku provider — skipping careers_crawl scoring")
+    if not tier_has_configured_provider("scoring", config, _scoring_client):
+        logger.debug("No routable scoring provider — skipping careers_crawl scoring")
         return
 
     profile = load_scoring_profile(config)
-    threshold = config.get("scoring", {}).get(
-        "haiku_threshold", DEFAULT_HAIKU_THRESHOLD
-    )
-    sonnet_queue: list[str] = []
 
     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
 
@@ -1228,8 +1235,7 @@ def _score_new_jobs(
                 job_row = dict(row)
 
                 # Enrich BEFORE scoring — careers_crawl produces title+URL only
-                # shells, so Haiku would otherwise score an empty description.
-                # Mirrors scoring_runner.run_haiku_scoring's enrichment path.
+                # shells, so the scorer would otherwise read an empty description.
                 if enrich_job is not None and (
                     not job_row.get("jd_full")
                     or job_row.get("salary_min") is None
@@ -1250,41 +1256,18 @@ def _score_new_jobs(
                             "(non-fatal): %s", dedup_key, enrich_err,
                         )
 
-                result = score_and_persist_haiku(
+                result = score_and_persist_job(
                     conn, job_row, config, profile,
                 )
                 if result is None:
                     continue
-                summary["haiku_scored"] = summary.get("haiku_scored", 0) + 1
-                if result.get("score", 0) >= threshold:
-                    sonnet_queue.append(dedup_key)
+                summary["scored"] = summary.get("scored", 0) + 1
+                cls = result.get("classification")
+                if cls in ("apply", "consider", "skip", "reject"):
+                    key = f"classified_{cls}"
+                    summary[key] = summary.get(key, 0) + 1
             except Exception as e:
                 logger.warning(
-                    "careers_crawl Haiku scoring error for '%s': %s", dedup_key, e,
+                    "careers_crawl scoring error for '%s': %s", dedup_key, e,
                     exc_info=True,
                 )
-
-        # Sonnet evaluation for above-threshold jobs
-        if sonnet_queue and score_and_persist_sonnet is not None:
-            for dedup_key in sonnet_queue:
-                try:
-                    row = conn.execute(
-                        "SELECT * FROM jobs WHERE dedup_key = ?", (dedup_key,)
-                    ).fetchone()
-                    if row is None:
-                        continue
-                    job_row = dict(row)
-                    if not job_row.get("jd_full"):
-                        continue
-                    s_result = score_and_persist_sonnet(
-                        conn, job_row, config, profile,
-                    )
-                    if s_result is not None:
-                        summary["sonnet_evaluated"] = (
-                            summary.get("sonnet_evaluated", 0) + 1
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "careers_crawl Sonnet scoring error for '%s': %s",
-                        dedup_key, e,
-                    )
