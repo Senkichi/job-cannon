@@ -448,3 +448,284 @@ class TestOpusScoreInAllColumns:
         result = get_job(migrated_conn, "acme|opus-score-test")
         assert result is not None
         assert "opus_score" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: v3.0 JobAssessment + derive_classification + persist_job_assessment
+#        (Phase 34 Plan 1 — new scorer schema)
+# ---------------------------------------------------------------------------
+
+_ALL_KEYS = (
+    "title_fit", "location_fit", "comp_fit",
+    "domain_match", "seniority_match", "skills_match",
+)
+
+
+def _rationale_sample() -> dict:
+    """Realistic v3 rationale payload for persist-path tests."""
+    return {
+        "strengths": ["Strong Python", "ML background"],
+        "gaps": ["No Kubernetes"],
+        "talking_points": ["Platform team lead experience"],
+        "resume_priority_skills": ["Python", "PyTorch", "AWS"],
+    }
+
+
+class TestJobAssessmentDataclass:
+    """JobAssessment is @dataclass(frozen=True) with the D-05 shape."""
+
+    def test_job_assessment_is_frozen(self):
+        """JobAssessment instances are immutable (attempted mutation raises)."""
+        from job_finder.db import JobAssessment
+        a = JobAssessment(
+            sub_scores={k: 3 for k in _ALL_KEYS},
+            classification="",
+            rationale=_rationale_sample(),
+            provider="ollama",
+        )
+        with pytest.raises((AttributeError, Exception)):
+            a.classification = "apply"  # type: ignore[misc]
+
+    def test_job_assessment_has_expected_fields(self):
+        """D-05 fields: sub_scores, classification, rationale, provider (optional)."""
+        from job_finder.db import JobAssessment
+        a = JobAssessment(
+            sub_scores={k: 4 for k in _ALL_KEYS},
+            classification="apply",
+            rationale=_rationale_sample(),
+            provider="ollama",
+        )
+        assert a.sub_scores == {k: 4 for k in _ALL_KEYS}
+        assert a.classification == "apply"
+        assert a.rationale["strengths"] == ["Strong Python", "ML background"]
+        assert a.provider == "ollama"
+
+    def test_job_assessment_provider_defaults_to_none(self):
+        """provider field is optional (defaults to None)."""
+        from job_finder.db import JobAssessment
+        a = JobAssessment(
+            sub_scores={k: 3 for k in _ALL_KEYS},
+            classification="",
+            rationale=_rationale_sample(),
+        )
+        assert a.provider is None
+
+
+class TestDeriveClassification:
+    """derive_classification implements CONTEXT D-06 rule exactly."""
+
+    @pytest.mark.parametrize("sub_scores,note,expected", [
+        # legitimacy_note truthy -> reject regardless of sub_scores
+        ({k: 5 for k in _ALL_KEYS}, "scam_pattern_matched", "reject"),
+        ({k: 3 for k in _ALL_KEYS}, "ghost_job", "reject"),
+        ({k: 2 for k in _ALL_KEYS}, "stale_posting", "reject"),
+        # any sub-score == 1 -> reject (legitimacy_note None/empty)
+        ({**{k: 5 for k in _ALL_KEYS}, "title_fit": 1}, None, "reject"),
+        ({**{k: 5 for k in _ALL_KEYS}, "skills_match": 1}, None, "reject"),
+        ({**{k: 5 for k in _ALL_KEYS}, "location_fit": 1}, "", "reject"),
+        # all sub-scores >= 3 -> apply
+        ({k: 3 for k in _ALL_KEYS}, None, "apply"),
+        ({k: 5 for k in _ALL_KEYS}, None, "apply"),
+        ({**{k: 3 for k in _ALL_KEYS}, "title_fit": 5, "skills_match": 4}, None, "apply"),
+        # all >= 2 but not all >= 3 -> consider
+        ({k: 2 for k in _ALL_KEYS}, None, "consider"),
+        ({**{k: 2 for k in _ALL_KEYS}, "title_fit": 3, "skills_match": 3}, None, "consider"),
+        ({**{k: 5 for k in _ALL_KEYS}, "title_fit": 2}, None, "consider"),
+        # empty legitimacy_note is falsy and does not trigger reject
+        ({k: 4 for k in _ALL_KEYS}, "", "apply"),
+    ])
+    def test_derive_classification_rule(self, sub_scores, note, expected):
+        """CONTEXT D-06 truth table — exhaustive parametrized coverage."""
+        from job_finder.db import derive_classification
+        assert derive_classification(sub_scores, note) == expected
+
+    def test_derive_classification_skip_branch_documented_edge(self):
+        """The "skip" branch is unreachable for integer 1-5 sub-scores.
+
+        Rule order: reject (any==1) -> apply (all>=3) -> consider (all>=2) -> skip.
+        With domain {1..5}, any value <2 is 1 which already returned reject.
+        The branch is retained for defense against future domain changes.
+        """
+        from job_finder.db import derive_classification
+        # Passing a hypothetical 0 (outside the documented 1-5 domain) would hit skip.
+        # This test documents the guarantee without relying on out-of-domain values
+        # reaching production (schema validator rejects <1 upstream).
+        out_of_domain = {k: 0 for k in _ALL_KEYS}
+        assert derive_classification(out_of_domain, None) == "skip"
+
+    def test_derive_classification_legitimacy_precedence(self):
+        """legitimacy_note check runs BEFORE sub-score checks (order-sensitive)."""
+        from job_finder.db import derive_classification
+        # Would be "apply" on sub-scores alone, but legitimacy_note wins.
+        assert derive_classification({k: 5 for k in _ALL_KEYS}, "scam") == "reject"
+
+
+class TestPersistJobAssessment:
+    """persist_job_assessment writes classification + sub_scores_json + rationale + provider/model."""
+
+    def test_happy_path_writes_all_columns(self, migrated_conn):
+        """Writing a valid JobAssessment updates all 5 target columns."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+        _insert_job(migrated_conn, "acme|v3-happy-path")
+
+        assessment = JobAssessment(
+            sub_scores={k: 4 for k in _ALL_KEYS},
+            classification="",  # sentinel — persist overwrites
+            rationale=_rationale_sample(),
+            provider=None,
+        )
+        persist_job_assessment(
+            migrated_conn,
+            "acme|v3-happy-path",
+            assessment,
+            provider="ollama",
+            model="qwen2.5:14b",
+        )
+
+        row = migrated_conn.execute(
+            "SELECT classification, sub_scores_json, fit_analysis, "
+            "scoring_provider, scoring_model "
+            "FROM jobs WHERE dedup_key = 'acme|v3-happy-path'"
+        ).fetchone()
+
+        import json as _json
+        assert row["classification"] == "apply"
+        assert _json.loads(row["sub_scores_json"]) == {k: 4 for k in _ALL_KEYS}
+        assert _json.loads(row["fit_analysis"])["strengths"] == [
+            "Strong Python", "ML background"
+        ]
+        assert row["scoring_provider"] == "ollama"
+        assert row["scoring_model"] == "qwen2.5:14b"
+
+    def test_classification_derived_not_trusted(self, migrated_conn):
+        """Classification is derived from sub_scores + legitimacy_note; passed-in value ignored."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+        _insert_job(migrated_conn, "acme|v3-derive")
+
+        # Pass "reject" on the assessment object — should be IGNORED.
+        # Sub-scores all 3 -> should derive "apply" since legitimacy_note is NULL.
+        assessment = JobAssessment(
+            sub_scores={k: 3 for k in _ALL_KEYS},
+            classification="reject",  # stale / lying field — must be ignored
+            rationale=_rationale_sample(),
+        )
+        persist_job_assessment(migrated_conn, "acme|v3-derive", assessment)
+
+        row = migrated_conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = 'acme|v3-derive'"
+        ).fetchone()
+        assert row["classification"] == "apply"
+
+    def test_legitimacy_note_sources_from_row(self, migrated_conn):
+        """legitimacy_note is read from the jobs row, not from the assessment (D-07)."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+        _insert_job(migrated_conn, "acme|v3-legit")
+        # Set legitimacy_note on the row (simulates ingestion-time scam detection)
+        migrated_conn.execute(
+            "UPDATE jobs SET legitimacy_note = 'scam_pattern' WHERE dedup_key = ?",
+            ("acme|v3-legit",),
+        )
+        migrated_conn.commit()
+
+        # Even with all-5 sub-scores, legitimacy_note forces reject.
+        assessment = JobAssessment(
+            sub_scores={k: 5 for k in _ALL_KEYS},
+            classification="",
+            rationale=_rationale_sample(),
+        )
+        persist_job_assessment(migrated_conn, "acme|v3-legit", assessment)
+
+        row = migrated_conn.execute(
+            "SELECT classification FROM jobs WHERE dedup_key = 'acme|v3-legit'"
+        ).fetchone()
+        assert row["classification"] == "reject"
+
+    def test_missing_dedup_key_is_noop(self, migrated_conn):
+        """Calling persist_job_assessment on a nonexistent dedup_key is a silent no-op."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+
+        assessment = JobAssessment(
+            sub_scores={k: 4 for k in _ALL_KEYS},
+            classification="",
+            rationale=_rationale_sample(),
+        )
+        # Must not raise.
+        persist_job_assessment(migrated_conn, "acme|does-not-exist", assessment)
+
+        row = migrated_conn.execute(
+            "SELECT COUNT(*) as c FROM jobs WHERE dedup_key = 'acme|does-not-exist'"
+        ).fetchone()
+        assert row["c"] == 0  # no row created, no error raised
+
+    def test_provider_coalesce_preserves_existing(self, migrated_conn):
+        """Passing provider=None preserves an existing scoring_provider value."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+        _insert_job(migrated_conn, "acme|v3-coalesce")
+        # Pre-seed a scoring_provider (simulates earlier scoring attempt)
+        migrated_conn.execute(
+            "UPDATE jobs SET scoring_provider = 'anthropic' WHERE dedup_key = ?",
+            ("acme|v3-coalesce",),
+        )
+        migrated_conn.commit()
+
+        assessment = JobAssessment(
+            sub_scores={k: 4 for k in _ALL_KEYS},
+            classification="",
+            rationale=_rationale_sample(),
+        )
+        # Call with provider=None and model=None — COALESCE should keep existing.
+        persist_job_assessment(
+            migrated_conn, "acme|v3-coalesce", assessment,
+            provider=None, model=None,
+        )
+
+        row = migrated_conn.execute(
+            "SELECT scoring_provider, scoring_model "
+            "FROM jobs WHERE dedup_key = 'acme|v3-coalesce'"
+        ).fetchone()
+        assert row["scoring_provider"] == "anthropic"  # preserved
+        assert row["scoring_model"] is None  # was NULL, stays NULL
+
+    def test_sub_scores_serialized_with_stable_key_order(self, migrated_conn):
+        """sub_scores_json uses CONTEXT D-05 key order (title_fit first)."""
+        from job_finder.db import JobAssessment, persist_job_assessment
+        _insert_job(migrated_conn, "acme|v3-order")
+
+        # Build dict in intentionally-wrong order to prove ordering is enforced.
+        scrambled = {
+            "skills_match": 4,
+            "location_fit": 3,
+            "title_fit": 5,
+            "seniority_match": 3,
+            "comp_fit": 4,
+            "domain_match": 3,
+        }
+        assessment = JobAssessment(
+            sub_scores=scrambled,
+            classification="",
+            rationale=_rationale_sample(),
+        )
+        persist_job_assessment(migrated_conn, "acme|v3-order", assessment)
+
+        row = migrated_conn.execute(
+            "SELECT sub_scores_json FROM jobs WHERE dedup_key = 'acme|v3-order'"
+        ).fetchone()
+
+        # Parse as list of items to verify order matches D-05.
+        import json as _json
+        # Python 3.7+ dict preserves insertion order. json.loads preserves that.
+        parsed = _json.loads(row["sub_scores_json"])
+        assert list(parsed.keys()) == [
+            "title_fit", "location_fit", "comp_fit",
+            "domain_match", "seniority_match", "skills_match",
+        ]
+
+    def test_legacy_persist_functions_still_exist(self):
+        """persist_haiku_score and persist_sonnet_score still present (Plan 4 removes them)."""
+        from job_finder import db
+        assert hasattr(db, "persist_haiku_score"), (
+            "Plan 1 must NOT remove persist_haiku_score (Plan 4 scope)"
+        )
+        assert hasattr(db, "persist_sonnet_score"), (
+            "Plan 1 must NOT remove persist_sonnet_score (Plan 4 scope)"
+        )

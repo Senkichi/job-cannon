@@ -6,11 +6,86 @@ import json
 import logging
 import re
 import sqlite3
+from dataclasses import dataclass
 
 from job_finder.models import Job
 from job_finder.json_utils import safe_json_load, utc_now_iso
 
 _log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# v3.0 ordinal scoring (Phase 34) — JobAssessment + classification rule
+# ---------------------------------------------------------------------------
+
+# Canonical sub-score key order (matches CONTEXT D-05 and the v3 scoring prompt's
+# JSON schema). Used for JSON serialization stability and for derive_classification.
+_SUB_SCORE_KEYS: tuple[str, ...] = (
+    "title_fit",
+    "location_fit",
+    "comp_fit",
+    "domain_match",
+    "seniority_match",
+    "skills_match",
+)
+
+
+@dataclass(frozen=True)
+class JobAssessment:
+    """Unified v3.0 scoring result. Replaces HaikuScore + SonnetScore pair.
+
+    Per CONTEXT D-05 (Phase 34):
+
+      sub_scores: dict[str, int] with 6 keys (title_fit, location_fit, comp_fit,
+          domain_match, seniority_match, skills_match) — each 1-5 integer.
+      classification: one of apply|consider|skip|reject. Typically a sentinel
+          empty string at construction time; derive_classification() at persist
+          time computes the authoritative value (see D-06 rule and D-07 note
+          that legitimacy_note is read from the jobs row, not from the LLM).
+      rationale: dict with keys strengths, gaps, talking_points,
+          resume_priority_skills (each a list[str]); serialized to the reused
+          fit_analysis column per D-08.
+      provider: cascade-attribution string (e.g., "ollama", "anthropic") or None.
+    """
+
+    sub_scores: dict
+    classification: str
+    rationale: dict
+    provider: str | None = None
+
+
+def derive_classification(sub_scores: dict, legitimacy_note: str | None) -> str:
+    """Python-derived 4-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
+
+    Rule (exact CONTEXT D-06 order):
+      1. legitimacy_note truthy  -> "reject"
+      2. any sub-score == 1      -> "reject"
+      3. all sub-scores >= 3     -> "apply"
+      4. all sub-scores >= 2     -> "consider"
+      5. otherwise               -> "skip"
+
+    Note: for integer 1-5 sub-scores, branch 5 ("skip") is effectively unreachable —
+    any value below 2 is 1, which already triggered reject at branch 2. The branch
+    remains for defense-in-depth against future sub-score domain changes (e.g.,
+    0 added as a sentinel).
+
+    Args:
+        sub_scores: dict of the 6 ordinal sub-scores (1-5 integers).
+        legitimacy_note: value of the jobs.legitimacy_note column; truthy means
+            ingestion-time scam/exclusion detection flagged this row.
+
+    Returns:
+        One of "reject", "apply", "consider", "skip".
+    """
+    if legitimacy_note:
+        return "reject"
+    if any(v == 1 for v in sub_scores.values()):
+        return "reject"
+    if all(v >= 3 for v in sub_scores.values()):
+        return "apply"
+    if all(v >= 2 for v in sub_scores.values()):
+        return "consider"
+    return "skip"
 
 
 # Explicit column lists for high-traffic queries. Avoids SELECT * so that
@@ -272,6 +347,77 @@ def persist_sonnet_score(
         "scoring_provider = COALESCE(?, scoring_provider), "
         "eval_blocks = COALESCE(?, eval_blocks) WHERE dedup_key = ?",
         (sonnet_score, fit_analysis, provider, eval_blocks, dedup_key),
+    )
+    conn.commit()
+
+
+def persist_job_assessment(
+    conn: sqlite3.Connection,
+    dedup_key: str,
+    assessment: JobAssessment,
+    provider: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Persist a v3.0 JobAssessment. Replaces persist_haiku_score + persist_sonnet_score.
+
+    Writes classification (derived at persist time), sub_scores_json (JSON),
+    fit_analysis (rationale payload — D-08 reuse), scoring_provider, scoring_model.
+    Legacy haiku_score/haiku_summary/sonnet_score columns are untouched here
+    (Plan 2's dual-write shim writes them; Plan 4 removes that shim).
+
+    legitimacy_note sourcing (CONTEXT D-07): read from the existing jobs row,
+    NOT from the assessment. derive_classification uses this value to compute
+    the authoritative classification — any classification field on the passed
+    assessment is ignored (anti-pattern 3 defense).
+
+    No-op on missing dedup_key (SQLite UPDATE with no matching row is a silent
+    no-op; we also short-circuit before the UPDATE to avoid COALESCE no-ops).
+
+    Args:
+        conn: Open sqlite3 connection.
+        dedup_key: The job's primary key.
+        assessment: JobAssessment with sub_scores + rationale.
+        provider: Cascade-attribution string; None preserves the existing value.
+        model: Model identifier (e.g., "qwen2.5:14b"); None preserves existing.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT legitimacy_note FROM jobs WHERE dedup_key = ?", (dedup_key,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        # Silent no-op matches SQLite UPDATE-no-match semantics.
+        return
+    legitimacy_note = row[0]
+    final_classification = derive_classification(
+        assessment.sub_scores, legitimacy_note
+    )
+
+    # Serialize sub_scores with stable key order for diff-friendliness.
+    ordered_sub_scores = {
+        k: assessment.sub_scores[k]
+        for k in _SUB_SCORE_KEYS
+        if k in assessment.sub_scores
+    }
+
+    cur.execute(
+        """
+        UPDATE jobs
+           SET classification   = ?,
+               sub_scores_json  = ?,
+               fit_analysis     = ?,
+               scoring_provider = COALESCE(?, scoring_provider),
+               scoring_model    = COALESCE(?, scoring_model)
+         WHERE dedup_key = ?
+        """,
+        (
+            final_classification,
+            json.dumps(ordered_sub_scores),
+            json.dumps(assessment.rationale),
+            provider or assessment.provider,
+            model,
+            dedup_key,
+        ),
     )
     conn.commit()
 
