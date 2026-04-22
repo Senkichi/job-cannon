@@ -706,6 +706,27 @@ MIGRATIONS = [
         "ALTER TABLE jobs DROP COLUMN liveness_status",
         "ALTER TABLE jobs DROP COLUMN liveness_reason",
     ],
+
+    # Migration 40: v3.0 ordinal rubric scoring — additive schema.
+    #
+    # Adds unified ordinal-assessment columns alongside existing tier-specific columns.
+    # Migration 41 (Plan 5 of Phase 34) drops the legacy columns after rescore convergence.
+    #
+    #   classification TEXT        — enum: apply|consider|skip|reject (populated by
+    #                                persist_job_assessment via derive_classification)
+    #   sub_scores_json TEXT       — JSON dict of 6 ordinal 1-5 sub-scores
+    #   scoring_model TEXT         — model ID (e.g., "qwen2.5:14b"); closes the
+    #                                (provider, tier) → (provider, model) keying gap (REQ MIGRATE-02)
+    #
+    # fit_analysis column REUSED to hold the rationale payload (strengths/gaps/
+    # talking_points/resume_priority_skills) — preserves compatibility with
+    # resume_generator and interview_prep which remain out-of-scope for v3.0.
+    [
+        "ALTER TABLE jobs ADD COLUMN classification TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN sub_scores_json TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN scoring_model TEXT DEFAULT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_classification ON jobs(classification)",
+    ],
 ]
 
 def run_migrations(db_path: str) -> None:

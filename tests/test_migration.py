@@ -418,7 +418,7 @@ def test_migration_count_is_thirteen():
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 39
+    assert len(MIGRATIONS) == 40
 
 
 class TestMigration27:
@@ -1169,5 +1169,103 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 39 entries (updated for Migration 39: drop liveness_* columns)."""
-        assert len(MIGRATIONS) == 39
+        """MIGRATIONS list has exactly 40 entries (updated for Migration 40: v3.0 ordinal scorer schema)."""
+        assert len(MIGRATIONS) == 40
+
+
+class TestMigration40:
+    """Tests for Migration 40 (v3.0 ordinal rubric scoring — additive schema).
+
+    Adds classification, sub_scores_json, scoring_model columns + idx_jobs_classification.
+    No data loss; rollback is `git revert` + drop new columns.
+    """
+
+    def test_migration_40_additive_schema(self, tmp_db_path):
+        """Migration 40 adds classification, sub_scores_json, scoring_model columns to jobs."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        col_info = {
+            row[1]: row
+            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        conn.close()
+
+        # All three new columns exist with TEXT type and default NULL
+        for col in ("classification", "sub_scores_json", "scoring_model"):
+            assert col in col_info, f"Migration 40: missing column {col}"
+            # PRAGMA table_info row: (cid, name, type, notnull, dflt_value, pk)
+            assert col_info[col][2].upper() == "TEXT", (
+                f"Migration 40: {col} has type {col_info[col][2]}, expected TEXT"
+            )
+            assert col_info[col][4] is None or str(col_info[col][4]).upper() == "NULL", (
+                f"Migration 40: {col} default is {col_info[col][4]}, expected NULL"
+            )
+
+    def test_migration_40_creates_classification_index(self, tmp_db_path):
+        """Migration 40 creates idx_jobs_classification on jobs(classification)."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_classification'"
+        ).fetchone()
+        conn.close()
+        assert row is not None, "Migration 40: idx_jobs_classification index missing"
+
+    def test_migration_40_user_version_increments(self, tmp_db_path):
+        """Migration 40 increments user_version to 40 (matches len(MIGRATIONS))."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        conn.close()
+        assert version == len(MIGRATIONS), (
+            f"Migration 40: user_version={version}, expected {len(MIGRATIONS)}"
+        )
+        assert version == 40, f"Migration 40: expected user_version=40, got {version}"
+
+    def test_migration_40_defaults_null_on_new_row(self, tmp_db_path):
+        """New jobs rows have classification/sub_scores_json/scoring_model = NULL by default."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        conn.execute(
+            """INSERT INTO jobs
+                (dedup_key, title, company, location, first_seen, last_seen)
+            VALUES ('test|mig40|scorer', 'Test Job', 'Test Co', 'Remote',
+                    '2026-04-21', '2026-04-21')"""
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT classification, sub_scores_json, scoring_model "
+            "FROM jobs WHERE dedup_key = 'test|mig40|scorer'"
+        ).fetchone()
+        conn.close()
+        assert row[0] is None, f"Expected classification=NULL, got {row[0]!r}"
+        assert row[1] is None, f"Expected sub_scores_json=NULL, got {row[1]!r}"
+        assert row[2] is None, f"Expected scoring_model=NULL, got {row[2]!r}"
+
+    def test_migration_40_idempotent(self, tmp_db_path):
+        """Running migrations twice (incl. Migration 40) does not raise — columns still exist."""
+        run_migrations(tmp_db_path)
+        # Second run must not raise duplicate-column errors
+        run_migrations(tmp_db_path)
+
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        conn.close()
+
+        for col in ("classification", "sub_scores_json", "scoring_model"):
+            assert col in cols, f"Migration 40 idempotency: {col} missing after double-run"
+        assert version == 40, f"Migration 40 idempotency: user_version={version}, expected 40"
+
+    def test_migration_40_preserves_legacy_columns(self, tmp_db_path):
+        """Migration 40 is additive — legacy haiku_score, haiku_summary, sonnet_score still exist.
+        (Migration 41 in Plan 5 removes them; Plan 1's migration must not touch them.)"""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        for legacy_col in ("haiku_score", "haiku_summary", "sonnet_score", "fit_analysis"):
+            assert legacy_col in cols, (
+                f"Migration 40 must NOT remove legacy column {legacy_col} "
+                f"(Plan 5 / Migration 41 handles removal)"
+            )
