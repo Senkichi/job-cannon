@@ -169,7 +169,7 @@
 
 **Plans**: 5 plans
 
-- [ ] 34-01-PLAN.md — Additive schema (Migration 40) + JobAssessment/derive_classification/persist_job_assessment in db.py + job_scorer.py skeleton (no callers yet)
+- [x] 34-01-PLAN.md — Additive schema (Migration 40) + JobAssessment/derive_classification/persist_job_assessment in db.py + job_scorer.py skeleton (no callers yet) (completed 2026-04-22)
 - [ ] 34-02-PLAN.md — Orchestrator dual-write: score_and_persist_job + run_scoring + use_unified_scorer flag (2-step rollout A→B)
 - [ ] 34-03-PLAN.md — Read migration in 5 revertable sub-commits A→E (queries, batch_scoring merge, dashboard, templates, resume+summary)
 - [ ] 34-04-PLAN.md — Batched rescore (B1=150, B2=1000, B3=remaining ~2750) with G1-G4 gates + systematic-debugging loop, then legacy-write removal + module deletion sweep (A→E)

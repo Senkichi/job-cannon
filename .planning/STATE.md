@@ -2,33 +2,33 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
-status: planning
+status: executing
 stopped_at: Phase 34 context gathered
-last_updated: "2026-04-21T23:03:48.614Z"
-last_activity: 2026-04-21
+last_updated: "2026-04-22T05:15:01.155Z"
+last_activity: 2026-04-22
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 2
-  percent: 29
+  completed_plans: 3
+  percent: 43
 ---
 
 # State
 
 ## Current Position
 
-Phase: 34
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-04-21
+Phase: 34 (Greenfield Scorer Rewrite) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-04-22
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Milestone v3.0 — Phase 33 (Local-LLM Site-Fitness Survey) about to begin planning
+**Current focus:** Phase 34 — Greenfield Scorer Rewrite
 
 ## Milestone Structure (v3.0)
 
@@ -55,6 +55,7 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 | 32-integration-config-wiring | 01 | 15min | 3 | 3 |
 
 *Updated after each plan completion*
+| Phase --phase P34 | --plan | 01 tasks | --duration files |
 
 ## Accumulated Context
 
