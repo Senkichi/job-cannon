@@ -412,12 +412,13 @@ def _generate_resume_background(
             )
             conn.commit()
 
-            # Determine dispatch: single or multi based on sonnet_score threshold
-            multi_threshold = (
-                config.get("scoring", {}).get("multi_version_threshold", DEFAULT_MULTI_VERSION_THRESHOLD)
-            )
-            sonnet_score = float(job_row.get("sonnet_score") or 0.0)
-            use_multi = sonnet_score >= multi_threshold
+            # v3.0 (Phase 34 Plan 3 Commit E): dispatch based on classification
+            # instead of sonnet_score threshold. Multi-version synthesis reserves
+            # its cost for the highest-priority matches — 'apply' only. All
+            # other classifications (consider / skip / reject) take the single-
+            # pass path. multi_version_threshold config is retained for revert
+            # path compat but no longer consulted here.
+            use_multi = job_row.get("classification") == "apply"
 
             if use_multi:
                 # Multi-version synthesis: 3 strategy-focused variants + synthesis pass
@@ -426,8 +427,8 @@ def _generate_resume_background(
                 from job_finder.web.resume_multi_version import generate_resume_multi
                 logger.info(
                     "_generate_resume_background: using multi-version synthesis for gen_id=%s "
-                    "(sonnet_score=%.1f >= threshold=%d)",
-                    gen_id, sonnet_score, multi_threshold,
+                    "(classification=apply)",
+                    gen_id,
                 )
                 resume_data = generate_resume_multi(db_path, job_row, profile, config)
                 generation_type = "multi"

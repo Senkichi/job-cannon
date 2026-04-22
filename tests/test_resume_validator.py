@@ -445,6 +445,10 @@ _MOCK_JOB_ROW = {
     "jd_full": "Looking for a data scientist with Python and SQL skills.",
     "fit_analysis": None,
     "sonnet_score": 50.0,
+    # v3.0 (Phase 34 Plan 3 Commit E): dispatch uses classification
+    # == 'apply'. 'consider' takes the single-version path which these
+    # validator tests exercise.
+    "classification": "consider",
 }
 
 _BACKGROUND_CONFIG = {

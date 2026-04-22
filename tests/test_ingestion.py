@@ -1195,29 +1195,24 @@ class TestDataForSEOIngestion:
 
 
 class TestUnifiedScorerFlagGate:
-    """Phase 34 Plan 2 — use_unified_scorer config flag dispatch."""
+    """Phase 34 Plan 3 Commit E — use_unified_scorer flag after legacy else-branch deletion.
+
+    The legacy Haiku/Sonnet two-phase branch is removed in Commit E; only the
+    unified-scorer path remains. The flag is still consulted but now with a
+    default of True, and a False value makes run_ingestion skip AI scoring
+    entirely (no legacy fallback). Plan 4 removes the flag itself.
+    """
 
     def _job(self, title="Unified DS", company="Acme"):
         return _make_job(title=title, company=company)
 
     def _run_with_flag(self, flag_value, minimal_config, migrated_db_path):
         """Common harness — runs ingestion with a single fake job and the
-        given flag value, recording which runner was called. Returns a dict
-        with call flags: haiku/sonnet/unified."""
+        given flag value, recording whether the unified scorer was called."""
         import job_finder.web.pipeline_runner as pr
 
         gmail_jobs = [self._job()]
-        flags = {"haiku_called": False,
-                 "sonnet_called": False,
-                 "unified_called": False}
-
-        def fake_haiku(keys, cfg, db):
-            flags["haiku_called"] = True
-            return ([], len(keys))
-
-        def fake_sonnet(keys, cfg, db):
-            flags["sonnet_called"] = True
-            return len(keys)
+        flags = {"unified_called": False}
 
         def fake_unified(keys, cfg, db):
             flags["unified_called"] = True
@@ -1242,8 +1237,6 @@ class TestUnifiedScorerFlagGate:
         with (
             patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
-            patch.object(pr, "run_haiku_scoring", side_effect=fake_haiku),
-            patch.object(pr, "run_sonnet_evaluation", side_effect=fake_sonnet),
             patch("job_finder.web.scoring_runner.run_scoring",
                   side_effect=fake_unified),
         ):
@@ -1253,28 +1246,24 @@ class TestUnifiedScorerFlagGate:
 
         return flags
 
-    def test_flag_false_uses_legacy_haiku_sonnet(
+    def test_flag_false_skips_ai_scoring(
         self, minimal_config, migrated_db_path,
     ):
-        """Flag False -> run_haiku_scoring invoked; run_scoring NOT invoked."""
+        """Flag False -> unified scorer NOT invoked (no fallback to legacy path)."""
         flags = self._run_with_flag(False, minimal_config, migrated_db_path)
-        assert flags["haiku_called"] is True
         assert flags["unified_called"] is False
 
     def test_flag_true_uses_run_scoring(self, minimal_config, migrated_db_path):
-        """Flag True -> run_scoring invoked; legacy runners NOT invoked."""
+        """Flag True -> run_scoring invoked."""
         flags = self._run_with_flag(True, minimal_config, migrated_db_path)
         assert flags["unified_called"] is True
-        assert flags["haiku_called"] is False
-        assert flags["sonnet_called"] is False
 
-    def test_flag_absent_defaults_false(
+    def test_flag_absent_defaults_true(
         self, minimal_config, migrated_db_path,
     ):
-        """Config with no use_unified_scorer key -> default is legacy path."""
+        """Config with no use_unified_scorer key -> default True (v3.0 Commit E)."""
         flags = self._run_with_flag(None, minimal_config, migrated_db_path)
-        assert flags["haiku_called"] is True
-        assert flags["unified_called"] is False
+        assert flags["unified_called"] is True
 
     def test_flag_true_populates_classification_summary_keys(
         self, minimal_config, migrated_db_path,

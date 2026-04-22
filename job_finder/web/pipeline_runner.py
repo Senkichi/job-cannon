@@ -26,7 +26,10 @@ from job_finder.db import upsert_job, log_run
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.scoring_runner import run_haiku_scoring, run_sonnet_evaluation
+# v3.0 (Phase 34 Plan 3 Commit E): the unified run_scoring is imported lazily
+# inside run_ingestion(). The legacy run_haiku_scoring / run_sonnet_evaluation
+# imports are gone — they remain available on scoring_runner for Plan 4 to
+# delete alongside the legacy scorer modules.
 
 # ats_scanner import is lazy (inside _score_and_persist) to avoid circular import:
 # ats_scanner → dedup_normalizer → pipeline_runner → ats_scanner (partial)
@@ -81,13 +84,20 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
             - serpapi_errors: list[str]
             - jobs_new: int
             - jobs_updated: int
-            - jobs_scored: int
+            - jobs_scored: int (heuristic score applied during upsert)
             - job_errors: list[str]
-            - haiku_scored: int
-            - sonnet_queued: int
-            - sonnet_queue: list[str]
-            - sonnet_evaluated: int
+            - scored: int (count of rows routed through score_and_persist_job)
+            - classified_apply: int
+            - classified_consider: int
+            - classified_skip: int
+            - classified_reject: int
             - duration_seconds: float
+
+        v3.0 (Phase 34 Plan 3 Commit E): the legacy haiku_scored /
+        sonnet_queued / sonnet_queue / sonnet_evaluated keys are removed.
+        The unified-scorer path is the only remaining branch; the
+        use_unified_scorer config flag is honored but the else-branch is
+        gone. Plan 4 removes the flag itself.
     """
     start_time = datetime.now()
     summary = {
@@ -105,10 +115,11 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         "jobs_updated": 0,
         "jobs_scored": 0,
         "job_errors": [],
-        "haiku_scored": 0,
-        "sonnet_queued": 0,
-        "sonnet_queue": [],
-        "sonnet_evaluated": 0,
+        "scored": 0,
+        "classified_apply": 0,
+        "classified_consider": 0,
+        "classified_skip": 0,
+        "classified_reject": 0,
         "duration_seconds": 0.0,
     }
     new_job_keys: list[str] = []
@@ -168,38 +179,19 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
     # --- AI scoring (runs after DB connection is closed) ---
-    if score and new_job_keys:
-        if config.get("use_unified_scorer", False):
-            # v3.0 unified path — CONTEXT D-15. Single-tier ordinal scorer
-            # writes the new columns AND the legacy shim atomically per D-16.
-            from job_finder.web.scoring_runner import run_scoring
-            scoring_summary = run_scoring(new_job_keys, config, db_path)
-            summary["scored"] = scoring_summary.get("scored", 0)
-            summary["classified_apply"] = scoring_summary.get(
-                "classified_apply", 0,
-            )
-            summary["classified_consider"] = scoring_summary.get(
-                "classified_consider", 0,
-            )
-            summary["classified_skip"] = scoring_summary.get(
-                "classified_skip", 0,
-            )
-            summary["classified_reject"] = scoring_summary.get(
-                "classified_reject", 0,
-            )
-        else:
-            # Legacy two-phase path — Plan 4 removes this branch; Plan 3
-            # Commit E collapses the haiku_scored / sonnet_queued /
-            # sonnet_evaluated summary keys.
-            sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
-            summary["haiku_scored"] = haiku_scored_count
-            summary["sonnet_queue"] = sonnet_queue
-            summary["sonnet_queued"] = len(sonnet_queue)
+    # v3.0 (Phase 34 Plan 3 Commit E): only the unified-scorer path remains.
+    # The use_unified_scorer config flag is still consulted so a one-line
+    # revert (flag -> false) restores the legacy pipeline via Plan 2's shim,
+    # but the legacy Haiku/Sonnet else-branch is deleted here.
+    if score and new_job_keys and config.get("use_unified_scorer", True):
+        from job_finder.web.scoring_runner import run_scoring
+        scoring_summary = run_scoring(new_job_keys, config, db_path)
+        summary["scored"] = scoring_summary.get("scored", 0)
+        summary["classified_apply"] = scoring_summary.get("classified_apply", 0)
+        summary["classified_consider"] = scoring_summary.get("classified_consider", 0)
+        summary["classified_skip"] = scoring_summary.get("classified_skip", 0)
+        summary["classified_reject"] = scoring_summary.get("classified_reject", 0)
 
-            # Run Sonnet evaluation for jobs above threshold
-            if sonnet_queue:
-                sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
-                summary["sonnet_evaluated"] = sonnet_evaluated
     # --- Budget alert notification (check after AI scoring completes) ---
     _check_budget_alert(config, db_path)
 
@@ -211,11 +203,15 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         + summary.get("dataforseo_fetched", 0) + summary.get("portal_search_fetched", 0)
     )
     logger.info(
-        "Ingestion complete: %d fetched, %d new, %d haiku-scored, %d sonnet-evaluated in %.1fs",
+        "Ingestion complete: %d fetched, %d new, %d scored "
+        "(apply=%d, consider=%d, skip=%d, reject=%d) in %.1fs",
         total_fetched,
         summary["jobs_new"],
-        summary["haiku_scored"],
-        summary["sonnet_evaluated"],
+        summary["scored"],
+        summary["classified_apply"],
+        summary["classified_consider"],
+        summary["classified_skip"],
+        summary["classified_reject"],
         summary["duration_seconds"],
     )
 
