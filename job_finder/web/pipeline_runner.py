@@ -167,17 +167,39 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
             except Exception as e:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
-    # --- Two-tier AI scoring (runs after DB connection is closed) ---
+    # --- AI scoring (runs after DB connection is closed) ---
     if score and new_job_keys:
-        sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
-        summary["haiku_scored"] = haiku_scored_count
-        summary["sonnet_queue"] = sonnet_queue
-        summary["sonnet_queued"] = len(sonnet_queue)
+        if config.get("use_unified_scorer", False):
+            # v3.0 unified path — CONTEXT D-15. Single-tier ordinal scorer
+            # writes the new columns AND the legacy shim atomically per D-16.
+            from job_finder.web.scoring_runner import run_scoring
+            scoring_summary = run_scoring(new_job_keys, config, db_path)
+            summary["scored"] = scoring_summary.get("scored", 0)
+            summary["classified_apply"] = scoring_summary.get(
+                "classified_apply", 0,
+            )
+            summary["classified_consider"] = scoring_summary.get(
+                "classified_consider", 0,
+            )
+            summary["classified_skip"] = scoring_summary.get(
+                "classified_skip", 0,
+            )
+            summary["classified_reject"] = scoring_summary.get(
+                "classified_reject", 0,
+            )
+        else:
+            # Legacy two-phase path — Plan 4 removes this branch; Plan 3
+            # Commit E collapses the haiku_scored / sonnet_queued /
+            # sonnet_evaluated summary keys.
+            sonnet_queue, haiku_scored_count = run_haiku_scoring(new_job_keys, config, db_path)
+            summary["haiku_scored"] = haiku_scored_count
+            summary["sonnet_queue"] = sonnet_queue
+            summary["sonnet_queued"] = len(sonnet_queue)
 
-        # Run Sonnet evaluation for jobs above threshold
-        if sonnet_queue:
-            sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
-            summary["sonnet_evaluated"] = sonnet_evaluated
+            # Run Sonnet evaluation for jobs above threshold
+            if sonnet_queue:
+                sonnet_evaluated = run_sonnet_evaluation(sonnet_queue, config, db_path)
+                summary["sonnet_evaluated"] = sonnet_evaluated
     # --- Budget alert notification (check after AI scoring completes) ---
     _check_budget_alert(config, db_path)
 

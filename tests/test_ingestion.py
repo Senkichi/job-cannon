@@ -1181,3 +1181,204 @@ class TestDataForSEOIngestion:
 
         assert summary["dataforseo_fetched"] == 0
         assert len(summary["dataforseo_errors"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 34 Plan 2 — use_unified_scorer flag gate tests
+#
+# Verifies run_ingestion routes new-job scoring through either the legacy
+# run_haiku_scoring + run_sonnet_evaluation path (flag false / absent) or
+# the unified run_scoring path (flag true). Commit A ships the flag with
+# default false; Commit B flips it to true in config.yaml after a smoke
+# test on the dev DB.
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedScorerFlagGate:
+    """Phase 34 Plan 2 — use_unified_scorer config flag dispatch."""
+
+    def _job(self, title="Unified DS", company="Acme"):
+        return _make_job(title=title, company=company)
+
+    def _run_with_flag(self, flag_value, minimal_config, migrated_db_path):
+        """Common harness — runs ingestion with a single fake job and the
+        given flag value, recording which runner was called. Returns a dict
+        with call flags: haiku/sonnet/unified."""
+        import job_finder.web.pipeline_runner as pr
+
+        gmail_jobs = [self._job()]
+        flags = {"haiku_called": False,
+                 "sonnet_called": False,
+                 "unified_called": False}
+
+        def fake_haiku(keys, cfg, db):
+            flags["haiku_called"] = True
+            return ([], len(keys))
+
+        def fake_sonnet(keys, cfg, db):
+            flags["sonnet_called"] = True
+            return len(keys)
+
+        def fake_unified(keys, cfg, db):
+            flags["unified_called"] = True
+            return {
+                "scored": len(keys),
+                "classified_apply": 0,
+                "classified_consider": 0,
+                "classified_skip": 0,
+                "classified_reject": 0,
+                "skipped_dead": 0,
+                "skipped_no_jd": 0,
+                "errors": 0,
+            }
+
+        # Configure the flag in minimal_config if provided (None = absent key).
+        cfg = dict(minimal_config)
+        if flag_value is None:
+            cfg.pop("use_unified_scorer", None)
+        else:
+            cfg["use_unified_scorer"] = flag_value
+
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
+            patch.object(pr, "run_haiku_scoring", side_effect=fake_haiku),
+            patch.object(pr, "run_sonnet_evaluation", side_effect=fake_sonnet),
+            patch("job_finder.web.scoring_runner.run_scoring",
+                  side_effect=fake_unified),
+        ):
+            MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
+            MockSerp.return_value.fetch_jobs.return_value = []
+            pr.run_ingestion(migrated_db_path, cfg)
+
+        return flags
+
+    def test_flag_false_uses_legacy_haiku_sonnet(
+        self, minimal_config, migrated_db_path,
+    ):
+        """Flag False -> run_haiku_scoring invoked; run_scoring NOT invoked."""
+        flags = self._run_with_flag(False, minimal_config, migrated_db_path)
+        assert flags["haiku_called"] is True
+        assert flags["unified_called"] is False
+
+    def test_flag_true_uses_run_scoring(self, minimal_config, migrated_db_path):
+        """Flag True -> run_scoring invoked; legacy runners NOT invoked."""
+        flags = self._run_with_flag(True, minimal_config, migrated_db_path)
+        assert flags["unified_called"] is True
+        assert flags["haiku_called"] is False
+        assert flags["sonnet_called"] is False
+
+    def test_flag_absent_defaults_false(
+        self, minimal_config, migrated_db_path,
+    ):
+        """Config with no use_unified_scorer key -> default is legacy path."""
+        flags = self._run_with_flag(None, minimal_config, migrated_db_path)
+        assert flags["haiku_called"] is True
+        assert flags["unified_called"] is False
+
+    def test_flag_true_populates_classification_summary_keys(
+        self, minimal_config, migrated_db_path,
+    ):
+        """Flag True path writes classified_{apply,consider,skip,reject} keys
+        into the run summary."""
+        import job_finder.web.pipeline_runner as pr
+
+        gmail_jobs = [self._job()]
+
+        def fake_unified(keys, cfg, db):
+            return {
+                "scored": 1,
+                "classified_apply": 1,
+                "classified_consider": 0,
+                "classified_skip": 0,
+                "classified_reject": 0,
+                "skipped_dead": 0,
+                "skipped_no_jd": 0,
+                "errors": 0,
+            }
+
+        cfg = dict(minimal_config)
+        cfg["use_unified_scorer"] = True
+
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
+            patch("job_finder.web.scoring_runner.run_scoring",
+                  side_effect=fake_unified),
+        ):
+            MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
+            MockSerp.return_value.fetch_jobs.return_value = []
+            summary = pr.run_ingestion(migrated_db_path, cfg)
+
+        assert summary.get("scored") == 1
+        assert summary.get("classified_apply") == 1
+        assert "classified_consider" in summary
+        assert "classified_skip" in summary
+        assert "classified_reject" in summary
+
+
+class TestUnifiedScorerConfigShape:
+    """Phase 34 Plan 2 — configuration artifacts for the unified scorer."""
+
+    def test_config_example_has_use_unified_scorer_flag(self):
+        """config.example.yaml ships with use_unified_scorer: false default."""
+        from pathlib import Path
+        text = Path("config.example.yaml").read_text(encoding="utf-8")
+        assert "use_unified_scorer: false" in text
+
+    def test_config_example_has_providers_scoring_block(self):
+        """config.example.yaml documents the providers.scoring block template."""
+        from pathlib import Path
+        text = Path("config.example.yaml").read_text(encoding="utf-8")
+        # Commented example — search for the scoring: sub-block and qwen model.
+        assert "scoring:" in text
+        assert "qwen2.5:14b" in text
+
+    def test_config_yaml_has_providers_scoring_block(self):
+        """config.yaml (user config) has providers.scoring after Plan 2."""
+        from pathlib import Path
+        text = Path("config.yaml").read_text(encoding="utf-8")
+        # Active scoring block (not commented) — must be indented under providers:.
+        assert "\n  scoring:\n" in text
+        assert "qwen2.5:14b" in text
+
+    def test_config_yaml_use_unified_scorer_present(self):
+        """config.yaml has the use_unified_scorer flag (value is env-specific)."""
+        from pathlib import Path
+        text = Path("config.yaml").read_text(encoding="utf-8")
+        assert "use_unified_scorer:" in text
+
+
+class TestRunOneshotLegacyFixture:
+    """Sanity tests for the new mock_run_oneshot_legacy conftest fixture."""
+
+    def test_legacy_fixture_yields_legacy_envelope(self, mock_run_oneshot_legacy):
+        """Declaring mock_run_oneshot_legacy in a signature returns a mock
+        whose envelope carries only the legacy {score, summary} shape."""
+        import json
+        envelope = mock_run_oneshot_legacy.return_value
+        assert envelope["is_error"] is False
+        parsed = json.loads(envelope["result"])
+        assert parsed.get("score") == 75
+        assert parsed.get("summary") == "Good match"
+        # v3 ordinal keys should be absent on the legacy envelope.
+        assert "title_fit" not in parsed
+
+
+class TestCascadeConfigScoringFixture:
+    """Sanity tests for the new cascade_config_scoring conftest fixture."""
+
+    def test_cascade_config_scoring_shape(self, cascade_config_scoring):
+        """Fixture exposes providers.scoring with model qwen2.5:14b and
+        the full Phase 34 cascade fallback chain."""
+        providers = cascade_config_scoring["providers"]
+        assert "scoring" in providers
+        scoring = providers["scoring"]
+        assert scoring["model"] == "qwen2.5:14b"
+        assert scoring["provider"] == "ollama"
+        assert any(
+            link.get("provider") == "anthropic"
+            for link in scoring["fallback_chain"]
+        )
+        # Flag co-ships with the fixture so tests exercise the unified path.
+        assert cascade_config_scoring["use_unified_scorer"] is True

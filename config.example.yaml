@@ -1,6 +1,12 @@
 # Job Cannon Configuration
 # Copy this file to config.yaml and customize for your job search.
 
+# Phase 34 Plan 2 dual-write gate. false = legacy Haiku->Sonnet two-phase
+# scoring; true = unified v3.0 ordinal scoring via job_scorer.py. Plan 2
+# ships with false; flipped to true in Plan 2 commit B after smoke-test
+# window. Removed in Plan 4 alongside legacy scorer deletion.
+use_unified_scorer: false
+
 # --- Your job search profile ---
 profile:
   # Job titles you're targeting (matched against listing titles)
@@ -195,6 +201,22 @@ scoring:
 #     provider: ollama
 #     model: qwen2.5:14b
 #     fallback_chain:
+#       - provider: anthropic
+#         model: claude-sonnet-4-6
+#   # v3.0 unified scoring tier (Phase 34). Used when use_unified_scorer: true.
+#   # qwen2.5:14b is the Phase 33 shootout winner (single-model sweep supersedes
+#   # the renderer's per-site split — 3.5% MAE cost for 2.4x throughput gain).
+#   # Cascade falls through Ollama -> Groq -> Cerebras -> Gemini -> Anthropic.
+#   scoring:
+#     provider: ollama
+#     model: qwen2.5:14b
+#     fallback_chain:
+#       - provider: groq
+#         model: llama-3.3-70b-versatile
+#       - provider: cerebras
+#         model: llama3.3-70b
+#       - provider: gemini
+#         model: gemini-2.0-flash
 #       - provider: anthropic
 #         model: claude-sonnet-4-6
 #   daily_limits: {}

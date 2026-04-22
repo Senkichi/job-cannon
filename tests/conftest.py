@@ -350,8 +350,53 @@ def sample_resume_data():
 def mock_run_oneshot():
     """Auto-mock _run_oneshot so no test accidentally invokes the real Claude CLI.
 
-    Returns a generic CLI envelope with score=75.  Individual test classes
-    override call_claude at the module-import level for more specific behavior.
+    Returns a superset envelope that works for both legacy (Haiku/Sonnet) and
+    v3.0 (JobAssessment) call sites. structured_output carries the legacy
+    {score, summary} shape (keeps pre-Phase-34 tests green) while the result
+    JSON carries the v3 ordinal fields at the top level (matches
+    JOB_ASSESSMENT_SCHEMA) so dispatcher calls through call_model(tier='scoring')
+    also parse cleanly. Individual test classes override at the module-import
+    level for more specific behavior.
+    """
+    v3_payload = {
+        # v3.0 top-level ordinal sub-scores (CONTEXT D-05).
+        "title_fit": 3,
+        "location_fit": 3,
+        "comp_fit": 3,
+        "domain_match": 3,
+        "seniority_match": 3,
+        "skills_match": 3,
+        "rationale": {
+            "strengths": ["stub strength"],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
+        },
+        "legitimacy_note": "",
+    }
+    legacy_payload = {"score": 75, "summary": "Good match"}
+    # Merge: legacy keys available as top-level alongside v3 keys. No key
+    # collision because the legacy schema never emitted title_fit etc.
+    merged = {**legacy_payload, **v3_payload}
+    envelope = {
+        "is_error": False,
+        "result": json.dumps(merged),
+        "structured_output": merged,
+        "usage": {"input_tokens": 100, "output_tokens": 50},
+        "total_cost_usd": 0.001,
+    }
+    with patch("job_finder.web.claude_client._run_oneshot", return_value=envelope) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_run_oneshot_legacy():
+    """Opt-in fixture for tests exercising the pre-v3 legacy path.
+
+    Returns the Haiku/Sonnet-shaped envelope only, without the v3 ordinal
+    fields. Overrides the autouse mock_run_oneshot when declared explicitly
+    in a test function's signature. Removed in Plan 4 alongside the
+    haiku_scorer.py / sonnet_evaluator.py deletion.
     """
     envelope = {
         "is_error": False,
@@ -416,6 +461,33 @@ def cascade_config_sonnet():
                 ],
             },
         },
+    }
+
+
+@pytest.fixture
+def cascade_config_scoring():
+    """Phase 34 Plan 2 — config with the v3.0 unified scoring tier.
+
+    Mirrors providers.scoring in the live config.yaml. qwen2.5:14b is the
+    Phase 33 shootout winner (CONTEXT D-01). The fallback chain inherits
+    the full cascade per D-10. Tests that exercise the unified path should
+    declare this fixture AND set use_unified_scorer: True when constructing
+    their full config dict.
+    """
+    return {
+        "providers": {
+            "scoring": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [
+                    {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+                    {"provider": "cerebras", "model": "llama3.3-70b"},
+                    {"provider": "gemini", "model": "gemini-2.0-flash"},
+                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+                ],
+            },
+        },
+        "use_unified_scorer": True,
     }
 
 
