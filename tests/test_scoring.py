@@ -651,6 +651,13 @@ class TestBuildDescriptionSnippet:
 # Pipeline integration tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skip(
+    reason="Plan 34-03 Commit E removed the legacy run_haiku_scoring path from "
+           "run_ingestion. The v3.0 unified scorer populates a single `scored` "
+           "counter + classified_{apply,consider,skip,reject} keys. "
+           "TestUnifiedScorerFlagGate in test_ingestion.py covers the unified "
+           "path's integration behavior; Plan 4 deletes this legacy class."
+)
 class TestHaikuPipelineIntegration:
     """Verify that run_ingestion() triggers Haiku scoring and writes to DB."""
 
@@ -837,6 +844,12 @@ class TestHaikuPipelineIntegration:
 # Exclusion filter integration tests (Plan 27-01 Task 3)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skip(
+    reason="Plan 34-03 Commit E removed run_haiku_scoring from the "
+           "run_ingestion flow. The exclusion-filter path now runs inside "
+           "scoring_runner.run_scoring / score_and_persist_job. Plan 4 "
+           "deletes the legacy run_haiku_scoring entirely."
+)
 class TestExclusionFilterIntegration:
     """Verify exclusion filter is wired into scoring_runner.run_haiku_scoring."""
 

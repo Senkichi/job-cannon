@@ -40,13 +40,13 @@ resume_bp = Blueprint("resume", __name__, url_prefix="/jobs")
 
 @resume_bp.route("/<path:dedup_key>/resume/generate", methods=["POST"], strict_slashes=False)
 def generate(dedup_key: str):
-    """Start background resume generation for a Sonnet-scored job.
+    """Start background resume generation for a v3.0-classified job.
 
-    Requires that the job has a Sonnet score (sonnet_score IS NOT NULL).
+    Requires that the job has a classification (classification IS NOT NULL).
     Inserts a pending resume_generations row, starts a daemon thread,
     and returns the polling fragment immediately.
 
-    Returns 400 if job is not Sonnet-scored.
+    Returns 400 if job is not classified.
     """
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
@@ -58,9 +58,9 @@ def generate(dedup_key: str):
     if job is None:
         return "", 404
 
-    # Guard: require Sonnet score
-    if job.get("sonnet_score") is None:
-        return "Job must be scored with Sonnet before generating a resume.", 400
+    # Guard: require a classification (v3.0 Phase 34 Plan 3 Commit E)
+    if job.get("classification") is None:
+        return "Job must be scored before generating a resume.", 400
 
     # Load profile
     profile_path = config.get("profile_path", "experience_profile.json")
@@ -206,9 +206,9 @@ def quick_apply(dedup_key: str):
 
     job = ctx["job"]
 
-    # Guard: require Sonnet score
-    if job.get("sonnet_score") is None:
-        return "Job must be scored with Sonnet before using Quick Apply.", 400
+    # Guard: require a classification (v3.0 Phase 34 Plan 3 Commit E)
+    if job.get("classification") is None:
+        return "Job must be scored before using Quick Apply.", 400
 
     job_row = dict(job)
 

@@ -64,6 +64,15 @@ class TestPipelineRunnerLogLevels:
             "scoring_runner.run_haiku_scoring — was the message text changed?"
         )
 
+    @pytest.mark.skip(
+        reason="Plan 34-03 Commit E removed run_haiku_scoring from the "
+               "run_ingestion flow. run_scoring does not gate on claude CLI "
+               "presence (it routes via the provider cascade), so this "
+               "integration test no longer has a code path to exercise. "
+               "The static source inspection variant "
+               "(test_scoring_runner_claude_cli_not_found_log_level_in_source) "
+               "still guards the log-level invariant."
+    )
     def test_claude_cli_not_found_logs_at_debug(self, caplog):
         """When claude CLI is not on PATH, scoring_runner emits DEBUG not WARNING."""
         import job_finder.web.pipeline_runner as runner_module
