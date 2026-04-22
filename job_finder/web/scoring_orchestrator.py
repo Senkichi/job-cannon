@@ -1,4 +1,4 @@
-"""Centralized scoring orchestration for Haiku and Sonnet evaluation.
+"""Centralized scoring orchestration for Haiku, Sonnet, and unified v3 scoring.
 
 Consolidates the scoring workflow (cost gate, profile loading, CLI oneshot,
 borderline re-evaluation, DB persistence) that was previously duplicated
@@ -9,6 +9,8 @@ Public API:
                             scorer_fn=None) -> dict | None
     score_and_persist_sonnet(conn, job_row, config, profile,
                              evaluator_fn=None) -> dict | None
+    score_and_persist_job(job, conn, config, client=None,
+                          scorer_fn=None) -> ScoringResult | None
     load_scoring_profile(config) -> dict
 
 These functions handle the core scoring + persistence logic. Callers remain
@@ -22,15 +24,27 @@ responsible for:
 The scorer_fn / evaluator_fn parameters allow callers to pass their own
 reference to the scoring function, which preserves mock injection in tests
 (tests patch the name in the caller's module namespace).
+
+score_and_persist_job is the v3.0 unified entry (Phase 34 Plan 2). It writes
+the NEW columns (classification, sub_scores_json, fit_analysis, scoring_*)
+AND the legacy shim (haiku_score/sonnet_score/haiku_summary) in a single
+atomic UPDATE so one commit lands consistent data (CONTEXT D-16). The
+legacy functions remain alive during the Plan 2/3 migration window and are
+removed in Plan 4.
 """
 
 import json
 import logging
 import sqlite3
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from job_finder.config import DEFAULT_BORDERLINE_HIGH, DEFAULT_HAIKU_THRESHOLD
-from job_finder.db import persist_haiku_score, persist_sonnet_score
+from job_finder.db import (
+    derive_classification,
+    persist_haiku_score,
+    persist_sonnet_score,
+    _SUB_SCORE_KEYS,
+)
 from job_finder.web.score_calibration import calibrate_score, has_calibration
 from job_finder.web.scoring_types import unwrap_scoring_result
 
@@ -204,4 +218,153 @@ def score_and_persist_sonnet(
 
     persist_sonnet_score(conn, dedup_key, sonnet_score, fit_analysis, provider=provider)
 
+    return result
+
+
+# ---------------------------------------------------------------------------
+# v3.0 unified scoring orchestration (Phase 34 Plan 2)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_scoring_model(config: dict, provider: str | None) -> str | None:
+    """Pull the active model ID for the scoring tier from config.
+
+    Reads providers.scoring.model per Phase 34 CONTEXT D-01 / D-10. Falls back
+    to None when the block is absent — persist writes NULL, which COALESCE
+    preserves any previously-captured model in the column.
+    """
+    providers_cfg = config.get("providers") or {}
+    scoring_cfg = providers_cfg.get("scoring") or {}
+    return scoring_cfg.get("model")
+
+
+def score_and_persist_job(
+    job: dict,
+    conn: sqlite3.Connection,
+    config: dict,
+    client: Any | None = None,
+    scorer_fn: Optional[Callable] = None,
+):
+    """Unified v3.0 scoring entry point. Dual-writes new columns AND legacy shim
+    atomically per CONTEXT D-16.
+
+    - scorer_fn: defaults to job_scorer.score_job. Injection point preserved
+      for tests — pass your own reference to support mock injection.
+    - New columns: classification (Python-derived), sub_scores_json,
+      fit_analysis (rationale payload), scoring_provider, scoring_model.
+    - Legacy shim (REMOVED in Plan 4):
+        haiku_score   <- mean(sub_scores.values()) * 20
+        sonnet_score  <- same value (identical per D-16)
+        haiku_summary <- rationale.strengths[0] or rationale.gaps[0] or ""
+      Shim exists only so Plan 3's progressive read-swap has fresh legacy
+      columns to read from. Ordering of haiku_score values is preserved
+      (monotonic mapping) — the load-bearing invariant for Plan 3.
+
+    The new-column write and the legacy-shim write land in a SINGLE UPDATE
+    statement (atomic under SQLite statement-level semantics) followed by one
+    conn.commit(). This is CONTEXT D-16's atomicity clause — splitting into
+    two commits would create an inconsistent-data window on crash.
+
+    Returns the underlying ScoringResult (status='ok'/'skipped'/'error') or
+    None if the scorer returned nothing. Missing dedup_key rows are silent
+    no-ops (matches SQLite UPDATE-no-match semantics).
+    """
+    # Lazy import avoids a top-level cycle: scoring_orchestrator is imported
+    # by scoring_runner, and job_scorer imports from db/model_provider which
+    # already carries orchestrator-adjacent surface area.
+    if scorer_fn is None:
+        from job_finder.web.job_scorer import score_job as _default_scorer
+        scorer_fn = _default_scorer
+
+    dedup_key = job.get("dedup_key")
+    result = scorer_fn(job, conn, config, client=client)
+
+    if result is None:
+        logger.info(
+            "score_and_persist_job: no result for dedup_key=%s", dedup_key
+        )
+        return None
+
+    # Pass-through for skipped / error envelopes — no DB write, no raise.
+    if getattr(result, "status", None) != "ok" or result.data is None:
+        logger.info(
+            "score_and_persist_job: skip dedup_key=%s status=%s error=%s",
+            dedup_key,
+            getattr(result, "status", None),
+            getattr(result, "error", None),
+        )
+        return result
+
+    assessment = result.data
+    provider = result.provider
+    model = _resolve_scoring_model(config, provider)
+
+    # Legacy-shim math (CONTEXT D-16). Compute BEFORE opening the transaction
+    # so the single UPDATE carries both new-column and shim values.
+    sub_scores = assessment.sub_scores or {}
+    if sub_scores:
+        mean_sub = sum(sub_scores.values()) / len(sub_scores)
+    else:
+        mean_sub = 0.0
+    legacy_numeric = round(mean_sub * 20, 2)
+
+    rationale = assessment.rationale or {}
+    strengths = rationale.get("strengths") or []
+    gaps = rationale.get("gaps") or []
+    if strengths:
+        legacy_summary = strengths[0] or ""
+    elif gaps:
+        legacy_summary = gaps[0] or ""
+    else:
+        legacy_summary = ""
+
+    # Classification is Python-derived from the jobs row's legitimacy_note
+    # (CONTEXT D-07). Read it first; silent no-op on missing row.
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT legitimacy_note FROM jobs WHERE dedup_key = ?", (dedup_key,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return result
+    legitimacy_note = row[0]
+    final_classification = derive_classification(
+        sub_scores, legitimacy_note
+    )
+
+    # Stable key order for diff-friendly sub_scores_json (matches
+    # persist_job_assessment's serialization policy in db.py).
+    ordered_sub_scores = {
+        k: sub_scores[k] for k in _SUB_SCORE_KEYS if k in sub_scores
+    }
+
+    # Atomic dual-write: new columns AND legacy shim in ONE UPDATE.
+    # Single conn.commit() per CONTEXT D-16 — one transaction, consistent
+    # state, revertable by flipping the use_unified_scorer flag.
+    cur.execute(
+        """
+        UPDATE jobs
+           SET classification   = ?,
+               sub_scores_json  = ?,
+               fit_analysis     = ?,
+               scoring_provider = COALESCE(?, scoring_provider),
+               scoring_model    = COALESCE(?, scoring_model),
+               haiku_score      = ?,
+               sonnet_score     = ?,
+               haiku_summary    = ?
+         WHERE dedup_key = ?
+        """,
+        (
+            final_classification,
+            json.dumps(ordered_sub_scores),
+            json.dumps(rationale),
+            provider,
+            model,
+            legacy_numeric,
+            legacy_numeric,
+            legacy_summary,
+            dedup_key,
+        ),
+    )
+    conn.commit()
     return result

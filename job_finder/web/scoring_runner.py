@@ -1,7 +1,19 @@
-"""Scoring runner -- Haiku batch scoring and Sonnet deep evaluation orchestration."""
+"""Scoring runner -- Haiku batch scoring, Sonnet deep evaluation, and
+unified v3.0 scoring orchestration.
+
+Exposes three entry points:
+
+- ``run_haiku_scoring`` / ``run_sonnet_evaluation`` — legacy two-tier path.
+- ``run_scoring`` — Phase 34 Plan 2 unified v3.0 runner. Calls
+  ``score_and_persist_job`` per dedup_key, preserving the pre-score
+  liveness gate per CONTEXT D-11. Gated at the caller (pipeline_runner)
+  behind the ``use_unified_scorer`` config flag until Plan 4 removes the
+  legacy path.
+"""
 
 import logging
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 
 from job_finder.config import DEFAULT_HAIKU_THRESHOLD
@@ -13,6 +25,7 @@ from job_finder.web.haiku_scorer import score_job_haiku
 from job_finder.web.scoring_orchestrator import (
     load_scoring_profile,
     score_and_persist_haiku,
+    score_and_persist_job,
     score_and_persist_sonnet,
 )
 
@@ -294,3 +307,131 @@ def run_sonnet_evaluation(
 
     logger.info("Sonnet evaluated %d jobs", sonnet_evaluated)
     return sonnet_evaluated
+
+
+# ---------------------------------------------------------------------------
+# Unified v3.0 runner (Phase 34 Plan 2)
+# ---------------------------------------------------------------------------
+
+
+def run_scoring(
+    new_job_keys: list[str],
+    config: dict,
+    db_path: str,
+) -> dict:
+    """Unified v3.0 scoring runner -- replaces run_haiku_scoring +
+    run_sonnet_evaluation once Plan 4 lands.
+
+    For each dedup_key in ``new_job_keys``:
+
+    1. Fetch the jobs row (skip silently if missing).
+    2. Pre-score liveness gate (CONTEXT D-11) — matches the position used by
+       the legacy ``run_sonnet_evaluation``. Dead jobs are counted as skipped
+       and never hit the scorer.
+    3. Delegate scoring + persistence to ``score_and_persist_job``, which
+       performs the atomic dual-write of new columns AND legacy shim
+       (CONTEXT D-16).
+
+    Returns a summary dict with counters for scored / skipped / error cases
+    and per-classification breakdown. Counter keys match the new pipeline
+    summary shape introduced in Plan 2 commit A (Plan 3 Commit E collapses
+    the legacy haiku_scored / sonnet_queued / sonnet_evaluated keys).
+    """
+    summary = {
+        "scored": 0,
+        "classified_apply": 0,
+        "classified_consider": 0,
+        "classified_skip": 0,
+        "classified_reject": 0,
+        "skipped_dead": 0,
+        "skipped_no_jd": 0,
+        "errors": 0,
+    }
+
+    if not new_job_keys:
+        return summary
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        for dedup_key in new_job_keys:
+            try:
+                row = conn.execute(
+                    f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE dedup_key = ?",
+                    (dedup_key,),
+                ).fetchone()
+                if row is None:
+                    logger.warning(
+                        "run_scoring: job '%s' not found in DB -- skipping",
+                        dedup_key,
+                    )
+                    continue
+                job = dict(row)
+
+                # Liveness gate (D-11): pre-score, same position as legacy
+                # Sonnet path. Expired rows get the standard archive update
+                # and are counted as skipped_dead.
+                liveness = check_job_liveness(job)
+                now_iso = datetime.now(timezone.utc).isoformat()
+                persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
+                if liveness == _EXPIRED:
+                    logger.info(
+                        "run_scoring liveness gate: archiving expired '%s' @ '%s'",
+                        job.get("title"),
+                        job.get("company"),
+                    )
+                    update_pipeline_status(
+                        conn, dedup_key, "archived",
+                        source="run_scoring_liveness",
+                        evidence="quick_liveness_check expired",
+                    )
+                    summary["skipped_dead"] += 1
+                    continue
+
+                result = score_and_persist_job(job, conn, config)
+
+                if result is None:
+                    summary["skipped_no_jd"] += 1
+                    continue
+
+                status = getattr(result, "status", None)
+                if status == "skipped":
+                    summary["skipped_no_jd"] += 1
+                    continue
+                if status == "error":
+                    summary["errors"] += 1
+                    continue
+
+                summary["scored"] += 1
+
+                # Re-read classification for the per-class counter. Single
+                # small SELECT keeps the counter faithful to what actually
+                # landed on disk (including Python-derived classification
+                # overrides via legitimacy_note).
+                cls_row = conn.execute(
+                    "SELECT classification FROM jobs WHERE dedup_key = ?",
+                    (dedup_key,),
+                ).fetchone()
+                if cls_row and cls_row[0]:
+                    key = f"classified_{cls_row[0]}"
+                    if key in summary:
+                        summary[key] += 1
+
+            except Exception as e:
+                logger.warning(
+                    "run_scoring error for job '%s': %s -- continuing",
+                    dedup_key,
+                    e,
+                )
+                summary["errors"] += 1
+    finally:
+        conn.close()
+
+    logger.info(
+        "run_scoring: %d scored, %d dead, %d no-jd, %d errors",
+        summary["scored"],
+        summary["skipped_dead"],
+        summary["skipped_no_jd"],
+        summary["errors"],
+    )
+    return summary
