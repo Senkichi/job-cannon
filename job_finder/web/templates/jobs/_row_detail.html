@@ -1,33 +1,39 @@
-{# Inline full-detail row. Replaces _row_expanded.html via HTMX outerHTML swap when "View Full Detail" is clicked. #}
+{# Inline full-detail row. Replaces _row_expanded.html via HTMX outerHTML swap when "View Full Detail" is clicked.
+
+   v3.0 (Phase 34 Plan 3 Commit D): numeric 0-100 display swapped for a
+   classification-enum badge + horizontal-bar sub-score breakdown sourced
+   from job.classification + job.sub_scores_json + job.fit_analysis. #}
 {% set sources_list = job.sources | from_json if job.sources else [] %}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
 
-{# Use best available AI score; fall back to heuristic score (0-10 scale) #}
-{% set ai_score = job.sonnet_score if job.sonnet_score is not none else job.haiku_score %}
-{% if ai_score is not none %}
-  {# AI score: 0-100 scale #}
-  {% set display_score_str = ai_score | int | string %}
-  {% set score_label = "AI score" %}
-  {% if ai_score >= 70 %}
-    {% set score_badge_class = "text-green-300" %}
-  {% elif ai_score >= 50 %}
-    {% set score_badge_class = "text-yellow-300" %}
-  {% else %}
-    {% set score_badge_class = "text-red-300 opacity-70" %}
-  {% endif %}
+{# Classification-enum badge — apply/consider/skip/reject #}
+{% set cls = job.classification %}
+{% if cls == 'apply' %}
+  {% set badge_class = 'bg-green-900 text-green-200 border-green-700' %}
+  {% set badge_text = 'Apply' %}
+{% elif cls == 'consider' %}
+  {% set badge_class = 'bg-amber-900 text-amber-200 border-amber-700' %}
+  {% set badge_text = 'Consider' %}
+{% elif cls == 'skip' %}
+  {% set badge_class = 'bg-slate-800 text-slate-300 border-slate-600' %}
+  {% set badge_text = 'Skip' %}
+{% elif cls == 'reject' %}
+  {% set badge_class = 'bg-red-900 text-red-200 border-red-700' %}
+  {% set badge_text = 'Reject' %}
 {% else %}
-  {# Heuristic score: 0-10 scale #}
-  {% set score = job.score | float %}
-  {% set display_score_str = "%.1f" | format(score) %}
-  {% set score_label = "heuristic" %}
-  {% if score >= 8 %}
-    {% set score_badge_class = "text-green-300" %}
-  {% elif score >= 6 %}
-    {% set score_badge_class = "text-yellow-300" %}
-  {% else %}
-    {% set score_badge_class = "text-red-300" %}
-  {% endif %}
+  {% set badge_class = 'bg-slate-900 text-slate-500 border-slate-700' %}
+  {% set badge_text = 'Unscored' %}
 {% endif %}
+
+{% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
+{% set sub_score_dims = [
+  ('title_fit', 'Title fit'),
+  ('location_fit', 'Location fit'),
+  ('comp_fit', 'Compensation'),
+  ('domain_match', 'Domain'),
+  ('seniority_match', 'Seniority'),
+  ('skills_match', 'Skills'),
+] %}
 
 <tr class="border-b border-slate-700 bg-slate-800/40">
   <td colspan="7" class="px-4 py-4">
@@ -60,14 +66,9 @@
             {% endif %}
           </div>
         </div>
-        <!-- Score badge + Collapse button (top) -->
+        <!-- Classification badge + Collapse button (top) -->
         <div class="flex flex-col items-end gap-2 shrink-0">
-          <div class="flex flex-col items-center gap-1">
-            <span class="text-2xl font-black {{ score_badge_class }}">
-              {{ display_score_str }}{% if job.sonnet_score is not none %}<span class="text-amber-400 text-sm">*</span>{% endif %}
-            </span>
-            <span class="text-xs text-slate-500">{{ score_label }}</span>
-          </div>
+          <span class="inline-block px-3 py-1 text-sm font-semibold rounded border {{ badge_class }}">{{ badge_text }}</span>
           <button type="button"
                   hx-get="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
                   hx-target="closest tr"
@@ -105,15 +106,42 @@
       </div>
       {% endif %}
 
-      <!-- AI Fit Analysis (Sonnet-scored jobs) -->
-      {% if job.sonnet_score is not none and job.fit_analysis %}
+      <!-- Sub-score breakdown (v3.0 — 6 ordinal dimensions, 1-5 each) -->
+      {% if sub_scores %}
+      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
+          Fit Breakdown
+        </h3>
+        <div class="space-y-1.5">
+          {% for key, label in sub_score_dims %}
+            {% set v = sub_scores.get(key, 0) %}
+            {% if v >= 4 %}
+              {% set bar_class = 'bg-green-500' %}
+            {% elif v == 3 %}
+              {% set bar_class = 'bg-amber-500' %}
+            {% elif v == 2 %}
+              {% set bar_class = 'bg-orange-500' %}
+            {% else %}
+              {% set bar_class = 'bg-red-500' %}
+            {% endif %}
+            <div class="flex items-center gap-2">
+              <span class="w-28 text-xs text-slate-400">{{ label }}</span>
+              <div class="flex-1 bg-slate-900 h-2 rounded overflow-hidden">
+                <div class="h-2 rounded {{ bar_class }}" style="width: {{ (v * 20) }}%"></div>
+              </div>
+              <span class="w-6 text-right text-xs text-slate-300">{{ v }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- AI Fit Analysis (rationale — strengths/gaps/resume_priority_skills) -->
+      {% if job.fit_analysis %}
         {% set analysis = job.fit_analysis | from_json %}
+        {% if analysis.strengths or analysis.gaps or analysis.resume_priority_skills or analysis.talking_points %}
         <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3 space-y-2 text-sm">
-          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">
-            AI Fit Analysis
-            <span class="text-amber-400 ml-1">*</span>
-            <span class="text-slate-600 font-normal normal-case ml-1">(Sonnet score: {{ job.sonnet_score | int }}/100)</span>
-          </h3>
+          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide">AI Fit Analysis</h3>
           {% if analysis.strengths %}
           <div>
             <span class="text-xs font-semibold text-green-400">Strengths</span>
@@ -130,6 +158,14 @@
             </ul>
           </div>
           {% endif %}
+          {% if analysis.talking_points %}
+          <div>
+            <span class="text-xs font-semibold text-sky-400">Talking Points</span>
+            <ul class="list-disc list-inside text-slate-300 mt-1 text-xs space-y-0.5">
+              {% for t in analysis.talking_points %}<li>{{ t }}</li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
           {% if analysis.resume_priority_skills %}
           <div>
             <span class="text-xs font-semibold text-blue-400">Resume Priority Skills</span>
@@ -141,15 +177,7 @@
           </div>
           {% endif %}
         </div>
-      {% elif job.haiku_summary %}
-      <!-- Haiku-only jobs -->
-      <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
-        <h3 class="text-xs font-semibold text-slate-400 mb-1">AI Assessment</h3>
-        <p class="text-sm text-slate-400 italic">
-          <span class="text-slate-500 not-italic">Haiku score: {{ job.haiku_score | int if job.haiku_score is not none else "?" }}/100 &mdash;</span>
-          {{ job.haiku_summary }}
-        </p>
-      </div>
+        {% endif %}
       {% endif %}
 
       <!-- Description (hidden when full JD is available — jd_full is a superset) -->

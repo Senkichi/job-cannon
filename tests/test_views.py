@@ -1465,8 +1465,8 @@ def app_with_sonnet_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score, sonnet_score, jd_full)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             haiku_score, sonnet_score, classification, sub_scores_json, jd_full)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "drive-test|data-scientist|remote",
             "Data Scientist",
@@ -1481,7 +1481,9 @@ def app_with_sonnet_job(tmp_db_path):
             "2026-03-09T10:00:00",
             8.5, '{"skills": 0.9}',
             "discovered",
-            80, 85,  # has sonnet score
+            80, 85,  # legacy shim scores — kept for regression back-compat
+            "apply",  # v3.0 classification
+            '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             "Senior Data Scientist role at Drive Test Co. Requires 5+ years ML experience.",
         ),
     )
@@ -2236,8 +2238,9 @@ def client_with_scored_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
              first_seen, last_seen, pipeline_status,
-             haiku_score, sonnet_score, jd_full, fit_analysis)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             haiku_score, sonnet_score, classification, sub_scores_json,
+             jd_full, fit_analysis)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "acme|data-scientist|remote",
             "Data Scientist",
@@ -2252,6 +2255,8 @@ def client_with_scored_job(tmp_db_path):
             "2026-03-09T10:00:00",
             "reviewing",
             75, 80,
+            "apply",  # v3.0 classification
+            '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             "Full job description text here for testing",
             '{"strengths": ["ML experience"], "gaps": [], "resume_priority_skills": ["Python"]}',
         ),
