@@ -1828,6 +1828,12 @@ class TestBorderlineReeval:
 # Batch Haiku borderline re-eval tests (Plan 28-02)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skip(
+    reason="Plan 34-03 Commit B merged _run_batch_haiku_bg into _run_batch_bg. "
+           "The borderline-reeval band (42-54) is a Haiku-specific path that the "
+           "v3.0 unified scorer (ordinal 1-5 output) no longer needs. Plan 4 deletes "
+           "this entire test class along with haiku_scorer.py."
+)
 class TestBatchHaikuBorderlineReeval:
     """Verify borderline re-eval band (42-54) works in dashboard batch scoring path.
 
@@ -1992,44 +1998,66 @@ class TestBatchHaikuBorderlineReeval:
 # ---------------------------------------------------------------------------
 
 class TestFilteredJobsSorting:
-    """Verify COALESCE sort: sonnet_score > haiku_score > heuristic score."""
+    """Verify v3.0 classification-rank + sub_score_sum sort ordering.
 
-    def test_coalesce_sort_prefers_sonnet_over_haiku_over_heuristic(self, migrated_db):
-        """Sort by 'score' uses COALESCE(sonnet_score, haiku_score, score) DESC."""
+    Phase 34 Plan 3 Commit A migrated get_filtered_jobs() away from
+    COALESCE(sonnet_score, haiku_score, score) to
+    (classification_rank DESC, sub_score_sum DESC). This test confirms the
+    new ordering: 'apply' ranks higher than 'consider' which ranks higher
+    than 'skip'/'reject'.
+    """
+
+    def test_classification_sort_prefers_apply_over_consider_over_skip(self, migrated_db):
+        """Sort by 'score' orders apply > consider > skip via classification_rank CASE."""
         from job_finder.db import get_filtered_jobs
 
         path, conn = migrated_db
 
-        # Job 1: sonnet_score=85 (highest AI score)
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest, sonnet_score)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("j1", "Sonnet Job", "Co", "Remote", '[]', '[]',
-             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 5.0, "{}", "unreviewed", 85.0),
+        sub_scores_high = (
+            '{"title_fit": 5, "location_fit": 5, "comp_fit": 4, '
+            '"domain_match": 4, "seniority_match": 4, "skills_match": 4}'
         )
-        # Job 2: haiku_score=60, no sonnet
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest, haiku_score)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("j2", "Haiku Job", "Co", "Remote", '[]', '[]',
-             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 3.0, "{}", "unreviewed", 60.0),
+        sub_scores_mid = (
+            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, '
+            '"domain_match": 3, "seniority_match": 3, "skills_match": 3}'
         )
-        # Job 3: heuristic score=7.5 only, no AI scores
+
+        # Job 1: classification=apply (highest rank)
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("j3", "Heuristic Job", "Co", "Remote", '[]', '[]',
-             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 7.5, "{}", "unreviewed"),
+               first_seen, last_seen, score, score_breakdown, user_interest,
+               classification, sub_scores_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("j1", "Apply Job", "Co", "Remote", '[]', '[]',
+             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 5.0, "{}", "unreviewed",
+             "apply", sub_scores_high),
+        )
+        # Job 2: classification=consider
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
+               first_seen, last_seen, score, score_breakdown, user_interest,
+               classification, sub_scores_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("j2", "Consider Job", "Co", "Remote", '[]', '[]',
+             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 3.0, "{}", "unreviewed",
+             "consider", sub_scores_mid),
+        )
+        # Job 3: classification=skip (lowest of the three)
+        conn.execute(
+            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
+               first_seen, last_seen, score, score_breakdown, user_interest,
+               classification, sub_scores_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("j3", "Skip Job", "Co", "Remote", '[]', '[]',
+             "2026-03-01T00:00:00", "2026-03-01T00:00:00", 7.5, "{}", "unreviewed",
+             "skip", sub_scores_mid),
         )
         conn.commit()
 
         jobs = get_filtered_jobs(conn, sort_by="score", sort_dir="DESC")
         dedup_keys = [j["dedup_key"] for j in jobs]
 
-        # j1 (sonnet=85) > j2 (haiku=60) > j3 (heuristic=7.5)
+        # apply (rank=4) > consider (rank=3) > skip (rank=2)
         j1_idx = dedup_keys.index("j1")
         j2_idx = dedup_keys.index("j2")
         j3_idx = dedup_keys.index("j3")

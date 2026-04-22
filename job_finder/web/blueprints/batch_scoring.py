@@ -1,4 +1,13 @@
-"""Batch scoring blueprint -- Haiku/Sonnet batch scoring start, status, cancel routes."""
+"""Batch scoring blueprint — unified batch scoring routes (v3.0 Phase 34 Plan 3 Commit B).
+
+v3.0 merges the previous Haiku/Sonnet two-route split into a single
+`batch_score_start` route + `_run_batch_bg` worker. The session_type enum
+collapses from {haiku, sonnet, sync} to {scoring, sync}. Old
+/batch-score/haiku/start and /batch-score/sonnet/start URLs are retained
+as thin wrappers that delegate to the unified route so existing HTMX
+templates keep working until Commit D migrates them; Plan 4 removes the
+wrappers entirely.
+"""
 
 import logging
 import threading
@@ -9,53 +18,74 @@ import json
 from flask import Blueprint, current_app, make_response, render_template
 
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
-from job_finder.config import DEFAULT_HAIKU_THRESHOLD
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.exclusion_filter import count_haiku_scorable, should_exclude
+from job_finder.web.exclusion_filter import count_scorable, should_exclude
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
 batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
 
-@batch_scoring_bp.route("/batch-score/haiku/start", methods=["POST"], strict_slashes=False)
-def batch_score_haiku_start():
-    """Start async Haiku batch scoring — returns HTMX polling fragment.
+# v3.0 session_type for the unified scoring route. Plan 4 drops the old
+# "haiku"/"sonnet" values entirely. Until then, the status route renders
+# them with a generic "Scoring" label.
+_SESSION_TYPE_SCORING = "scoring"
 
-    Counts unscored jobs and either returns a done fragment immediately
-    (nothing to score) or inserts a batch_score_sessions row and starts a
-    daemon thread, returning a progress fragment that polls every 2s.
+
+def _render_scoring_done(scored: int = 0, skipped: int = 0, status: str = "done",
+                         message: str | None = None, error_msg: str | None = None):
+    """Render the batch-score done fragment with the v3 'Scoring' label."""
+    return render_template(
+        "dashboard/_batch_score_done.html",
+        label="Scoring",
+        scored=scored,
+        skipped=skipped,
+        status=status,
+        message=message,
+        error_msg=error_msg,
+    )
+
+
+def _start_batch_session(label: str = "Scoring"):
+    """Shared core for /batch-score/start and the back-compat haiku/sonnet wrappers.
+
+    The `label` arg controls the user-visible text in the returned fragment AND
+    the id= prefix of the surrounding div (`batch-score-<label.lower()>-status`).
+    The unified route passes "Scoring"; the legacy wrappers pass "Haiku"/"Sonnet"
+    so existing HTMX hx-target selectors in the pre-Commit-D dashboard templates
+    still line up. Plan 34-03 Commit D replaces the templates with a single
+    Scoring region; Plan 4 removes the wrappers entirely.
     """
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
     testing = current_app.config.get("TESTING", False)
 
     with standalone_connection(db_path) as conn:
-        total = count_haiku_scorable(conn, config)
+        total = count_scorable(conn, config)
 
         if total == 0:
             return render_template(
                 "dashboard/_batch_score_done.html",
-                label="Haiku",
+                label=label,
                 scored=0,
                 skipped=0,
                 status="done",
-                message="No scorable jobs — all unscored jobs are dismissed or already scored.",
+                message="No scorable jobs — all unscored jobs are dismissed or already classified.",
                 error_msg=None,
             )
 
         now = utc_now_iso()
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
-            "VALUES ('haiku', 'running', ?, 0, ?)",
-            (total, now),
+            "VALUES (?, 'running', ?, 0, ?)",
+            (_SESSION_TYPE_SCORING, total, now),
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     if not testing:
         t = threading.Thread(
-            target=_run_batch_haiku_bg,
+            target=_run_batch_bg,
             args=(db_path, session_id, config),
             daemon=True,
         )
@@ -63,70 +93,42 @@ def batch_score_haiku_start():
 
     return render_template(
         "dashboard/_batch_score_progress.html",
-        label="Haiku",
+        label=label,
         session_id=session_id,
         total=total,
         scored=0,
         skipped=0,
         cancelling=False,
     )
+
+
+@batch_scoring_bp.route("/batch-score/start", methods=["POST"], strict_slashes=False)
+def batch_score_start():
+    """Start async unified batch scoring — returns HTMX polling fragment.
+
+    v3.0 (Phase 34 Plan 3 Commit B): replaces batch_score_haiku_start +
+    batch_score_sonnet_start. Counts jobs with classification IS NULL
+    (i.e. not yet processed by the unified scorer) and kicks off a
+    daemon thread that routes each row through score_and_persist_job.
+    """
+    return _start_batch_session(label="Scoring")
+
+
+# Back-compat wrappers — template buttons still POST to /batch-score/haiku/start
+# and /batch-score/sonnet/start. Commit D migrates the templates; Plan 4 removes
+# these wrappers entirely. Delegating with the original label argument preserves
+# HTMX id= selectors in the pre-Commit-D templates. PLAN-4-REMOVE
+@batch_scoring_bp.route("/batch-score/haiku/start", methods=["POST"], strict_slashes=False)
+def batch_score_haiku_start():
+    """DEPRECATED — delegates to the unified scorer. Plan 4 removes."""
+    return _start_batch_session(label="Haiku")
+
 
 @batch_scoring_bp.route("/batch-score/sonnet/start", methods=["POST"], strict_slashes=False)
 def batch_score_sonnet_start():
-    """Start async Sonnet batch evaluation — returns HTMX polling fragment.
+    """DEPRECATED — delegates to the unified scorer. Plan 4 removes."""
+    return _start_batch_session(label="Sonnet")
 
-    Counts jobs qualifying for Sonnet (haiku_score >= threshold, no sonnet_score,
-    jd_full present). Returns done fragment if none qualify.
-    """
-    db_path = current_app.config["DB_PATH"]
-    config = current_app.config.get("JF_CONFIG", {})
-    testing = current_app.config.get("TESTING", False)
-    threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-
-    with standalone_connection(db_path) as conn:
-        total = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
-            "AND sonnet_score IS NULL AND jd_full IS NOT NULL",
-            (threshold,),
-        ).fetchone()[0]
-
-        if total == 0:
-            return render_template(
-                "dashboard/_batch_score_done.html",
-                label="Sonnet",
-                scored=0,
-                skipped=0,
-                status="done",
-                message="No qualifying jobs for Sonnet evaluation.",
-                error_msg=None,
-            )
-
-        now = utc_now_iso()
-        conn.execute(
-            "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
-            "VALUES ('sonnet', 'running', ?, 0, ?)",
-            (total, now),
-        )
-        conn.commit()
-        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-
-    if not testing:
-        t = threading.Thread(
-            target=_run_batch_sonnet_bg,
-            args=(db_path, session_id, config),
-            daemon=True,
-        )
-        t.start()
-
-    return render_template(
-        "dashboard/_batch_score_progress.html",
-        label="Sonnet",
-        session_id=session_id,
-        total=total,
-        scored=0,
-        skipped=0,
-        cancelling=False,
-    )
 
 @batch_scoring_bp.route("/batch-score/status/<int:session_id>", strict_slashes=False)
 def batch_score_status(session_id):
@@ -154,7 +156,7 @@ def batch_score_status(session_id):
             error_msg="Session not found.",
         )
 
-    label = "Haiku" if session["session_type"] == "haiku" else "Sonnet"
+    label = _label_for_session(session["session_type"])
     status = session["status"]
 
     # Timeout safety net: if session has been running for >30 minutes, auto-mark as error
@@ -246,7 +248,7 @@ def batch_score_cancel(session_id):
             error_msg="Session not found.",
         )
 
-    label = "Haiku" if session["session_type"] == "haiku" else "Sonnet"
+    label = _label_for_session(session["session_type"])
 
     # Return progress fragment with cancelling=True — polling continues until
     # the background thread sets status='cancelled'
@@ -260,11 +262,33 @@ def batch_score_cancel(session_id):
         cancelling=True,
     )
 
-def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
-    """Background thread: run Haiku scoring for all unscored jobs.
 
-    Delegates per-job scoring + persistence to scoring_orchestrator.score_and_persist_haiku.
-    This function handles thread-own DB connection, cancellation checks, exclusion filtering,
+def _label_for_session(session_type: str) -> str:
+    """Map a session_type enum value to the user-visible label.
+
+    v3.0 normalizes "haiku"/"sonnet"/"scoring" all to "Scoring" so the
+    running UI reflects the unified pipeline regardless of which route
+    created the session (plans 3 and 4 progressively remove the legacy
+    session_type values).
+    """
+    if session_type == "sync":
+        return "Sync"
+    return "Scoring"
+
+
+def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
+    """Background thread: run the unified v3.0 scorer for all unscored jobs.
+
+    v3.0 (Phase 34 Plan 3 Commit B): replaces the previous two-phase
+    worker pair with a single worker that routes each job through
+    score_and_persist_job. The query predicate selects rows where
+    classification is not yet populated — the unified scorer writes
+    classification on every row, so one predicate covers both the
+    pre-v3 filter pass and the pre-v3 evaluation pass.
+
+    Delegates per-job scoring + persistence to
+    scoring_orchestrator.score_and_persist_job. This function handles
+    thread-own DB connection, cancellation checks, exclusion filtering,
     session progress tracking, and activity logging.
 
     Args:
@@ -273,8 +297,10 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
         config: Application config dict.
     """
     try:
-
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_haiku
+        from job_finder.web.scoring_orchestrator import (
+            load_scoring_profile,
+            score_and_persist_job,
+        )
 
         profile = load_scoring_profile(config)
     except ImportError as e:
@@ -284,8 +310,9 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
     try:
         with standalone_connection(db_path) as conn:
             rows = conn.execute(
-                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NULL "
-                "AND pipeline_status NOT IN ('dismissed', 'archived') ORDER BY score DESC"
+                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE classification IS NULL "
+                "AND pipeline_status NOT IN ('dismissed', 'archived') "
+                "ORDER BY score DESC"
             ).fetchall()
 
             # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
@@ -306,14 +333,19 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
             for row in rows:
                 job_row = dict(row)
 
-                # Pre-Haiku exclusion filter — auto-dismiss excluded jobs silently.
+                # Pre-scoring exclusion filter — auto-dismiss excluded jobs silently.
                 # Excluded jobs are NOT counted against scored/skipped: total was
-                # computed by count_haiku_scorable() which already excludes them.
+                # computed by count_scorable() which already excludes them.
                 exclusions = config.get("profile", {}).get("exclusions", {})
                 profile_min_salary = config.get("profile", {}).get("min_salary")
-                excluded, reason = should_exclude(job_row, exclusions, profile_min_salary, config=config)
+                excluded, reason = should_exclude(
+                    job_row, exclusions, profile_min_salary, config=config
+                )
                 if excluded:
-                    logger.info("Batch Haiku: excluded '%s': %s", job_row.get("dedup_key"), reason)
+                    logger.info(
+                        "Batch scoring: excluded '%s': %s",
+                        job_row.get("dedup_key"), reason,
+                    )
                     dedup_key = job_row.get("dedup_key")
                     if dedup_key and job_row.get("pipeline_status") == "discovered":
                         update_pipeline_status(
@@ -323,14 +355,14 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
                     continue
 
                 try:
-                    result = score_and_persist_haiku(conn, job_row, config, profile)
+                    result = score_and_persist_job(conn, job_row, config, profile)
                     if result is not None:
                         scored_count += 1
                     else:
                         skipped_count += 1
                 except Exception as e:
                     logger.warning(
-                        "Batch Haiku: error scoring job '%s': %s -- continuing",
+                        "Batch scoring: error scoring job '%s': %s -- continuing",
                         job_row.get("dedup_key"), e,
                     )
                     skipped_count += 1
@@ -352,94 +384,12 @@ def _run_batch_haiku_bg(db_path: str, session_id: int, config: dict) -> None:
             conn.commit()
 
             # All jobs processed — mark done
-            _finish_session(conn, db_path, session_id, "done", "haiku")
+            _finish_session(conn, db_path, session_id, "done", _SESSION_TYPE_SCORING)
 
     except Exception as e:
-        logger.error("Batch Haiku background thread failed: %s", e)
+        logger.error("Batch scoring background thread failed: %s", e)
         _mark_session_error(db_path, session_id, str(e)[:500])
 
-def _run_batch_sonnet_bg(db_path: str, session_id: int, config: dict) -> None:
-    """Background thread: run Sonnet evaluation for qualifying jobs.
-
-    Delegates per-job scoring + persistence to scoring_orchestrator.score_and_persist_sonnet.
-    This function handles thread-own DB connection, cancellation checks, session progress
-    tracking, and activity logging.
-
-    Args:
-        db_path: Absolute path to the SQLite database.
-        session_id: ID of the batch_score_sessions row to update.
-        config: Application config dict.
-    """
-    try:
-
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
-    except ImportError as e:
-        _mark_session_error(db_path, session_id, f"Import error: {e}")
-        return
-
-    threshold = config.get("scoring", {}).get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)
-    profile = load_scoring_profile(config)
-
-    try:
-        with standalone_connection(db_path) as conn:
-            rows = conn.execute(
-                f"SELECT {JOBS_ALL_COLUMNS} FROM jobs WHERE haiku_score IS NOT NULL AND haiku_score >= ? "
-                "AND sonnet_score IS NULL AND jd_full IS NOT NULL ORDER BY haiku_score DESC",
-                (threshold,),
-            ).fetchall()
-
-            # BATCH-04: Pre-loop cancellation check (was per-job inside loop)
-            status_row = conn.execute(
-                "SELECT status FROM batch_score_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if status_row and status_row["status"] == "cancelling":
-                conn.execute(
-                    "UPDATE batch_score_sessions SET status = 'cancelled', finished_at = ? WHERE id = ?",
-                    (utc_now_iso(), session_id),
-                )
-                conn.commit()
-                return
-
-            scored_count = 0
-            skipped_count = 0
-
-            for row in rows:
-                job_row = dict(row)
-                try:
-                    result = score_and_persist_sonnet(conn, job_row, config, profile)
-                    if result is not None:
-                        scored_count += 1
-                    else:
-                        skipped_count += 1
-                except Exception as e:
-                    logger.warning(
-                        "Batch Sonnet: error evaluating job '%s': %s -- continuing",
-                        job_row.get("dedup_key"), e,
-                    )
-                    skipped_count += 1
-
-                # Flush progress counters periodically so the polling endpoint sees updates
-                processed = scored_count + skipped_count
-                if processed % 5 == 0:
-                    conn.execute(
-                        "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                        (scored_count, skipped_count, session_id),
-                    )
-                    conn.commit()
-
-            # Final flush before finishing
-            conn.execute(
-                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                (scored_count, skipped_count, session_id),
-            )
-            conn.commit()
-
-            # All jobs processed — mark done
-            _finish_session(conn, db_path, session_id, "done", "sonnet")
-
-    except Exception as e:
-        logger.error("Batch Sonnet background thread failed: %s", e)
-        _mark_session_error(db_path, session_id, str(e)[:500])
 
 def _finish_session(conn, db_path: str, session_id: int, status: str, session_type: str) -> None:
     """Mark a batch session as done and log the activity."""
@@ -455,7 +405,14 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
             ACTION_BATCH_SCORE_SONNET,
             log_activity,
         )
-        action = ACTION_BATCH_SCORE_HAIKU if session_type == "haiku" else ACTION_BATCH_SCORE_SONNET
+        # v3.0 keeps the existing activity constants for continuity with
+        # dashboard Recent Activity records; Plan 4 consolidates them into
+        # a single ACTION_BATCH_SCORE. For now the unified session_type
+        # maps to BATCH_SCORE_HAIKU to avoid breaking the dashboard query.
+        if session_type == "sonnet":
+            action = ACTION_BATCH_SCORE_SONNET
+        else:
+            action = ACTION_BATCH_SCORE_HAIKU
         session_row = conn.execute(
             "SELECT scored, skipped, total FROM batch_score_sessions WHERE id = ?",
             (session_id,),

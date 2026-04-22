@@ -1,7 +1,9 @@
-"""Tests for batch scoring background thread optimization.
+"""Tests for the unified v3.0 batch scoring background thread (Phase 34 Plan 3 Commit B).
 
 Verifies BATCH-04 (pre-loop cancellation check) and BATCH-05 (deferred in-memory
-counters) per the Phase 23 N+1 batching plan.
+counters) after the Haiku/Sonnet merge. The pre-v3 test file had parallel
+"haiku" and "sonnet" copies of each test case; this file collapses them into a
+single "scoring" test since `_run_batch_bg` now drives the whole pipeline.
 """
 
 import sqlite3
@@ -26,7 +28,7 @@ def _make_db():
     conn.row_factory = sqlite3.Row
     return path, conn
 
-def _insert_session(conn, status="running", session_type="haiku", total=0):
+def _insert_session(conn, status="running", session_type="scoring", total=0):
     """Insert a batch_score_sessions row and return its id."""
     from job_finder.json_utils import utc_now_iso
     conn.execute(
@@ -38,25 +40,13 @@ def _insert_session(conn, status="running", session_type="haiku", total=0):
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
-    """Insert a job with haiku_score IS NULL (unscored)."""
+    """Insert a job with classification IS NULL (unscored by v3 pipeline)."""
     from job_finder.json_utils import utc_now_iso
     now = utc_now_iso()
     conn.execute(
         "INSERT OR IGNORE INTO jobs (dedup_key, title, company, location, first_seen, last_seen) "
         "VALUES (?, ?, ?, 'Remote', ?, ?)",
         (dedup_key, title, company, now, now),
-    )
-    conn.commit()
-
-def _insert_sonnet_eligible_job(conn, dedup_key, title="Engineer", company="Acme", haiku_score=75):
-    """Insert a job eligible for Sonnet (haiku_score set, no sonnet_score, jd_full present)."""
-    from job_finder.json_utils import utc_now_iso
-    now = utc_now_iso()
-    conn.execute(
-        "INSERT OR IGNORE INTO jobs "
-        "(dedup_key, title, company, location, first_seen, last_seen, haiku_score, jd_full) "
-        "VALUES (?, ?, ?, 'Remote', ?, ?, ?, ?)",
-        (dedup_key, title, company, now, now, haiku_score, "Full job description text"),
     )
     conn.commit()
 
@@ -72,11 +62,11 @@ def _get_session(conn, session_id):
 
 _MOCK_CONFIG = {}
 
-# score_and_persist_* and load_scoring_profile are imported inside the bg functions
-# via `from job_finder.web.scoring_orchestrator import ...`, so patch at source module.
+# score_and_persist_job and load_scoring_profile are imported inside the bg
+# function via `from job_finder.web.scoring_orchestrator import ...`, so patch
+# at the source module.
 # should_exclude is a top-level import in batch_scoring, so patch there.
-_SCORE_HAIKU_PATCH = "job_finder.web.scoring_orchestrator.score_and_persist_haiku"
-_SCORE_SONNET_PATCH = "job_finder.web.scoring_orchestrator.score_and_persist_sonnet"
+_SCORE_JOB_PATCH = "job_finder.web.scoring_orchestrator.score_and_persist_job"
 _LOAD_PROFILE_PATCH = "job_finder.web.scoring_orchestrator.load_scoring_profile"
 _SHOULD_EXCLUDE_PATCH = "job_finder.web.blueprints.batch_scoring.should_exclude"
 
@@ -87,28 +77,30 @@ _SHOULD_EXCLUDE_PATCH = "job_finder.web.blueprints.batch_scoring.should_exclude"
 class TestCancellationPreLoop:
     """BATCH-04: cancellation check fires once BEFORE the job loop."""
 
-    def test_cancellation_check_once_haiku(self):
-        """Haiku bg: status='cancelling' → immediate return, zero jobs scored."""
-        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
+    def test_cancellation_check_once(self):
+        """Unified bg: status='cancelling' → immediate return, zero jobs scored."""
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
 
         path, conn = _make_db()
         try:
             # Insert 2 unscored jobs
-            _insert_unscored_job(conn, "job-cancel-h-1")
-            _insert_unscored_job(conn, "job-cancel-h-2")
+            _insert_unscored_job(conn, "job-cancel-1")
+            _insert_unscored_job(conn, "job-cancel-2")
             # Session already set to 'cancelling' before the bg thread runs
-            session_id = _insert_session(conn, status="cancelling", session_type="haiku", total=2)
+            session_id = _insert_session(
+                conn, status="cancelling", session_type="scoring", total=2,
+            )
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_JOB_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")):
-                _run_batch_haiku_bg(path, session_id, _MOCK_CONFIG)
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             # Must NOT have scored any jobs
             assert score_mock.call_count == 0, (
-                f"score_and_persist_haiku called {score_mock.call_count} times; "
+                f"score_and_persist_job called {score_mock.call_count} times; "
                 "expected 0 (cancellation before loop)"
             )
 
@@ -121,53 +113,26 @@ class TestCancellationPreLoop:
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_cancellation_check_once_sonnet(self):
-        """Sonnet bg: status='cancelling' → immediate return, zero jobs evaluated."""
-        from job_finder.web.blueprints.batch_scoring import _run_batch_sonnet_bg
+    def test_no_cancellation_processes_all(self):
+        """Unified bg: status='running' → all 3 jobs are processed, session='done'."""
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
 
         path, conn = _make_db()
         try:
-            _insert_sonnet_eligible_job(conn, "job-cancel-s-1")
-            _insert_sonnet_eligible_job(conn, "job-cancel-s-2")
-            session_id = _insert_session(conn, status="cancelling", session_type="sonnet", total=2)
-
-            score_mock = MagicMock(return_value=MagicMock())
-
-            with patch(_SCORE_SONNET_PATCH, score_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}):
-                _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
-
-            assert score_mock.call_count == 0, (
-                f"score_and_persist_sonnet called {score_mock.call_count} times; "
-                "expected 0 (cancellation before loop)"
+            _insert_unscored_job(conn, "job-run-1")
+            _insert_unscored_job(conn, "job-run-2")
+            _insert_unscored_job(conn, "job-run-3")
+            session_id = _insert_session(
+                conn, status="running", session_type="scoring", total=3,
             )
-
-            session = _get_session(conn, session_id)
-            assert session["status"] == "cancelled"
-
-        finally:
-            conn.close()
-            if os.path.exists(path):
-                os.remove(path)
-
-    def test_no_cancellation_processes_all_haiku(self):
-        """Haiku bg: status='running' → all 3 jobs are processed, session='done'."""
-        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
-
-        path, conn = _make_db()
-        try:
-            _insert_unscored_job(conn, "job-run-h-1")
-            _insert_unscored_job(conn, "job-run-h-2")
-            _insert_unscored_job(conn, "job-run-h-3")
-            session_id = _insert_session(conn, status="running", session_type="haiku", total=3)
 
             score_mock = MagicMock(return_value=MagicMock())  # non-None → scored
 
-            with patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_JOB_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
-                _run_batch_haiku_bg(path, session_id, _MOCK_CONFIG)
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             assert score_mock.call_count == 3, (
                 f"Expected 3 scoring calls, got {score_mock.call_count}"
@@ -188,55 +153,28 @@ class TestCancellationPreLoop:
 class TestDeferredCounters:
     """BATCH-05: counters accumulated in memory, flushed periodically and before _finish_session."""
 
-    def test_counter_deferred_haiku(self):
-        """Haiku bg: 2 scored + 1 None → session row has scored=2, skipped=1 at end."""
-        from job_finder.web.blueprints.batch_scoring import _run_batch_haiku_bg
+    def test_counter_deferred(self):
+        """Unified bg: 2 scored + 1 None → session row has scored=2, skipped=1 at end."""
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
 
         path, conn = _make_db()
         try:
-            _insert_unscored_job(conn, "job-ctr-h-1")
-            _insert_unscored_job(conn, "job-ctr-h-2")
-            _insert_unscored_job(conn, "job-ctr-h-3")
-            session_id = _insert_session(conn, status="running", session_type="haiku", total=3)
+            _insert_unscored_job(conn, "job-ctr-1")
+            _insert_unscored_job(conn, "job-ctr-2")
+            _insert_unscored_job(conn, "job-ctr-3")
+            session_id = _insert_session(
+                conn, status="running", session_type="scoring", total=3,
+            )
 
-            # score_and_persist_haiku: return non-None, non-None, None (last job skipped)
+            # score_and_persist_job: return non-None, non-None, None (last job skipped)
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_SCORE_HAIKU_PATCH, score_mock), \
+            with patch(_SCORE_JOB_PATCH, score_mock), \
                  patch(_LOAD_PROFILE_PATCH, return_value={}), \
                  patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
                  patch("job_finder.web.activity_tracker.log_activity"):
-                _run_batch_haiku_bg(path, session_id, _MOCK_CONFIG)
-
-            session = _get_session(conn, session_id)
-            assert session["status"] == "done"
-            assert session["scored"] == 2, f"Expected scored=2, got {session['scored']}"
-            assert session["skipped"] == 1, f"Expected skipped=1, got {session['skipped']}"
-
-        finally:
-            conn.close()
-            if os.path.exists(path):
-                os.remove(path)
-
-    def test_counter_deferred_sonnet(self):
-        """Sonnet bg: 2 scored + 1 None → session row has scored=2, skipped=1 at end."""
-        from job_finder.web.blueprints.batch_scoring import _run_batch_sonnet_bg
-
-        path, conn = _make_db()
-        try:
-            _insert_sonnet_eligible_job(conn, "job-ctr-s-1")
-            _insert_sonnet_eligible_job(conn, "job-ctr-s-2")
-            _insert_sonnet_eligible_job(conn, "job-ctr-s-3")
-            session_id = _insert_session(conn, status="running", session_type="sonnet", total=3)
-
-            side_effects = [MagicMock(), MagicMock(), None]
-            score_mock = MagicMock(side_effect=side_effects)
-
-            with patch(_SCORE_SONNET_PATCH, score_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
-                 patch("job_finder.web.activity_tracker.log_activity"):
-                _run_batch_sonnet_bg(path, session_id, _MOCK_CONFIG)
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             session = _get_session(conn, session_id)
             assert session["status"] == "done"
@@ -262,3 +200,114 @@ class TestDeadCodeRemoved:
             "_update_session_counter still defined in batch_scoring module; "
             "should have been removed as dead code after BATCH-05 migration"
         )
+
+
+# ---------------------------------------------------------------------------
+# v3.0 Plan 3 Commit B invariants — unified route shape
+# ---------------------------------------------------------------------------
+
+class TestUnifiedRouteShape:
+    """Plan 3 Commit B: single batch_score_start + _run_batch_bg, session_type='scoring'."""
+
+    def test_batch_score_start_exists(self):
+        """The unified batch_score_start route function exists."""
+        from job_finder.web.blueprints import batch_scoring as bs
+        assert hasattr(bs, "batch_score_start"), (
+            "Plan 3 Commit B must define batch_score_start"
+        )
+
+    def test_run_batch_bg_exists(self):
+        """The unified _run_batch_bg worker function exists."""
+        from job_finder.web.blueprints import batch_scoring as bs
+        assert hasattr(bs, "_run_batch_bg"), (
+            "Plan 3 Commit B must define _run_batch_bg"
+        )
+
+    def test_legacy_haiku_sonnet_bg_functions_removed(self):
+        """The old _run_batch_haiku_bg / _run_batch_sonnet_bg workers are gone."""
+        from job_finder.web.blueprints import batch_scoring as bs
+        assert not hasattr(bs, "_run_batch_haiku_bg"), (
+            "_run_batch_haiku_bg still defined; Plan 3 Commit B must merge it into _run_batch_bg"
+        )
+        assert not hasattr(bs, "_run_batch_sonnet_bg"), (
+            "_run_batch_sonnet_bg still defined; Plan 3 Commit B must merge it into _run_batch_bg"
+        )
+
+    def test_predicate_uses_classification_not_haiku_score(self):
+        """The worker SQL filters on `classification IS NULL`, not `haiku_score IS NULL`.
+
+        Checks the compiled function bytecode's string constants rather than the
+        source text to avoid false positives from docstring references.
+        """
+        from job_finder.web.blueprints import batch_scoring as bs
+        consts = bs._run_batch_bg.__code__.co_consts
+        sql_strings = [c for c in consts if isinstance(c, str) and "jobs" in c.lower()]
+        combined = " ".join(sql_strings)
+        assert "classification IS NULL" in combined, (
+            f"_run_batch_bg SQL must query on `classification IS NULL`. "
+            f"Found SQL strings: {sql_strings!r}"
+        )
+        assert "haiku_score IS NULL" not in combined, (
+            f"_run_batch_bg SQL must not use the legacy `haiku_score IS NULL` predicate. "
+            f"Found SQL strings: {sql_strings!r}"
+        )
+
+    def _build_app(self, db_path):
+        """Helper — build a real create_app-backed Flask app with full templates."""
+        from job_finder.web import create_app
+        app = create_app(config={
+            "db": {"path": db_path},
+            "scoring": {"daily_budget_usd": 25.0},
+            "profile": {
+                "target_titles": ["Staff Data Scientist"],
+                "target_locations": ["Remote"],
+                "min_salary": 150000,
+                "industries": [],
+                "exclusions": {"title_keywords": [], "companies": []},
+                "skills": [],
+            },
+            "sources": {},
+            "output": {"default_format": "cli", "max_results": 50},
+        })
+        app.config["TESTING"] = True
+        return app
+
+    def test_session_type_inserted_is_scoring(self):
+        """batch_score_start inserts a session with session_type='scoring'."""
+        path, conn = _make_db()
+        try:
+            _insert_unscored_job(conn, "job-route-1")
+            app = self._build_app(path)
+            with app.test_client() as client:
+                resp = client.post("/dashboard/batch-score/start")
+            assert resp.status_code == 200
+
+            session_type = conn.execute(
+                "SELECT session_type FROM batch_score_sessions ORDER BY id DESC LIMIT 1"
+            ).fetchone()[0]
+            assert session_type == "scoring", (
+                f"Expected session_type='scoring' from unified route; got {session_type!r}"
+            )
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_legacy_haiku_route_delegates(self):
+        """POST /dashboard/batch-score/haiku/start still works — it delegates to the unified route."""
+        path, conn = _make_db()
+        try:
+            _insert_unscored_job(conn, "job-legacy-1")
+            app = self._build_app(path)
+            with app.test_client() as client:
+                resp = client.post("/dashboard/batch-score/haiku/start")
+            assert resp.status_code == 200
+            session_type = conn.execute(
+                "SELECT session_type FROM batch_score_sessions ORDER BY id DESC LIMIT 1"
+            ).fetchone()[0]
+            # Legacy wrapper still writes the v3 session_type value.
+            assert session_type == "scoring"
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)

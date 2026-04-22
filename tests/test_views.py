@@ -696,7 +696,12 @@ class TestBatchScoreHaikuStart:
         assert "Haiku" in data
 
     def test_haiku_start_creates_session_in_db(self, app_with_unscored_jobs):
-        """POST /dashboard/batch-score/haiku/start inserts a batch_score_sessions row."""
+        """POST /dashboard/batch-score/haiku/start inserts a batch_score_sessions row.
+
+        v3.0 (Phase 34 Plan 3 Commit B): the legacy haiku/start URL delegates
+        to the unified scorer, which always writes session_type='scoring'
+        regardless of which wrapper route was called.
+        """
         import sqlite3
 
         client = app_with_unscored_jobs.test_client()
@@ -706,12 +711,12 @@ class TestBatchScoreHaikuStart:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         session = conn.execute(
-            "SELECT * FROM batch_score_sessions WHERE session_type='haiku' ORDER BY id DESC LIMIT 1"
+            "SELECT * FROM batch_score_sessions ORDER BY id DESC LIMIT 1"
         ).fetchone()
         conn.close()
 
         assert session is not None
-        assert session["session_type"] == "haiku"
+        assert session["session_type"] == "scoring"
         assert session["status"] in ("running", "done", "cancelled")
 
 class TestBatchScoreSonnetStart:
