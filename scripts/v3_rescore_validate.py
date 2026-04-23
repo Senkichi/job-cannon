@@ -66,25 +66,41 @@ def _quartile_for_score(score: float | int | None) -> str:
 
 
 def gate_g2_monotonicity(
-    report: dict, strict: bool, min_bucket_n: int = 5,
+    report: dict, strict: bool,
+    min_bucket_n: int = 5,
+    noise_tolerance_pct: float = 0.02,
 ) -> tuple[str, dict]:
-    """Higher legacy-score quartile -> >= apply+consider RATE.
+    """Higher legacy-score quartile -> >= apply+consider RATE (with noise tolerance).
 
     Compares rates (not raw counts) because the underlying jobs.sonnet_score
     distribution is heavily skewed -- the upper quartile (76-100) is rare in
     the unclassified pool, so a count comparison would always fail there
     despite the rates being monotonic.
 
+    Rows without a legacy_sonnet_score are skipped entirely (they don't fit
+    the quartile concept). For batches drawing exclusively from the no-sonnet
+    leftover pool, this leaves no quartiles to compare and the gate returns
+    "suppressed" -- correct behavior because the gate's purpose is
+    cross-paradigm directional check vs legacy.
+
     Buckets with fewer than ``min_bucket_n`` rows are suppressed (n too small
     for a stable rate); the monotonicity check then runs over the remaining
     buckets in ascending-quartile order.
+
+    Strict mode allows adjacent-bucket inversions of ``noise_tolerance_pct``
+    or less (default 2pp). For n~40 in a tail bucket, the standard error on
+    a 92% rate is ~4pp; a 2pp tolerance covers half the SE band so genuine
+    inversions still fail while sampling noise does not.
     """
     buckets = {"q1": 0, "q2": 0, "q3": 0, "q4": 0}
     totals = {"q1": 0, "q2": 0, "q3": 0, "q4": 0}
     for r in report.get("per_row_results", []):
         if r.get("status") != "ok":
             continue
-        bucket = _quartile_for_score(r.get("legacy_sonnet_score"))
+        legacy = r.get("legacy_sonnet_score")
+        if legacy is None:
+            continue
+        bucket = _quartile_for_score(legacy)
         totals[bucket] += 1
         sub = r.get("new_sub_scores") or {}
         if sub and all(v >= 2 for v in sub.values()):
@@ -106,6 +122,7 @@ def gate_g2_monotonicity(
         "totals": totals,
         "strict": strict,
         "min_bucket_n": min_bucket_n,
+        "noise_tolerance_pct": noise_tolerance_pct,
     }
 
     if len(valid) < 2:
@@ -116,11 +133,15 @@ def gate_g2_monotonicity(
 
     rates_seq = [r for _, r in valid]
     if strict:
-        monotonic = all(rates_seq[i] <= rates_seq[i + 1] for i in range(len(rates_seq) - 1))
+        # Adjacent inversion of <= noise_tolerance_pct is acceptable.
+        monotonic = all(
+            rates_seq[i] <= rates_seq[i + 1] + noise_tolerance_pct
+            for i in range(len(rates_seq) - 1)
+        )
     else:
         # Loose mode: only flag a strict reversal (highest valid bucket rate <
-        # lowest valid bucket rate).
-        monotonic = rates_seq[-1] >= rates_seq[0]
+        # lowest valid bucket rate, beyond noise tolerance).
+        monotonic = rates_seq[-1] + noise_tolerance_pct >= rates_seq[0]
     return ("pass" if monotonic else "fail"), evidence_base
 
 

@@ -43,6 +43,7 @@ def select_batch_rows(
     batch_size: int,
     seed: int,
     exclude_rescored: bool = True,
+    include_no_sonnet: bool = False,
 ) -> list[str]:
     """Stratified sampling by legacy sonnet_score quartile.
 
@@ -52,32 +53,47 @@ def select_batch_rows(
     distinct row orders (SQLite has no seedable random — printf-based
     seeded ORDER BY does not actually re-shuffle when only a constant
     suffix differs across rows).
+
+    When ``include_no_sonnet`` is True the sonnet_score IS NOT NULL filter
+    is dropped and rows without a legacy score are placed in a synthetic
+    "q0" bucket. Used for the leftover-pool rescore (Plan 4 B4) that
+    converges global G1 to zero per CONTEXT D-20.
     """
     conn.row_factory = sqlite3.Row
     exclude_pred = " AND classification IS NULL " if exclude_rescored else ""
+    sonnet_pred = "" if include_no_sonnet else " AND sonnet_score IS NOT NULL "
     sql = f"""
         SELECT
             dedup_key,
-            NTILE(4) OVER (ORDER BY sonnet_score) AS quartile
+            CASE
+                WHEN sonnet_score IS NULL THEN 0
+                ELSE NTILE(4) OVER (
+                    ORDER BY (CASE WHEN sonnet_score IS NULL THEN NULL ELSE sonnet_score END)
+                )
+            END AS quartile
         FROM jobs
         WHERE jd_full IS NOT NULL
           AND LENGTH(jd_full) >= 200
-          AND sonnet_score IS NOT NULL
+          {sonnet_pred}
           {exclude_pred}
     """
     rows = conn.execute(sql).fetchall()
 
-    by_quartile: dict[int, list[str]] = {1: [], 2: [], 3: [], 4: []}
+    by_quartile: dict[int, list[str]] = {0: [], 1: [], 2: [], 3: [], 4: []}
     for r in rows:
         by_quartile.setdefault(r["quartile"], []).append(r["dedup_key"])
 
     rng = random.Random(seed)
-    per_quartile = batch_size // 4 + (1 if batch_size % 4 else 0)
+    quartile_keys = [0, 1, 2, 3, 4] if include_no_sonnet else [1, 2, 3, 4]
+    nonempty = [q for q in quartile_keys if by_quartile.get(q)]
+    if not nonempty:
+        return []
+    per_bucket = max(1, batch_size // len(nonempty) + (1 if batch_size % len(nonempty) else 0))
     selected: list[str] = []
-    for q in (1, 2, 3, 4):
+    for q in quartile_keys:
         bucket = list(by_quartile.get(q, []))
         rng.shuffle(bucket)
-        selected.extend(bucket[:per_quartile])
+        selected.extend(bucket[:per_bucket])
 
     return selected[:batch_size]
 
@@ -218,6 +234,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Bypass the classification-IS-NOT-NULL skip rail (for re-runs after fix commits).",
     )
+    parser.add_argument(
+        "--include-no-sonnet",
+        action="store_true",
+        help="Include rows with sonnet_score IS NULL (the leftover pool that "
+             "never went through legacy scoring). Required for the B4 sweep "
+             "that converges global G1 to zero.",
+    )
     parser.add_argument("--config-path", default="config.yaml")
     args = parser.parse_args(argv)
 
@@ -236,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         keys = select_batch_rows(
             conn, args.batch_size, args.seed,
             exclude_rescored=not args.force_rescore,
+            include_no_sonnet=args.include_no_sonnet,
         )
         log.info("selected %d rows for batch %d", len(keys), args.batch_number)
         report = run_batch(

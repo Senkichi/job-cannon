@@ -157,6 +157,42 @@ def test_select_batch_rows_force_returns_already_scored_when_no_excluded():
     assert classified > 0
 
 
+def test_select_batch_rows_excludes_no_sonnet_by_default():
+    """sonnet_score IS NULL rows are excluded from default stratified pool."""
+    conn = _make_jobs_db(num_rows=40)
+    # Set 5 rows' sonnet_score to NULL.
+    conn.execute("UPDATE jobs SET sonnet_score = NULL WHERE rowid <= 5")
+    conn.commit()
+    keys = select_batch_rows(conn, batch_size=20, seed=1)
+    placeholders = ",".join("?" * len(keys))
+    rows = conn.execute(
+        f"SELECT sonnet_score FROM jobs WHERE dedup_key IN ({placeholders})",
+        keys,
+    ).fetchall()
+    assert all(r["sonnet_score"] is not None for r in rows)
+
+
+def test_select_batch_rows_include_no_sonnet_picks_them_up():
+    """include_no_sonnet=True surfaces sonnet-NULL rows in a synthetic q0."""
+    conn = _make_jobs_db(num_rows=20)
+    # Insert 8 rows with NULL sonnet_score (simulating leftover pool).
+    long_jd = "x" * 500
+    for i in range(8):
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, jd_full) VALUES (?, ?, ?)",
+            (f"co|leftover-{i:03d}", f"Leftover {i}", long_jd),
+        )
+    conn.commit()
+    keys = select_batch_rows(conn, batch_size=20, seed=1, include_no_sonnet=True)
+    placeholders = ",".join("?" * len(keys))
+    rows = conn.execute(
+        f"SELECT sonnet_score FROM jobs WHERE dedup_key IN ({placeholders})",
+        keys,
+    ).fetchall()
+    null_count = sum(1 for r in rows if r["sonnet_score"] is None)
+    assert null_count > 0
+
+
 # ---------------------------------------------------------------------------
 # run_batch
 # ---------------------------------------------------------------------------
