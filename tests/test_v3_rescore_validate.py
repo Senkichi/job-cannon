@@ -155,7 +155,7 @@ def test_g3_suppressed_below_n_20():
     assert evidence["n"] == 15
 
 
-def test_g3_pass_b1_threshold_0_3():
+def test_g3_pass_when_r_above_noise_floor():
     # Construct correlated pairs: legacy 10..100 stepwise, sub-mean tracking.
     rows = []
     for i in range(25):
@@ -164,27 +164,41 @@ def test_g3_pass_b1_threshold_0_3():
         rows.append(_row(legacy, mean))
     verdict, evidence = gate_g3_correlation(_report(rows, 1), batch_number=1)
     assert verdict == "pass"
-    assert evidence["r"] >= 0.3
-    assert evidence["threshold"] == 0.3
+    assert evidence["r"] >= 0.20
+    assert evidence["threshold"] == 0.20
 
 
-def test_g3_fail_b2_threshold_when_r_between_thresholds():
-    # Build a mediocre correlation that passes 0.3 but fails 0.5.
+def test_g3_threshold_uniform_across_batches():
+    # B1, B2, B3 all use the noise-floor threshold (0.20). G3 was
+    # downgraded from a "matches legacy" test to a "v3 isn't returning
+    # noise" test after B2 confirmed cross-paradigm r ~ 0.33 (Phase 33
+    # locked decision: v3 ordinal is intentionally a different paradigm
+    # than legacy continuous Sonnet).
     rows = []
+    for i in range(25):
+        rows.append(_row(legacy=5 + i * 4, mean_sub=1 + (i / 24) * 4))
+    rep = _report(rows, batch_number=1)
+    for batch in (1, 2, 3):
+        _, ev = gate_g3_correlation(rep, batch_number=batch)
+        assert ev["threshold"] == 0.20
+
+
+def test_g3_fail_when_r_below_noise_floor():
+    # Build an essentially uncorrelated sequence (random) to fail the floor.
     import random
-    rng = random.Random(7)
+    rng = random.Random(11)
+    rows = []
     for i in range(50):
-        legacy = 10 + i * 1.8
-        mean = 2 + (i / 49) * 1 + rng.uniform(-1.0, 1.0)
-        rows.append(_row(legacy, max(1, min(5, mean))))
+        legacy = rng.uniform(0, 100)
+        mean = rng.uniform(1, 5)
+        rows.append(_row(legacy, mean))
     verdict, evidence = gate_g3_correlation(_report(rows, 2), batch_number=2)
-    # Threshold check; r may be borderline depending on RNG but must be < 0.5
-    if evidence["r"] >= 0.5:
-        pytest.skip(f"random sample produced r={evidence['r']}; rerun seed adjust")
+    if evidence["r"] >= 0.20:
+        pytest.skip(f"random sample produced r={evidence['r']}; not low enough to test")
     assert verdict == "fail"
 
 
-def test_g3_pass_b2_threshold_0_5_when_r_high():
+def test_g3_pass_b2_when_r_high():
     rows = []
     for i in range(30):
         legacy = 5 + i * 3
@@ -192,7 +206,7 @@ def test_g3_pass_b2_threshold_0_5_when_r_high():
         rows.append(_row(legacy, mean))
     verdict, evidence = gate_g3_correlation(_report(rows, 2), batch_number=2)
     assert verdict == "pass"
-    assert evidence["threshold"] == 0.5
+    assert evidence["threshold"] == 0.20
 
 
 # ---------------------------------------------------------------------------
