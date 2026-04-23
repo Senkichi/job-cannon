@@ -65,8 +65,20 @@ def _quartile_for_score(score: float | int | None) -> str:
     return "q4"
 
 
-def gate_g2_monotonicity(report: dict, strict: bool) -> tuple[str, dict]:
-    """Higher quartile -> >= apply+consider count, with strict/loose modes."""
+def gate_g2_monotonicity(
+    report: dict, strict: bool, min_bucket_n: int = 5,
+) -> tuple[str, dict]:
+    """Higher legacy-score quartile -> >= apply+consider RATE.
+
+    Compares rates (not raw counts) because the underlying jobs.sonnet_score
+    distribution is heavily skewed -- the upper quartile (76-100) is rare in
+    the unclassified pool, so a count comparison would always fail there
+    despite the rates being monotonic.
+
+    Buckets with fewer than ``min_bucket_n`` rows are suppressed (n too small
+    for a stable rate); the monotonicity check then runs over the remaining
+    buckets in ascending-quartile order.
+    """
     buckets = {"q1": 0, "q2": 0, "q3": 0, "q4": 0}
     totals = {"q1": 0, "q2": 0, "q3": 0, "q4": 0}
     for r in report.get("per_row_results", []):
@@ -77,18 +89,39 @@ def gate_g2_monotonicity(report: dict, strict: bool) -> tuple[str, dict]:
         sub = r.get("new_sub_scores") or {}
         if sub and all(v >= 2 for v in sub.values()):
             buckets[bucket] += 1
-    counts = [buckets["q1"], buckets["q2"], buckets["q3"], buckets["q4"]]
-    if strict:
-        monotonic = all(counts[i] <= counts[i + 1] for i in range(3))
-    else:
-        # Loose mode: only flag a strict reversal (top quartile < bottom quartile)
-        monotonic = counts[3] >= counts[0]
-    verdict = "pass" if monotonic else "fail"
-    return verdict, {
+
+    rates: dict[str, float | None] = {}
+    valid: list[tuple[str, float]] = []
+    for q in ("q1", "q2", "q3", "q4"):
+        if totals[q] >= min_bucket_n:
+            rate = buckets[q] / totals[q]
+            rates[q] = round(rate, 3)
+            valid.append((q, rate))
+        else:
+            rates[q] = None
+
+    evidence_base: dict = {
+        "rates_apply_or_consider": rates,
         "buckets_apply_or_consider": buckets,
         "totals": totals,
         "strict": strict,
+        "min_bucket_n": min_bucket_n,
     }
+
+    if len(valid) < 2:
+        return "suppressed", {
+            **evidence_base,
+            "reason": f"fewer than 2 buckets with n>={min_bucket_n}",
+        }
+
+    rates_seq = [r for _, r in valid]
+    if strict:
+        monotonic = all(rates_seq[i] <= rates_seq[i + 1] for i in range(len(rates_seq) - 1))
+    else:
+        # Loose mode: only flag a strict reversal (highest valid bucket rate <
+        # lowest valid bucket rate).
+        monotonic = rates_seq[-1] >= rates_seq[0]
+    return ("pass" if monotonic else "fail"), evidence_base
 
 
 def gate_g3_correlation(report: dict, batch_number: int) -> tuple[str, dict]:

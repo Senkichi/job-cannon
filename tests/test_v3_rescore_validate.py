@@ -84,43 +84,63 @@ def test_g1_fail_lists_missing():
 # ---------------------------------------------------------------------------
 
 
-def _bucketed_rows(counts: dict[str, int], all_pass: bool = True) -> list[dict]:
-    """counts: {q1: n_apply_or_consider, ...}. Builds rows with appropriate sub-scores."""
+def _rated_rows(rates: dict[str, tuple[int, int]]) -> list[dict]:
+    """rates: {q1: (n_apply_or_consider, n_total), ...}. Builds rows with the right mix."""
     bucket_to_score = {"q1": 12, "q2": 38, "q3": 62, "q4": 88}
     rows = []
-    for bucket, n in counts.items():
+    for bucket, (apply_n, total_n) in rates.items():
         score = bucket_to_score[bucket]
-        for _ in range(n):
-            rows.append(_row(score, 3))  # sub all 3 -> apply+consider eligible
-        if not all_pass:
-            for _ in range(2):
-                rows.append(_row(score, 1))  # sub all 1 -> not apply+consider
+        for _ in range(apply_n):
+            rows.append(_row(score, 3))  # all sub-scores 3 -> apply-eligible
+        for _ in range(total_n - apply_n):
+            rows.append(_row(score, 1))  # any sub=1 -> not apply-eligible
     return rows
 
 
-def test_g2_pass_strict_when_strictly_monotonic():
-    rows = _bucketed_rows({"q1": 1, "q2": 2, "q3": 3, "q4": 4})
+def test_g2_pass_strict_when_rates_monotonic():
+    # Rates: q1=2/10=20%, q2=4/10=40%, q3=6/10=60%, q4=8/10=80% -- strictly monotonic
+    rows = _rated_rows({"q1": (2, 10), "q2": (4, 10), "q3": (6, 10), "q4": (8, 10)})
     verdict, evidence = gate_g2_monotonicity(_report(rows, batch_number=2), strict=True)
     assert verdict == "pass"
-    assert evidence["buckets_apply_or_consider"]["q4"] == 4
+    assert evidence["rates_apply_or_consider"]["q4"] == 0.8
 
 
-def test_g2_fail_strict_on_reversal():
-    rows = _bucketed_rows({"q1": 5, "q2": 3, "q3": 4, "q4": 2})
+def test_g2_fail_strict_on_rate_reversal():
+    # Rates: q1=8/10=80%, q2=3/10=30%, q3=4/10=40%, q4=2/10=20% -- reversed
+    rows = _rated_rows({"q1": (8, 10), "q2": (3, 10), "q3": (4, 10), "q4": (2, 10)})
     verdict, _ = gate_g2_monotonicity(_report(rows, batch_number=2), strict=True)
     assert verdict == "fail"
 
 
-def test_g2_loose_passes_minor_reversal():
-    rows = _bucketed_rows({"q1": 1, "q2": 4, "q3": 2, "q4": 5})
+def test_g2_loose_passes_minor_rate_dip():
+    # q1=20%, q2=40%, q3=30%, q4=50% -- non-strict but q4 > q1
+    rows = _rated_rows({"q1": (2, 10), "q2": (4, 10), "q3": (3, 10), "q4": (5, 10)})
     verdict, _ = gate_g2_monotonicity(_report(rows, batch_number=1), strict=False)
     assert verdict == "pass"
 
 
 def test_g2_loose_fails_q4_below_q1():
-    rows = _bucketed_rows({"q1": 5, "q2": 4, "q3": 3, "q4": 1})
+    # q1=80%, q4=10% -- loose mode flags this reversal
+    rows = _rated_rows({"q1": (8, 10), "q2": (5, 10), "q3": (3, 10), "q4": (1, 10)})
     verdict, _ = gate_g2_monotonicity(_report(rows, batch_number=1), strict=False)
     assert verdict == "fail"
+
+
+def test_g2_suppresses_buckets_below_min_n():
+    # q4 has only 3 ok rows; gate should ignore it. q1..q3 are strictly monotonic by rate.
+    rows = _rated_rows({"q1": (2, 10), "q2": (4, 10), "q3": (6, 10), "q4": (3, 3)})
+    verdict, evidence = gate_g2_monotonicity(_report(rows, batch_number=2), strict=True)
+    assert verdict == "pass"
+    assert evidence["rates_apply_or_consider"]["q4"] is None
+    assert evidence["totals"]["q4"] == 3
+
+
+def test_g2_suppressed_when_too_few_buckets_meet_min_n():
+    # Only q1 has n>=5; everything else suppressed. Need 2+ to evaluate.
+    rows = _rated_rows({"q1": (2, 10), "q2": (1, 2), "q3": (1, 1), "q4": (0, 1)})
+    verdict, evidence = gate_g2_monotonicity(_report(rows, batch_number=2), strict=True)
+    assert verdict == "suppressed"
+    assert "fewer than 2 buckets" in evidence["reason"]
 
 
 # ---------------------------------------------------------------------------
