@@ -180,7 +180,7 @@ def _run_prep_generation(
     try:
         # --- Load job row ---
         job = conn.execute(
-            "SELECT title, company, jd_full, sonnet_score, fit_analysis "
+            "SELECT title, company, jd_full, fit_analysis "
             "FROM jobs WHERE dedup_key = ?",
             (dedup_key,),
         ).fetchone()

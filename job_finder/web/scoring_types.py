@@ -43,10 +43,12 @@ class JobRow(TypedDict, total=False):
     salary_max: int | None
     source_urls: str
     comp_data_json: str | None
-    haiku_score: int | None
-    sonnet_score: float | None
+    classification: str | None
+    sub_scores_json: str | None
     opus_score: float | None
     fit_analysis: str | None
+    scoring_provider: str | None
+    scoring_model: str | None
     enrichment_tier: str | None
     company_id: str | None
     status: str

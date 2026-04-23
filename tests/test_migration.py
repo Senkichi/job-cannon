@@ -415,10 +415,12 @@ def test_migration_count_is_thirteen():
     Migration 29 adds company_research table.
     Migration 30 adds careers_url to companies.
     Migration 31 adds careers_crawl_last_at to companies.
+    Migration 40 adds v3.0 classification/sub_scores_json/scoring_model.
+    Migration 41 (Plan 5) drops legacy haiku_score/haiku_summary/sonnet_score.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
-    assert len(MIGRATIONS) == 40
+    assert len(MIGRATIONS) == 41
 
 
 class TestMigration27:
@@ -744,26 +746,26 @@ class TestMigration7:
 # ---------------------------------------------------------------------------
 
 class TestMigration2:
-    """Verify Migration 2 adds AI scoring columns and indexes to jobs table.
+    """Verify Migration 2 added AI-scoring scaffolding that *persists* through
+    the full migration chain.
 
-    Class-scope safe: all migrated_db tests are pure PRAGMA reads (schema verification only).
-    Confirmed by audit (Plan 20-01). One test uses tmp_db_path independently.
+    Plan 5 (Migration 41) dropped the transient haiku_score / haiku_summary /
+    sonnet_score columns and idx_jobs_haiku_score index. The fit_analysis,
+    jd_full, is_stale columns Migration 2 added remain in the final schema and
+    are the load-bearing survivors — they're asserted here.
+
+    Class-scope safe: all migrated_db tests are pure PRAGMA reads (schema
+    verification only). Confirmed by audit (Plan 20-01). One test uses
+    tmp_db_path independently.
     """
 
-    def test_migration2_adds_haiku_score_column(self, migrated_db_class):
+    def test_migration2_legacy_score_columns_dropped_by_mig41(self, migrated_db_class):
+        """Post-Mig-41: the transient legacy score columns are gone."""
         path, conn = migrated_db_class
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-        assert "haiku_score" in cols
-
-    def test_migration2_adds_haiku_summary_column(self, migrated_db_class):
-        path, conn = migrated_db_class
-        cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-        assert "haiku_summary" in cols
-
-    def test_migration2_adds_sonnet_score_column(self, migrated_db_class):
-        path, conn = migrated_db_class
-        cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-        assert "sonnet_score" in cols
+        assert "haiku_score" not in cols
+        assert "haiku_summary" not in cols
+        assert "sonnet_score" not in cols
 
     def test_migration2_adds_fit_analysis_column(self, migrated_db_class):
         path, conn = migrated_db_class
@@ -780,7 +782,8 @@ class TestMigration2:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         assert "is_stale" in cols
 
-    def test_migration2_adds_haiku_score_index(self, migrated_db_class):
+    def test_migration2_legacy_haiku_score_index_dropped_by_mig41(self, migrated_db_class):
+        """Post-Mig-41: idx_jobs_haiku_score is gone (dropped before the column)."""
         path, conn = migrated_db_class
         indexes = {
             row[0]
@@ -788,7 +791,7 @@ class TestMigration2:
                 "SELECT name FROM sqlite_master WHERE type='index'"
             ).fetchall()
         }
-        assert "idx_jobs_haiku_score" in indexes
+        assert "idx_jobs_haiku_score" not in indexes
 
     def test_migration2_adds_is_stale_index(self, migrated_db_class):
         path, conn = migrated_db_class
@@ -808,7 +811,9 @@ class TestMigration2:
         conn.row_factory = sqlite3.Row
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
-        assert "haiku_score" in cols
+        # fit_analysis survives the full chain; haiku_score is dropped by Mig 41.
+        assert "fit_analysis" in cols
+        assert "haiku_score" not in cols
 
     def test_migration2_user_version_is_current(self, migrated_db_class):
         from job_finder.web.db_migrate import MIGRATIONS
@@ -1169,8 +1174,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 40 entries (updated for Migration 40: v3.0 ordinal scorer schema)."""
-        assert len(MIGRATIONS) == 40
+        """MIGRATIONS list has exactly 41 entries (updated for Migration 41: Plan 5 legacy-score column drop)."""
+        assert len(MIGRATIONS) == 41
 
 
 class TestMigration40:
@@ -1220,7 +1225,8 @@ class TestMigration40:
         assert version == len(MIGRATIONS), (
             f"Migration 40: user_version={version}, expected {len(MIGRATIONS)}"
         )
-        assert version == 40, f"Migration 40: expected user_version=40, got {version}"
+        # Post-Plan-5 the final user_version is 41 (Mig 41 ran on top of Mig 40).
+        assert version >= 40, f"Migration 40: expected user_version>=40, got {version}"
 
     def test_migration_40_defaults_null_on_new_row(self, tmp_db_path):
         """New jobs rows have classification/sub_scores_json/scoring_model = NULL by default."""
@@ -1255,17 +1261,234 @@ class TestMigration40:
 
         for col in ("classification", "sub_scores_json", "scoring_model"):
             assert col in cols, f"Migration 40 idempotency: {col} missing after double-run"
-        assert version == 40, f"Migration 40 idempotency: user_version={version}, expected 40"
+        # After Plan 5 lands, user_version advances to 41 (Mig 41 follows Mig 40).
+        assert version >= 40, (
+            f"Migration 40 idempotency: user_version={version}, expected >=40"
+        )
 
-    def test_migration_40_preserves_legacy_columns(self, tmp_db_path):
-        """Migration 40 is additive — legacy haiku_score, haiku_summary, sonnet_score still exist.
-        (Migration 41 in Plan 5 removes them; Plan 1's migration must not touch them.)"""
+    def test_migration_40_fit_analysis_preserved_by_mig41(self, tmp_db_path):
+        """Migration 41 preserves fit_analysis (holds the v3.0 rationale payload).
+
+        The transient legacy scoring columns (haiku_score / haiku_summary /
+        sonnet_score) are dropped by Mig 41; fit_analysis remains because it
+        now carries the rationale JSON (strengths / gaps / talking_points /
+        resume_priority_skills).
+        """
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
-        for legacy_col in ("haiku_score", "haiku_summary", "sonnet_score", "fit_analysis"):
-            assert legacy_col in cols, (
-                f"Migration 40 must NOT remove legacy column {legacy_col} "
-                f"(Plan 5 / Migration 41 handles removal)"
+        assert "fit_analysis" in cols
+        for dropped in ("haiku_score", "haiku_summary", "sonnet_score"):
+            assert dropped not in cols, (
+                f"Migration 41 should have dropped {dropped}, but it is still present"
             )
+
+
+class TestMigration41DestructiveShape:
+    """Shape tests for Migration 41 -- the destructive legacy-score column drop.
+
+    Plan 5 asserts: after run_migrations on a fresh DB, haiku_score,
+    haiku_summary, and sonnet_score columns are absent; idx_jobs_haiku_score
+    index is absent; everything else Plan 5 intended to preserve is present.
+    """
+
+    def test_mig41_drops_haiku_score_column(self, tmp_db_path):
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "haiku_score" not in cols
+
+    def test_mig41_drops_haiku_summary_column(self, tmp_db_path):
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "haiku_summary" not in cols
+
+    def test_mig41_drops_sonnet_score_column(self, tmp_db_path):
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        assert "sonnet_score" not in cols
+
+    def test_mig41_drops_idx_jobs_haiku_score_index(self, tmp_db_path):
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        indexes = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        conn.close()
+        assert "idx_jobs_haiku_score" not in indexes
+
+    def test_mig41_preserves_v3_columns(self, tmp_db_path):
+        """Migration 41 preserves the v3 scoring surface and all untouched columns."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        conn.close()
+        for preserved in (
+            "fit_analysis",
+            "scoring_provider",
+            "scoring_model",
+            "eval_blocks",
+            "opus_score",
+            "score",
+            "job_archetype",
+            "legitimacy_note",
+            "classification",
+            "sub_scores_json",
+        ):
+            assert preserved in cols, f"Mig 41 should preserve {preserved}"
+
+    def test_mig41_preserves_existing_data(self, tmp_db_path):
+        """Rows populated with v3 columns before Mig 41 retain their values after."""
+        import json
+        import os
+        import tempfile
+
+        from job_finder.web.db_migrate import (
+            MIGRATIONS, _apply_migration, _migration_41_drop_legacy_scores,
+        )
+
+        # Run all migrations EXCEPT Migration 41 so we can populate legacy
+        # columns with a known payload before the destructive migration lands.
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        try:
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            for i, m in enumerate(MIGRATIONS, start=1):
+                if m is _migration_41_drop_legacy_scores:
+                    break
+                _apply_migration(conn, i, m)
+
+            # Seed a row with both legacy columns AND v3 columns populated.
+            sub_scores = {
+                "title_fit": 4, "location_fit": 4, "comp_fit": 3,
+                "domain_match": 4, "seniority_match": 4, "skills_match": 3,
+            }
+            conn.execute(
+                """INSERT INTO jobs
+                    (dedup_key, title, company, location, first_seen, last_seen,
+                     haiku_score, sonnet_score, haiku_summary,
+                     classification, sub_scores_json, fit_analysis,
+                     scoring_provider, scoring_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "preserve-me", "Engineer", "Acme", "Remote",
+                    "2026-04-23", "2026-04-23",
+                    65.0, 78.0, "summary-text",
+                    "apply", json.dumps(sub_scores), json.dumps({"strengths": ["ML"]}),
+                    "ollama", "qwen2.5:14b",
+                ),
+            )
+            conn.commit()
+
+            # Now apply Mig 41
+            _apply_migration(
+                conn,
+                MIGRATIONS.index(_migration_41_drop_legacy_scores) + 1,
+                _migration_41_drop_legacy_scores,
+            )
+
+            row = conn.execute(
+                "SELECT classification, sub_scores_json, fit_analysis, "
+                "scoring_provider, scoring_model "
+                "FROM jobs WHERE dedup_key = 'preserve-me'"
+            ).fetchone()
+            conn.close()
+            assert row["classification"] == "apply"
+            assert json.loads(row["sub_scores_json"]) == sub_scores
+            assert json.loads(row["fit_analysis"]) == {"strengths": ["ML"]}
+            assert row["scoring_provider"] == "ollama"
+            assert row["scoring_model"] == "qwen2.5:14b"
+        finally:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except PermissionError:
+                    pass
+
+    def test_mig41_is_idempotent(self, tmp_db_path):
+        """Running the full migration chain twice does not raise on Mig 41 re-run."""
+        run_migrations(tmp_db_path)
+        run_migrations(tmp_db_path)  # must not raise
+        conn = sqlite3.connect(tmp_db_path)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        conn.close()
+        assert "haiku_score" not in cols
+        assert version == len(MIGRATIONS)
+
+
+class TestMigration41BackupGate:
+    """Preflight tests for Migration 41's backup-recency gate.
+
+    The gate reads GSD_BACKUP_CONFIRMED env var and globs for
+    backup_userdata_*.tar.gz in cwd. Raises MigrationBlockedError when the
+    combination indicates no recent backup is available. conftest.py sets
+    GSD_BACKUP_CONFIRMED=1 session-wide, so these tests monkeypatch it away
+    to exercise the real gate logic.
+    """
+
+    def test_gate_raises_with_no_backup_and_no_override(self, monkeypatch, tmp_path):
+        import os
+
+        from job_finder.web.db_migrate import (
+            MigrationBlockedError, _check_backup_recent,
+        )
+        monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
+        monkeypatch.chdir(tmp_path)  # empty directory -- no backup tarballs
+        with pytest.raises(MigrationBlockedError, match=r"no backup_userdata_\*\.tar\.gz"):
+            _check_backup_recent()
+
+    def test_gate_raises_when_backup_older_than_24h(self, monkeypatch, tmp_path):
+        import os
+        import time
+
+        from job_finder.web.db_migrate import (
+            MigrationBlockedError, _check_backup_recent,
+        )
+        monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
+        monkeypatch.chdir(tmp_path)
+        # Create a backup tarball with mtime 48h in the past
+        stale = tmp_path / "backup_userdata_20260101_000000.tar.gz"
+        stale.write_bytes(b"")
+        old_mtime = time.time() - (48 * 3600)
+        os.utime(stale, (old_mtime, old_mtime))
+
+        with pytest.raises(MigrationBlockedError, match=r"h old \(>24h\)"):
+            _check_backup_recent()
+
+    def test_gate_allows_fresh_backup(self, monkeypatch, tmp_path):
+        from job_finder.web.db_migrate import _check_backup_recent
+
+        monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "backup_userdata_fresh.tar.gz").write_bytes(b"")
+        # Fresh mtime (now) -- should not raise
+        _check_backup_recent()
+
+    def test_gate_allows_env_override(self, monkeypatch, tmp_path):
+        from job_finder.web.db_migrate import _check_backup_recent
+
+        # No backups + explicit override -- must not raise
+        monkeypatch.setenv("GSD_BACKUP_CONFIRMED", "1")
+        monkeypatch.chdir(tmp_path)
+        _check_backup_recent()
+
+    def test_gate_env_override_any_other_value_does_not_bypass(self, monkeypatch, tmp_path):
+        """GSD_BACKUP_CONFIRMED only bypasses the gate when literally '1'."""
+        from job_finder.web.db_migrate import (
+            MigrationBlockedError, _check_backup_recent,
+        )
+        monkeypatch.setenv("GSD_BACKUP_CONFIRMED", "yes")  # not '1'
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(MigrationBlockedError):
+            _check_backup_recent()

@@ -857,9 +857,9 @@ class TestResumeRoutes:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -874,7 +874,6 @@ class TestResumeRoutes:
                 "{}",
                 "reviewing",
                 "reviewing",
-                85.0,
                 "Full job description text here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -930,14 +929,15 @@ class TestResumeRoutes:
 
         run_migrations(tmp_db_path)
 
-        # Insert a job without classification (legacy shim haiku_score only)
+        # Insert a job without classification (NULL) -- Plan 5 scoring gate
+        # requires classification=='apply' to unlock resume generation.
         conn = _sqlite3.connect(tmp_db_path)
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, haiku_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 user_interest, pipeline_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "unclassified|job",
                 "Data Analyst",
@@ -952,7 +952,6 @@ class TestResumeRoutes:
                 "{}",
                 "reviewing",
                 "reviewing",
-                65.0,
             ),
         )
         conn.commit()
@@ -1232,7 +1231,7 @@ class TestParallelVariantGeneration:
             "company": "Acme",
             "jd_full": "Looking for a data scientist with Python skills.",
             "fit_analysis": None,
-            "sonnet_score": 85.0,
+            "classification": "apply",
         }
 
         sample_resume = self._make_sample_resume()
@@ -1276,7 +1275,7 @@ class TestParallelVariantGeneration:
             "company": "Acme",
             "jd_full": "Looking for a data scientist.",
             "fit_analysis": None,
-            "sonnet_score": 85.0,
+            "classification": "apply",
         }
 
         sample_resume = self._make_sample_resume()
@@ -1406,7 +1405,7 @@ class TestPartialFailure:
             "company": "Acme",
             "jd_full": "Looking for a data scientist.",
             "fit_analysis": None,
-            "sonnet_score": 85.0,
+            "classification": "apply",
         }
 
         sample_resume = self._make_sample_resume()
@@ -1461,7 +1460,7 @@ class TestPartialFailure:
             "company": "Acme",
             "jd_full": "Looking for a data scientist.",
             "fit_analysis": None,
-            "sonnet_score": 85.0,
+            "classification": "apply",
         }
 
         with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=RuntimeError("all fail")):
@@ -1859,9 +1858,9 @@ class TestQuickApply:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -1876,7 +1875,6 @@ class TestQuickApply:
                 "{}",
                 "reviewing",
                 "reviewing",
-                85.0,
                 "Full job description text here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -1969,9 +1967,9 @@ class TestQuickApply:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -1986,7 +1984,6 @@ class TestQuickApply:
                 "{}",
                 "reviewing",
                 "reviewing",
-                85.0,
                 "Full job description text here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -2027,8 +2024,13 @@ class TestQuickApply:
             "Response should show applied confirmation"
         )
 
-    def test_quick_apply_returns_400_when_no_sonnet_score(self, tmp_db_path):
-        """POST /quick-apply returns 400 when job has no sonnet_score."""
+    def test_quick_apply_returns_400_when_not_classified_apply(self, tmp_db_path):
+        """POST /quick-apply returns 400 when classification != 'apply'.
+
+        Plan 5: the legacy sonnet_score gate was replaced by the
+        classification=='apply' gate (Plan 3 Commit E). A job with classification
+        NULL should not unlock quick-apply.
+        """
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
@@ -2042,10 +2044,10 @@ class TestQuickApply:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, haiku_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 user_interest, pipeline_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                "haiku|only|job",
+                "unclassified|only|job",
                 "Data Analyst",
                 "Some Corp",
                 "Remote",
@@ -2058,7 +2060,6 @@ class TestQuickApply:
                 "{}",
                 "reviewing",
                 "reviewing",
-                65.0,
             ),
         )
         conn.commit()
@@ -2072,7 +2073,7 @@ class TestQuickApply:
         app.config["TESTING"] = True
 
         with app.test_client() as client:
-            resp = client.post(f"/jobs/{quote('haiku|only|job', safe='')}/quick-apply")
+            resp = client.post(f"/jobs/{quote('unclassified|only|job', safe='')}/quick-apply")
 
         assert resp.status_code == 400, f"Expected 400, got: {resp.status_code}"
 
@@ -2091,9 +2092,9 @@ class TestQuickApply:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "nourls|job|remote",
                 "Staff Analyst",
@@ -2108,7 +2109,6 @@ class TestQuickApply:
                 "{}",
                 "reviewing",
                 "reviewing",
-                80.0,
                 "Job description here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -2164,9 +2164,9 @@ class TestQuickApplyResponse:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -2181,7 +2181,6 @@ class TestQuickApplyResponse:
                 "{}",
                 "reviewing",
                 "reviewing",
-                85.0,
                 "Full job description.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -2232,9 +2231,9 @@ class TestQuickApplyResponse:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -2249,7 +2248,6 @@ class TestQuickApplyResponse:
                 "{}",
                 "reviewing",
                 "reviewing",
-                85.0,
                 "Full job description.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -2359,9 +2357,9 @@ class TestInterviewPrepTrigger:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "acme|senior-ds|remote",
                 "Senior Data Scientist",
@@ -2373,7 +2371,7 @@ class TestInterviewPrepTrigger:
                 "2026-03-01T00:00:00",
                 "2026-03-11T00:00:00",
                 8.5, "{}", "reviewing", "reviewing",
-                85.0, "Full job description text here.",
+                "Full job description text here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             ),
@@ -2647,7 +2645,7 @@ class TestPreferenceInjection:
             "company": "Acme Corp",
             "jd_full": "Looking for a data scientist with Python and ML experience.",
             "fit_analysis": None,
-            "sonnet_score": 75.0,
+            "classification": "consider",
         }
 
     def _make_profile(self) -> dict:
@@ -3216,9 +3214,9 @@ class TestValidationBadge:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "badge|test|job",
                 "Staff Data Scientist",
@@ -3233,7 +3231,6 @@ class TestValidationBadge:
                 "{}",
                 "reviewing",
                 "reviewing",
-                88.0,
                 "Full job description.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -3384,9 +3381,9 @@ class TestStatusPollingBadge:
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, first_seen, last_seen, score, score_breakdown,
-                 user_interest, pipeline_status, sonnet_score, jd_full,
+                 user_interest, pipeline_status, jd_full,
                  classification, sub_scores_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "polling|test|job",
                 "Staff Data Scientist",
@@ -3401,7 +3398,6 @@ class TestStatusPollingBadge:
                 "{}",
                 "reviewing",
                 "reviewing",
-                88.0,
                 "Full job description.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',

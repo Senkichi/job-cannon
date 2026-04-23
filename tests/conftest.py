@@ -8,6 +8,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Migration 41 (Plan 5) has a backup-recency preflight that raises
+# MigrationBlockedError unless a recent backup_userdata_*.tar.gz exists or
+# GSD_BACKUP_CONFIRMED=1 is set. The test suite creates temp DBs and runs the
+# full migration chain on every fixture instantiation, so we acknowledge the
+# override session-wide. Individual tests that need to exercise the gate set
+# up their own os.environ patches.
+os.environ.setdefault("GSD_BACKUP_CONFIRMED", "1")
+
+
 @pytest.fixture
 def tmp_db_path():
     """Create a temporary SQLite database file, yield path, clean up after."""

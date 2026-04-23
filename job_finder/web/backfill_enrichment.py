@@ -13,8 +13,8 @@ Design principles:
       skips AI tiers.
     - Convergence loop: runs passes until a pass enriches 0 jobs.
     - Cost confirmation before any AI tier executes.
-    - High-value jobs first: ORDER BY COALESCE(haiku_score, 0) DESC (the legacy
-      haiku_score column is retained as a sort hint where present).
+    - High-value jobs first: ORDER BY classification-rank CASE (apply > consider >
+      skip > reject > NULL) so already-scored, high-priority jobs enrich first.
 
 Exports:
     main: CLI entry point.
@@ -162,7 +162,8 @@ def run_enrichment_pass(
     """Run a single enrichment pass over all eligible jobs.
 
     Queries jobs where enrichment_tier IS NULL or not yet at a high tier,
-    ordered by COALESCE(haiku_score, 0) DESC so high-value jobs enrich first.
+    ordered by classification-rank (apply > consider > skip > reject > NULL)
+    so already-scored, high-priority jobs enrich first.
     Calls enrich_job() directly with anthropic_client — AI tiers will execute.
 
     Tracks which dedup_keys had their enrichment_tier advance during this pass.
@@ -182,7 +183,14 @@ def run_enrichment_pass(
     rows = conn.execute(
         f"""SELECT * FROM jobs
            WHERE {_ELIGIBLE_TIERS_QUERY}
-           ORDER BY COALESCE(haiku_score, 0) DESC
+           ORDER BY
+               CASE classification
+                   WHEN 'apply'    THEN 4
+                   WHEN 'consider' THEN 3
+                   WHEN 'skip'     THEN 2
+                   WHEN 'reject'   THEN 1
+                   ELSE 0
+               END DESC
            LIMIT ?""",
         (limit,),
     ).fetchall()
@@ -269,9 +277,7 @@ def run_scoring_backfill(
     """Score jobs that have jd_full but no v3 classification yet.
 
     Queries jobs where jd_full IS NOT NULL AND classification IS NULL,
-    ordered by COALESCE(haiku_score, 0) DESC to prioritize high-value jobs
-    (the legacy haiku_score column is retained read-only as a sort hint
-    where present; absent values fall through the COALESCE).
+    ordered by first_seen DESC so newly-ingested jobs score first.
 
     Routes through the production score_job + persist_job_assessment path,
     matching the rescore CLI in scripts/v3_rescore.py.
@@ -288,7 +294,7 @@ def run_scoring_backfill(
     rows = conn.execute(
         """SELECT * FROM jobs
            WHERE jd_full IS NOT NULL AND classification IS NULL
-           ORDER BY COALESCE(haiku_score, 0) DESC"""
+           ORDER BY first_seen DESC"""
     ).fetchall()
 
     print(f"\nScoring backfill: {len(rows)} jobs to evaluate")

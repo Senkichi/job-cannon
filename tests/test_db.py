@@ -32,19 +32,26 @@ def migrated_conn():
 
 def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
                 location="Remote", pipeline_status="discovered",
-                sonnet_score=None, haiku_score=None):
-    """Insert a minimal job row for testing."""
+                classification=None, sub_scores_json=None):
+    """Insert a minimal job row for testing.
+
+    Plan 5: `sonnet_score` / `haiku_score` params were replaced by the v3
+    ordinal surface (`classification` + `sub_scores_json`). Callers that
+    previously passed a numeric score now pass a classification string
+    ("apply" / "consider" / "skip" / "reject") if they care about the
+    scoring state at all.
+    """
     now = datetime.now().isoformat()
     conn.execute(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              pipeline_status, first_seen, last_seen, score, score_breakdown,
-             user_interest, sonnet_score, haiku_score)
+             user_interest, classification, sub_scores_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (dedup_key, title, company, location, '["test"]',
          f'["https://example.com/{dedup_key}"]',
          pipeline_status, now, now, 7.0, '{}', 'unreviewed',
-         sonnet_score, haiku_score),
+         classification, sub_scores_json),
     )
     conn.commit()
 

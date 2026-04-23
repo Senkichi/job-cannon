@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
-status: executing
-stopped_at: Phase 34 Plan 4 complete (rescore + legacy deletion)
-last_updated: "2026-04-23T09:30:00.000Z"
-last_activity: 2026-04-23 -- Phase 34 Plan 4 complete -- 3922 jobs classified, legacy modules removed
+status: complete
+stopped_at: Phase 34 Plan 5 complete (Migration 41 destructive column drop)
+last_updated: "2026-04-23T12:45:00.000Z"
+last_activity: 2026-04-23 -- Phase 34 COMPLETE -- Migration 41 applied, legacy columns dropped, v3.0 milestone delivered
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 7
+  percent: 100
 ---
 
 # State
 
 ## Current Position
 
-Phase: 34 — EXECUTING
-Plan: 4 of 5 complete; Plan 5 (Migration 41 column drop) next
-Status: Plan 4 landed (commits A-E + B4 leftover sweep + 3 systematic-debugging fix commits)
-Last activity: 2026-04-23 -- 1953-row B4 leftover sweep + Commit E deletion sweep complete
+Phase: 34 — COMPLETE
+Plan: 5 of 5 complete
+Status: v3.0 milestone DELIVERED — single-tier ordinal scorer is the sole code path; no legacy columns, modules, shims, or dual-writes remain in production
+Last activity: 2026-04-23 -- Mig 41 applied to live DB (user_version=41, 3 legacy cols + 1 index dropped); 2408 tests passing; SUMMARY + STATE updated
 
 ## Project Reference
 
