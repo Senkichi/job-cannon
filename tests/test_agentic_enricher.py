@@ -66,9 +66,9 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     """Insert a minimal job row into the test DB.
 
-    v3.0 (Phase 34 Plan 3 Commit A): default classification='consider' instead
-    of legacy haiku_score=70; sub_scores_json populated so the agentic enricher
-    ORDER BY classification_rank + sub_score_sum can sort deterministically.
+    Plan 5: the legacy haiku_score/haiku_summary/sonnet_score columns were
+    dropped; sub_scores_json + classification are the v3 scoring surface that
+    the agentic enricher's classification_rank + sub_score_sum ORDER BY uses.
     """
     defaults = {
         "title": "Data Scientist",
@@ -85,9 +85,6 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         "score": 0.0,
         "score_breakdown": "{}",
         "user_interest": "unreviewed",
-        "haiku_score": 70.0,
-        "haiku_summary": None,
-        "sonnet_score": None,
         "fit_analysis": None,
         "classification": "consider",
         "sub_scores_json": '{"title_fit": 3, "location_fit": 4, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 4}',
@@ -100,15 +97,13 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         """INSERT OR REPLACE INTO jobs
         (dedup_key, title, company, location, sources, source_urls, source_id,
          salary_min, salary_max, description, first_seen, last_seen, score,
-         score_breakdown, user_interest, haiku_score, haiku_summary,
-         sonnet_score, fit_analysis, classification, sub_scores_json,
-         jd_full, enrichment_tier, pipeline_status)
+         score_breakdown, user_interest, fit_analysis, classification,
+         sub_scores_json, jd_full, enrichment_tier, pipeline_status)
         VALUES
         (:dedup_key, :title, :company, :location, :sources, :source_urls, :source_id,
          :salary_min, :salary_max, :description, :first_seen, :last_seen, :score,
-         :score_breakdown, :user_interest, :haiku_score, :haiku_summary,
-         :sonnet_score, :fit_analysis, :classification, :sub_scores_json,
-         :jd_full, :enrichment_tier, :pipeline_status)""",
+         :score_breakdown, :user_interest, :fit_analysis, :classification,
+         :sub_scores_json, :jd_full, :enrichment_tier, :pipeline_status)""",
         {"dedup_key": dedup_key, **defaults},
     )
     conn.commit()

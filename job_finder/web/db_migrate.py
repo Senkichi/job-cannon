@@ -3,18 +3,33 @@
 Uses PRAGMA user_version to track migration state. Safe to call on every
 startup -- idempotent by design.
 
-Pattern: Each migration is a list of SQL statements. WAL PRAGMA statements
-are run via execute() (PRAGMA needs its own transaction). DDL statements
-are run individually so that "duplicate column name" errors can be caught
+Pattern: Each migration is either a list of SQL statement strings OR a
+callable(conn) that performs arbitrary Python + SQL (used by Migration 41
+for its backup-recency preflight gate). WAL PRAGMA statements are run via
+execute() (PRAGMA needs its own transaction). DDL statements are run
+individually so that "duplicate column name" errors can be caught
 per-statement without aborting the whole migration.
 """
 
+import glob
 import logging
+import os
 import sqlite3
+import time
 
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
+
+
+class MigrationBlockedError(Exception):
+    """Raised by a migration's preflight gate to block destructive schema changes.
+
+    Currently raised by Migration 41 when the backup-recency check fails
+    (no recent backup tarball AND GSD_BACKUP_CONFIRMED=1 not set). Callers
+    should present the message to the operator and halt; the migration
+    will not have mutated any schema or data before the raise.
+    """
 
 # Each migration is a list of SQL statement strings.
 # Storing as discrete strings avoids semicolon-splitting hazards in comments.
@@ -729,6 +744,64 @@ MIGRATIONS = [
     ],
 ]
 
+
+def _check_backup_recent() -> None:
+    """Preflight gate for Migration 41: require a recent backup OR explicit override.
+
+    Looks for backup_userdata_*.tar.gz files in the working directory. Raises
+    MigrationBlockedError when:
+      - No matching backup is found, AND GSD_BACKUP_CONFIRMED != "1"
+      - The newest backup is older than 24h, AND GSD_BACKUP_CONFIRMED != "1"
+
+    The env var override exists so operators who use alternate backup schemes
+    (time-machine snapshots, zfs datasets, manual .backup copies) can proceed
+    after accepting responsibility for the rollback path. Fail-closed default.
+    """
+    if os.environ.get("GSD_BACKUP_CONFIRMED") == "1":
+        return
+    backups = sorted(glob.glob("backup_userdata_*.tar.gz"), reverse=True)
+    if not backups:
+        raise MigrationBlockedError(
+            "Migration 41 blocked: no backup_userdata_*.tar.gz found in cwd. "
+            "Run `bash backup_userdata.sh` first, or set GSD_BACKUP_CONFIRMED=1 "
+            "to override (only if you have an alternate backup)."
+        )
+    age_h = (time.time() - os.path.getmtime(backups[0])) / 3600.0
+    if age_h > 24.0:
+        raise MigrationBlockedError(
+            f"Migration 41 blocked: most recent backup ({backups[0]}) is "
+            f"{age_h:.1f}h old (>24h). Run `bash backup_userdata.sh`, or set "
+            f"GSD_BACKUP_CONFIRMED=1 to override."
+        )
+
+
+def _migration_41_drop_legacy_scores(conn: sqlite3.Connection) -> None:
+    """Migration 41: drop legacy haiku_score/haiku_summary/sonnet_score columns.
+
+    Preflight: backup-recency gate (see _check_backup_recent).
+
+    Drops:
+        - haiku_score, haiku_summary, sonnet_score columns
+        - idx_jobs_haiku_score index
+
+    Preserves:
+        - fit_analysis (now holds v3.0 rationale payload)
+        - scoring_provider, scoring_model
+        - eval_blocks, opus_score, score, job_archetype, legitimacy_note
+        - classification, sub_scores_json (v3 scoring surface from Mig 40)
+
+    No inline rollback -- recovery path is a DB restore from the gated backup.
+    Idempotent via "no such column" handling in _apply_migration.
+    """
+    _check_backup_recent()
+    conn.execute("DROP INDEX IF EXISTS idx_jobs_haiku_score")
+    conn.execute("ALTER TABLE jobs DROP COLUMN haiku_score")
+    conn.execute("ALTER TABLE jobs DROP COLUMN haiku_summary")
+    conn.execute("ALTER TABLE jobs DROP COLUMN sonnet_score")
+
+
+MIGRATIONS.append(_migration_41_drop_legacy_scores)
+
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 
@@ -810,15 +883,21 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
 
             logger.info("Retroactive dedup: merged %d duplicate jobs.", merged_count)
 
-            # Queue merged canonical rows for re-scoring (nullify AI scores)
+            # Queue merged canonical rows for re-scoring by nulling the v3
+            # scoring surface (classification/sub_scores_json) and the
+            # rationale (fit_analysis). Plan 5 dropped haiku_score/sonnet_score;
+            # the v3 scorer re-derives classification from sub_scores.
             try:
                 canonical_keys = conn.execute(
                     "SELECT canonical_key FROM merge_log WHERE merge_source = 'migration'"
                 ).fetchall()
                 for row in canonical_keys:
                     conn.execute("""
-                        UPDATE jobs SET haiku_score = NULL, sonnet_score = NULL, fit_analysis = NULL
-                        WHERE dedup_key = ?
+                        UPDATE jobs
+                           SET classification = NULL,
+                               sub_scores_json = NULL,
+                               fit_analysis = NULL
+                         WHERE dedup_key = ?
                     """, (row[0],))
                 conn.commit()
             except Exception as e:
@@ -830,37 +909,55 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
         logger.warning("Retroactive dedup failed (non-fatal): %s", e)
 
 def _apply_migration(
-    conn: sqlite3.Connection, version: int, statements: list
+    conn: sqlite3.Connection, version: int, migration
 ) -> None:
-    """Apply a single migration (list of SQL statements) and update user_version.
+    """Apply a single migration (list of SQL statements OR callable) and update user_version.
 
-    Each statement is executed individually so that "duplicate column name"
-    errors from ALTER TABLE ADD COLUMN can be caught and skipped without
-    aborting the rest of the migration. This enables idempotent re-runs.
+    Two migration shapes are supported:
 
-    PRAGMA statements are handled the same way as DDL -- execute() in its own
-    commit so that journal_mode=WAL takes effect immediately.
+    1. List of SQL statement strings -- the default. Each statement is
+       executed individually so that "duplicate column name" errors from
+       ALTER TABLE ADD COLUMN can be caught and skipped without aborting
+       the rest of the migration. This enables idempotent re-runs.
+
+    2. Callable taking one argument (the open connection). Used by migrations
+       that need Python-side preflight logic (e.g. Migration 41's backup-recency
+       gate). The callable is responsible for its own idempotency handling;
+       ``sqlite3.OperationalError`` with "no such column" is still caught here
+       so destructive migrations can safely re-run.
+
+    PRAGMA statements in list-form are handled the same way as DDL -- execute()
+    in its own commit so that journal_mode=WAL takes effect immediately.
 
     Args:
         conn: Open SQLite connection.
         version: The migration version number (1-based).
-        statements: List of SQL statement strings for this migration.
+        migration: Either a list of SQL statement strings, or a callable(conn).
     """
-    for stmt in statements:
-        stmt = stmt.strip()
-        if not stmt:
-            continue
+    if callable(migration):
         try:
-            conn.execute(stmt)
+            migration(conn)
         except sqlite3.OperationalError as e:
             error_msg = str(e).lower()
-            if "duplicate column name" in error_msg:
-                # Column already exists -- safe to skip for idempotent re-runs
+            if "no such column" not in error_msg:
+                raise
+            # Columns already dropped on a re-run -- safe to skip
+    else:
+        for stmt in migration:
+            stmt = stmt.strip()
+            if not stmt:
                 continue
-            if "no such column" in error_msg:
-                # Column already dropped (migration 39+ re-run) -- safe to skip
-                continue
-            raise
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                error_msg = str(e).lower()
+                if "duplicate column name" in error_msg:
+                    # Column already exists -- safe to skip for idempotent re-runs
+                    continue
+                if "no such column" in error_msg:
+                    # Column already dropped (migration 39+ re-run) -- safe to skip
+                    continue
+                raise
 
     # Commit once per migration (not per statement)
     conn.commit()

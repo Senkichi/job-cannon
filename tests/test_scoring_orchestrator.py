@@ -153,39 +153,19 @@ class TestScoreAndPersistJob:
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
 
-    def test_does_not_write_legacy_shim_columns(
-        self, db_conn, seeded_job, base_config,
-    ):
-        """Plan 4 Commit E removed the haiku_score/sonnet_score/haiku_summary
-        dual-write shim. score_and_persist_job no longer touches those
-        columns; their values stay at whatever they were pre-rescore.
+    def test_legacy_shim_columns_do_not_exist(self, db_conn):
+        """Plan 5 Migration 41 dropped haiku_score/sonnet_score/haiku_summary.
+
+        This replaces the Plan 4E "shim is not re-introduced" test with a
+        schema-level invariant: the columns physically cannot exist after
+        Migration 41, so no shim can write to them regardless of orchestrator
+        behavior.
         """
         conn, _ = db_conn
-        # Pre-set legacy columns to a sentinel value -- if score_and_persist_job
-        # accidentally re-introduces a shim write, the test will catch it.
-        conn.execute(
-            "UPDATE jobs SET haiku_score = 11, sonnet_score = 22, "
-            "haiku_summary = 'sentinel' WHERE dedup_key = ?",
-            ("job-abc",),
-        )
-        conn.commit()
-
-        assessment = _make_assessment()
-        so.score_and_persist_job(
-            seeded_job, conn, base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=assessment, provider="ollama",
-            ),
-        )
-
-        row = conn.execute(
-            "SELECT haiku_score, sonnet_score, haiku_summary "
-            "FROM jobs WHERE dedup_key = ?",
-            ("job-abc",),
-        ).fetchone()
-        assert row["haiku_score"] == 11
-        assert row["sonnet_score"] == 22
-        assert row["haiku_summary"] == "sentinel"
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        assert "haiku_score" not in cols
+        assert "sonnet_score" not in cols
+        assert "haiku_summary" not in cols
 
     def test_scorer_fn_injection_override_called(
         self, db_conn, seeded_job, base_config,
@@ -233,12 +213,14 @@ class TestScoreAndPersistJob:
             ),
         )
         row = conn.execute(
-            "SELECT classification, haiku_score FROM jobs WHERE dedup_key = ?",
+            "SELECT classification, sub_scores_json, fit_analysis "
+            "FROM jobs WHERE dedup_key = ?",
             ("job-abc",),
         ).fetchone()
-        # Both columns still NULL — no write happened.
+        # All v3 scoring columns still NULL — no write happened.
         assert row["classification"] is None
-        assert row["haiku_score"] is None
+        assert row["sub_scores_json"] is None
+        assert row["fit_analysis"] is None
 
     def test_error_status_is_passthrough(
         self, db_conn, seeded_job, base_config, caplog,

@@ -97,8 +97,7 @@ JOBS_ALL_COLUMNS = (
     "dedup_key, title, company, location, sources, source_urls, source_id, "
     "salary_min, salary_max, description, first_seen, last_seen, score, "
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
-    "haiku_score, haiku_summary, sonnet_score, fit_analysis, "
-    "classification, sub_scores_json, scoring_model, "
+    "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
     "company_id, comp_data_json, enrichment_tier, rejection_reviewed, "
     "locations_raw, description_reformatted, expiry_checked_at, scoring_provider, "
@@ -308,8 +307,8 @@ def persist_job_assessment(
 
     Writes classification (derived at persist time), sub_scores_json (JSON),
     fit_analysis (rationale payload — D-08 reuse), scoring_provider, scoring_model.
-    Legacy haiku_score/haiku_summary/sonnet_score columns are untouched here
-    (Plan 2's dual-write shim writes them; Plan 4 removes that shim).
+    Plan 5 (Migration 41) dropped the legacy haiku_score/haiku_summary/sonnet_score
+    columns; this function now writes only the v3.0 surface.
 
     legitimacy_note sourcing (CONTEXT D-07): read from the existing jobs row,
     NOT from the assessment. derive_classification uses this value to compute
@@ -570,21 +569,12 @@ def _classification_score_order(sort_dir: str) -> str:
     """Compose the (classification_rank, sub_score_sum) composite ORDER BY clause.
 
     Used by get_filtered_jobs() when the caller sorts by the generic 'score'
-    key OR a v3 alias ('classification', 'classification_rank', 'sub_score_sum')
-    OR a legacy alias ('haiku_score', 'sonnet_score') retained for bookmark
-    back-compat. Both keys share the same direction (ASC/DESC).
-
-    Plan 4 drops the legacy aliases (D-17).
+    key OR a v3 alias ('classification', 'classification_rank', 'sub_score_sum').
+    Both keys share the same direction (ASC/DESC).
     """
     direction = "DESC" if sort_dir.upper() != "ASC" else "ASC"
     return f"{_CLASSIFICATION_RANK_CASE} {direction}, {_SUB_SCORE_SUM_SQL} {direction}"
 
-
-# Legacy URL sort-by keys kept as aliases during Plan 3 so bookmarks that use
-# ?sort=haiku_score or ?sort=sonnet_score continue to work. They translate to the
-# same classification + sub_score_sum composite ordering as the generic 'score'.
-# Plan 4 removes these aliases entirely.
-_LEGACY_SORT_ALIAS: set[str] = {"haiku_score", "sonnet_score"}
 
 # v3 classification-aware sort keys (preferred).
 _CLASSIFICATION_SORT_KEYS: set[str] = {
@@ -646,15 +636,14 @@ def get_filtered_jobs(
 
     status: single string or list for IN-filter. sort_by validated against
     allowlist (SQL injection guard). The default 'score' sort (and the v3
-    'classification'/'classification_rank'/'sub_score_sum' keys, plus the legacy
-    'haiku_score'/'sonnet_score' bookmark-back-compat aliases) map to the
+    'classification'/'classification_rank'/'sub_score_sum' keys) map to the
     classification-rank CASE + sub_score_sum composite order defined above.
     Hidden statuses excluded by default unless status set or show_hidden=True.
 
     Plan 34-03 Commit A: migrated from COALESCE(sonnet_score, haiku_score,
     score) to classification-based ordering; min_score/max_score translate
-    to classification IN-list shim via the mapping above (Plan 4 removes).
-    The new explicit `classification=` kwarg is the preferred filter.
+    to classification IN-list shim via the mapping above.
+    The explicit `classification=` kwarg is the preferred filter.
     """
     allowed_sort_cols = (
         {
@@ -668,18 +657,16 @@ def get_filtered_jobs(
             "pipeline_status",
         }
         | _CLASSIFICATION_SORT_KEYS
-        | _LEGACY_SORT_ALIAS
     )
     if sort_by not in allowed_sort_cols:
         sort_by = "score"
     sort_dir = "DESC" if sort_dir.upper() != "ASC" else "ASC"
 
-    # 'score' + 'classification*' + legacy aliases all collapse to the v3
-    # classification-rank + sub_score_sum composite ORDER BY (D-17 Commit A).
+    # 'score' + 'classification*' collapse to the v3 classification-rank +
+    # sub_score_sum composite ORDER BY (D-17 Commit A).
     if (
         sort_by == "score"
         or sort_by in _CLASSIFICATION_SORT_KEYS
-        or sort_by in _LEGACY_SORT_ALIAS
     ):
         sort_expr = _classification_score_order(sort_dir)
     else:

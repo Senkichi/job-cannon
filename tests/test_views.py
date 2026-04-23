@@ -615,7 +615,7 @@ def app_with_unscored_jobs(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score, sonnet_score)
+             classification, sub_scores_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
@@ -632,7 +632,7 @@ def app_with_unscored_jobs(tmp_db_path):
                 "2026-03-09T10:00:00",
                 8.5, '{"skills": 0.9}',
                 "discovered",
-                None, None,  # unscored
+                None, None,  # unscored (classification IS NULL)
             ),
             (
                 "beta|staff-ds|san-francisco",
@@ -648,7 +648,9 @@ def app_with_unscored_jobs(tmp_db_path):
                 "2026-03-09T12:00:00",
                 9.1, '{"skills": 0.95}',
                 "reviewing",
-                75, None,  # haiku scored, no sonnet
+                # v3 classification='apply' with sub_scores_json, replacing
+                # legacy (haiku_score=75, sonnet_score=None) pair
+                "apply", '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             ),
         ],
     )
@@ -1465,8 +1467,8 @@ def app_with_sonnet_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score, sonnet_score, classification, sub_scores_json, jd_full)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             classification, sub_scores_json, jd_full)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "drive-test|data-scientist|remote",
             "Data Scientist",
@@ -1481,7 +1483,6 @@ def app_with_sonnet_job(tmp_db_path):
             "2026-03-09T10:00:00",
             8.5, '{"skills": 0.9}',
             "discovered",
-            80, 85,  # legacy shim scores — kept for regression back-compat
             "apply",  # v3.0 classification
             '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             "Senior Data Scientist role at Drive Test Co. Requires 5+ years ML experience.",
@@ -1713,7 +1714,7 @@ def app_with_jd_full_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score)
+             classification)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|jd-full-job|remote",
@@ -1731,7 +1732,7 @@ def app_with_jd_full_job(tmp_db_path):
             8.0,
             '{"skills": 0.8}',
             "discovered",
-            72,
+            "consider",  # v3 classification replacing legacy haiku_score=72
         ),
     )
     conn.commit()
@@ -1989,7 +1990,7 @@ def app_with_entity_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description, jd_full,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score)
+             classification)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|entity-job|remote",
@@ -2007,7 +2008,7 @@ def app_with_entity_job(tmp_db_path):
             8.0,
             '{"skills": 0.8}',
             "discovered",
-            72,
+            "consider",  # v3 classification replacing legacy haiku_score=72
         ),
     )
     conn.commit()
@@ -2054,7 +2055,7 @@ def app_with_html_tag_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, description, jd_full,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
-             haiku_score)
+             classification)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "test|html-tag-job|remote",
@@ -2071,7 +2072,7 @@ def app_with_html_tag_job(tmp_db_path):
             7.5,
             '{"skills": 0.7}',
             "discovered",
-            65,
+            "consider",  # v3 classification replacing legacy haiku_score=65
         ),
     )
     conn.commit()
@@ -2238,9 +2239,9 @@ def client_with_scored_job(tmp_db_path):
             (dedup_key, title, company, location, sources, source_urls,
              source_id, salary_min, salary_max, description,
              first_seen, last_seen, pipeline_status,
-             haiku_score, sonnet_score, classification, sub_scores_json,
+             classification, sub_scores_json,
              jd_full, fit_analysis)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             "acme|data-scientist|remote",
             "Data Scientist",
@@ -2254,7 +2255,6 @@ def client_with_scored_job(tmp_db_path):
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
             "reviewing",
-            75, 80,
             "apply",  # v3.0 classification
             '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             "Full job description text here for testing",
@@ -2379,7 +2379,13 @@ class TestSaveJD:
         assert b"Please provide a job description" in response.data
 
     def test_save_jd_no_scoring_triggered(self, jobs_client, tmp_db_path):
-        """save-jd does NOT set sonnet_score -- only saves jd_full."""
+        """save-jd only persists jd_full; it does not trigger scoring.
+
+        Plan 5: checks that v3 scoring surface (`classification`,
+        `sub_scores_json`) is NOT populated as a side-effect of saving the
+        JD text. The previous assertion relied on `sonnet_score IS NULL`
+        against a column that has since been dropped by Migration 41.
+        """
         import sqlite3
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
@@ -2388,11 +2394,15 @@ class TestSaveJD:
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT sonnet_score FROM jobs WHERE dedup_key = ?",
+            "SELECT classification, sub_scores_json, jd_full FROM jobs WHERE dedup_key = ?",
             ("acme|data-scientist|remote",),
         ).fetchone()
         conn.close()
-        assert row["sonnet_score"] is None
+        # JD text is persisted...
+        assert row["jd_full"] == "Some JD text."
+        # ...but no rescore was triggered, so v3 scoring columns remain NULL.
+        assert row["classification"] is None
+        assert row["sub_scores_json"] is None
 
     def test_save_jd_no_hx_trigger_header(self, jobs_client):
         """save-jd response should NOT have HX-Trigger header (no table re-sort)."""

@@ -34,27 +34,30 @@ def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         "score": 0.0,
         "score_breakdown": "{}",
         "user_interest": "unreviewed",
-        "haiku_score": None,
-        "haiku_summary": None,
-        "sonnet_score": None,
+        "classification": None,
+        "sub_scores_json": None,
         "fit_analysis": None,
         "jd_full": None,
         "enrichment_tier": None,
         "pipeline_status": "discovered",
     }
+    # Strip any legacy scoring kwargs (haiku_score/haiku_summary/sonnet_score)
+    # that pre-Plan-5 tests still pass -- those columns no longer exist.
+    for _legacy in ("haiku_score", "haiku_summary", "sonnet_score"):
+        kwargs.pop(_legacy, None)
     defaults.update(kwargs)
     conn.execute(
         """INSERT OR REPLACE INTO jobs
         (dedup_key, title, company, location, sources, source_urls, source_id,
          salary_min, salary_max, description, first_seen, last_seen, score,
-         score_breakdown, user_interest, haiku_score, haiku_summary,
-         sonnet_score, fit_analysis, jd_full, enrichment_tier,
+         score_breakdown, user_interest, classification, sub_scores_json,
+         fit_analysis, jd_full, enrichment_tier,
          pipeline_status)
         VALUES
         (:dedup_key, :title, :company, :location, :sources, :source_urls, :source_id,
          :salary_min, :salary_max, :description, :first_seen, :last_seen, :score,
-         :score_breakdown, :user_interest, :haiku_score, :haiku_summary,
-         :sonnet_score, :fit_analysis, :jd_full, :enrichment_tier,
+         :score_breakdown, :user_interest, :classification, :sub_scores_json,
+         :fit_analysis, :jd_full, :enrichment_tier,
          :pipeline_status)""",
         {"dedup_key": dedup_key, **defaults},
     )
@@ -315,14 +318,18 @@ def test_scoring_backfill_skips_already_classified(migrated_db):
 # test_ordering_by_score_desc
 # ---------------------------------------------------------------------------
 
-def test_ordering_by_score_desc(migrated_db):
-    """Enrichment query uses ORDER BY COALESCE(haiku_score, 0) DESC so high-value jobs first."""
+def test_ordering_by_classification_rank(migrated_db):
+    """Enrichment query orders by classification-rank (apply > consider > reject > NULL).
+
+    Plan 5: `ORDER BY COALESCE(haiku_score, 0) DESC` was replaced by the
+    classification-rank CASE expression so high-priority jobs enrich first.
+    """
     path, conn = migrated_db
 
-    # Insert jobs with different haiku scores at NULL enrichment tier
-    insert_job(conn, "low_score", haiku_score=30, enrichment_tier=None)
-    insert_job(conn, "high_score", haiku_score=85, enrichment_tier=None)
-    insert_job(conn, "no_score", haiku_score=None, enrichment_tier=None)
+    # Insert jobs with different v3 classifications at NULL enrichment tier
+    insert_job(conn, "low_priority", classification="reject", enrichment_tier=None)
+    insert_job(conn, "high_priority", classification="apply", enrichment_tier=None)
+    insert_job(conn, "no_score", classification=None, enrichment_tier=None)
 
     call_order = []
 
@@ -341,9 +348,9 @@ def test_ordering_by_score_desc(migrated_db):
          patch.object(be_module, "estimate_and_confirm", return_value=True):
         be_module.run_passes_to_convergence(conn, serpapi_key=None, config={})
 
-    # high_score (85) should come before low_score (30) and no_score (NULL=0)
-    assert call_order[0] == "high_score"
-    assert call_order[1] == "low_score"
+    # apply (rank 4) should come before reject (rank 1) and no_score (NULL=0)
+    assert call_order[0] == "high_priority"
+    assert call_order[1] == "low_priority"
     assert call_order[2] == "no_score"
 
 # ---------------------------------------------------------------------------
