@@ -337,10 +337,19 @@ def run_enrichment_backfill(
         config = {}
 
     with standalone_connection(db_path) as conn:
+        # Only select rows that (a) are in a resumable enrichment tier AND
+        # (b) are actually missing at least one field _find_missing_fields()
+        # checks. Without the (b) clause, LIMIT N silently returns the first
+        # N rows in rowid order — which are the oldest, already-enriched
+        # rows — and enrich_job() returns {} for each, leaving the real
+        # backlog unreached. ORDER BY first_seen DESC further prioritises the
+        # freshest rows, which are the ones users are actively viewing.
         rows = conn.execute(
             """SELECT * FROM jobs
-               WHERE enrichment_tier IS NULL
-                  OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet')
+               WHERE (enrichment_tier IS NULL
+                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet'))
+                 AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
+               ORDER BY first_seen DESC
                LIMIT ?""",
             (limit,),
         ).fetchall()

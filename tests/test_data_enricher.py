@@ -1576,3 +1576,111 @@ class TestDescriptionPromotion:
             f"Expected jd_full in DB to match description (truncated to 8000), "
             f"got: {row['jd_full']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# run_enrichment_backfill SELECT correctness (regression test)
+# ---------------------------------------------------------------------------
+
+class TestRunEnrichmentBackfillSelect:
+    """Regression test for the SELECT in run_enrichment_backfill.
+
+    The pre-fix SELECT matched any row in a resumable tier regardless of
+    whether fields were actually missing, so LIMIT N hit already-enriched
+    rows first and the real backlog was never reached. The fix adds an
+    AND clause filtering for actually-missing fields plus ORDER BY
+    first_seen DESC.
+    """
+
+    @pytest.fixture
+    def backfill_db_path(self, tmp_path):
+        """File-based SQLite with the minimal jobs columns the SELECT needs."""
+        db_path = tmp_path / "backfill.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("""
+            CREATE TABLE jobs (
+                dedup_key TEXT PRIMARY KEY,
+                title TEXT,
+                company TEXT,
+                location TEXT,
+                jd_full TEXT DEFAULT NULL,
+                salary_min INTEGER DEFAULT NULL,
+                salary_max INTEGER DEFAULT NULL,
+                enrichment_tier TEXT DEFAULT NULL,
+                first_seen TEXT DEFAULT NULL
+            )
+        """)
+        rows = [
+            # (dedup_key, jd_full, salary_min, tier, first_seen)
+            # Already fully enriched -- must NOT be selected (the bug)
+            ("enriched-old-1",  "full JD text",   100_000, None,       "2026-01-01"),
+            ("enriched-old-2",  "full JD text",   120_000, "haiku",    "2026-01-02"),
+            ("enriched-old-3",  "full JD text",   150_000, "free",     "2026-01-03"),
+            # Terminal tier -- must NOT be selected regardless of fields
+            ("terminal-serpapi", None,            None,    "serpapi",  "2026-01-04"),
+            ("terminal-sonnet",  None,            None,    "sonnet",   "2026-01-05"),
+            ("terminal-exhausted", None,          None,    "exhausted","2026-01-06"),
+            # Actually missing fields -- MUST be selected
+            ("needs-jd-new-1",  None,            90_000,   None,       "2026-04-23"),
+            ("needs-sal-new-2", "full JD",       None,     "haiku",    "2026-04-22"),
+            ("needs-both-3",   None,            None,      "ddg",      "2026-04-21"),
+        ]
+        conn.executemany(
+            "INSERT INTO jobs (dedup_key, jd_full, salary_min, enrichment_tier, first_seen) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(r[0], r[1], r[2], r[3], r[4]) for r in rows],
+        )
+        # Title/company/location need values too (NOT NULL wasn't set, but keep clean)
+        conn.execute("UPDATE jobs SET title = dedup_key, company = 'co', location = 'loc'")
+        conn.commit()
+        conn.close()
+        return str(db_path)
+
+    def test_skips_rows_where_all_fields_already_populated(self, backfill_db_path):
+        """Rows with both jd_full and salary_min set must NOT be passed to enrich_job."""
+        from job_finder.web.data_enricher import run_enrichment_backfill
+
+        with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_enrichment_backfill(backfill_db_path, limit=20)
+
+        passed_keys = {call.args[0]["dedup_key"] for call in mock_enrich.call_args_list}
+        assert "enriched-old-1" not in passed_keys
+        assert "enriched-old-2" not in passed_keys
+        assert "enriched-old-3" not in passed_keys
+
+    def test_skips_terminal_tiers(self, backfill_db_path):
+        """Rows with tier in (exhausted, serpapi, sonnet) must NOT be selected."""
+        from job_finder.web.data_enricher import run_enrichment_backfill
+
+        with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_enrichment_backfill(backfill_db_path, limit=20)
+
+        passed_keys = {call.args[0]["dedup_key"] for call in mock_enrich.call_args_list}
+        assert "terminal-serpapi" not in passed_keys
+        assert "terminal-sonnet" not in passed_keys
+        assert "terminal-exhausted" not in passed_keys
+
+    def test_selects_only_rows_that_need_fields(self, backfill_db_path):
+        """Only rows missing jd_full or salary_min should be passed to enrich_job."""
+        from job_finder.web.data_enricher import run_enrichment_backfill
+
+        with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_enrichment_backfill(backfill_db_path, limit=20)
+
+        passed_keys = {call.args[0]["dedup_key"] for call in mock_enrich.call_args_list}
+        assert passed_keys == {"needs-jd-new-1", "needs-sal-new-2", "needs-both-3"}
+
+    def test_orders_by_first_seen_desc(self, backfill_db_path):
+        """Newest first_seen must be processed first (freshest rows are what users view)."""
+        from job_finder.web.data_enricher import run_enrichment_backfill
+
+        with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_enrichment_backfill(backfill_db_path, limit=20)
+
+        order = [call.args[0]["dedup_key"] for call in mock_enrich.call_args_list]
+        # Expected descending by first_seen: 2026-04-23, 2026-04-22, 2026-04-21
+        assert order == ["needs-jd-new-1", "needs-sal-new-2", "needs-both-3"]
