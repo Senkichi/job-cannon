@@ -7,6 +7,12 @@ Provides:
               success from budget_exceeded, error, and skipped outcomes.
     unwrap_scoring_result -- Helper to extract the data dict from a ScoringResult,
               returning None for any non-success status.
+    build_description_snippet -- Intelligent JD truncation with skill-keyword
+              summary and requirements-section extraction. Migrated here from
+              the deleted haiku_scorer.py (Plan 4 COLLAPSE-01).
+    build_comp_context -- Compensation-summary string built from comp_data_json
+              (Ashby/Lever ATS payloads). Migrated from the deleted haiku_scorer.py
+              (Plan 4 COLLAPSE-01).
 
 Usage:
     from job_finder.web.scoring_types import JobRow, ScoringResult, unwrap_scoring_result
@@ -14,6 +20,8 @@ Usage:
     def score(job_row: JobRow) -> ScoringResult: ...
 """
 
+import json
+import re
 from typing import Literal, NamedTuple, Optional, TypedDict
 
 class JobRow(TypedDict, total=False):
@@ -86,3 +94,90 @@ def unwrap_scoring_result(scoring_result: ScoringResult) -> Optional[dict]:
     if scoring_result.status != "success":
         return None
     return scoring_result.data
+
+
+# ---------------------------------------------------------------------------
+# Scoring-prompt helpers (migrated from haiku_scorer.py per COLLAPSE-01)
+# ---------------------------------------------------------------------------
+
+
+def build_comp_context(job_row: dict) -> str | None:
+    """Build a concise compensation-context string from comp_data_json.
+
+    Extracts equity, bonus, and benefits summaries from ATS-sourced
+    compensation data (stored as JSON). Returns a short summary suitable
+    for inclusion in a scoring prompt, or None if no extra comp data
+    is available.
+    """
+    comp_data_raw = job_row.get("comp_data_json")
+    if not comp_data_raw:
+        return None
+    try:
+        comp = json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
+    except (ValueError, TypeError):
+        return None
+    if not comp or not isinstance(comp, dict):
+        return None
+
+    parts: list[str] = []
+    tier_summary = comp.get("compensationTierSummary")
+    if tier_summary and isinstance(tier_summary, str):
+        parts.append(tier_summary.strip())
+    currency = comp.get("currency")
+    if currency and not tier_summary:
+        comp_min = comp.get("min")
+        comp_max = comp.get("max")
+        if comp_min and comp_max:
+            parts.append(f"{currency} {comp_min:,}-{comp_max:,}")
+    return "; ".join(parts) if parts else None
+
+
+def build_description_snippet(
+    description: str,
+    profile_skills: list[str],
+    max_chars: int = 2000,
+) -> str:
+    """Intelligent snippet builder: 1200-char head + skill summary + requirements.
+
+    Replaces the legacy 500-char truncation. Surfaces requirements/qualifications
+    sections and skill-keyword counts from the full posting without sending the
+    entire JD to the model.
+    """
+    if not description:
+        return ""
+
+    snippet = description[:1200].strip()
+
+    description_lower = description.lower()
+    skill_matches: dict[str, int] = {}
+    for skill in profile_skills:
+        if not skill:
+            continue
+        count = description_lower.count(skill.lower())
+        if count > 0:
+            skill_matches[skill] = count
+
+    if skill_matches:
+        matches_str = ", ".join(
+            f"{skill} ({count}x)"
+            for skill, count in sorted(skill_matches.items(), key=lambda x: -x[1])
+        )
+        keyword_summary = f"\n\n[Skill keyword matches in full posting: {matches_str}]"
+    else:
+        keyword_summary = "\n\n[No candidate skill keywords found in full posting text]"
+
+    remaining_chars = max_chars - len(snippet) - len(keyword_summary)
+    if remaining_chars > 200 and len(description) > 1200:
+        req_pattern = re.compile(
+            r'(requirements|qualifications|what you.ll bring|what we.re looking for|'
+            r'about you|your background|skills|experience required|must.have)',
+            re.IGNORECASE,
+        )
+        match = req_pattern.search(description, 800)
+        if match:
+            req_start = max(0, match.start() - 20)
+            req_section = description[req_start: req_start + remaining_chars].strip()
+            if req_section and req_section not in snippet:
+                snippet += f"\n\n[...Requirements section:]\n{req_section}"
+
+    return (snippet + keyword_summary)[:max_chars]

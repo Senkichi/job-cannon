@@ -38,31 +38,14 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
 
+    @pytest.mark.skip(
+        reason="Plan 4 Commit E deleted run_haiku_scoring; the v3 unified "
+               "run_scoring routes through the provider cascade and never "
+               "shells out to the claude CLI directly, so the log-level "
+               "invariant has no live code path to guard."
+    )
     def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog):
-        """scoring_runner 'claude CLI not found' branch uses logger.debug not WARNING."""
-        import inspect
-        import job_finder.web.scoring_runner as sr_module
-
-        source = inspect.getsource(sr_module.run_haiku_scoring)
-        lines = source.splitlines()
-
-        for i, line in enumerate(lines):
-            if "claude cli not found" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
-                assert "logger.warning" not in context, (
-                    f"scoring_runner 'claude CLI not found' must not use logger.warning.\n"
-                    f"Context:\n{context}"
-                )
-                assert "logger.debug" in context, (
-                    f"scoring_runner 'claude CLI not found' must use logger.debug.\n"
-                    f"Context:\n{context}"
-                )
-                return  # found and validated
-
-        raise AssertionError(
-            "Could not find 'claude CLI not found' log message in "
-            "scoring_runner.run_haiku_scoring — was the message text changed?"
-        )
+        ...
 
     @pytest.mark.skip(
         reason="Plan 34-03 Commit E removed run_haiku_scoring from the "
@@ -138,26 +121,12 @@ class TestPipelineRunnerLogLevels:
                     f"Context:\n{context}"
                 )
 
+    @pytest.mark.skip(
+        reason="Plan 4 Commit E deleted run_haiku_scoring -- the "
+               "'Haiku: no result for' log path it guarded no longer exists."
+    )
     def test_haiku_no_result_logs_at_debug(self, caplog):
-        """'Haiku: no result for' uses logger.debug not WARNING."""
-        import inspect
-        import job_finder.web.scoring_runner as scoring_runner_module
-
-        source = inspect.getsource(scoring_runner_module.run_haiku_scoring)
-        # Find the line(s) referencing "no result for"
-        lines = source.splitlines()
-        for i, line in enumerate(lines):
-            if "no result for" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
-                assert "logger.warning" not in context, (
-                    f"'Haiku: no result for' must not use logger.warning.\n"
-                    f"Context:\n{context}"
-                )
-                # Verify the debug call is present
-                assert "logger.debug" in context, (
-                    f"'Haiku: no result for' must use logger.debug.\n"
-                    f"Context:\n{context}"
-                )
+        ...
 
 # ---------------------------------------------------------------------------
 # rejection_analyzer.py — INFO demotion

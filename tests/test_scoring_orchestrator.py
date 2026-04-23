@@ -153,12 +153,24 @@ class TestScoreAndPersistJob:
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
 
-    def test_writes_legacy_shim_columns(self, db_conn, seeded_job, base_config):
-        """Behavior 2: legacy haiku_score / sonnet_score / haiku_summary written
-        atomically with new columns (CONTEXT D-16)."""
+    def test_does_not_write_legacy_shim_columns(
+        self, db_conn, seeded_job, base_config,
+    ):
+        """Plan 4 Commit E removed the haiku_score/sonnet_score/haiku_summary
+        dual-write shim. score_and_persist_job no longer touches those
+        columns; their values stay at whatever they were pre-rescore.
+        """
         conn, _ = db_conn
-        assessment = _make_assessment()
+        # Pre-set legacy columns to a sentinel value -- if score_and_persist_job
+        # accidentally re-introduces a shim write, the test will catch it.
+        conn.execute(
+            "UPDATE jobs SET haiku_score = 11, sonnet_score = 22, "
+            "haiku_summary = 'sentinel' WHERE dedup_key = ?",
+            ("job-abc",),
+        )
+        conn.commit()
 
+        assessment = _make_assessment()
         so.score_and_persist_job(
             seeded_job, conn, base_config,
             scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
@@ -171,89 +183,9 @@ class TestScoreAndPersistJob:
             "FROM jobs WHERE dedup_key = ?",
             ("job-abc",),
         ).fetchone()
-        # mean 3 * 20 = 60
-        assert row["haiku_score"] == 60.0
-        assert row["sonnet_score"] == 60.0
-        assert row["haiku_summary"] == "strong skills match"
-
-    def test_shim_summary_falls_back_to_gaps(self, db_conn, seeded_job, base_config):
-        """Behavior 2b: when rationale.strengths empty, summary falls back to
-        rationale.gaps[0]."""
-        conn, _ = db_conn
-        assessment = _make_assessment(
-            rationale={"strengths": [], "gaps": ["missing ML depth"],
-                       "talking_points": [], "resume_priority_skills": []},
-        )
-        so.score_and_persist_job(
-            seeded_job, conn, base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=assessment, provider="ollama",
-            ),
-        )
-        row = conn.execute(
-            "SELECT haiku_summary FROM jobs WHERE dedup_key = ?",
-            ("job-abc",),
-        ).fetchone()
-        assert row["haiku_summary"] == "missing ML depth"
-
-    def test_shim_summary_empty_when_no_strengths_or_gaps(
-        self, db_conn, seeded_job, base_config,
-    ):
-        """Behavior 2c: both strengths and gaps empty -> haiku_summary is ""."""
-        conn, _ = db_conn
-        assessment = _make_assessment(
-            rationale={"strengths": [], "gaps": [],
-                       "talking_points": [], "resume_priority_skills": []},
-        )
-        so.score_and_persist_job(
-            seeded_job, conn, base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=assessment, provider="ollama",
-            ),
-        )
-        row = conn.execute(
-            "SELECT haiku_summary FROM jobs WHERE dedup_key = ?",
-            ("job-abc",),
-        ).fetchone()
-        assert row["haiku_summary"] == ""
-
-    def test_atomic_single_commit(
-        self, db_conn, seeded_job, base_config,
-    ):
-        """Behavior 3: one score_and_persist_job invocation -> exactly one
-        conn.commit() (atomic dual-write per CONTEXT D-16).
-
-        sqlite3.Connection.commit is a read-only attribute so monkeypatch
-        cannot wrap it in place. Instead, wrap the connection in a proxy
-        that forwards every attribute to the real connection but counts
-        commit() calls. score_and_persist_job only uses conn.execute /
-        conn.cursor / conn.commit — all covered by __getattr__."""
-        conn, _ = db_conn
-
-        class _CommitCounter:
-            def __init__(self, real):
-                self._real = real
-                self.commits = 0
-
-            def commit(self):
-                self.commits += 1
-                return self._real.commit()
-
-            def __getattr__(self, name):
-                return getattr(self._real, name)
-
-        counter = _CommitCounter(conn)
-
-        assessment = _make_assessment()
-        so.score_and_persist_job(
-            seeded_job, counter, base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=assessment, provider="ollama",
-            ),
-        )
-        # Exactly one commit — the dual-write must not split into two
-        # separate transactions (would leave a crash-vulnerable window).
-        assert counter.commits == 1
+        assert row["haiku_score"] == 11
+        assert row["sonnet_score"] == 22
+        assert row["haiku_summary"] == "sentinel"
 
     def test_scorer_fn_injection_override_called(
         self, db_conn, seeded_job, base_config,
@@ -365,11 +297,11 @@ class TestScoreAndPersistJob:
         ).fetchone()
         assert row["classification"] == "reject"
 
-    def test_legacy_functions_still_exist(self):
-        """Sanity: Plan 2 MUST NOT delete legacy orchestrator functions.
-        Plan 4 owns deletion."""
-        assert callable(so.score_and_persist_haiku)
-        assert callable(so.score_and_persist_sonnet)
+    def test_legacy_functions_removed(self):
+        """Plan 4 Commit E removed score_and_persist_haiku + sonnet."""
+        assert not hasattr(so, "score_and_persist_haiku")
+        assert not hasattr(so, "score_and_persist_sonnet")
+        assert not hasattr(so, "_apply_calibration")
         assert callable(so.score_and_persist_job)
 
 

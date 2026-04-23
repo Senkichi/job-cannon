@@ -383,28 +383,26 @@ def paste_jd(dedup_key: str):
     except Exception:
         logger.debug("log_activity failed in paste_jd", exc_info=True)
 
-    # Attempt Sonnet evaluation (budget-gated)
+    # Attempt v3 unified scoring (budget-gated)
     error = None
     try:
         from job_finder.web.claude_client import cost_gate
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
+        from job_finder.web.scoring_orchestrator import score_and_persist_job
 
         config = current_app.config.get("JF_CONFIG", {})
-        if cost_gate(conn, config, "sonnet"):
-            profile = load_scoring_profile(config)
-
+        if cost_gate(conn, config, "scoring"):
             # Refresh job row with jd_full
             job = get_job(conn, dedup_key)
-            score_and_persist_sonnet(conn, job, config, profile)
+            score_and_persist_job(job, conn, config)
         else:
-            logger.info("paste-jd: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-            error = "Budget cap reached. Sonnet scoring skipped."
+            logger.info("paste-jd: budget cap reached, scoring skipped for %s", dedup_key)
+            error = "Budget cap reached. Scoring skipped."
 
     except ImportError as e:
-        logger.warning("paste-jd: Sonnet evaluator not available: %s", e)
+        logger.warning("paste-jd: scorer not available: %s", e)
         error = "Scoring unavailable. JD saved for later."
     except Exception as e:
-        logger.error("paste-jd: Sonnet eval failed for %s: %s", dedup_key, e)
+        logger.error("paste-jd: scoring failed for %s: %s", dedup_key, e)
         error = "Re-scoring failed. Try again later."
 
     # Return updated expanded row + OOB score cell (updates compact row in-place)
@@ -447,30 +445,32 @@ def rescore(dedup_key: str):
             drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
-    # Capture old score before re-evaluation
-    old_score = job.get("sonnet_score")
+    # Capture old classification before re-evaluation
+    old_classification = job.get("classification")
 
-    # Attempt Sonnet re-evaluation (budget-gated)
+    # Attempt v3 re-evaluation (budget-gated)
     error = None
     t0 = _time.time()
     try:
         from job_finder.web.claude_client import cost_gate
-        from job_finder.web.scoring_orchestrator import load_scoring_profile, score_and_persist_sonnet
+        from job_finder.web.scoring_orchestrator import score_and_persist_job
 
         config = current_app.config.get("JF_CONFIG", {})
-        if cost_gate(conn, config, "sonnet"):
-            profile = load_scoring_profile(config)
-
-            result = score_and_persist_sonnet(conn, job, config, profile)
-            if result:
+        if cost_gate(conn, config, "scoring"):
+            result = score_and_persist_job(job, conn, config)
+            if result and getattr(result, "status", None) == "ok":
+                # Re-query to get the persisted classification (derived
+                # at persist time from sub_scores + legitimacy_note).
+                refreshed = get_job(conn, dedup_key)
+                new_classification = (refreshed or {}).get("classification")
                 try:
                     log_activity(
                         db_path,
                         ACTION_RESCORE,
                         entity_id=dedup_key,
                         metadata={
-                            "old_score": old_score,
-                            "new_score": result.get("score"),
+                            "old_classification": old_classification,
+                            "new_classification": new_classification,
                             "duration_seconds": round(_time.time() - t0, 2),
                             "status": "success",
                         },
@@ -478,11 +478,11 @@ def rescore(dedup_key: str):
                 except Exception:
                     pass
         else:
-            logger.info("rescore: budget cap reached, Sonnet eval skipped for %s", dedup_key)
-            error = "Budget cap reached. Sonnet scoring skipped."
+            logger.info("rescore: budget cap reached, scoring skipped for %s", dedup_key)
+            error = "Budget cap reached. Scoring skipped."
 
     except ImportError as e:
-        logger.warning("rescore: Sonnet evaluator not available: %s", e)
+        logger.warning("rescore: scorer not available: %s", e)
         error = "Re-scoring failed. Try again later."
         try:
             log_activity(
@@ -495,7 +495,7 @@ def rescore(dedup_key: str):
         except Exception:
             pass
     except Exception as e:
-        logger.error("rescore: Sonnet eval failed for %s: %s", dedup_key, e)
+        logger.error("rescore: scoring failed for %s: %s", dedup_key, e)
         error = "Re-scoring failed. Try again later."
         try:
             log_activity(

@@ -179,11 +179,9 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
     # --- AI scoring (runs after DB connection is closed) ---
-    # v3.0 (Phase 34 Plan 3 Commit E): only the unified-scorer path remains.
-    # The use_unified_scorer config flag is still consulted so a one-line
-    # revert (flag -> false) restores the legacy pipeline via Plan 2's shim,
-    # but the legacy Haiku/Sonnet else-branch is deleted here.
-    if score and new_job_keys and config.get("use_unified_scorer", True):
+    # v3.0 unified scoring is the only path (Plan 4 Commit E removed the
+    # use_unified_scorer toggle and the legacy two-tier else-branch).
+    if score and new_job_keys:
         from job_finder.web.scoring_runner import run_scoring
         scoring_summary = run_scoring(new_job_keys, config, db_path)
         summary["scored"] = scoring_summary.get("scored", 0)

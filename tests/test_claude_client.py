@@ -8,8 +8,6 @@ import pytest
 from jsonschema import ValidationError, validate
 
 from job_finder.web.claude_client import call_claude, record_cost
-from job_finder.web.haiku_scorer import HAIKU_SCHEMA
-from job_finder.web.sonnet_evaluator import SONNET_SCHEMA, SONNET_SCHEMA_WITH_EVAL_BLOCKS
 
 
 def test_record_cost_default_provider(migrated_db):
@@ -126,46 +124,6 @@ class TestGetMonthlyProviderBreakdown:
         from job_finder.web.claude_client import get_monthly_provider_breakdown
         result = get_monthly_provider_breakdown(conn)
         assert result == []
-
-
-# ---------------------------------------------------------------------------
-# Tests: schema score bounds
-# ---------------------------------------------------------------------------
-
-
-class TestSchemaScoreBounds:
-    """Verify score field has minimum/maximum constraints in all schemas."""
-
-    def test_haiku_schema_has_score_bounds(self):
-        assert HAIKU_SCHEMA["properties"]["score"]["minimum"] == 0
-        assert HAIKU_SCHEMA["properties"]["score"]["maximum"] == 100
-
-    def test_sonnet_schema_has_score_bounds(self):
-        assert SONNET_SCHEMA["properties"]["score"]["minimum"] == 0
-        assert SONNET_SCHEMA["properties"]["score"]["maximum"] == 100
-
-    def test_sonnet_with_eval_blocks_inherits_score_bounds(self):
-        props = SONNET_SCHEMA_WITH_EVAL_BLOCKS["properties"]
-        assert props["score"]["minimum"] == 0
-        assert props["score"]["maximum"] == 100
-
-    def test_haiku_schema_rejects_score_above_100(self):
-        doc = {"score": 150, "summary": "x", "title_fit": "strong",
-               "location_fit": "remote", "salary_meets_floor": True}
-        with pytest.raises(ValidationError, match="maximum"):
-            validate(doc, HAIKU_SCHEMA)
-
-    def test_haiku_schema_rejects_negative_score(self):
-        doc = {"score": -5, "summary": "x", "title_fit": "strong",
-               "location_fit": "remote", "salary_meets_floor": True}
-        with pytest.raises(ValidationError, match="minimum"):
-            validate(doc, HAIKU_SCHEMA)
-
-    def test_haiku_schema_accepts_boundary_values(self):
-        base = {"summary": "x", "title_fit": "strong",
-                "location_fit": "remote", "salary_meets_floor": True}
-        validate({**base, "score": 0}, HAIKU_SCHEMA)
-        validate({**base, "score": 100}, HAIKU_SCHEMA)
 
 
 # ---------------------------------------------------------------------------
