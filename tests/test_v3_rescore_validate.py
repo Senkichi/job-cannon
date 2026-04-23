@@ -143,6 +143,48 @@ def test_g2_suppressed_when_too_few_buckets_meet_min_n():
     assert "fewer than 2 buckets" in evidence["reason"]
 
 
+def test_g2_strict_tolerates_small_adjacent_inversion():
+    # B3 saw q3=92.7% / q4=91.9% -- a 0.8pp inversion within sampling noise
+    # for n~37 (SE ~ 4.5pp). Default tolerance is 2pp.
+    # Approximate: q3=46/50=92%, q4=37/40=92.5% (no inversion) vs
+    # q3=46/50=92%, q4=36/40=90% (2pp inversion -- exactly at boundary).
+    rows = _rated_rows({"q1": (40, 50), "q2": (45, 50), "q3": (46, 50), "q4": (36, 40)})
+    verdict, evidence = gate_g2_monotonicity(_report(rows, batch_number=3), strict=True)
+    # q3 = 92%, q4 = 90% -> 2pp inversion (within default 2pp tolerance) -> pass
+    assert verdict == "pass"
+    assert evidence["rates_apply_or_consider"]["q3"] == 0.92
+    assert evidence["rates_apply_or_consider"]["q4"] == 0.9
+
+
+def test_g2_strict_fails_inversion_beyond_tolerance():
+    # q3 80%, q4 50% -- 30pp inversion, well beyond noise tolerance.
+    rows = _rated_rows({"q1": (10, 50), "q2": (20, 50), "q3": (40, 50), "q4": (25, 50)})
+    verdict, _ = gate_g2_monotonicity(_report(rows, batch_number=3), strict=True)
+    assert verdict == "fail"
+
+
+def test_g2_skips_rows_with_null_legacy_score():
+    # Rows with legacy_sonnet_score=None are dropped (don't pollute q1 bucket).
+    rows = _rated_rows({"q1": (4, 5), "q2": (5, 5), "q3": (5, 5), "q4": (5, 5)})
+    # Add 20 rows with None legacy score and apply-eligible sub-scores -- if not
+    # filtered they would all collide into q1 (since 0 -> q1) and skew totals.
+    null_legacy_rows = [
+        {
+            "dedup_key": f"co|nolegacy-{i}",
+            "legacy_sonnet_score": None,
+            "new_sub_scores": {dim: 4 for dim in _DIMS},
+            "status": "ok",
+        }
+        for i in range(20)
+    ]
+    verdict, evidence = gate_g2_monotonicity(
+        _report(rows + null_legacy_rows, batch_number=3), strict=True,
+    )
+    assert verdict == "pass"
+    # q1 totals reflect ONLY rows with legacy_sonnet_score != None.
+    assert evidence["totals"]["q1"] == 5
+
+
 # ---------------------------------------------------------------------------
 # G3
 # ---------------------------------------------------------------------------
