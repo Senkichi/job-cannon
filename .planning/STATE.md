@@ -3,32 +3,32 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
 status: executing
-stopped_at: Phase 34 context gathered
-last_updated: "2026-04-22T05:15:01.155Z"
-last_activity: 2026-04-22
+stopped_at: Phase 34 Plan 4 complete (rescore + legacy deletion)
+last_updated: "2026-04-23T09:30:00.000Z"
+last_activity: 2026-04-23 -- Phase 34 Plan 4 complete -- 3922 jobs classified, legacy modules removed
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 3
-  percent: 43
+  completed_plans: 5
+  percent: 71
 ---
 
 # State
 
 ## Current Position
 
-Phase: 34 (Greenfield Scorer Rewrite) — EXECUTING
-Plan: 2 of 5
-Status: Ready to execute
-Last activity: 2026-04-22
+Phase: 34 — EXECUTING
+Plan: 4 of 5 complete; Plan 5 (Migration 41 column drop) next
+Status: Plan 4 landed (commits A-E + B4 leftover sweep + 3 systematic-debugging fix commits)
+Last activity: 2026-04-23 -- 1953-row B4 leftover sweep + Commit E deletion sweep complete
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** Surface the best-fit jobs fast and keep the application pipeline visible
-**Current focus:** Phase 34 — Greenfield Scorer Rewrite
+**Current focus:** Phase --phase — 34
 
 ## Milestone Structure (v3.0)
 
