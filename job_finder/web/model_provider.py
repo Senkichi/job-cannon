@@ -26,6 +26,12 @@ from job_finder.web.claude_client import BudgetExceededError, FREE_PROVIDERS, co
 logger = logging.getLogger(__name__)
 
 _TIER_DEFAULTS: dict[str, str] = {
+    # Plan 4 Commit E: 'scoring' is the v3.0 single tier for job scoring.
+    # The 'haiku' and 'sonnet' tiers remain for non-scoring callers --
+    # enrichment_tiers, careers_scraper, ai_career_navigator,
+    # company_research, description_reformatter -- which still route
+    # short/cheap vs long/deep reasoning through tier names.
+    "scoring": DEFAULT_MODEL_SONNET,
     "haiku": DEFAULT_MODEL_HAIKU,
     "sonnet": DEFAULT_MODEL_SONNET,
     "opus": DEFAULT_MODEL_OPUS,
@@ -568,12 +574,10 @@ def call_model(
                     logger.info("Cascade: %s over budget, skipping", entry_provider)
                     continue
 
-            # Resolve effective system prompt for this cascade entry (CASC-05)
+            # CASC-05's per-provider variant prompt is gone alongside
+            # PROMPT_VARIANTS (deleted with sonnet_evaluator in Plan 4).
+            # All scoring callers now use the single v3 system prompt.
             effective_system = system
-            if entry_variant:
-                # Lazy import to avoid circular dependency (sonnet_evaluator imports call_model)
-                from job_finder.web.sonnet_evaluator import PROMPT_VARIANTS as _pv
-                effective_system = _pv.get(entry_variant, system)
 
             # Inter-request throttle: respect per-provider delay from config
             delay = throttle_delays.get(entry_provider, 0)

@@ -140,7 +140,7 @@ class TestAutoDismiss:
         """Jobs excluded by keyword filter are auto-set to dismissed status."""
         from unittest.mock import patch
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.scoring_runner import run_haiku_scoring
+        from job_finder.web.scoring_runner import run_scoring
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -159,7 +159,7 @@ class TestAutoDismiss:
 
         config = {
             "db": {"path": tmp_db_path},
-            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "daily_budget_usd": 25.0},
+            "scoring": {"daily_budget_usd": 25.0},
             "profile": {
                 "target_titles": ["Data Scientist"],
                 "target_locations": ["Remote"],
@@ -171,11 +171,11 @@ class TestAutoDismiss:
             "sources": {},
         }
 
-        # Mock shutil.which so the CLI check passes, and check_job_liveness
-        # so no HTTP requests are made during the liveness gate.
-        with patch("job_finder.web.scoring_runner.shutil.which", return_value="/usr/bin/claude"), \
-             patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
-            run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
+        # Liveness gate is mocked so no HTTP requests fire. The exclusion
+        # check fires BEFORE the liveness gate now, so the exclusion path
+        # never reaches it -- mock kept for safety in case of refactor.
+        with patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
+            run_scoring(["intern|job|remote"], config, tmp_db_path)
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
@@ -189,7 +189,7 @@ class TestAutoDismiss:
         """Auto-dismiss only affects discovered jobs, not reviewing/applied/etc."""
         from unittest.mock import patch
         from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.scoring_runner import run_haiku_scoring
+        from job_finder.web.scoring_runner import run_scoring
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -208,7 +208,7 @@ class TestAutoDismiss:
 
         config = {
             "db": {"path": tmp_db_path},
-            "scoring": {"haiku_threshold": 55, "min_score_threshold": 40, "daily_budget_usd": 25.0},
+            "scoring": {"daily_budget_usd": 25.0},
             "profile": {
                 "target_titles": ["Data Scientist"],
                 "target_locations": ["Remote"],
@@ -220,9 +220,8 @@ class TestAutoDismiss:
             "sources": {},
         }
 
-        with patch("job_finder.web.scoring_runner.shutil.which", return_value="/usr/bin/claude"), \
-             patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
-            run_haiku_scoring(["intern|job|remote"], config, tmp_db_path)
+        with patch("job_finder.web.scoring_runner.check_job_liveness", return_value="inconclusive"):
+            run_scoring(["intern|job|remote"], config, tmp_db_path)
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row

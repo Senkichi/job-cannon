@@ -277,100 +277,6 @@ class TestUpdatePipelineStatusEvidence:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Provider attribution on persist_sonnet_score (Phase 31 ATTR-01)
-# ---------------------------------------------------------------------------
-
-
-class TestProviderAttribution:
-    """Tests for scoring_provider column and persist_sonnet_score provider param (ATTR-01)."""
-
-    def test_persist_sonnet_score_writes_provider(self, migrated_conn):
-        """persist_sonnet_score with provider= writes the provider to scoring_provider column."""
-        from job_finder.db import persist_sonnet_score
-        _insert_job(migrated_conn, "acme|data-scientist")
-        persist_sonnet_score(
-            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
-            provider="ollama",
-        )
-        row = migrated_conn.execute(
-            "SELECT scoring_provider FROM jobs WHERE dedup_key = 'acme|data-scientist'"
-        ).fetchone()
-        assert row is not None
-        assert row["scoring_provider"] == "ollama"
-
-    def test_persist_sonnet_score_defaults_anthropic_when_no_provider(self, migrated_conn):
-        """persist_sonnet_score without provider= preserves column DEFAULT ('anthropic')."""
-        from job_finder.db import persist_sonnet_score
-        _insert_job(migrated_conn, "acme|data-scientist")
-        persist_sonnet_score(
-            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}'
-        )
-        row = migrated_conn.execute(
-            "SELECT scoring_provider FROM jobs WHERE dedup_key = 'acme|data-scientist'"
-        ).fetchone()
-        assert row is not None
-        assert row["scoring_provider"] == "anthropic"
-
-    def test_scoring_provider_in_get_job(self, migrated_conn):
-        """get_job() returns scoring_provider — confirms JOBS_ALL_COLUMNS includes the column."""
-        from job_finder.db import persist_sonnet_score, get_job
-        _insert_job(migrated_conn, "acme|data-scientist")
-        persist_sonnet_score(
-            migrated_conn, "acme|data-scientist", 78.0, '{"strengths":[]}',
-            provider="gemini",
-        )
-        result = get_job(migrated_conn, "acme|data-scientist")
-        assert result is not None
-        assert result["scoring_provider"] == "gemini"
-
-
-# ---------------------------------------------------------------------------
-# Tests: Career-ops persistence helpers (Migration 27)
-# ---------------------------------------------------------------------------
-
-
-class TestEvalBlocksPersistence:
-    """Tests for eval_blocks parameter on persist_sonnet_score."""
-
-    def test_persist_sonnet_score_writes_eval_blocks(self, migrated_conn):
-        """persist_sonnet_score with eval_blocks= writes JSON to eval_blocks column."""
-        from job_finder.db import persist_sonnet_score, get_job
-        _insert_job(migrated_conn, "acme|eval-blocks-test")
-        eval_blocks_json = '[{"criterion": "Python expertise", "score": 8, "rationale": "Strong match"}]'
-        persist_sonnet_score(
-            migrated_conn, "acme|eval-blocks-test", 75.0, '{"strengths":[]}',
-            eval_blocks=eval_blocks_json,
-        )
-        result = get_job(migrated_conn, "acme|eval-blocks-test")
-        assert result is not None
-        assert result["eval_blocks"] == eval_blocks_json
-
-    def test_persist_sonnet_score_eval_blocks_defaults_null(self, migrated_conn):
-        """persist_sonnet_score without eval_blocks= leaves eval_blocks NULL."""
-        from job_finder.db import persist_sonnet_score, get_job
-        _insert_job(migrated_conn, "acme|no-eval-blocks")
-        persist_sonnet_score(
-            migrated_conn, "acme|no-eval-blocks", 60.0, '{"strengths":[]}'
-        )
-        result = get_job(migrated_conn, "acme|no-eval-blocks")
-        assert result is not None
-        assert result["eval_blocks"] is None
-
-    def test_persist_sonnet_score_eval_blocks_with_provider(self, migrated_conn):
-        """persist_sonnet_score with both eval_blocks and provider writes both."""
-        from job_finder.db import persist_sonnet_score, get_job
-        _insert_job(migrated_conn, "acme|eval-blocks-provider")
-        persist_sonnet_score(
-            migrated_conn, "acme|eval-blocks-provider", 82.0, '{"strengths":[]}',
-            provider="ollama",
-            eval_blocks='[{"criterion": "test"}]',
-        )
-        result = get_job(migrated_conn, "acme|eval-blocks-provider")
-        assert result is not None
-        assert result["scoring_provider"] == "ollama"
-        assert result["eval_blocks"] == '[{"criterion": "test"}]'
-
-
 class TestPersistJobExpiryState:
     """Tests for persist_job_expiry_state helper."""
 
@@ -720,12 +626,8 @@ class TestPersistJobAssessment:
             "domain_match", "seniority_match", "skills_match",
         ]
 
-    def test_legacy_persist_functions_still_exist(self):
-        """persist_haiku_score and persist_sonnet_score still present (Plan 4 removes them)."""
+    def test_legacy_persist_functions_removed(self):
+        """Plan 4 Commit E removed persist_haiku_score + persist_sonnet_score."""
         from job_finder import db
-        assert hasattr(db, "persist_haiku_score"), (
-            "Plan 1 must NOT remove persist_haiku_score (Plan 4 scope)"
-        )
-        assert hasattr(db, "persist_sonnet_score"), (
-            "Plan 1 must NOT remove persist_sonnet_score (Plan 4 scope)"
-        )
+        assert not hasattr(db, "persist_haiku_score")
+        assert not hasattr(db, "persist_sonnet_score")

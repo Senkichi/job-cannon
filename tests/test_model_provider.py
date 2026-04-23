@@ -129,11 +129,13 @@ def test_resolve_provider_tier_model_missing_uses_scoring_models():
     assert result["provider"] == "ollama"
 
 
-def test_resolve_provider_haiku_tier():
+def test_resolve_provider_scoring_tier_default():
+    """v3.0 single tier name 'scoring' falls back to the Sonnet default
+    when no providers.scoring config is present."""
     config = {}
-    result = resolve_provider_config("haiku", config)
+    result = resolve_provider_config("scoring", config)
     assert result["provider"] == "anthropic"
-    assert result["model"] == "claude-haiku-4-5"
+    assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_opus_tier():
@@ -770,8 +772,13 @@ _CASCADE_VARIANT_CONFIG = {
 }
 
 
-def test_cascade_prompt_variant_overrides_system(tmp_path, _reset_daily_state):
-    """When cascade entry has prompt_variant, adapter.call uses the variant's system prompt."""
+def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_daily_state):
+    """Plan 4 Commit E removed PROMPT_VARIANTS along with sonnet_evaluator.
+
+    The prompt_variant cascade key is now ignored -- every entry uses the
+    caller's system prompt verbatim. This test pins the new behavior so a
+    future regression that re-introduces variant lookups is caught.
+    """
     from job_finder.web.model_provider import call_model
 
     conn = _migrated_conn(tmp_path)
@@ -794,17 +801,10 @@ def test_cascade_prompt_variant_overrides_system(tmp_path, _reset_daily_state):
             [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
         )
 
-    # gemini was selected (ollama exhausted)
     assert result.provider == "gemini"
-    # adapter.call should have been called with the fewshot-distribution variant, not the original
     call_args = mock_adapter.call.call_args
-    actual_system = call_args[0][1]  # positional arg: model, system, messages, ...
-    assert "Expected Score Distribution" in actual_system, (
-        "fewshot-distribution variant should include distribution instructions"
-    )
-    assert "original system prompt" not in actual_system, (
-        "original system prompt should be replaced by prompt_variant"
-    )
+    actual_system = call_args[0][1]  # positional: model, system, messages, ...
+    assert actual_system == "original system prompt"
 
 
 def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state):

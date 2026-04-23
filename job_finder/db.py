@@ -297,60 +297,6 @@ def log_run(
 # ---------------------------------------------------------------------------
 
 
-def persist_haiku_score(
-    conn: sqlite3.Connection,
-    dedup_key: str,
-    haiku_score: float,
-    haiku_summary: str,
-) -> None:
-    """Persist Haiku scoring results for a job.
-
-    Single point of truth for the haiku_score UPDATE statement.
-    Called from scoring_orchestrator, backfill_enrichment, and scoring_evaluator.
-
-    Args:
-        conn: Open sqlite3 connection.
-        dedup_key: The job's primary key.
-        haiku_score: Numeric score from Haiku fast-filter.
-        haiku_summary: Summary text from Haiku evaluation.
-    """
-    conn.execute(
-        "UPDATE jobs SET haiku_score = ?, haiku_summary = ? WHERE dedup_key = ?",
-        (haiku_score, haiku_summary, dedup_key),
-    )
-    conn.commit()
-
-
-def persist_sonnet_score(
-    conn: sqlite3.Connection,
-    dedup_key: str,
-    sonnet_score: float,
-    fit_analysis: str,
-    provider: str | None = None,
-    eval_blocks: str | None = None,
-) -> None:
-    """Persist Sonnet evaluation results for a job.
-
-    Single point of truth for the sonnet_score UPDATE statement.
-    Called from scoring_orchestrator, backfill_enrichment, and scoring_evaluator.
-
-    Args:
-        conn: Open sqlite3 connection.
-        dedup_key: The job's primary key.
-        sonnet_score: Numeric score from Sonnet deep evaluation.
-        fit_analysis: JSON string containing fit analysis details.
-        provider: Provider name that produced the score (e.g. "ollama"). None preserves existing value.
-        eval_blocks: JSON string of structured evaluation criteria. None leaves column unchanged.
-    """
-    conn.execute(
-        "UPDATE jobs SET sonnet_score = ?, fit_analysis = ?, "
-        "scoring_provider = COALESCE(?, scoring_provider), "
-        "eval_blocks = COALESCE(?, eval_blocks) WHERE dedup_key = ?",
-        (sonnet_score, fit_analysis, provider, eval_blocks, dedup_key),
-    )
-    conn.commit()
-
-
 def persist_job_assessment(
     conn: sqlite3.Connection,
     dedup_key: str,

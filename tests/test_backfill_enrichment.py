@@ -238,141 +238,78 @@ def test_no_ai_calls_without_confirmation(migrated_db):
 # test_sonnet_queue
 # ---------------------------------------------------------------------------
 
-def test_sonnet_queue(migrated_db):
-    """run_sonnet_backfill calls evaluate_job_sonnet for jobs with jd_full but no sonnet_score."""
+def test_scoring_backfill_classifies_unscored_jobs(migrated_db):
+    """run_scoring_backfill scores jobs with jd_full but no v3 classification."""
+    from job_finder.db import JobAssessment
+    from job_finder.web.job_scorer import ScoringResult as JSResult
+
     path, conn = migrated_db
 
-    # 3 jobs with jd_full but no sonnet_score
     insert_job(conn, "job1", jd_full="Full JD for job 1", sonnet_score=None)
     insert_job(conn, "job2", jd_full="Full JD for job 2", sonnet_score=None)
     insert_job(conn, "job3", jd_full="Full JD for job 3", sonnet_score=None)
 
-    mock_data = {
-        "score": 82,
-        "summary": "Strong match",
-        "fit_analysis": {"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []},
-    }
-    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
+    assessment = JobAssessment(
+        sub_scores={"title_fit": 4, "location_fit": 3, "comp_fit": 4,
+                    "domain_match": 5, "seniority_match": 4, "skills_match": 3},
+        classification="",
+        rationale={"strengths": [], "gaps": [],
+                   "talking_points": [], "resume_priority_skills": []},
+        provider="ollama",
+    )
+    mock_score_job = MagicMock(return_value=JSResult(
+        status="ok", data=assessment, provider="ollama",
+    ))
 
-    with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        count = be_module.run_sonnet_backfill(conn, config={})
+    with patch.object(be_module, "score_job", mock_score_job):
+        count = be_module.run_scoring_backfill(conn, config={})
 
     assert count == 3
-    assert mock_evaluate.call_count == 3
+    assert mock_score_job.call_count == 3
 
-    # Verify sonnet_score written to DB
     rows = conn.execute(
-        "SELECT dedup_key, sonnet_score FROM jobs WHERE dedup_key IN ('job1','job2','job3')"
+        "SELECT dedup_key, classification FROM jobs "
+        "WHERE dedup_key IN ('job1','job2','job3')"
     ).fetchall()
     for row in rows:
-        assert dict(row)["sonnet_score"] == 82
+        assert dict(row)["classification"] in {"apply", "consider", "skip", "reject"}
 
-# ---------------------------------------------------------------------------
-# test_sonnet_queue_skips_scored
-# ---------------------------------------------------------------------------
 
-def test_sonnet_queue_skips_scored(migrated_db):
-    """run_sonnet_backfill skips jobs that already have sonnet_score."""
+def test_scoring_backfill_skips_already_classified(migrated_db):
+    """run_scoring_backfill skips jobs that already have classification."""
+    from job_finder.db import JobAssessment
+    from job_finder.web.job_scorer import ScoringResult as JSResult
+
     path, conn = migrated_db
 
-    # One job with jd_full AND sonnet_score already set
-    insert_job(conn, "already_scored", jd_full="Full JD", sonnet_score=75)
-    # One job that needs scoring
+    insert_job(conn, "already_scored", jd_full="Full JD", sonnet_score=None)
+    conn.execute(
+        "UPDATE jobs SET classification = 'apply' WHERE dedup_key = 'already_scored'"
+    )
+    conn.commit()
     insert_job(conn, "needs_scoring", jd_full="Full JD 2", sonnet_score=None)
 
-    mock_data = {
-        "score": 80,
-        "summary": "Good match",
-        "fit_analysis": {"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []},
-    }
-    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
+    assessment = JobAssessment(
+        sub_scores={"title_fit": 3, "location_fit": 3, "comp_fit": 3,
+                    "domain_match": 3, "seniority_match": 3, "skills_match": 3},
+        classification="",
+        rationale={"strengths": [], "gaps": [],
+                   "talking_points": [], "resume_priority_skills": []},
+        provider="ollama",
+    )
+    mock_score_job = MagicMock(return_value=JSResult(
+        status="ok", data=assessment, provider="ollama",
+    ))
 
-    with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        count = be_module.run_sonnet_backfill(conn, config={})
+    with patch.object(be_module, "score_job", mock_score_job):
+        count = be_module.run_scoring_backfill(conn, config={})
 
-    assert count == 1  # Only 1 job evaluated
-    assert mock_evaluate.call_count == 1
-    # Verify the already_scored job was NOT re-evaluated
-    row = conn.execute(
-        "SELECT sonnet_score FROM jobs WHERE dedup_key = 'already_scored'"
-    ).fetchone()
-    assert dict(row)["sonnet_score"] == 75  # unchanged
-
-# ---------------------------------------------------------------------------
-# test_borderline_rescore
-# ---------------------------------------------------------------------------
-
-def test_borderline_rescore(migrated_db):
-    """run_borderline_rescore calls score_job_haiku for borderline jobs whose tier advanced."""
-    path, conn = migrated_db
-
-    # Insert borderline job (haiku_score 40-70) that had its tier advanced
-    insert_job(conn, "borderline1", haiku_score=55, enrichment_tier="haiku")
-    insert_job(conn, "borderline2", haiku_score=42, enrichment_tier="ddg")
-
-    tier_advanced_keys = {"borderline1", "borderline2"}
-
-    mock_data = {
-        "score": 65,
-        "summary": "Re-scored after enrichment",
-        "title_fit": "partial",
-        "location_fit": "remote",
-        "salary_meets_floor": True,
-    }
-    mock_score = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
-
-    with patch.object(be_module, "score_job_haiku", mock_score):
-        count = be_module.run_borderline_rescore(
-            conn, config={}, tier_advanced_keys=tier_advanced_keys
-        )
-
-    assert count == 2
-    assert mock_score.call_count == 2
-
-    # Verify haiku_score written to DB
-    rows = conn.execute(
-        "SELECT dedup_key, haiku_score FROM jobs WHERE dedup_key IN ('borderline1', 'borderline2')"
-    ).fetchall()
-    for row in rows:
-        assert dict(row)["haiku_score"] == 65
-
-# ---------------------------------------------------------------------------
-# test_borderline_skips_non_advanced
-# ---------------------------------------------------------------------------
-
-def test_borderline_skips_non_advanced(migrated_db):
-    """run_borderline_rescore skips borderline jobs whose tier did NOT advance."""
-    path, conn = migrated_db
-
-    # Borderline job that was NOT in tier_advanced_keys
-    insert_job(conn, "borderline_not_advanced", haiku_score=55)
-    # Borderline job that WAS advanced
-    insert_job(conn, "borderline_advanced", haiku_score=60)
-
-    # Only the second job is in tier_advanced_keys
-    tier_advanced_keys = {"borderline_advanced"}
-
-    mock_score = MagicMock(return_value=ScoringResult(data={
-        "score": 70,
-        "summary": "Better after enrichment",
-        "title_fit": "strong",
-        "location_fit": "remote",
-        "salary_meets_floor": True,
-    }, status="success"))
-
-    with patch.object(be_module, "score_job_haiku", mock_score):
-        count = be_module.run_borderline_rescore(
-            conn, config={}, tier_advanced_keys=tier_advanced_keys
-        )
-
-    # Only 1 job re-scored (the one in tier_advanced_keys)
     assert count == 1
-    assert mock_score.call_count == 1
-    # non-advanced job's score should be unchanged
+    assert mock_score_job.call_count == 1
     row = conn.execute(
-        "SELECT haiku_score FROM jobs WHERE dedup_key = 'borderline_not_advanced'"
+        "SELECT classification FROM jobs WHERE dedup_key = 'already_scored'"
     ).fetchone()
-    assert dict(row)["haiku_score"] == 55
+    assert dict(row)["classification"] == "apply"  # unchanged
 
 # ---------------------------------------------------------------------------
 # test_ordering_by_score_desc
@@ -448,31 +385,41 @@ def test_run_enrichment_pass_tracks_tier_advancement(migrated_db):
 # test_sonnet_backfill_writes_fit_analysis
 # ---------------------------------------------------------------------------
 
-def test_sonnet_backfill_writes_fit_analysis(migrated_db):
-    """run_sonnet_backfill persists fit_analysis JSON to DB."""
-    path, conn = migrated_db
+def test_scoring_backfill_writes_fit_analysis(migrated_db):
+    """run_scoring_backfill persists rationale JSON to fit_analysis column."""
+    from job_finder.db import JobAssessment
+    from job_finder.web.job_scorer import ScoringResult as JSResult
 
+    path, conn = migrated_db
     insert_job(conn, "job_with_jd", jd_full="Full job description here", sonnet_score=None)
 
-    fit = {
+    rationale = {
         "strengths": ["Python", "ML"],
         "gaps": ["Leadership"],
         "talking_points": ["Experience with large datasets"],
         "resume_priority_skills": ["Python", "SQL"],
     }
-    mock_data = {"score": 78, "summary": "Good fit", "fit_analysis": fit}
-    mock_evaluate = MagicMock(return_value=ScoringResult(data=mock_data, status="success"))
+    assessment = JobAssessment(
+        sub_scores={"title_fit": 4, "location_fit": 4, "comp_fit": 4,
+                    "domain_match": 4, "seniority_match": 4, "skills_match": 4},
+        classification="",
+        rationale=rationale,
+        provider="ollama",
+    )
+    mock_score_job = MagicMock(return_value=JSResult(
+        status="ok", data=assessment, provider="ollama",
+    ))
 
-    with patch.object(be_module, "evaluate_job_sonnet", mock_evaluate):
-        be_module.run_sonnet_backfill(conn, config={})
+    with patch.object(be_module, "score_job", mock_score_job):
+        be_module.run_scoring_backfill(conn, config={})
 
     row = conn.execute(
-        "SELECT sonnet_score, fit_analysis FROM jobs WHERE dedup_key = 'job_with_jd'"
+        "SELECT classification, fit_analysis FROM jobs WHERE dedup_key = 'job_with_jd'"
     ).fetchone()
     row_dict = dict(row)
-    assert row_dict["sonnet_score"] == 78
-    parsed_fit = json.loads(row_dict["fit_analysis"])
-    assert parsed_fit["strengths"] == ["Python", "ML"]
+    assert row_dict["classification"] == "apply"  # all sub-scores >= 3
+    parsed = json.loads(row_dict["fit_analysis"])
+    assert parsed["strengths"] == ["Python", "ML"]
 
 
 # ---------------------------------------------------------------------------
@@ -545,10 +492,8 @@ def test_run_enrichment_pass_wraps_config_through_offline_providers(migrated_db)
     assert captured_configs, "enrich_job was never called"
     injected = captured_configs[0]
     providers = injected.get("providers", {})
-    assert "haiku" in providers
-    assert "sonnet" in providers
-    assert providers["haiku"]["provider"] == "ollama"
-    assert providers["sonnet"]["provider"] == "ollama"
+    assert "scoring" in providers
+    assert providers["scoring"]["provider"] == "ollama"
 
 
 def test_offline_providers_use_fallback_chain_not_fallback():

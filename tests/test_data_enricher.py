@@ -892,79 +892,18 @@ class TestPipelineIntegration:
     - Migration 8 leaves unenriched jobs with NULL enrichment_tier
     """
 
-    def test_enrich_job_called_before_haiku_in_pipeline(self, tmp_db_path):
-        """enrich_job is called BEFORE score_job_haiku in run_haiku_scoring.
+    def test_run_scoring_does_not_call_fetch_jd(self):
+        """run_scoring source does not reference fetch_jd.
 
-        Sets up a temp DB with a job missing jd_full, then calls
-        run_haiku_scoring with mocked enrich_job and score_job_haiku.
-        Verifies call order via side_effect call tracking.
+        v3 unified runner inherits the legacy no-JD-fetch contract from
+        run_sonnet_evaluation -- JD fetching is enrich_job's job.
         """
-        from job_finder.web.db_migrate import run_migrations
-        from job_finder.web.scoring_runner import run_haiku_scoring
+        from job_finder.web.scoring_runner import run_scoring
 
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
-               first_seen, last_seen, score, score_breakdown, user_interest)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "acme|data-scientist|remote",
-                "Data Scientist",
-                "Acme Corp",
-                "Remote",
-                '["test"]', '["https://example.com/job"]',
-                "2026-03-10T00:00:00", "2026-03-10T00:00:00",
-                0, '{}', "unreviewed",
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        call_order = []
-
-        def mock_enrich(job_row, **kwargs):
-            call_order.append("enrich_job")
-            return {}
-
-        def mock_score(job_row, profile, conn, config, **kwargs):
-            call_order.append("score_job_haiku")
-            return {"score": 50, "summary": "OK"}
-
-        config = {
-            "scoring": {"haiku_threshold": 55, "profile_path": None},
-            "sources": {"serpapi": {"api_key": ""}},
-        }
-
-        with patch("job_finder.web.scoring_runner.enrich_job", side_effect=mock_enrich), \
-             patch("job_finder.web.scoring_runner.score_job_haiku", side_effect=mock_score):
-            run_haiku_scoring(
-                ["acme|data-scientist|remote"], config, tmp_db_path
-            )
-
-        # enrich_job must appear before score_job_haiku in the call order
-        assert "enrich_job" in call_order, "enrich_job was not called"
-        assert "score_job_haiku" in call_order, "score_job_haiku was not called"
-        enrich_idx = call_order.index("enrich_job")
-        score_idx = call_order.index("score_job_haiku")
-        assert enrich_idx < score_idx, (
-            f"enrich_job (pos {enrich_idx}) must be called before "
-            f"score_job_haiku (pos {score_idx})"
-        )
-
-    def test_sonnet_evaluation_does_not_call_fetch_jd(self):
-        """run_sonnet_evaluation source does not reference fetch_jd.
-
-        Verifies via inspect.getsource that the no-JD-fetch contract is
-        maintained — fetch_jd should not appear anywhere in the function body.
-        """
-        from job_finder.web.scoring_runner import run_sonnet_evaluation
-
-        source = inspect.getsource(run_sonnet_evaluation)
+        source = inspect.getsource(run_scoring)
         assert "fetch_jd" not in source, (
-            "run_sonnet_evaluation still references fetch_jd — "
-            "JD fetching should be handled exclusively by enrich_job"
+            "run_scoring references fetch_jd -- JD fetching must remain "
+            "exclusively in enrich_job"
         )
 
     def test_enrichment_tier_column_exists_after_migration(self, tmp_db_path):

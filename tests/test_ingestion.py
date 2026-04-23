@@ -870,122 +870,10 @@ class TestCompanyAutoPopulation:
 # Test: ScoringResult unwrap (Phase 11 plan 01)
 # ---------------------------------------------------------------------------
 
-class TestScoringResultUnwrap:
-    """Regression tests: run_haiku_scoring and run_sonnet_evaluation correctly
-    unwrap ScoringResult via .data and .status instead of treating it as a dict."""
-
-    def _make_job_row(self, db_path: str, dedup_key: str = "testco|data scientist|remote",
-                      jd_full: str | None = None) -> str:
-        """Insert a minimal job row using correct schema, return dedup_key."""
-        conn = sqlite3.connect(db_path)
-        conn.execute(
-            """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, jd_full)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (dedup_key, "Data Scientist", "TestCo", "Remote",
-             "2026-01-01T00:00:00", "2026-01-01T00:00:00", jd_full),
-        )
-        conn.commit()
-        conn.close()
-        return dedup_key
-
-    def test_haiku_scoring_unwraps_scoring_result(self, migrated_db_path):
-        """run_haiku_scoring correctly extracts score from ScoringResult.data."""
-        from job_finder.web.scoring_runner import run_haiku_scoring
-        from job_finder.web.scoring_types import ScoringResult
-
-        dedup_key = self._make_job_row(migrated_db_path)
-
-        scoring_result = ScoringResult(
-            data={
-                "score": 75,
-                "summary": "Good match",
-                "title_fit": "strong",
-                "location_fit": "remote",
-                "salary_meets_floor": True,
-            },
-            status="success",
-        )
-
-        config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
-
-        with patch("job_finder.web.scoring_runner.score_job_haiku", return_value=scoring_result), \
-             patch("job_finder.web.scoring_runner.should_exclude", return_value=(False, None)), \
-             patch("job_finder.web.scoring_runner.enrich_job", None):
-
-            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], config, migrated_db_path)
-
-        assert haiku_scored == 1, f"Expected 1 haiku-scored job, got {haiku_scored}"
-
-        conn = sqlite3.connect(migrated_db_path)
-        row = conn.execute(
-            "SELECT haiku_score FROM jobs WHERE dedup_key = ?", (dedup_key,)
-        ).fetchone()
-        conn.close()
-
-        assert row is not None
-        assert row[0] == 75, f"Expected haiku_score=75, got {row[0]}"
-
-    def test_haiku_scoring_handles_error_scoring_result(self, migrated_db_path):
-        """run_haiku_scoring gracefully handles ScoringResult with data=None (error status)."""
-        from job_finder.web.scoring_runner import run_haiku_scoring
-        from job_finder.web.scoring_types import ScoringResult
-
-        dedup_key = self._make_job_row(migrated_db_path, dedup_key="testco|engineer|remote")
-
-        error_result = ScoringResult(data=None, status="error")
-
-        config = {"scoring": {"haiku_threshold": 42}, "profile": {"exclusions": {}}}
-
-        with patch("job_finder.web.scoring_runner.score_job_haiku", return_value=error_result), \
-             patch("job_finder.web.scoring_runner.should_exclude", return_value=(False, None)), \
-             patch("job_finder.web.scoring_runner.enrich_job", None):
-
-            sonnet_queue, haiku_scored = run_haiku_scoring([dedup_key], config, migrated_db_path)
-
-        assert haiku_scored == 0, f"Expected 0 scored jobs on error, got {haiku_scored}"
-
-    def test_sonnet_evaluation_unwraps_scoring_result(self, migrated_db_path):
-        """run_sonnet_evaluation correctly extracts score from ScoringResult.data."""
-        from job_finder.web.scoring_runner import run_sonnet_evaluation
-        from job_finder.web.scoring_types import ScoringResult
-
-        dedup_key = self._make_job_row(
-            migrated_db_path,
-            dedup_key="corp|scientist|nyc",
-            jd_full="Full job description text for Sonnet evaluation.",
-        )
-
-        scoring_result = ScoringResult(
-            data={
-                "score": 82,
-                "summary": "Great fit for this role",
-                "fit_analysis": {
-                    "strengths": ["Python"],
-                    "gaps": [],
-                    "talking_points": [],
-                    "resume_priority_skills": [],
-                },
-            },
-            status="success",
-        )
-
-        config = {"scoring": {}, "profile": {}}
-
-        with patch("job_finder.web.scoring_runner.evaluate_job_sonnet", return_value=scoring_result), \
-             patch("job_finder.web.scoring_runner.enrich_company_info", None):
-
-            count = run_sonnet_evaluation([dedup_key], config, migrated_db_path)
-
-        assert count == 1, f"Expected 1 sonnet-evaluated job, got {count}"
-
-        conn = sqlite3.connect(migrated_db_path)
-        row = conn.execute(
-            "SELECT sonnet_score FROM jobs WHERE dedup_key = ?", (dedup_key,)
-        ).fetchone()
-        conn.close()
-
-        assert row is not None
-        assert row[0] == 82, f"Expected sonnet_score=82, got {row[0]}"
+# NOTE: TestScoringResultUnwrap was removed in Plan 4 Commit E along with the
+# legacy run_haiku_scoring + run_sonnet_evaluation entry points. The v3 unified
+# run_scoring's own ScoringResult-unwrap behavior is covered in
+# tests/test_scoring_runner.py::TestRunScoring.
 
 # ---------------------------------------------------------------------------
 # Test: Gmail pagination cap (SAFE-03, Phase 11 plan 01)
@@ -1246,12 +1134,14 @@ class TestUnifiedScorerFlagGate:
 
         return flags
 
-    def test_flag_false_skips_ai_scoring(
+    def test_flag_false_no_longer_disables_scoring(
         self, minimal_config, migrated_db_path,
     ):
-        """Flag False -> unified scorer NOT invoked (no fallback to legacy path)."""
+        """Plan 4 Commit E removed the use_unified_scorer toggle.
+        Setting it to False (legacy escape hatch) is now a no-op -- the
+        unified runner is the only path."""
         flags = self._run_with_flag(False, minimal_config, migrated_db_path)
-        assert flags["unified_called"] is False
+        assert flags["unified_called"] is True
 
     def test_flag_true_uses_run_scoring(self, minimal_config, migrated_db_path):
         """Flag True -> run_scoring invoked."""
@@ -1261,7 +1151,8 @@ class TestUnifiedScorerFlagGate:
     def test_flag_absent_defaults_true(
         self, minimal_config, migrated_db_path,
     ):
-        """Config with no use_unified_scorer key -> default True (v3.0 Commit E)."""
+        """Config with no use_unified_scorer key -> unified runner invoked
+        (Plan 4 Commit E made this unconditional)."""
         flags = self._run_with_flag(None, minimal_config, migrated_db_path)
         assert flags["unified_called"] is True
 
@@ -1307,13 +1198,13 @@ class TestUnifiedScorerFlagGate:
 
 
 class TestUnifiedScorerConfigShape:
-    """Phase 34 Plan 2 — configuration artifacts for the unified scorer."""
+    """Phase 34 Plan 4 — configuration artifacts after the deletion sweep."""
 
-    def test_config_example_has_use_unified_scorer_flag(self):
-        """config.example.yaml ships with use_unified_scorer: false default."""
+    def test_config_example_has_no_legacy_use_unified_scorer_flag(self):
+        """Plan 4 Commit E removed use_unified_scorer from config.example.yaml."""
         from pathlib import Path
         text = Path("config.example.yaml").read_text(encoding="utf-8")
-        assert "use_unified_scorer: false" in text
+        assert "use_unified_scorer" not in text
 
     def test_config_example_has_providers_scoring_block(self):
         """config.example.yaml documents the providers.scoring block template."""
@@ -1324,38 +1215,23 @@ class TestUnifiedScorerConfigShape:
         assert "qwen2.5:14b" in text
 
     def test_config_yaml_has_providers_scoring_block(self):
-        """config.yaml (user config) has providers.scoring after Plan 2."""
+        """config.yaml (user config) has providers.scoring after Plan 4."""
         from pathlib import Path
         text = Path("config.yaml").read_text(encoding="utf-8")
         # Active scoring block (not commented) — must be indented under providers:.
         assert "\n  scoring:\n" in text
         assert "qwen2.5:14b" in text
 
-    def test_config_yaml_use_unified_scorer_present(self):
-        """config.yaml has the use_unified_scorer flag (value is env-specific)."""
+    def test_config_yaml_no_legacy_provider_blocks(self):
+        """Plan 4 Commit E collapsed providers.haiku/providers.sonnet."""
         from pathlib import Path
         text = Path("config.yaml").read_text(encoding="utf-8")
-        assert "use_unified_scorer:" in text
-
-
-class TestRunOneshotLegacyFixture:
-    """Sanity tests for the new mock_run_oneshot_legacy conftest fixture."""
-
-    def test_legacy_fixture_yields_legacy_envelope(self, mock_run_oneshot_legacy):
-        """Declaring mock_run_oneshot_legacy in a signature returns a mock
-        whose envelope carries only the legacy {score, summary} shape."""
-        import json
-        envelope = mock_run_oneshot_legacy.return_value
-        assert envelope["is_error"] is False
-        parsed = json.loads(envelope["result"])
-        assert parsed.get("score") == 75
-        assert parsed.get("summary") == "Good match"
-        # v3 ordinal keys should be absent on the legacy envelope.
-        assert "title_fit" not in parsed
+        assert "\n  haiku:\n" not in text
+        assert "\n  sonnet:\n" not in text
 
 
 class TestCascadeConfigScoringFixture:
-    """Sanity tests for the new cascade_config_scoring conftest fixture."""
+    """Sanity tests for the cascade_config_scoring conftest fixture."""
 
     def test_cascade_config_scoring_shape(self, cascade_config_scoring):
         """Fixture exposes providers.scoring with model qwen2.5:14b and
@@ -1369,5 +1245,3 @@ class TestCascadeConfigScoringFixture:
             link.get("provider") == "anthropic"
             for link in scoring["fallback_chain"]
         )
-        # Flag co-ships with the fixture so tests exercise the unified path.
-        assert cascade_config_scoring["use_unified_scorer"] is True
