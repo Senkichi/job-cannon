@@ -9,7 +9,7 @@
 - ✅ **v1.4 Tech Debt Sweep** — Phases 19-23 (shipped 2026-03-27)
 - ✅ **v1.5 Multi-Provider Model Routing** — Phases 24-28 (shipped 2026-03-27)
 - ✅ **v2.0 Cascading Free Provider Routing** — Phases 29-32 (shipped 2026-03-30)
-- 🚧 **v3.0 Single-Tier Ordinal Scoring** — Phases 33-34 (started 2026-04-18)
+- ✅ **v3.0 Single-Tier Ordinal Scoring** — Phases 33-34 (shipped 2026-04-24)
 
 ## Phases
 
@@ -87,10 +87,10 @@
 
 </details>
 
-### 🚧 v3.0 Single-Tier Ordinal Scoring (Phases 33-34) — STARTED 2026-04-18
+### 🚧 v3.0 Single-Tier Ordinal Scoring (Phases 33-34) — SHIPPED 2026-04-24
 
 - [x] **Phase 33: Local-LLM Site-Fitness Survey** — Evidence-driven multi-model shootout across 9 active AI call sites, producing a per-site winner matrix that drives Phase 34 model selection (completed 2026-04-21)
-- [ ] **Phase 34: Greenfield Scorer Rewrite** — Five atomic, dependency-ordered plans delivering `job_scorer.py`, Migration 40+41, complete deletion of Haiku/calibration/cost-era scaffolding, and downstream consumer migration
+- [x] **Phase 34: Greenfield Scorer Rewrite** — Five atomic, dependency-ordered plans delivering `job_scorer.py`, Migration 40+41, complete deletion of Haiku/calibration/cost-era scaffolding, and downstream consumer migration (completed 2026-04-24)
 
 ## Phase Details
 
@@ -170,10 +170,10 @@
 **Plans**: 5 plans
 
 - [x] 34-01-PLAN.md — Additive schema (Migration 40) + JobAssessment/derive_classification/persist_job_assessment in db.py + job_scorer.py skeleton (no callers yet) (completed 2026-04-22)
-- [ ] 34-02-PLAN.md — Orchestrator dual-write: score_and_persist_job + run_scoring + use_unified_scorer flag (2-step rollout A→B)
-- [ ] 34-03-PLAN.md — Read migration in 5 revertable sub-commits A→E (queries, batch_scoring merge, dashboard, templates, resume+summary)
-- [ ] 34-04-PLAN.md — Batched rescore (B1=150, B2=1000, B3=remaining ~2750) with G1-G4 gates + systematic-debugging loop, then legacy-write removal + module deletion sweep (A→E)
-- [ ] 34-05-PLAN.md — Migration 41 (destructive column drop) backup-gated + preflight-grep-gated; JOBS_ALL_COLUMNS/JobRow TypedDict/fixture cleanup
+- [x] 34-02-PLAN.md — Orchestrator dual-write: score_and_persist_job + run_scoring + use_unified_scorer flag (2-step rollout A→B) (completed 2026-04-22)
+- [x] 34-03-PLAN.md — Read migration in 5 revertable sub-commits A→E (queries, batch_scoring merge, dashboard, templates, resume+summary) (completed 2026-04-22)
+- [x] 34-04-PLAN.md — Batched rescore (B1=150, B2=1000, B3=remaining ~2750) + B4 leftover sweep with G1-G4 gates + systematic-debugging loop, then legacy-write removal + module deletion sweep (A→E) (completed 2026-04-23)
+- [x] 34-05-PLAN.md — Migration 41 (destructive column drop) backup-gated + preflight-grep-gated; JOBS_ALL_COLUMNS/JobRow TypedDict/fixture cleanup (completed 2026-04-23)
 **UI hint**: yes
 
 ## Progress
@@ -213,4 +213,4 @@
 | 31. Prompts & Attribution | v2.0 | 3/3 | Complete | 2026-03-30 |
 | 32. Integration & Config Wiring | v2.0 | 1/1 | Complete | 2026-03-30 |
 | 33. Local-LLM Site-Fitness Survey | v3.0 | 2/2 | Complete    | 2026-04-21 |
-| 34. Greenfield Scorer Rewrite | v3.0 | 0/5 | Not started | — |
+| 34. Greenfield Scorer Rewrite | v3.0 | 5/5 | Complete    | 2026-04-24 |

@@ -4,8 +4,8 @@ milestone: v3.0
 milestone_name: Single-Tier Ordinal Scoring
 status: complete
 stopped_at: Phase 34 Plan 5 complete (Migration 41 destructive column drop)
-last_updated: "2026-04-23T12:45:00.000Z"
-last_activity: 2026-04-23 -- Phase 34 COMPLETE -- Migration 41 applied, legacy columns dropped, v3.0 milestone delivered
+last_updated: "2026-04-24T00:00:00.000Z"
+last_activity: 2026-04-24 -- v3.0 milestone SHIPPED -- ROADMAP + MILESTONES updated, TESTING-propagation fix in create_app, 2412 tests green
 progress:
   total_phases: 2
   completed_phases: 2
