@@ -98,6 +98,8 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
 
     app.config["JF_CONFIG"] = cfg
     app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
+    if "TESTING" in cfg:
+        app.config["TESTING"] = cfg["TESTING"]
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # Activate cross-project API telemetry, budget enforcement, and key injection.
