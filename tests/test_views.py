@@ -3089,3 +3089,83 @@ class TestDateFilterHtmxTrigger:
             "filter form hx-trigger must include 'input from:#filter-date-to' "
             "so clearing the date input fires an HTMX request"
         )
+
+
+# ---------------------------------------------------------------------------
+# Composite Score Cell tests (Phase 34 — v3.0 numeric badge)
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeScoreCell:
+    """v3.0 composite-score display: number + color + tooltip + packed sort key.
+
+    Replaces the classification-badge rendering with a colored composite number
+    (sum of 6 sub-scores, range 6-30). See spec
+    docs/superpowers/specs/2026-04-27-composite-score-display-design.md.
+    """
+
+    def test_apply_row_renders_composite_30(self, scored_client):
+        """Apply with all 5s renders composite '30'."""
+        response = scored_client.get("/jobs")
+        assert response.status_code == 200
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        assert idx != -1, "score cell for max-apply not rendered"
+        cell = html[idx : idx + 800]
+        assert ">30<" in cell, f"composite '30' not rendered in cell: {cell[:300]}"
+
+    def test_apply_row_uses_green_color(self, scored_client):
+        """Apply classification renders with text-green-400."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert "text-green-400" in cell
+
+    def test_consider_row_uses_amber_color(self, scored_client):
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cconsider-22%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert "text-amber-400" in cell
+        assert ">22<" in cell
+
+    def test_skip_row_uses_slate_color(self, scored_client):
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cskip-22%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert "text-slate-400" in cell
+
+    def test_reject_row_uses_red_color(self, scored_client):
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Creject-6%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert "text-red-400" in cell
+        assert ">6<" in cell
+
+    def test_apply_min_renders_composite_18(self, scored_client):
+        """Apply with all 3s (boundary) renders '18'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmin-apply%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert ">18<" in cell
+
+    def test_badge_text_no_longer_present(self, scored_client):
+        """Old badge background classes are removed from compact-row score cells."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        for old_badge in ('"bg-green-900', '"bg-amber-900', '"bg-red-900', '"bg-slate-800'):
+            for dk in (
+                "ax%7Cmax-apply%7Cremote",
+                "ax%7Cconsider-22%7Cremote",
+                "ax%7Cskip-22%7Cremote",
+                "ax%7Creject-6%7Cremote",
+            ):
+                idx = html.find(f'id="score-{dk}"')
+                cell = html[idx : idx + 800]
+                assert old_badge not in cell, (
+                    f"Old badge class {old_badge} still present in score cell {dk}"
+                )
