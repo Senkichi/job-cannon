@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Push-size guardrail. Checks the diff being pushed against thresholds:
+#   < 400 lines → silent (push proceeds)
+#   400–800     → warns (push proceeds)
+#   > 800       → blocks (push aborted; explains how to split)
+#
+# Lockfiles, generated artifacts, and docs are excluded from the count
+# (mirrors the pr-size workflow's exclusions).
+#
+# To override in genuine large-rename / migration cases:
+#   git push --no-verify
+# ...but think first. The reason the threshold exists is that downstream
+# review tooling chokes on pushes over ~800 lines of code change.
+
+set -e
+
+WARN_THRESHOLD=400
+BLOCK_THRESHOLD=800
+
+remote="$1"
+url="$2"
+
+# Read each ref being pushed from stdin (git pre-push protocol).
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Skip branch deletions (local_sha is all zeros).
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        continue
+    fi
+
+    # If the remote ref doesn't exist yet (new branch), compare against the
+    # remote's default branch instead.
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        base=$(git merge-base "$local_sha" "refs/remotes/$remote/HEAD" 2>/dev/null \
+            || git merge-base "$local_sha" "refs/remotes/$remote/master" 2>/dev/null \
+            || echo "")
+        if [ -z "$base" ]; then
+            # No common ancestor we can find — skip size check.
+            continue
+        fi
+    else
+        base="$remote_sha"
+    fi
+
+    # Count added + deleted lines, excluding noise.
+    LINES=$(git diff --numstat "$base" "$local_sha" -- \
+        ':!*.lock' \
+        ':!uv.lock' \
+        ':!*.pyc' \
+        ':!**/__pycache__/**' \
+        ':!*.md' \
+        ':!*.png' \
+        ':!*.jpg' \
+        ':!*.svg' \
+        ':!.planning/**' \
+        ':!.reviews/**' \
+        ':!eval_results/**' \
+        ':!logs/**' \
+        ':!data/**' \
+        ':!reports/**' \
+        | awk '{ added += $1; deleted += $2 } END { print (added + deleted) + 0 }')
+
+    if [ "$LINES" -gt "$BLOCK_THRESHOLD" ]; then
+        echo ""
+        echo "  BLOCKED: This push contains $LINES lines of code change."
+        echo "           The block threshold is $BLOCK_THRESHOLD lines."
+        echo ""
+        echo "  Pushes this large overwhelm downstream review tooling and are"
+        echo "  hard to audit if something regresses. Split the work:"
+        echo ""
+        echo "    - Push commits one at a time:"
+        echo "        git push origin <commit-sha>:$(echo "$remote_ref" | sed 's|refs/heads/||')"
+        echo "    - Or split mechanical changes (formatting, renames) from"
+        echo "      semantic changes into separate commits + separate pushes."
+        echo ""
+        echo "  Genuine exceptions (large-scale migrations, vendored deps):"
+        echo "        git push --no-verify"
+        echo ""
+        exit 1
+    elif [ "$LINES" -gt "$WARN_THRESHOLD" ]; then
+        echo ""
+        echo "  WARN: This push contains $LINES lines of code change"
+        echo "        (warn threshold: $WARN_THRESHOLD, block threshold: $BLOCK_THRESHOLD)."
+        echo "        Consider splitting if the next push would compound this."
+        echo ""
+    fi
+done
+
+exit 0

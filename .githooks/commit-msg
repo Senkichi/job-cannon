@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Chains to pre-commit framework for commit-msg validation (commitizen).
+
+if command -v pre-commit &> /dev/null; then
+    pre-commit run --hook-stage commit-msg --commit-msg-filename "$1" || exit 1
+elif uv run pre-commit --version &> /dev/null 2>&1; then
+    uv run pre-commit run --hook-stage commit-msg --commit-msg-filename "$1" || exit 1
+fi

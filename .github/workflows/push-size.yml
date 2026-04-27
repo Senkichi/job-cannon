@@ -1,0 +1,72 @@
+# Reports push size on every push to master.
+#
+# Solo-dev adaptation of empericus's pr-size.yml. Since this repo pushes
+# directly to master (no PRs), the local pre-push hook is the primary
+# gate — but this workflow gives a server-side record of push sizes in
+# the Actions log and fails the run for genuinely huge pushes so they
+# show up in commit-status notifications.
+
+name: Push Size Check
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  size-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate push size
+        id: size
+        run: |
+          # Compare HEAD against the previous commit on master.
+          # github.event.before is the SHA before this push.
+          BEFORE="${{ github.event.before }}"
+
+          # First push to a new branch, or force-push edge case.
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            echo "lines=0" >> "$GITHUB_OUTPUT"
+            echo "Initial push or unknown base — skipping size check."
+            exit 0
+          fi
+
+          LINES=$(git diff --numstat "${BEFORE}...HEAD" -- \
+            ':!*.lock' ':!uv.lock' ':!*.pyc' ':!**/__pycache__/**' \
+            ':!*.md' ':!*.png' ':!*.jpg' ':!*.svg' \
+            ':!.planning/**' ':!.reviews/**' \
+            ':!eval_results/**' ':!logs/**' ':!data/**' ':!reports/**' \
+            | awk '{ added += $1; deleted += $2 } END { print (added + deleted) + 0 }')
+          echo "lines=${LINES}" >> "$GITHUB_OUTPUT"
+          echo "Push changes ${LINES} lines of code (excluding docs, lockfiles, planning artifacts)."
+
+      - name: Annotate large pushes
+        if: steps.size.outputs.lines != ''
+        run: |
+          LINES=${{ steps.size.outputs.lines }}
+          if [ "$LINES" -gt 800 ]; then
+            echo "::error::This push changes $LINES lines, exceeding the 800-line guideline. Downstream review tooling may struggle. Split future pushes."
+          elif [ "$LINES" -gt 400 ]; then
+            echo "::warning::This push changes $LINES lines (above the 400-line warning threshold). Acceptable for mechanical reformats; otherwise consider splitting."
+          else
+            echo "Push size: $LINES lines — within reviewable threshold."
+          fi
+          {
+            echo "## Push Size"
+            echo ""
+            echo "- Lines changed: **$LINES**"
+            echo "- Warn threshold: 400"
+            echo "- Block threshold: 800"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on enormous pushes
+        if: steps.size.outputs.lines != '' && steps.size.outputs.lines > 800
+        run: |
+          echo "Push of ${{ steps.size.outputs.lines }} lines exceeds the 800-line block threshold."
+          exit 1
