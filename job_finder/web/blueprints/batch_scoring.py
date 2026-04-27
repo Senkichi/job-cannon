@@ -355,7 +355,7 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                     continue
 
                 try:
-                    result = score_and_persist_job(conn, job_row, config, profile)
+                    result = score_and_persist_job(job_row, conn, config)
                     if result is not None:
                         scored_count += 1
                     else:
