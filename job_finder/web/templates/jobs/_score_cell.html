@@ -1,18 +1,20 @@
-{# Score cell partial. Renders the score column as a colored composite number.
+{# Score cell partial. Renders the score column as a colored composite number
+   plus a Tailwind hover-tooltip showing sub-scores + top strength + top gap.
 
    Variables expected in scope:
-     job              — job object with classification (enum: apply/consider/skip/reject),
-                        sub_scores_json, fit_analysis, dedup_key, first_seen
+     job              — job object with classification (enum), sub_scores_json,
+                        fit_analysis, dedup_key, first_seen
    Optional:
-     oob              — when truthy, adds hx-swap-oob="outerHTML" for out-of-band targeting
-     freshness_cutoff — ISO date string; jobs with first_seen >= this get a freshness star
+     oob              — when truthy, adds hx-swap-oob="outerHTML"
+     freshness_cutoff — ISO date string; jobs with first_seen >= this get a star
 
-   v3.0 (Phase 34) numeric badge → colored composite number.
-   See docs/superpowers/specs/2026-04-27-composite-score-display-design.md
+   v3.0 (Phase 34) numeric badge → colored composite number + tooltip.
+   Spec: docs/superpowers/specs/2026-04-27-composite-score-display-design.md
 #}
 
 {% set cls = job.classification %}
 {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
+{% set fit = job.fit_analysis | from_json if job.fit_analysis else {} %}
 {% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
 
 {# Composite = sum of 6 sub-scores (range 6-30). 0 if sub_scores missing. #}
@@ -40,17 +42,46 @@
   {% set rank = 0 %}
 {% endif %}
 
-{# Packed sort key: classification_rank * 100 + composite. Preserves single-key
-   client-side resort in jobs/index.html resortByScore() while matching server
-   two-key sort (classification rank DESC, sub_score_sum DESC). #}
 {% set sort_score = rank * 100 + composite %}
 
+{# Tooltip text fragments. Truncate strength/gap at 120 chars (spec). #}
+{% set strengths = fit.get('strengths', []) if fit else [] %}
+{% set gaps = fit.get('gaps', []) if fit else [] %}
+{% set top_strength = strengths[0] if strengths else '' %}
+{% set top_gap = gaps[0] if gaps else '' %}
+{% if top_strength and top_strength | length > 120 %}
+  {% set top_strength = top_strength[:120] ~ '…' %}
+{% endif %}
+{% if top_gap and top_gap | length > 120 %}
+  {% set top_gap = top_gap[:120] ~ '…' %}
+{% endif %}
+
 <td id="score-{{ job.dedup_key | urlencode }}"
-    class="px-1 py-1.5 whitespace-nowrap text-right"
+    class="px-1 py-1.5 whitespace-nowrap text-right relative group"
     data-sort-score="{{ sort_score }}"
     {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
   {% if cls %}
-    <span class="font-semibold {{ color_class }}">{{ composite }}</span>{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
+    <span class="font-semibold {{ color_class }} cursor-help">{{ composite }}</span>{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
+    {# Tooltip: hidden by default, revealed on parent <td>.group hover. #}
+    <div class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-100
+                absolute z-30 left-full ml-2 top-1/2 -translate-y-1/2
+                w-72 p-2 rounded border border-slate-700 bg-slate-900 shadow-lg
+                text-xs text-slate-200 text-left whitespace-normal pointer-events-none">
+      <div class="font-mono text-slate-300">
+        Title {{ sub_scores.get('title_fit', 0) }} ·
+        Location {{ sub_scores.get('location_fit', 0) }} ·
+        Comp {{ sub_scores.get('comp_fit', 0) }} ·
+        Domain {{ sub_scores.get('domain_match', 0) }} ·
+        Seniority {{ sub_scores.get('seniority_match', 0) }} ·
+        Skills {{ sub_scores.get('skills_match', 0) }}
+      </div>
+      {% if top_strength %}
+        <div class="mt-1"><span class="text-green-400 font-semibold">Strength:</span> {{ top_strength }}</div>
+      {% endif %}
+      {% if top_gap %}
+        <div class="mt-1"><span class="text-red-400 font-semibold">Gap:</span> {{ top_gap }}</div>
+      {% endif %}
+    </div>
   {% else %}
     <span class="{{ color_class }}">&mdash;</span>
   {% endif %}

@@ -3223,3 +3223,86 @@ class TestCompositeScoreCell:
         idx = html.find('id="score-ax%7Cunscored%7Cremote"')
         cell = html[idx : idx + 800]
         assert 'data-sort-score="0"' in cell
+
+    # --- Tooltip content ---
+
+    def test_tooltip_contains_all_six_axis_labels(self, scored_client):
+        """Tooltip lists all 6 sub-score axes for an Apply row."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 1500]
+        for label in ("Title", "Location", "Comp", "Domain", "Seniority", "Skills"):
+            assert label in cell, f"Axis label '{label}' missing from tooltip in {cell[:300]}"
+
+    def test_tooltip_contains_axis_values(self, scored_client):
+        """Tooltip shows numeric values for each axis."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cconsider-22%7Cremote"')
+        cell = html[idx : idx + 1500]
+        # consider-22: title 4, location 3, comp 4, domain 4, seniority 4, skills 3
+        assert "4" in cell and "3" in cell
+
+    def test_tooltip_includes_top_strength(self, scored_client):
+        """Tooltip surfaces fit_analysis.strengths[0]."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "Deep platform experience aligns with infra-heavy stack" in cell
+
+    def test_tooltip_includes_top_gap(self, scored_client):
+        """Tooltip surfaces fit_analysis.gaps[0]."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "No published Kubernetes operator work" in cell
+
+    def test_tooltip_omits_strength_when_empty(self, scored_client):
+        """fit_analysis.strengths == [] -> no Strength: line."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Capply-empty-lists%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "Strength:" not in cell
+        assert "Gap:" not in cell
+
+    def test_tooltip_works_when_fit_analysis_missing(self, scored_client):
+        """fit_analysis NULL -> tooltip still renders sub-scores; no Strength/Gap lines."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Capply-no-rationale%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "Title" in cell and "Skills" in cell
+        assert "Strength:" not in cell
+        assert "Gap:" not in cell
+
+    def test_tooltip_truncates_long_strength(self, scored_client):
+        """Strength text > 120 chars is truncated with ellipsis."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Capply-long-strength%7Cremote"')
+        cell = html[idx : idx + 2000]
+        long_a = "A" * 200
+        truncated = "A" * 120 + "…"
+        assert long_a not in cell, "Untruncated long strength leaked into tooltip"
+        assert truncated in cell, "Expected truncated strength with ellipsis"
+
+    def test_tooltip_uses_group_hover_pattern(self, scored_client):
+        """Tooltip markup uses Tailwind group-hover (CSS-only, no JS)."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "group-hover" in cell
+
+    def test_unscored_no_tooltip(self, scored_client):
+        """NULL classification -> no tooltip markup."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cunscored%7Cremote"')
+        cell = html[idx : idx + 1500]
+        assert "Strength:" not in cell
+        assert "Gap:" not in cell
