@@ -8,12 +8,12 @@ Covers:
 - scrape_careers_page: exclusion keyword filtering, JS-rendered fallback
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers: build mock response objects
 # ---------------------------------------------------------------------------
+
 
 def _mock_response(url, text, status_code=200):
     """Create a mock requests.Response."""
@@ -24,12 +24,13 @@ def _mock_response(url, text, status_code=200):
     resp.raise_for_status = MagicMock()
     return resp
 
+
 # ---------------------------------------------------------------------------
 # Tests: find_careers_url
 # ---------------------------------------------------------------------------
 
-class TestFindCareersUrl:
 
+class TestFindCareersUrl:
     def test_finds_careers_link_from_homepage(self):
         """/careers link on homepage is returned as absolute URL."""
         from job_finder.web.careers_scraper import find_careers_url
@@ -82,7 +83,7 @@ class TestFindCareersUrl:
         """Returns None when homepage redirects to known ATS domain (Research Pitfall 6)."""
         from job_finder.web.careers_scraper import find_careers_url
 
-        html = '<html><body>Redirected to Lever</body></html>'
+        html = "<html><body>Redirected to Lever</body></html>"
         # Simulate redirect to Lever
         resp = _mock_response("https://jobs.lever.co/acme", html)
 
@@ -108,7 +109,9 @@ class TestFindCareersUrl:
         """Returns None gracefully when requests.get raises an exception."""
         from job_finder.web.careers_scraper import find_careers_url
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=Exception("timeout")):
+        with patch(
+            "job_finder.web.careers_scraper.requests.get", side_effect=Exception("timeout")
+        ):
             result = find_careers_url("https://example.com/")
 
         assert result is None
@@ -117,7 +120,7 @@ class TestFindCareersUrl:
         """Returns None when redirected to Greenhouse ATS domain."""
         from job_finder.web.careers_scraper import find_careers_url
 
-        html = '<html><body>Greenhouse</body></html>'
+        html = "<html><body>Greenhouse</body></html>"
         resp = _mock_response("https://boards.greenhouse.io/acme", html)
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
@@ -129,7 +132,7 @@ class TestFindCareersUrl:
         """Returns None when redirected to Ashby ATS domain."""
         from job_finder.web.careers_scraper import find_careers_url
 
-        html = '<html><body>Ashby</body></html>'
+        html = "<html><body>Ashby</body></html>"
         resp = _mock_response("https://jobs.ashbyhq.com/acme", html)
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=resp):
@@ -149,12 +152,13 @@ class TestFindCareersUrl:
 
         assert result == "https://example.com/join"
 
+
 # ---------------------------------------------------------------------------
 # Tests: scrape_careers_page
 # ---------------------------------------------------------------------------
 
-class TestScrapeCareersPage:
 
+class TestScrapeCareersPage:
     def test_extracts_matching_job_title_links(self):
         """scrape_careers_page returns jobs whose title matches target keywords."""
         from job_finder.web.careers_scraper import scrape_careers_page
@@ -223,7 +227,9 @@ class TestScrapeCareersPage:
         """scrape_careers_page returns [] gracefully on request failure."""
         from job_finder.web.careers_scraper import scrape_careers_page
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=Exception("timeout")):
+        with patch(
+            "job_finder.web.careers_scraper.requests.get", side_effect=Exception("timeout")
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -272,9 +278,11 @@ class TestScrapeCareersPage:
         # Empty target_titles means no filter — all links returned
         assert len(results) == 2
 
+
 # ---------------------------------------------------------------------------
 # Tests: Haiku fallback in find_careers_url
 # ---------------------------------------------------------------------------
+
 
 class TestHaikuFallback:
     """Tests for Haiku fallback in find_careers_url."""
@@ -290,8 +298,13 @@ class TestHaikuFallback:
         mock_conn = MagicMock()
         mock_config = {}
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._find_careers_url_with_haiku", return_value="https://example.com/work-here") as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch(
+                "job_finder.web.careers_scraper._find_careers_url_with_haiku",
+                return_value="https://example.com/work-here",
+            ) as mock_haiku,
+        ):
             result = find_careers_url("https://example.com/", conn=mock_conn, config=mock_config)
 
         mock_haiku.assert_called_once()
@@ -307,8 +320,10 @@ class TestHaikuFallback:
         mock_client = MagicMock()
         mock_conn = MagicMock()
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._find_careers_url_with_haiku") as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch("job_finder.web.careers_scraper._find_careers_url_with_haiku") as mock_haiku,
+        ):
             result = find_careers_url("https://example.com/", conn=mock_conn, config={})
 
         mock_haiku.assert_not_called()
@@ -321,8 +336,10 @@ class TestHaikuFallback:
         html = '<html><body><a href="/about">About</a></body></html>'
         resp = _mock_response("https://example.com/", html)
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._find_careers_url_with_haiku") as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch("job_finder.web.careers_scraper._find_careers_url_with_haiku") as mock_haiku,
+        ):
             result = find_careers_url("https://example.com/")
 
         mock_haiku.assert_not_called()
@@ -335,15 +352,21 @@ class TestHaikuFallback:
         html = '<html><body><a href="/about">About</a></body></html>'
         resp = _mock_response("https://example.com/", html)
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._find_careers_url_with_haiku", return_value=None):
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch(
+                "job_finder.web.careers_scraper._find_careers_url_with_haiku", return_value=None
+            ),
+        ):
             result = find_careers_url("https://example.com/", conn=MagicMock(), config={})
 
         assert result is None
 
+
 # ---------------------------------------------------------------------------
 # Tests: Rich JD extraction via job link following
 # ---------------------------------------------------------------------------
+
 
 class TestRichJdExtraction:
     """Tests for rich JD extraction via job link following."""
@@ -353,7 +376,7 @@ class TestRichJdExtraction:
         from job_finder.web.careers_scraper import scrape_careers_page
 
         careers_html = '<html><body><a href="/jobs/1">Data Scientist</a></body></html>'
-        job_html = '<html><body><p>We are looking for a data scientist...</p></body></html>'
+        job_html = "<html><body><p>We are looking for a data scientist...</p></body></html>"
 
         careers_resp = _mock_response("https://example.com/careers", careers_html)
         job_resp = _mock_response("https://example.com/jobs/1", job_html)
@@ -363,8 +386,10 @@ class TestRichJdExtraction:
                 return careers_resp
             return job_resp
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect), \
-             patch("job_finder.web.careers_scraper.time.sleep"):
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect),
+            patch("job_finder.web.careers_scraper.time.sleep"),
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -380,7 +405,7 @@ class TestRichJdExtraction:
         from job_finder.web.careers_scraper import scrape_careers_page
 
         careers_html = '<html><body><a href="/jobs/1">Data Scientist</a></body></html>'
-        job_html = '<html><body><p>Sign in or join to continue</p></body></html>'
+        job_html = "<html><body><p>Sign in or join to continue</p></body></html>"
 
         careers_resp = _mock_response("https://example.com/careers", careers_html)
         job_resp = _mock_response("https://example.com/jobs/1", job_html)
@@ -390,8 +415,10 @@ class TestRichJdExtraction:
                 return careers_resp
             return job_resp
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect), \
-             patch("job_finder.web.careers_scraper.time.sleep"):
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect),
+            patch("job_finder.web.careers_scraper.time.sleep"),
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -407,15 +434,19 @@ class TestRichJdExtraction:
 
         html = '<html><body><a href="/jobs/1">Data Scientist</a></body></html>'
         resp = _mock_response("https://example.com/careers", html)
-        job_resp = _mock_response("https://example.com/jobs/1", "<html><body>JD text</body></html>")
+        job_resp = _mock_response(
+            "https://example.com/jobs/1", "<html><body>JD text</body></html>"
+        )
 
         def side_effect(url, **kwargs):
             if "careers" in url:
                 return resp
             return job_resp
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect), \
-             patch("job_finder.web.careers_scraper.time.sleep"):
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect),
+            patch("job_finder.web.careers_scraper.time.sleep"),
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -424,9 +455,11 @@ class TestRichJdExtraction:
 
         assert "description" in results[0]
 
+
 # ---------------------------------------------------------------------------
 # Tests: Haiku job extraction fallback in scrape_careers_page
 # ---------------------------------------------------------------------------
+
 
 class TestHaikuJobExtraction:
     """Tests for _extract_jobs_with_haiku fallback."""
@@ -439,8 +472,13 @@ class TestHaikuJobExtraction:
         html = '<html><body><a href="/about">About Us</a></body></html>'
         resp = _mock_response("https://example.com/careers", html)
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._extract_jobs_with_haiku", return_value=[{"title": "Data Scientist", "url": "", "description": ""}]) as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch(
+                "job_finder.web.careers_scraper._extract_jobs_with_haiku",
+                return_value=[{"title": "Data Scientist", "url": "", "description": ""}],
+            ) as mock_haiku,
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -465,9 +503,11 @@ class TestHaikuJobExtraction:
                 return resp
             return job_resp
 
-        with patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect), \
-             patch("job_finder.web.careers_scraper.time.sleep"), \
-             patch("job_finder.web.careers_scraper._extract_jobs_with_haiku") as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", side_effect=side_effect),
+            patch("job_finder.web.careers_scraper.time.sleep"),
+            patch("job_finder.web.careers_scraper._extract_jobs_with_haiku") as mock_haiku,
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -486,8 +526,10 @@ class TestHaikuJobExtraction:
         html = '<html><body><a href="/about">About</a></body></html>'
         resp = _mock_response("https://example.com/careers", html)
 
-        with patch("job_finder.web.careers_scraper.requests.get", return_value=resp), \
-             patch("job_finder.web.careers_scraper._extract_jobs_with_haiku") as mock_haiku:
+        with (
+            patch("job_finder.web.careers_scraper.requests.get", return_value=resp),
+            patch("job_finder.web.careers_scraper._extract_jobs_with_haiku") as mock_haiku,
+        ):
             results = scrape_careers_page(
                 "https://example.com/careers",
                 target_titles=["Data Scientist"],
@@ -501,8 +543,8 @@ class TestHaikuJobExtraction:
 # Tests: careers subdomain detection
 # ---------------------------------------------------------------------------
 
-class TestCareersSubdomainDetection:
 
+class TestCareersSubdomainDetection:
     def test_redirect_to_careers_subdomain_returned_directly(self):
         """Homepage redirecting to careers.example.com is returned as-is."""
         from job_finder.web.careers_scraper import find_careers_url
@@ -569,16 +611,16 @@ class TestCareersSubdomainDetection:
 # Tests: meta-refresh detection
 # ---------------------------------------------------------------------------
 
-class TestMetaRefreshDetection:
 
+class TestMetaRefreshDetection:
     def test_meta_refresh_to_careers_subdomain_followed(self):
         """Meta-refresh pointing to careers subdomain URL is returned."""
         from job_finder.web.careers_scraper import find_careers_url
 
         html = (
-            '<html><head>'
+            "<html><head>"
             '<meta http-equiv="refresh" content="0; url=https://careers.example.com/">'
-            '</head><body></body></html>'
+            "</head><body></body></html>"
         )
         resp = _mock_response("https://example.com/", html)
 
@@ -592,9 +634,9 @@ class TestMetaRefreshDetection:
         from job_finder.web.careers_scraper import find_careers_url
 
         html = (
-            '<html><head>'
+            "<html><head>"
             '<meta http-equiv="refresh" content="0;url=/careers">'
-            '</head><body></body></html>'
+            "</head><body></body></html>"
         )
         resp = _mock_response("https://example.com/", html)
 
@@ -608,9 +650,9 @@ class TestMetaRefreshDetection:
         from job_finder.web.careers_scraper import find_careers_url
 
         html = (
-            '<html><head>'
+            "<html><head>"
             '<meta http-equiv="refresh" content="0; url=https://jobs.lever.co/acme">'
-            '</head><body></body></html>'
+            "</head><body></body></html>"
         )
         resp = _mock_response("https://example.com/", html)
 
@@ -624,7 +666,7 @@ class TestMetaRefreshDetection:
         from job_finder.web.careers_scraper import find_careers_url
 
         html = (
-            '<html><head>'
+            "<html><head>"
             '<meta http-equiv="refresh" content="0; url=https://marketing.example.com/">'
             '</head><body><a href="/careers">Careers</a></body></html>'
         )
@@ -641,24 +683,28 @@ class TestMetaRefreshDetection:
 # Tests: _extract_base_domain
 # ---------------------------------------------------------------------------
 
-class TestExtractBaseDomain:
 
+class TestExtractBaseDomain:
     def test_strips_www_prefix(self):
         from job_finder.web.careers_scraper import _extract_base_domain
+
         assert _extract_base_domain("https://www.google.com/") == "google.com"
 
     def test_no_www_passthrough(self):
         from job_finder.web.careers_scraper import _extract_base_domain
+
         assert _extract_base_domain("https://nvidia.com/en-us/") == "nvidia.com"
 
     def test_empty_url_returns_none(self):
         from job_finder.web.careers_scraper import _extract_base_domain
+
         assert _extract_base_domain("") is None
 
 
 # ---------------------------------------------------------------------------
 # Tests: subdomain probing
 # ---------------------------------------------------------------------------
+
 
 class TestSubdomainProbing:
     """Tests for the proactive subdomain probe step in find_careers_url."""
@@ -756,8 +802,9 @@ class TestSubdomainProbing:
 
     def test_subdomain_probe_handles_connection_error(self):
         """Network error during HEAD probe is swallowed — tries next subdomain."""
-        from job_finder.web.careers_scraper import find_careers_url
         from requests.exceptions import ConnectionError
+
+        from job_finder.web.careers_scraper import find_careers_url
 
         get_resp = self._bare_homepage_response()
 
@@ -768,7 +815,9 @@ class TestSubdomainProbing:
             return self._head_response("https://jobs.example.com/")
 
         with patch("job_finder.web.careers_scraper.requests.get", return_value=get_resp):
-            with patch("job_finder.web.careers_scraper.requests.head", side_effect=head_side_effect):
+            with patch(
+                "job_finder.web.careers_scraper.requests.head", side_effect=head_side_effect
+            ):
                 result = find_careers_url("https://www.example.com/")
 
         assert result == "https://jobs.example.com/"
@@ -778,22 +827,30 @@ class TestSubdomainProbing:
 # Cascade dispatch tests — _find_careers_url_with_haiku + _extract_jobs_with_haiku
 # ---------------------------------------------------------------------------
 
+
 class TestFindCareersUrlCascade:
     """Dispatch pattern tests for _find_careers_url_with_haiku."""
 
     def test_uses_call_model_when_providers_configured(
-        self, migrated_db, cascade_config_haiku, make_model_result,
+        self,
+        migrated_db,
+        cascade_config_haiku,
+        make_model_result,
     ):
         from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
-            mock_cm.return_value = make_model_result(
-                {"url": "https://example.com/careers"}
-            )
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
+            mock_cm.return_value = make_model_result({"url": "https://example.com/careers"})
             result = _find_careers_url_with_haiku(
-                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+                "https://example.com/",
+                "<html></html>",
+                conn,
+                cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -804,13 +861,19 @@ class TestFindCareersUrlCascade:
 
     def test_uses_call_claude_when_no_providers(self, migrated_db):
         from job_finder.web.careers_scraper import _find_careers_url_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
             result = _find_careers_url_with_haiku(
-                "https://example.com/", "<html></html>", conn, config={},
+                "https://example.com/",
+                "<html></html>",
+                conn,
+                config={},
             )
 
         mock_cm.assert_not_called()
@@ -818,18 +881,26 @@ class TestFindCareersUrlCascade:
         assert result == "https://example.com/careers"
 
     def test_cascade_exhausted_falls_back_to_cli(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.careers_scraper import _find_careers_url_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
             result = _find_careers_url_with_haiku(
-                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+                "https://example.com/",
+                "<html></html>",
+                conn,
+                cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -837,18 +908,26 @@ class TestFindCareersUrlCascade:
         assert result == "https://example.com/careers"
 
     def test_cascade_and_cli_both_fail_returns_none(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.careers_scraper import _find_careers_url_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
             result = _find_careers_url_with_haiku(
-                "https://example.com/", "<html></html>", conn, cascade_config_haiku,
+                "https://example.com/",
+                "<html></html>",
+                conn,
+                cascade_config_haiku,
             )
 
         assert result is None
@@ -865,18 +944,27 @@ class TestExtractJobsCascade:
     }
 
     def test_uses_call_model_when_providers_configured(
-        self, migrated_db, cascade_config_haiku, make_model_result,
+        self,
+        migrated_db,
+        cascade_config_haiku,
+        make_model_result,
     ):
         from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cm.return_value = make_model_result(self._JOBS_PAYLOAD)
             results = _extract_jobs_with_haiku(
-                "https://example.com/careers", "<html></html>",
-                target_titles=["data scientist"], exclusions=["junior"],
-                conn=conn, config=cascade_config_haiku,
+                "https://example.com/careers",
+                "<html></html>",
+                target_titles=["data scientist"],
+                exclusions=["junior"],
+                conn=conn,
+                config=cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -889,15 +977,21 @@ class TestExtractJobsCascade:
 
     def test_uses_call_claude_when_no_providers(self, migrated_db):
         from job_finder.web.careers_scraper import _extract_jobs_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
             results = _extract_jobs_with_haiku(
-                "https://example.com/careers", "<html></html>",
-                target_titles=["data scientist"], exclusions=[],
-                conn=conn, config={},
+                "https://example.com/careers",
+                "<html></html>",
+                target_titles=["data scientist"],
+                exclusions=[],
+                conn=conn,
+                config={},
             )
 
         mock_cm.assert_not_called()
@@ -905,20 +999,28 @@ class TestExtractJobsCascade:
         assert results and results[0]["title"] == "Data Scientist"
 
     def test_cascade_exhausted_falls_back_to_cli(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.careers_scraper import _extract_jobs_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
             results = _extract_jobs_with_haiku(
-                "https://example.com/careers", "<html></html>",
-                target_titles=["data scientist"], exclusions=[],
-                conn=conn, config=cascade_config_haiku,
+                "https://example.com/careers",
+                "<html></html>",
+                target_titles=["data scientist"],
+                exclusions=[],
+                conn=conn,
+                config=cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -926,20 +1028,28 @@ class TestExtractJobsCascade:
         assert results and results[0]["title"] == "Data Scientist"
 
     def test_cascade_and_cli_both_fail_returns_empty_list(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.careers_scraper import _extract_jobs_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.careers_scraper.call_model") as mock_cm, \
-             patch("job_finder.web.careers_scraper.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
+            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
             results = _extract_jobs_with_haiku(
-                "https://example.com/careers", "<html></html>",
-                target_titles=["data scientist"], exclusions=[],
-                conn=conn, config=cascade_config_haiku,
+                "https://example.com/careers",
+                "<html></html>",
+                target_titles=["data scientist"],
+                exclusions=[],
+                conn=conn,
+                config=cascade_config_haiku,
             )
 
         assert results == []

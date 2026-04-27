@@ -24,6 +24,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_migrated_db():
     """Create a temp DB and run all migrations. Returns (path, conn)."""
     from job_finder.web.db_migrate import run_migrations
@@ -36,10 +37,17 @@ def make_migrated_db():
     conn.row_factory = sqlite3.Row
     return path, conn
 
-def insert_rejected_job(conn, dedup_key, title="Data Scientist", company="Acme",
-                        rejection_reviewed=0, classification="reject",
-                        sub_scores_json='{"title_fit": 3, "location_fit": 4, "comp_fit": 3, "domain_match": 3, "seniority_match": 2, "skills_match": 3}',
-                        jd_full="Job description text"):
+
+def insert_rejected_job(
+    conn,
+    dedup_key,
+    title="Data Scientist",
+    company="Acme",
+    rejection_reviewed=0,
+    classification="reject",
+    sub_scores_json='{"title_fit": 3, "location_fit": 4, "comp_fit": 3, "domain_match": 3, "seniority_match": 2, "skills_match": 3}',
+    jd_full="Job description text",
+):
     """Helper to insert a rejected job into the test DB (v3.0 Phase 34 Plan 3)."""
     conn.execute(
         """INSERT INTO jobs
@@ -48,12 +56,25 @@ def insert_rejected_job(conn, dedup_key, title="Data Scientist", company="Acme",
              rejection_reviewed, classification, sub_scores_json, jd_full)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            dedup_key, title, company, "Remote", '["linkedin"]', '["https://example.com"]',
-            "123", "2026-03-01T10:00:00", "2026-03-10T10:00:00",
-            7.5, "rejected", rejection_reviewed, classification, sub_scores_json, jd_full,
+            dedup_key,
+            title,
+            company,
+            "Remote",
+            '["linkedin"]',
+            '["https://example.com"]',
+            "123",
+            "2026-03-01T10:00:00",
+            "2026-03-10T10:00:00",
+            7.5,
+            "rejected",
+            rejection_reviewed,
+            classification,
+            sub_scores_json,
+            jd_full,
         ),
     )
     conn.commit()
+
 
 def make_opus_mock_response():
     """Return a mock Anthropic client that returns a valid rejection analysis result."""
@@ -85,9 +106,11 @@ def make_opus_mock_response():
     mock_client.messages.create.return_value = mock_response
     return mock_client, analysis_result
 
+
 # ---------------------------------------------------------------------------
 # Opus pricing
 # ---------------------------------------------------------------------------
+
 
 class TestOpusPricing:
     """Verify Opus is in MODEL_PRICING for cost gating."""
@@ -101,9 +124,11 @@ class TestOpusPricing:
         assert pricing["input"] == 5.0, f"Expected input=5.0, got {pricing['input']}"
         assert pricing["output"] == 25.0, f"Expected output=25.0, got {pricing['output']}"
 
+
 # ---------------------------------------------------------------------------
 # Core analysis engine
 # ---------------------------------------------------------------------------
+
 
 class TestNoUnreviewedRejections:
     """Verify graceful handling when no unreviewed rejections exist."""
@@ -151,9 +176,11 @@ class TestNoUnreviewedRejections:
 
         os.unlink(path)
 
+
 # ---------------------------------------------------------------------------
 # Batch analysis tests
 # ---------------------------------------------------------------------------
+
 
 class TestRejectionAnalysisBatch:
     """Test core batch analysis behavior."""
@@ -171,8 +198,9 @@ class TestRejectionAnalysisBatch:
         _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)) as mock_cc:
+        with patch(
+            "job_finder.web.rejection_analyzer.call_claude", return_value=(analysis_result, 0.10)
+        ) as mock_cc:
             run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -193,8 +221,9 @@ class TestRejectionAnalysisBatch:
         _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)):
+        with patch(
+            "job_finder.web.rejection_analyzer.call_claude", return_value=(analysis_result, 0.10)
+        ):
             result = run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
@@ -226,17 +255,18 @@ class TestRejectionAnalysisBatch:
         _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)):
+        with patch(
+            "job_finder.web.rejection_analyzer.call_claude", return_value=(analysis_result, 0.10)
+        ):
             run_rejection_analysis(path, config)
 
         conn = sqlite3.connect(path)
         unreviewed = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE pipeline_status='rejected' AND rejection_reviewed=0"
         ).fetchone()[0]
-        reviewed = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE rejection_reviewed=1"
-        ).fetchone()[0]
+        reviewed = conn.execute("SELECT COUNT(*) FROM jobs WHERE rejection_reviewed=1").fetchone()[
+            0
+        ]
         conn.close()
         os.unlink(path)
 
@@ -255,8 +285,9 @@ class TestRejectionAnalysisBatch:
         _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)):
+        with patch(
+            "job_finder.web.rejection_analyzer.call_claude", return_value=(analysis_result, 0.10)
+        ):
             result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -277,8 +308,9 @@ class TestRejectionAnalysisBatch:
         _, analysis_result = make_opus_mock_response()
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)):
+        with patch(
+            "job_finder.web.rejection_analyzer.call_claude", return_value=(analysis_result, 0.10)
+        ):
             result = run_rejection_analysis(path, config)
 
         os.unlink(path)
@@ -286,9 +318,11 @@ class TestRejectionAnalysisBatch:
         # Only 1 unreviewed rejection should be analyzed
         assert result["rejections_analyzed"] == 1
 
+
 # ---------------------------------------------------------------------------
 # Budget gate tests
 # ---------------------------------------------------------------------------
+
 
 class TestBudgetGate:
     """Verify budget gating prevents Opus calls when cap exceeded."""
@@ -331,9 +365,11 @@ class TestBudgetGate:
 
         assert count == 0, f"Expected 0 reports when budget exceeded, got {count}"
 
+
 # ---------------------------------------------------------------------------
 # On-demand Dashboard route
 # ---------------------------------------------------------------------------
+
 
 def _make_test_config(db_path, budget=25.0):
     """Return a minimal config dict accepted by create_app()."""
@@ -354,6 +390,7 @@ def _make_test_config(db_path, budget=25.0):
         "sources": {},
         "output": {"default_format": "cli", "max_results": 50},
     }
+
 
 class TestOnDemandTrigger:
     """Test the POST /dashboard/rejection-analysis on-demand route."""
@@ -400,14 +437,18 @@ class TestOnDemandTrigger:
 
         _, analysis_result = make_opus_mock_response()
 
-        with patch("job_finder.web.rejection_analyzer.call_claude",
-                   return_value=(analysis_result, 0.10)):
-            with app.test_client() as client:
-                with client.session_transaction() as sess:
-                    sess["_flashes"] = []
-                client.post("/dashboard/rejection-analysis")
-                with client.session_transaction() as sess:
-                    flashes = sess.get("_flashes", [])
+        with (
+            patch(
+                "job_finder.web.rejection_analyzer.call_claude",
+                return_value=(analysis_result, 0.10),
+            ),
+            app.test_client() as client,
+        ):
+            with client.session_transaction() as sess:
+                sess["_flashes"] = []
+            client.post("/dashboard/rejection-analysis")
+            with client.session_transaction() as sess:
+                flashes = sess.get("_flashes", [])
 
         messages = [msg for cat, msg in flashes]
         assert any("1" in m or "analyzed" in m.lower() for m in messages), (

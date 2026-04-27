@@ -18,7 +18,6 @@ Both use plain text format with a consistent pattern:
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
 from job_finder.models import Job
 from job_finder.parsers._common import is_meta_email, parse_salary_range
@@ -61,12 +60,10 @@ def _is_meta_email(body: str) -> bool:
         if stripped:
             first_line = stripped.lower()
             break
-    if first_line.startswith("your job alert for"):
-        return False
-    return True
+    return not first_line.startswith("your job alert for")
 
 
-def parse_linkedin_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
+def parse_linkedin_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a LinkedIn job alert email body into Job objects.
 
     Args:
@@ -95,7 +92,7 @@ def parse_linkedin_alert(body: str, email_date: Optional[datetime] = None) -> li
     return jobs
 
 
-def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
+def _parse_block(block: str, email_date: datetime | None) -> Job | None:
     """Parse a single job block from a LinkedIn alert."""
     if not block:
         return None
@@ -222,7 +219,9 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
     if "<" in title and (">" in title or "style=" in title):
         return None
     # Title is a LinkedIn section header (category labels that survived filters)
-    if re.match(r"^(See all|View all|Jobs similar|Expand|Manage|Edit alert)", title, re.IGNORECASE):
+    if re.match(
+        r"^(See all|View all|Jobs similar|Expand|Manage|Edit alert)", title, re.IGNORECASE
+    ):
         return None
 
     # Try to extract salary from the email snippet/subject if present
@@ -241,7 +240,7 @@ def _parse_block(block: str, email_date: Optional[datetime]) -> Optional[Job]:
     )
 
 
-def _extract_salary(text: str) -> tuple[Optional[int], Optional[int]]:
+def _extract_salary(text: str) -> tuple[int | None, int | None]:
     """Try to extract salary range from text.
 
     Delegates to the shared ``parse_salary_range`` in ``_common.py``.

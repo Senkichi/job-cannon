@@ -13,7 +13,7 @@ Design constraints:
   for domain_priority() which uses enumerate() to assign rank scores.
 """
 
-__all__ = ["BLOCKED_DOMAINS", "PRIORITY_DOMAINS", "is_blocked_domain", "domain_priority"]
+__all__ = ["BLOCKED_DOMAINS", "PRIORITY_DOMAINS", "domain_priority", "is_blocked_domain"]
 
 # ---------------------------------------------------------------------------
 # Blocked domains: aggregator/job-board sites that gate content behind login
@@ -31,34 +31,36 @@ __all__ = ["BLOCKED_DOMAINS", "PRIORITY_DOMAINS", "is_blocked_domain", "domain_p
 #   URL fetching, breaking the free-tier LinkedIn JD extraction.
 # ---------------------------------------------------------------------------
 
-BLOCKED_DOMAINS: frozenset[str] = frozenset({
-    # Aggregators that gate content behind logins or Cloudflare walls
-    "glassdoor.com",
-    "glassdoor.co.uk",
-    "indeed.com",
-    "ziprecruiter.com",
-    "dice.com",
-    # Content farms / salary databases / career advice — never contain real JDs.
-    # These appear in DDG search results and waste fetch attempts.
-    "dailyremote.com",
-    "jobted.com",
-    "h1bdata.info",
-    "h1bdata.net",
-    "mastersindatascience.org",
-    "careerjet.com",
-    "syntaxacademy.com",
-    "mrxjobs.com",
-    "beamjobs.com",        # resume examples, not JDs
-    "freelancer.co.uk",    # freelance marketplace, not JDs
-    "simplyhired.com",     # gated aggregator (403s on direct fetch)
-    "workopolis.com",      # gated aggregator (403s on direct fetch)
-    "talent.com",          # job aggregator search results, not JDs
-    "regionalhelpwanted.com",  # job aggregator
-    "fishbowlapp.com",    # gated social network (403s)
-    "thehomebase.ai",     # job aggregator listings
-    "imogate.com",        # generic job listings
-    "bigdatakb.com",      # job aggregator/scraper
-})
+BLOCKED_DOMAINS: frozenset[str] = frozenset(
+    {
+        # Aggregators that gate content behind logins or Cloudflare walls
+        "glassdoor.com",
+        "glassdoor.co.uk",
+        "indeed.com",
+        "ziprecruiter.com",
+        "dice.com",
+        # Content farms / salary databases / career advice — never contain real JDs.
+        # These appear in DDG search results and waste fetch attempts.
+        "dailyremote.com",
+        "jobted.com",
+        "h1bdata.info",
+        "h1bdata.net",
+        "mastersindatascience.org",
+        "careerjet.com",
+        "syntaxacademy.com",
+        "mrxjobs.com",
+        "beamjobs.com",  # resume examples, not JDs
+        "freelancer.co.uk",  # freelance marketplace, not JDs
+        "simplyhired.com",  # gated aggregator (403s on direct fetch)
+        "workopolis.com",  # gated aggregator (403s on direct fetch)
+        "talent.com",  # job aggregator search results, not JDs
+        "regionalhelpwanted.com",  # job aggregator
+        "fishbowlapp.com",  # gated social network (403s)
+        "thehomebase.ai",  # job aggregator listings
+        "imogate.com",  # generic job listings
+        "bigdatakb.com",  # job aggregator/scraper
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Priority domains: sites that reliably serve full JDs when fetched.
@@ -68,14 +70,14 @@ BLOCKED_DOMAINS: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 PRIORITY_DOMAINS: list[str] = [
-    "greenhouse.io",              # ATS — always full JD
-    "lever.co",                   # ATS — always full JD
-    "ashbyhq.com",                # ATS — always full JD
-    "myworkdayjobs.com",          # ATS — full JD behind JS render
-    "jobs.smartrecruiters.com",   # ATS — full JD
-    "linkedin.com/jobs",          # LinkedIn public job pages (Playwright fetch)
-    "builtin.com",                # Tech-focused job board
-    "workingnomads.com",          # Remote-focused job board
+    "greenhouse.io",  # ATS — always full JD
+    "lever.co",  # ATS — always full JD
+    "ashbyhq.com",  # ATS — always full JD
+    "myworkdayjobs.com",  # ATS — full JD behind JS render
+    "jobs.smartrecruiters.com",  # ATS — full JD
+    "linkedin.com/jobs",  # LinkedIn public job pages (Playwright fetch)
+    "builtin.com",  # Tech-focused job board
+    "workingnomads.com",  # Remote-focused job board
     "ycombinator.com/companies",  # YC company listings with JDs
 ]
 
@@ -105,6 +107,7 @@ def is_blocked_domain(url: str) -> bool:
         return False
     try:
         from urllib.parse import urlparse
+
         host = urlparse(url).hostname or ""
     except Exception:
         return False

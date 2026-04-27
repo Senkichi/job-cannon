@@ -17,7 +17,6 @@ from job_finder.web.careers_crawler import (
     crawl_careers_batch,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -143,7 +142,9 @@ def _insert_company(db_path, name, careers_url, probe_status="miss"):
     return company_id
 
 
-def _insert_high_scoring_job(db_path, company_id, title="Old Engineer Role", classification="apply"):
+def _insert_high_scoring_job(
+    db_path, company_id, title="Old Engineer Role", classification="apply"
+):
     """Insert a job with a high-priority classification so the company qualifies for crawling.
 
     v3.0 (Phase 34 Plan 3 Commit A): uses classification IN ('apply','consider')
@@ -227,7 +228,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com", ["data scientist"], [],
+            soup,
+            "https://example.com",
+            ["data scientist"],
+            [],
         )
         assert len(jobs) == 1
         assert jobs[0]["title"] == "Data Scientist"
@@ -243,8 +247,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com",
-            ["software engineer"], [],
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            [],
         )
         assert len(jobs) == 1
         assert jobs[0]["title"] == "Senior Software Engineer"
@@ -260,8 +266,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com",
-            ["software engineer", "engineer"], [],
+            soup,
+            "https://example.com",
+            ["software engineer", "engineer"],
+            [],
         )
         # Only /jobs/real-engineer should match (others filtered by nav prefixes)
         assert len(jobs) == 1
@@ -276,8 +284,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com",
-            ["software engineer"], [],
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            [],
         )
         assert len(jobs) == 1
 
@@ -291,8 +301,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com",
-            ["software engineer"], ["junior", "intern"],
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            ["junior", "intern"],
         )
         assert len(jobs) == 1
         assert "Senior" in jobs[0]["title"]
@@ -317,7 +329,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com", ["software engineer"], [],
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            [],
         )
         assert len(jobs) == 1
 
@@ -331,7 +346,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com", ["data scientist"], [],
+            soup,
+            "https://example.com",
+            ["data scientist"],
+            [],
         )
         assert len(jobs) == 1
         assert "/jobs/real" in jobs[0]["url"]
@@ -349,7 +367,10 @@ class TestExtractJobsFromSoup:
         """
         soup = BeautifulSoup(html, "html.parser")
         jobs = _extract_jobs_from_soup(
-            soup, "https://example.com", ["software engineer"], [],
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            [],
         )
         assert len(jobs) == 1
 
@@ -364,7 +385,9 @@ class TestCleanTitle:
         return BeautifulSoup(html, "html.parser").find("a")
 
     def test_strips_remote_suffix(self):
-        tag = self._make_tag('<a href="/j"><span>Senior Engineer</span><span>Remote - Americas</span></a>')
+        tag = self._make_tag(
+            '<a href="/j"><span>Senior Engineer</span><span>Remote - Americas</span></a>'
+        )
         assert _clean_title(tag, "Senior EngineerRemote - Americas") == "Senior Engineer"
 
     def test_strips_location_dash(self):
@@ -380,9 +403,7 @@ class TestCleanTitle:
         assert _clean_title(tag, "Software Engineer") == "Software Engineer"
 
     def test_uses_first_child_element(self):
-        tag = self._make_tag(
-            '<a href="/j"><div>Lead Designer</div><div>New York, NY</div></a>'
-        )
+        tag = self._make_tag('<a href="/j"><div>Lead Designer</div><div>New York, NY</div></a>')
         assert _clean_title(tag, "Lead DesignerNew York, NY") == "Lead Designer"
 
 
@@ -408,7 +429,8 @@ class TestTryStaticExtract:
 
         result = _try_static_extract(
             "https://example.com/careers",
-            ["software engineer"], [],
+            ["software engineer"],
+            [],
         )
         assert result is not None
         assert len(result) == 2
@@ -425,7 +447,8 @@ class TestTryStaticExtract:
 
         result = _try_static_extract(
             "https://example.com/careers",
-            ["software engineer"], [],
+            ["software engineer"],
+            [],
         )
         assert result is None  # Signals Playwright needed
 
@@ -445,7 +468,8 @@ class TestTryStaticExtract:
 
         result = _try_static_extract(
             "https://example.com/careers",
-            ["software engineer"], [],
+            ["software engineer"],
+            [],
         )
         assert result == []  # Static page, genuinely no matching jobs
 
@@ -455,7 +479,8 @@ class TestTryStaticExtract:
 
         result = _try_static_extract(
             "https://example.com/careers",
-            ["software engineer"], [],
+            ["software engineer"],
+            [],
         )
         assert result is None  # Can't determine page type — let Playwright try
 
@@ -554,7 +579,9 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_upserts_discovered_jobs(self, mock_static, mock_pw, mock_score, tmp_db_path):
         company_id = _insert_company(
-            tmp_db_path, "GoodCo", "https://goodco.com/careers",
+            tmp_db_path,
+            "GoodCo",
+            "https://goodco.com/careers",
         )
         _insert_high_scoring_job(tmp_db_path, company_id)
 
@@ -593,7 +620,13 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_page_interactions.probe_url_params")
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_falls_back_to_playwright_active(
-        self, mock_static, mock_probe, mock_pw_active, mock_pw, mock_score, tmp_db_path,
+        self,
+        mock_static,
+        mock_probe,
+        mock_pw_active,
+        mock_pw,
+        mock_score,
+        tmp_db_path,
     ):
         """When static returns None and URL params find nothing, Playwright active is used."""
         cid = _insert_company(tmp_db_path, "JsCo", "https://jsco.com/careers")
@@ -638,15 +671,11 @@ class TestCrawlCareersBatch:
 
         conn = sqlite3.connect(tmp_db_path)
         # Check company_scan_log
-        scan_log = conn.execute(
-            "SELECT * FROM company_scan_log"
-        ).fetchall()
+        scan_log = conn.execute("SELECT * FROM company_scan_log").fetchall()
         assert len(scan_log) == 1
 
         # Check runs table
-        runs = conn.execute(
-            "SELECT * FROM runs WHERE source = 'careers_crawl'"
-        ).fetchall()
+        runs = conn.execute("SELECT * FROM runs WHERE source = 'careers_crawl'").fetchall()
         assert len(runs) == 1
         conn.close()
 
@@ -655,7 +684,12 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_page_interactions.probe_url_params")
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_url_param_search_short_circuits(
-        self, mock_static, mock_probe, mock_pw, mock_score, tmp_db_path,
+        self,
+        mock_static,
+        mock_probe,
+        mock_pw,
+        mock_score,
+        tmp_db_path,
     ):
         """URL param search finding jobs should skip Playwright entirely."""
         cid = _insert_company(tmp_db_path, "ParamCo", "https://paramco.com/careers")
@@ -684,7 +718,12 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_crawler._try_cached_api")
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_cached_api_fast_path(
-        self, mock_static, mock_api, mock_pw, mock_score, tmp_db_path,
+        self,
+        mock_static,
+        mock_api,
+        mock_pw,
+        mock_score,
+        tmp_db_path,
     ):
         """Cached API endpoint should short-circuit all other tiers."""
         cid = _insert_company(tmp_db_path, "ApiCo", "https://apico.com/careers")
@@ -721,7 +760,12 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_crawler._try_cached_api")
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_stale_api_cache_cleared(
-        self, mock_static, mock_api, mock_pw, mock_score, tmp_db_path,
+        self,
+        mock_static,
+        mock_api,
+        mock_pw,
+        mock_score,
+        tmp_db_path,
     ):
         """When cached API returns None (broken), cache should be cleared."""
         cid = _insert_company(tmp_db_path, "StaleCo", "https://staleco.com/careers")
@@ -750,7 +794,8 @@ class TestCrawlCareersBatch:
         # API cache should be cleared
         conn = sqlite3.connect(tmp_db_path)
         row = conn.execute(
-            "SELECT careers_api_endpoint FROM companies WHERE id = ?", (cid,),
+            "SELECT careers_api_endpoint FROM companies WHERE id = ?",
+            (cid,),
         ).fetchone()
         conn.close()
         assert row[0] is None
@@ -761,7 +806,13 @@ class TestCrawlCareersBatch:
     @patch("job_finder.web.careers_page_interactions.probe_url_params")
     @patch("job_finder.web.careers_crawler._try_static_extract")
     def test_api_endpoint_cached_on_discovery(
-        self, mock_static, mock_probe, mock_pw_active, mock_pw, mock_score, tmp_db_path,
+        self,
+        mock_static,
+        mock_probe,
+        mock_pw_active,
+        mock_pw,
+        mock_score,
+        tmp_db_path,
     ):
         """When Playwright discovers an API endpoint, it should be cached."""
         cid = _insert_company(tmp_db_path, "DiscCo", "https://discco.com/careers")
@@ -785,7 +836,8 @@ class TestCrawlCareersBatch:
 
         conn = sqlite3.connect(tmp_db_path)
         row = conn.execute(
-            "SELECT careers_api_endpoint FROM companies WHERE id = ?", (cid,),
+            "SELECT careers_api_endpoint FROM companies WHERE id = ?",
+            (cid,),
         ).fetchone()
         conn.close()
         assert row[0] == "https://discco.com/api/v1/jobs"
@@ -801,8 +853,12 @@ class TestBatchQueryFilters:
 
     def test_excludes_ats_hit_companies(self, tmp_db_path):
         """Companies with ats_probe_status='hit' are excluded from crawl batch."""
-        hit_id = _insert_company(tmp_db_path, "HitCorp", "https://hitcorp.com/careers", probe_status="hit")
-        miss_id = _insert_company(tmp_db_path, "MissCorp", "https://misscorp.com/careers", probe_status="miss")
+        hit_id = _insert_company(
+            tmp_db_path, "HitCorp", "https://hitcorp.com/careers", probe_status="hit"
+        )
+        miss_id = _insert_company(
+            tmp_db_path, "MissCorp", "https://misscorp.com/careers", probe_status="miss"
+        )
         _insert_high_scoring_job(tmp_db_path, hit_id)
         _insert_high_scoring_job(tmp_db_path, miss_id)
 
@@ -836,7 +892,7 @@ class TestBatchQueryFilters:
 
         # Insert 5 zero-result scan entries
         conn = sqlite3.connect(tmp_db_path)
-        for i in range(5):
+        for _i in range(5):
             conn.execute(
                 "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
                 (cid,),
@@ -874,7 +930,7 @@ class TestBatchQueryFilters:
         _insert_high_scoring_job(tmp_db_path, cid)
 
         conn = sqlite3.connect(tmp_db_path)
-        for i in range(4):
+        for _i in range(4):
             conn.execute(
                 "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
                 (cid,),
@@ -913,7 +969,7 @@ class TestBatchQueryFilters:
 
         conn = sqlite3.connect(tmp_db_path)
         # 5 misses then 1 success
-        for i in range(5):
+        for _i in range(5):
             conn.execute(
                 "INSERT INTO company_scan_log (company_id, scanned_at, jobs_found, jobs_matched) VALUES (?, datetime('now'), 0, 0)",
                 (cid,),

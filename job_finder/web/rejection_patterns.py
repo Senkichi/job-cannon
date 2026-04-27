@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class RejectionPattern:
     with `classification` (enum string) and `sub_scores` (dict of the 6 ordinal
     dimensions). Score distribution buckets derive from the sub-score mean.
     """
+
     job_id: str
     company: str
     title: str
@@ -30,20 +31,21 @@ class RejectionPattern:
     sub_scores: dict = field(default_factory=dict)
 
     # Classification dimensions
-    seniority: str = ""          # junior/mid/senior/staff/principal/exec
-    domain: str = ""             # eng/data/ml/product/design/other
+    seniority: str = ""  # junior/mid/senior/staff/principal/exec
+    domain: str = ""  # eng/data/ml/product/design/other
     has_salary: bool = False
     salary_meets_floor: bool = False
     location: str = ""
-    rejection_stage: str = ""    # rejected/archived (where it died)
+    rejection_stage: str = ""  # rejected/archived (where it died)
     days_in_pipeline: int = 0
-    company_size: str = ""       # startup/small/mid-size/large
-    ats_platform: str = ""       # lever/greenhouse/ashby/unknown
+    company_size: str = ""  # startup/small/mid-size/large
+    ats_platform: str = ""  # lever/greenhouse/ashby/unknown
 
 
 @dataclass
 class PatternReport:
     """Aggregate rejection pattern analysis."""
+
     period_days: int
     total_rejections: int
     patterns: list[RejectionPattern] = field(default_factory=list)
@@ -69,24 +71,47 @@ class PatternReport:
 # Seniority detection from title keywords
 _SENIORITY_KEYWORDS = {
     "intern": "intern",
-    "junior": "junior", "jr": "junior", "entry": "junior",
-    "mid": "mid", "intermediate": "mid",
-    "senior": "senior", "sr": "senior", "lead": "senior",
+    "junior": "junior",
+    "jr": "junior",
+    "entry": "junior",
+    "mid": "mid",
+    "intermediate": "mid",
+    "senior": "senior",
+    "sr": "senior",
+    "lead": "senior",
     "staff": "staff",
     "principal": "principal",
-    "director": "exec", "vp": "exec", "head of": "exec",
-    "chief": "exec", "cto": "exec", "ceo": "exec",
+    "director": "exec",
+    "vp": "exec",
+    "head of": "exec",
+    "chief": "exec",
+    "cto": "exec",
+    "ceo": "exec",
 }
 
 # Ordered: longer/more-specific phrases first to avoid premature matches
 # (e.g., "Machine Learning Engineer" must match "ml" before "engineer" -> "eng").
 _DOMAIN_KEYWORDS: list[tuple[str, str]] = [
-    ("machine learning", "ml"), ("ml ", "ml"), ("ai ", "ml"), ("nlp", "ml"),
-    ("data scientist", "data"), ("data analyst", "data"), ("analytics", "data"),
-    ("product manager", "product"), ("product owner", "product"),
-    ("designer", "design"), ("ux", "design"), ("ui", "design"),
-    ("engineer", "eng"), ("developer", "eng"), ("swe", "eng"), ("backend", "eng"),
-    ("frontend", "eng"), ("fullstack", "eng"), ("devops", "eng"), ("sre", "eng"),
+    ("machine learning", "ml"),
+    ("ml ", "ml"),
+    ("ai ", "ml"),
+    ("nlp", "ml"),
+    ("data scientist", "data"),
+    ("data analyst", "data"),
+    ("analytics", "data"),
+    ("product manager", "product"),
+    ("product owner", "product"),
+    ("designer", "design"),
+    ("ux", "design"),
+    ("ui", "design"),
+    ("engineer", "eng"),
+    ("developer", "eng"),
+    ("swe", "eng"),
+    ("backend", "eng"),
+    ("frontend", "eng"),
+    ("fullstack", "eng"),
+    ("devops", "eng"),
+    ("sre", "eng"),
 ]
 
 
@@ -185,10 +210,9 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
             # Pipeline duration estimate (first_seen to now as proxy)
             if row["first_seen"]:
                 from datetime import datetime
+
                 try:
-                    first = datetime.fromisoformat(
-                        row["first_seen"].replace("Z", "+00:00")
-                    )
+                    first = datetime.fromisoformat(row["first_seen"].replace("Z", "+00:00"))
                     now = datetime.now(first.tzinfo) if first.tzinfo else datetime.now()
                     pattern.days_in_pipeline = max(0, (now - first).days)
                 except (ValueError, TypeError):
@@ -215,10 +239,7 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
             # the old haiku/sonnet numeric scale for continuity across the
             # Plan 3 -> Plan 4 window).
             if pattern.sub_scores:
-                values = [
-                    v for v in pattern.sub_scores.values()
-                    if isinstance(v, (int, float))
-                ]
+                values = [v for v in pattern.sub_scores.values() if isinstance(v, (int, float))]
                 score = (sum(values) / len(values) * 20) if values else 0
             else:
                 score = 0
@@ -246,11 +267,17 @@ def extract_rejection_patterns(db_path: str, config: dict | None = None) -> Patt
         # Identify blockers (systematic issues)
         blockers = []
         if seniority_counter.get("junior", 0) > report.total_rejections * 0.3:
-            blockers.append("Over 30% of rejections are junior-level roles -- consider raising seniority filter")
+            blockers.append(
+                "Over 30% of rejections are junior-level roles -- consider raising seniority filter"
+            )
         if location_counter.get("other", 0) > report.total_rejections * 0.3:
-            blockers.append("Over 30% of rejections are non-target locations -- tighten location filter")
+            blockers.append(
+                "Over 30% of rejections are non-target locations -- tighten location filter"
+            )
         if report.salary_floor_miss_rate > 0.4:
-            blockers.append(f"Salary floor miss rate is {report.salary_floor_miss_rate:.0%} -- many jobs below minimum")
+            blockers.append(
+                f"Salary floor miss rate is {report.salary_floor_miss_rate:.0%} -- many jobs below minimum"
+            )
         report.blockers = blockers
 
     return report

@@ -2,17 +2,18 @@
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, render_template, url_for
 
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
 sync_bp = Blueprint("sync", __name__, url_prefix="/dashboard")
+
 
 @sync_bp.route("/sync/start", methods=["POST"], strict_slashes=False)
 def sync_start():
@@ -64,6 +65,7 @@ def sync_start():
         phase_label="Starting...",
     )
 
+
 @sync_bp.route("/sync/status/<int:session_id>", strict_slashes=False)
 def sync_status(session_id):
     """Poll route for sync progress.
@@ -95,9 +97,13 @@ def sync_status(session_id):
     if status not in ("done", "error", "cancelled") and session["started_at"]:
         try:
             started = datetime.fromisoformat(session["started_at"])
-            elapsed_minutes = (datetime.now(timezone.utc).replace(tzinfo=None) - started).total_seconds() / 60
+            elapsed_minutes = (
+                datetime.now(UTC).replace(tzinfo=None) - started
+            ).total_seconds() / 60
             if elapsed_minutes > 30:
-                logger.warning("Sync session %s timed out after %.1f minutes", session_id, elapsed_minutes)
+                logger.warning(
+                    "Sync session %s timed out after %.1f minutes", session_id, elapsed_minutes
+                )
                 with standalone_connection(db_path) as timeout_conn:
                     timeout_conn.execute(
                         "UPDATE batch_score_sessions SET status='error', error_msg=?, finished_at=? "
@@ -140,6 +146,7 @@ def sync_status(session_id):
         phase_label=phase_label,
     )
 
+
 @sync_bp.route("/sync/dismiss", strict_slashes=False)
 def sync_dismiss():
     """Return the original Sync Now button so it reappears after auto-dismiss."""
@@ -149,8 +156,9 @@ def sync_dismiss():
         f'<form hx-post="{start_url}" hx-target="#sync-status" hx-swap="outerHTML">'
         '<button type="submit" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 '
         'text-white text-sm font-medium rounded-lg transition-colors">Sync Now</button>'
-        '</form></div>'
+        "</form></div>"
     )
+
 
 def _run_sync_bg(db_path: str, session_id: int, app) -> None:
     """Background thread: run full sync pipeline and update session row.
@@ -181,8 +189,16 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
 
         # Store results: scored=jobs_new, total=total_fetched, skipped=error_count
         jobs_new = summary.get("jobs_new", 0)
-        total_fetched = summary.get("gmail_fetched", 0) + summary.get("serpapi_fetched", 0) + summary.get("thordata_fetched", 0)
-        error_count = len(summary.get("gmail_errors", [])) + len(summary.get("serpapi_errors", [])) + len(summary.get("thordata_errors", []))
+        total_fetched = (
+            summary.get("gmail_fetched", 0)
+            + summary.get("serpapi_fetched", 0)
+            + summary.get("thordata_fetched", 0)
+        )
+        error_count = (
+            len(summary.get("gmail_errors", []))
+            + len(summary.get("serpapi_errors", []))
+            + len(summary.get("thordata_errors", []))
+        )
 
         with standalone_connection(db_path) as conn:
             conn.execute(
@@ -227,4 +243,3 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             )
         except Exception:
             pass
-

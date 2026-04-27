@@ -7,18 +7,16 @@ Usage:
     uv run --active python scripts/claude_homepage_backfill.py [--limit N]
 """
 
-import json
 import os
-import sqlite3
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(line_buffering=True)
 
-from job_finder.web.claude_enricher import enrich_companies_via_claude, BATCH_SIZE
-from job_finder.web.db_helpers import standalone_connection
 from job_finder.config import load_config
+from job_finder.web.claude_enricher import BATCH_SIZE, enrich_companies_via_claude
+from job_finder.web.db_helpers import standalone_connection
 
 # Canonical industry mapping for DB storage
 _INDUSTRY_DB = {
@@ -60,8 +58,10 @@ def main():
                WHERE homepage_url IS NULL OR careers_url IS NULL"""
         ).fetchone()[0]
 
-        print(f"=== Claude Company URL Backfill ===")
-        print(f"Processing {len(rows)} of {total_missing} companies missing homepage or careers URL")
+        print("=== Claude Company URL Backfill ===")
+        print(
+            f"Processing {len(rows)} of {total_missing} companies missing homepage or careers URL"
+        )
         print(f"Estimated cost: ~${len(rows) / BATCH_SIZE * 0.01:.2f}")
         print()
 
@@ -97,12 +97,12 @@ def main():
             updates = []
             values = []
 
-            if "homepage_url" in entry and entry["homepage_url"]:
+            if entry.get("homepage_url"):
                 updates.append("homepage_url = ?")
                 values.append(entry["homepage_url"])
                 homepage_found += 1
 
-            if "company_size" in entry and entry["company_size"]:
+            if entry.get("company_size"):
                 # Only update if not already set
                 existing = conn.execute(
                     "SELECT company_size FROM companies WHERE id = ?",
@@ -113,7 +113,7 @@ def main():
                     values.append(entry["company_size"])
                     size_found += 1
 
-            if "industry" in entry and entry["industry"]:
+            if entry.get("industry"):
                 existing = conn.execute(
                     "SELECT industry FROM companies WHERE id = ?",
                     (company_id,),
@@ -130,7 +130,7 @@ def main():
                     values,
                 )
 
-            if "careers_url" in entry and entry["careers_url"]:
+            if entry.get("careers_url"):
                 # Only store if not already set
                 existing = conn.execute(
                     "SELECT careers_url FROM companies WHERE id = ?",
@@ -156,10 +156,14 @@ def main():
         print(f"Industries:    {industry_found}")
 
         total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
-        hp = conn.execute("SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL").fetchone()[0]
-        cu = conn.execute("SELECT COUNT(*) FROM companies WHERE careers_url IS NOT NULL").fetchone()[0]
-        print(f"\nHomepage coverage: {hp}/{total} ({100*hp//total}%)")
-        print(f"Careers coverage:  {cu}/{total} ({100*cu//total}%)")
+        hp = conn.execute(
+            "SELECT COUNT(*) FROM companies WHERE homepage_url IS NOT NULL"
+        ).fetchone()[0]
+        cu = conn.execute(
+            "SELECT COUNT(*) FROM companies WHERE careers_url IS NOT NULL"
+        ).fetchone()[0]
+        print(f"\nHomepage coverage: {hp}/{total} ({100 * hp // total}%)")
+        print(f"Careers coverage:  {cu}/{total} ({100 * cu // total}%)")
 
 
 if __name__ == "__main__":

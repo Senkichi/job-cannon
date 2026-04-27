@@ -10,7 +10,7 @@ These are internal helpers used by data_enricher.enrich_job(). They handle:
 
 import json
 import logging
-from typing import Optional, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def filter_non_none(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def start_tier_index(current_tier: Optional[str], tier_order: list) -> int:
+def start_tier_index(current_tier: str | None, tier_order: list) -> int:
     """Return the index in tier_order to start from based on current_tier.
 
     If current_tier is None or not found, start from 0 (beginning).
@@ -72,7 +72,7 @@ def start_tier_index(current_tier: Optional[str], tier_order: list) -> int:
         return 0
 
 
-def parse_source_urls(source_urls_json: Optional[str]) -> list:
+def parse_source_urls(source_urls_json: str | None) -> list:
     """Parse source_urls JSON field into a list of URL strings.
 
     Args:
@@ -90,7 +90,7 @@ def parse_source_urls(source_urls_json: Optional[str]) -> list:
         return []
 
 
-def compose_fragment_text(fragments: dict, title: str, company: str) -> Optional[str]:
+def compose_fragment_text(fragments: dict, title: str, company: str) -> str | None:
     """Compose a single text string from all accumulated fragments.
 
     Args:
@@ -104,7 +104,7 @@ def compose_fragment_text(fragments: dict, title: str, company: str) -> Optional
         hallucinating JDs from titles alone).
     """
     parts = []
-    for key, text in fragments.items():
+    for _key, text in fragments.items():
         if text and isinstance(text, str):
             parts.append(str(text)[:1000])
 

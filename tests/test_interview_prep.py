@@ -9,20 +9,18 @@ Covers:
 """
 
 import json
+import os
 import sqlite3
 import tempfile
-import os
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.claude_client import MODEL_PRICING
+from job_finder.web.db_migrate import run_migrations
 
 # ---------------------------------------------------------------------------
 # Opus Pricing Tests
 # ---------------------------------------------------------------------------
+
 
 class TestOpusPricing:
     """Verify Opus model is in MODEL_PRICING with correct rates."""
@@ -30,8 +28,7 @@ class TestOpusPricing:
     def test_opus_model_in_pricing(self):
         """claude-opus-4-6 is in MODEL_PRICING dict."""
         assert "claude-opus-4-6" in MODEL_PRICING, (
-            "claude-opus-4-6 missing from MODEL_PRICING. "
-            "Add it to claude_client.py."
+            "claude-opus-4-6 missing from MODEL_PRICING. Add it to claude_client.py."
         )
 
     def test_opus_input_price(self):
@@ -46,9 +43,11 @@ class TestOpusPricing:
             f"Expected output=25.0, got {MODEL_PRICING['claude-opus-4-6']['output']}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Helper: create migrated DB with a job row
 # ---------------------------------------------------------------------------
+
 
 def _create_test_db_with_job(dedup_key="acme|senior data scientist|remote"):
     """Create a temp migrated DB with one job row. Returns (path, conn)."""
@@ -71,15 +70,19 @@ def _create_test_db_with_job(dedup_key="acme|senior data scientist|remote"):
             "2026-03-11T10:00:00Z",
             "applied",
             "We are looking for a data scientist with 5+ years of experience in ML.",
-            json.dumps({"strengths": ["ML experience"], "gaps": ["cloud"], "resume_priority_skills": []}),
+            json.dumps(
+                {"strengths": ["ML experience"], "gaps": ["cloud"], "resume_priority_skills": []}
+            ),
         ),
     )
     conn.commit()
     return path, conn
 
+
 # ---------------------------------------------------------------------------
 # Interview Prep Dedup Tests
 # ---------------------------------------------------------------------------
+
 
 class TestInterviewPrepDedup:
     """Dedup guard: skip generation if prep row already exists."""
@@ -168,8 +171,12 @@ class TestInterviewPrepDedup:
             "questions_to_ask": ["Q for interviewer 1"],
         }
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Company info."), \
-             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)):
+        with (
+            patch(
+                "job_finder.web.interview_prep._fetch_company_info", return_value="Company info."
+            ),
+            patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)),
+        ):
             generate_interview_prep_background(dedup_key, path, config)
 
         # Verify a new 'done' row was inserted
@@ -183,9 +190,11 @@ class TestInterviewPrepDedup:
 
         os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # Interview Prep Content Tests
 # ---------------------------------------------------------------------------
+
 
 class TestInterviewPrepContent:
     """Verify all 4 sections are stored on successful generation."""
@@ -208,18 +217,49 @@ class TestInterviewPrepContent:
         expected_prep = {
             "company_brief": "Acme Corp is a tech innovator with 500 employees.",
             "predicted_questions": [
-                {"question": "Tell me about your ML experience", "star_story": "At Acme I led...", "key_points": ["5 years", "production ML"]},
-                {"question": "Describe a failed experiment", "star_story": "We tested...", "key_points": ["learned", "iterated"]},
-                {"question": "How do you handle ambiguity?", "star_story": "In my last role...", "key_points": ["clarify", "structure"]},
-                {"question": "Tell me about A/B testing", "star_story": "I ran 50+ experiments...", "key_points": ["causal", "statistics"]},
-                {"question": "What are your weaknesses?", "star_story": "I overcame...", "key_points": ["growth", "feedback"]},
+                {
+                    "question": "Tell me about your ML experience",
+                    "star_story": "At Acme I led...",
+                    "key_points": ["5 years", "production ML"],
+                },
+                {
+                    "question": "Describe a failed experiment",
+                    "star_story": "We tested...",
+                    "key_points": ["learned", "iterated"],
+                },
+                {
+                    "question": "How do you handle ambiguity?",
+                    "star_story": "In my last role...",
+                    "key_points": ["clarify", "structure"],
+                },
+                {
+                    "question": "Tell me about A/B testing",
+                    "star_story": "I ran 50+ experiments...",
+                    "key_points": ["causal", "statistics"],
+                },
+                {
+                    "question": "What are your weaknesses?",
+                    "star_story": "I overcame...",
+                    "key_points": ["growth", "feedback"],
+                },
             ],
-            "gap_mitigation": ["Address cloud gap by highlighting on-prem Kubernetes.", "Frame lack of NLP as breadth opportunity."],
-            "questions_to_ask": ["What is the data team structure?", "How do you measure DS impact?"],
+            "gap_mitigation": [
+                "Address cloud gap by highlighting on-prem Kubernetes.",
+                "Frame lack of NLP as breadth opportunity.",
+            ],
+            "questions_to_ask": [
+                "What is the data team structure?",
+                "How do you measure DS impact?",
+            ],
         }
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="Acme company info"), \
-             patch("job_finder.web.interview_prep.call_claude", return_value=(expected_prep, 0.05)):
+        with (
+            patch(
+                "job_finder.web.interview_prep._fetch_company_info",
+                return_value="Acme company info",
+            ),
+            patch("job_finder.web.interview_prep.call_claude", return_value=(expected_prep, 0.05)),
+        ):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
@@ -268,15 +308,18 @@ class TestInterviewPrepContent:
         prep_result = {
             "company_brief": "Brief.",
             "predicted_questions": [
-                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
-                for i in range(5)
+                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]} for i in range(5)
             ],
             "gap_mitigation": ["gap"],
             "questions_to_ask": ["q"],
         }
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"), \
-             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)) as mock_cc:
+        with (
+            patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"),
+            patch(
+                "job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)
+            ) as mock_cc,
+        ):
             generate_interview_prep_background(dedup_key, path, config)
 
         assert "claude-opus" in mock_cc.call_args.kwargs.get("model", ""), (
@@ -305,8 +348,7 @@ class TestInterviewPrepContent:
         mock_response.content[0].input = {
             "company_brief": "Brief.",
             "predicted_questions": [
-                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
-                for i in range(5)
+                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]} for i in range(5)
             ],
             "gap_mitigation": [],
             "questions_to_ask": [],
@@ -322,7 +364,9 @@ class TestInterviewPrepContent:
             return original_connect(db_path, **kwargs)
 
         with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"):
-            with patch("job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect):
+            with patch(
+                "job_finder.web.interview_prep.sqlite3.connect", side_effect=tracking_connect
+            ):
                 generate_interview_prep_background(dedup_key, path, config)
 
         assert len(connect_calls) >= 1, "sqlite3.connect was not called"
@@ -343,15 +387,16 @@ class TestInterviewPrepContent:
         prep_result = {
             "company_brief": "Brief.",
             "predicted_questions": [
-                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
-                for i in range(5)
+                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]} for i in range(5)
             ],
             "gap_mitigation": [],
             "questions_to_ask": [],
         }
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"), \
-             patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)):
+        with (
+            patch("job_finder.web.interview_prep._fetch_company_info", return_value="info"),
+            patch("job_finder.web.interview_prep.call_claude", return_value=(prep_result, 0.05)),
+        ):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
@@ -375,8 +420,12 @@ class TestInterviewPrepContent:
 
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.interview_prep._fetch_company_info", return_value=""), \
-             patch("job_finder.web.interview_prep.call_claude", side_effect=RuntimeError("API error")):
+        with (
+            patch("job_finder.web.interview_prep._fetch_company_info", return_value=""),
+            patch(
+                "job_finder.web.interview_prep.call_claude", side_effect=RuntimeError("API error")
+            ),
+        ):
             generate_interview_prep_background(dedup_key, path, config)
 
         conn2 = sqlite3.connect(path)
@@ -406,8 +455,7 @@ class TestInterviewPrepContent:
         mock_response.content[0].input = {
             "company_brief": "Brief.",
             "predicted_questions": [
-                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]}
-                for i in range(5)
+                {"question": f"Q{i}", "star_story": f"S{i}", "key_points": ["p"]} for i in range(5)
             ],
             "gap_mitigation": [],
             "questions_to_ask": [],
@@ -424,14 +472,18 @@ class TestInterviewPrepContent:
         with patch("job_finder.web.interview_prep._fetch_company_info", side_effect=track_fetch):
             generate_interview_prep_background(dedup_key, path, config)
 
-        assert len(fetch_calls) == 1, f"Expected 1 _fetch_company_info call, got {len(fetch_calls)}"
+        assert len(fetch_calls) == 1, (
+            f"Expected 1 _fetch_company_info call, got {len(fetch_calls)}"
+        )
         assert "Acme Corp" in fetch_calls[0] or fetch_calls[0] == "Acme Corp"
 
         os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # Budget Gating Tests
 # ---------------------------------------------------------------------------
+
 
 class TestInterviewPrepBudget:
     """Budget gating: sets error status when budget exceeded."""
@@ -463,9 +515,11 @@ class TestInterviewPrepBudget:
 
         os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # _fetch_company_info Tests
 # ---------------------------------------------------------------------------
+
 
 class TestFetchCompanyInfo:
     """Tests for _fetch_company_info SerpAPI integration."""
@@ -496,7 +550,9 @@ class TestFetchCompanyInfo:
 
         config = {"apis": {"serpapi_key": "test-key"}}
 
-        with patch("job_finder.web.interview_prep.requests.get", side_effect=Exception("Network error")):
+        with patch(
+            "job_finder.web.interview_prep.requests.get", side_effect=Exception("Network error")
+        ):
             result = _fetch_company_info("Acme Corp", config)
 
         assert result == "", f"Expected empty string on failure, got: {result!r}"
@@ -510,9 +566,11 @@ class TestFetchCompanyInfo:
         result = _fetch_company_info("Acme Corp", config)
         assert result == "", f"Expected empty string when no key, got: {result!r}"
 
+
 # ---------------------------------------------------------------------------
 # Interview Prep Trigger Wiring Tests (05-01-01 / INTEL-01)
 # ---------------------------------------------------------------------------
+
 
 class TestInterviewPrepTrigger:
     """Verify blueprint routes wire daemon thread trigger for 'applied' status.
@@ -525,6 +583,7 @@ class TestInterviewPrepTrigger:
     def _make_app_with_job(self, db_path):
         """Create a Flask app with one job in a migrated DB."""
         import sqlite3
+
         from job_finder.web import create_app
         from job_finder.web.db_migrate import run_migrations
 
@@ -569,7 +628,6 @@ class TestInterviewPrepTrigger:
     def test_jobs_status_route_triggers_thread_on_applied(self, tmp_db_path):
         """POST /jobs/<key>/status to 'applied' constructs a daemon thread targeting
         generate_interview_prep_background when TESTING guard is disabled."""
-        import threading
         from job_finder.web.interview_prep import generate_interview_prep_background
 
         app = self._make_app_with_job(tmp_db_path)
@@ -639,7 +697,6 @@ class TestInterviewPrepTrigger:
     def test_pipeline_move_route_triggers_thread_on_applied(self, tmp_db_path):
         """POST /pipeline/move with new_status='applied' (Kanban drag) constructs
         a daemon thread targeting generate_interview_prep_background."""
-        import threading
         from job_finder.web.interview_prep import generate_interview_prep_background
 
         app = self._make_app_with_job(tmp_db_path)
@@ -675,9 +732,7 @@ class TestInterviewPrepTrigger:
             f"Expected target=generate_interview_prep_background, "
             f"got target={kwargs.get('target')}"
         )
-        assert kwargs.get("daemon") is True, (
-            f"Thread must be daemon=True for Kanban drag trigger"
-        )
+        assert kwargs.get("daemon") is True, "Thread must be daemon=True for Kanban drag trigger"
         args = kwargs.get("args", ())
         assert args[0] == "acme|trigger-test|remote", (
             f"Expected first arg to be job_id, got: {args[0]!r}"

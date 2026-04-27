@@ -8,20 +8,17 @@ Covers:
 - WARNING logged when success UPDATE rowcount == 0 (optimistic concurrency miss)
 """
 
-import json
+import os
 import sqlite3
 import tempfile
-import os
-from unittest.mock import MagicMock, patch, PropertyMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from job_finder.web.model_provider import ModelResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_model_result(data) -> ModelResult:  # type: ignore[type-arg]
     """Create a ModelResult as OllamaProvider.call() would return.
@@ -55,6 +52,7 @@ def _make_mock_provider(data) -> MagicMock:  # type: ignore[type-arg]
 def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
     """Create a temp DB with the full migration-applied schema."""
     from job_finder.web.db_migrate import run_migrations
+
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     run_migrations(path)
@@ -113,6 +111,7 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
 # _generate_queries()
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateQueries:
     def test_list_response_shape(self):
         """Provider returns a JSON array — queries extracted directly."""
@@ -142,7 +141,7 @@ class TestGenerateQueries:
 
     def test_provider_exception_fallback(self):
         """On OllamaProvider exception, falls back to heuristic queries."""
-        from job_finder.web.agentic_enricher import _generate_queries, _fallback_queries
+        from job_finder.web.agentic_enricher import _fallback_queries, _generate_queries
 
         provider = MagicMock()
         provider.call.side_effect = RuntimeError("connection refused")
@@ -176,6 +175,7 @@ class TestGenerateQueries:
 # _validate_page()
 # ---------------------------------------------------------------------------
 
+
 class TestValidatePage:
     def test_match_true_extracts_confidence(self):
         """Provider returns is_match=true — returns (True, confidence) correctly."""
@@ -184,7 +184,10 @@ class TestValidatePage:
         provider = _make_mock_provider({"is_match": True, "confidence": 0.92, "reason": "exact"})
         is_match, confidence = _validate_page(
             "Job posting for Data Scientist at Acme Corp",
-            "Data Scientist", "Acme Corp", "qwen2.5:14b", provider
+            "Data Scientist",
+            "Acme Corp",
+            "qwen2.5:14b",
+            provider,
         )
         assert is_match is True
         assert abs(confidence - 0.92) < 0.001
@@ -193,7 +196,9 @@ class TestValidatePage:
         """Provider returns is_match=false."""
         from job_finder.web.agentic_enricher import _validate_page
 
-        provider = _make_mock_provider({"is_match": False, "confidence": 0.1, "reason": "wrong role"})
+        provider = _make_mock_provider(
+            {"is_match": False, "confidence": 0.1, "reason": "wrong role"}
+        )
         is_match, confidence = _validate_page(
             "Software Engineer at Some Company", "Data Scientist", "Acme Corp", "model", provider
         )
@@ -223,6 +228,7 @@ class TestValidatePage:
 # enrich_single_job()
 # ---------------------------------------------------------------------------
 
+
 class TestEnrichSingleJob:
     def _make_page_mock(self, page_text: str) -> MagicMock:
         """Create a minimal Playwright page mock that returns page_text."""
@@ -247,9 +253,13 @@ class TestEnrichSingleJob:
         job_row = {"title": "Data Scientist", "company": "Acme Corp"}
         page = MagicMock()
 
-        with patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg, \
-             patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch:
-            mock_ddg.return_value = [{"href": "https://boards.greenhouse.io/acme/jobs/1", "title": "t", "body": "b"}]
+        with (
+            patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
+            patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
+        ):
+            mock_ddg.return_value = [
+                {"href": "https://boards.greenhouse.io/acme/jobs/1", "title": "t", "body": "b"}
+            ]
             mock_fetch.return_value = long_jd
 
             result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
@@ -285,6 +295,7 @@ class TestEnrichSingleJob:
 # run_agentic_backfill()
 # ---------------------------------------------------------------------------
 
+
 class TestRunAgenticBackfill:
     def test_returns_zero_when_ollama_unavailable(self):
         """When OllamaProvider raises RuntimeError (unreachable), returns 0 cleanly."""
@@ -295,10 +306,13 @@ class TestRunAgenticBackfill:
         mock_ollama_mod = MagicMock()
         mock_ollama_mod.OllamaProvider.side_effect = RuntimeError("Ollama service unreachable")
 
-        with patch.dict("sys.modules", {
-            "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-            "playwright.sync_api": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                "playwright.sync_api": MagicMock(),
+            },
+        ):
             result = run_agentic_backfill(":memory:", {})
         assert result == 0
 
@@ -327,13 +341,17 @@ class TestRunAgenticBackfill:
             mock_playwright_mod = MagicMock()
             mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
 
-            with patch.dict("sys.modules", {
-                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                "playwright.sync_api": mock_playwright_mod,
-            }), \
-                 patch("job_finder.web.agentic_enricher._create_browser") as mock_browser, \
-                 patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich:
-
+            with (
+                patch.dict(
+                    "sys.modules",
+                    {
+                        "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                        "playwright.sync_api": mock_playwright_mod,
+                    },
+                ),
+                patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich,
+            ):
                 mock_browser.return_value = (MagicMock(), MagicMock())
                 mock_enrich.return_value = long_jd
 
@@ -380,13 +398,17 @@ class TestRunAgenticBackfill:
             mock_playwright_mod = MagicMock()
             mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
 
-            with patch.dict("sys.modules", {
-                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                "playwright.sync_api": mock_playwright_mod,
-            }), \
-                 patch("job_finder.web.agentic_enricher._create_browser") as mock_browser, \
-                 patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich:
-
+            with (
+                patch.dict(
+                    "sys.modules",
+                    {
+                        "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                        "playwright.sync_api": mock_playwright_mod,
+                    },
+                ),
+                patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich,
+            ):
                 mock_browser.return_value = (MagicMock(), MagicMock())
                 mock_enrich.return_value = None
 
@@ -430,10 +452,13 @@ class TestRunAgenticBackfill:
             mock_playwright_mod = MagicMock()
             mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
 
-            with patch.dict("sys.modules", {
-                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                "playwright.sync_api": mock_playwright_mod,
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                    "playwright.sync_api": mock_playwright_mod,
+                },
+            ):
                 # No jobs → returns early before ever touching playwright
                 result = run_agentic_backfill(path, {}, limit=10)
 
@@ -446,6 +471,7 @@ class TestRunAgenticBackfill:
     def test_warning_logged_on_optimistic_concurrency_miss(self, caplog):
         """When success UPDATE rowcount == 0, WARNING is logged with dedup_key and JD length."""
         import logging
+
         from job_finder.web.agentic_enricher import run_agentic_backfill
 
         path, conn = _make_migrated_db()
@@ -463,13 +489,17 @@ class TestRunAgenticBackfill:
             mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
 
             with caplog.at_level(logging.WARNING, logger="job_finder.web.agentic_enricher"):
-                with patch.dict("sys.modules", {
-                    "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                    "playwright.sync_api": mock_playwright_mod,
-                }), \
-                     patch("job_finder.web.agentic_enricher._create_browser") as mock_browser, \
-                     patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich:
-
+                with (
+                    patch.dict(
+                        "sys.modules",
+                        {
+                            "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                            "playwright.sync_api": mock_playwright_mod,
+                        },
+                    ),
+                    patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                    patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich,
+                ):
                     mock_browser.return_value = (MagicMock(), MagicMock())
                     mock_enrich.return_value = long_jd
 
@@ -477,6 +507,7 @@ class TestRunAgenticBackfill:
                     # subsequent write calls return mock conn with rowcount=0 to simulate
                     # optimistic concurrency miss (another process changed the tier).
                     from job_finder.web import db_helpers
+
                     original_sc = db_helpers.standalone_connection
                     write_call_count = [0]
 
@@ -513,8 +544,10 @@ class TestRunAgenticBackfill:
                 )
 
             warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-            assert any("optimistic concurrency miss" in msg or "acme|ds|remote" in msg
-                       for msg in warning_messages)
+            assert any(
+                "optimistic concurrency miss" in msg or "acme|ds|remote" in msg
+                for msg in warning_messages
+            )
 
         finally:
             if os.path.exists(path):
@@ -524,6 +557,7 @@ class TestRunAgenticBackfill:
 # ---------------------------------------------------------------------------
 # _fetch_page_text() — LinkedIn routing
 # ---------------------------------------------------------------------------
+
 
 class TestFetchPageTextLinkedinRouting:
     """LinkedIn URLs should try the lightweight extractor before Playwright."""
@@ -553,9 +587,11 @@ class TestFetchPageTextLinkedinRouting:
         # Mock Playwright returning HTML
         page.content.return_value = "<html><body><p>Job description</p></body></html>"
 
-        with patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li, \
-             patch("job_finder.web.enrichment_tiers.is_short_auth_page", return_value=False), \
-             patch("job_finder.web.enrichment_tiers.is_chrome_or_login_page", return_value=False):
+        with (
+            patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li,
+            patch("job_finder.web.enrichment_tiers.is_short_auth_page", return_value=False),
+            patch("job_finder.web.enrichment_tiers.is_chrome_or_login_page", return_value=False),
+        ):
             mock_li.return_value = None  # LinkedIn extractor fails
 
             result = _fetch_page_text(page, "https://www.linkedin.com/jobs/view/123456/")
@@ -570,9 +606,11 @@ class TestFetchPageTextLinkedinRouting:
         page = MagicMock()
         page.content.return_value = "<html><body>" + "A" * 500 + "</body></html>"
 
-        with patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li, \
-             patch("job_finder.web.enrichment_tiers.is_short_auth_page", return_value=False), \
-             patch("job_finder.web.enrichment_tiers.is_chrome_or_login_page", return_value=False):
+        with (
+            patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li,
+            patch("job_finder.web.enrichment_tiers.is_short_auth_page", return_value=False),
+            patch("job_finder.web.enrichment_tiers.is_chrome_or_login_page", return_value=False),
+        ):
             mock_li.return_value = None
 
             _fetch_page_text(page, "https://boards.greenhouse.io/acme/jobs/1")
@@ -584,6 +622,7 @@ class TestFetchPageTextLinkedinRouting:
 # ---------------------------------------------------------------------------
 # enrich_single_job() — Company bypass and observability
 # ---------------------------------------------------------------------------
+
 
 class TestEnrichSingleJobObservability:
     """Tests for failure reason tracking and company-name bypass."""
@@ -602,12 +641,19 @@ class TestEnrichSingleJobObservability:
             _make_model_result({"is_match": True, "confidence": 0.85, "reason": "match"}),
         ]
 
-        job_row = {"title": "Data Scientist", "company": "Zo"}  # 2-char company → 0 meaningful tokens after filter
+        job_row = {
+            "title": "Data Scientist",
+            "company": "Zo",
+        }  # 2-char company → 0 meaningful tokens after filter
         page = MagicMock()
 
-        with patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg, \
-             patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch:
-            mock_ddg.return_value = [{"href": "https://example.com/job/1", "title": "t", "body": "b"}]
+        with (
+            patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
+            patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
+        ):
+            mock_ddg.return_value = [
+                {"href": "https://example.com/job/1", "title": "t", "body": "b"}
+            ]
             mock_fetch.return_value = long_text
 
             result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
@@ -620,6 +666,7 @@ class TestEnrichSingleJobObservability:
     def test_failure_stats_logged(self, caplog):
         """Failure breakdown is logged at INFO level."""
         import logging
+
         from job_finder.web.agentic_enricher import enrich_single_job
 
         provider = MagicMock()
@@ -631,8 +678,10 @@ class TestEnrichSingleJobObservability:
         page = MagicMock()
 
         with caplog.at_level(logging.INFO, logger="job_finder.web.agentic_enricher"):
-            with patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg, \
-                 patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch:
+            with (
+                patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
+                patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
+            ):
                 mock_ddg.return_value = [
                     {"href": "https://example.com/job/1", "title": "t", "body": "b"},
                 ]
@@ -642,5 +691,6 @@ class TestEnrichSingleJobObservability:
 
         # Check that the INFO-level failure breakdown was logged
         info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
-        assert any("urls=" in msg and "fetched=" in msg and "auth_wall=" in msg
-                    for msg in info_messages)
+        assert any(
+            "urls=" in msg and "fetched=" in msg and "auth_wall=" in msg for msg in info_messages
+        )

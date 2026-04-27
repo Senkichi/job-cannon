@@ -7,7 +7,7 @@ cost recording).
 """
 
 import sqlite3
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -17,7 +17,6 @@ from job_finder.web.model_provider import (
     ModelResult,
     resolve_provider_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # ModelResult tests
@@ -149,21 +148,30 @@ def test_resolve_provider_opus_tier():
 
 
 def test_resolve_with_fallback_chain():
-    config = {"providers": {"sonnet": {
-        "provider": "ollama",
-        "model": "qwen2.5:14b",
-        "fallback_chain": [
-            {"provider": "gemini", "model": "gemini-2.0-flash"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-        ],
-    }}}
+    config = {
+        "providers": {
+            "sonnet": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [
+                    {"provider": "gemini", "model": "gemini-2.0-flash"},
+                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+                ],
+            }
+        }
+    }
     result = resolve_provider_config("sonnet", config)
     assert result["fallback_chain"] == config["providers"]["sonnet"]["fallback_chain"]
     assert result["provider"] == "ollama"
 
 
 def test_resolve_returns_daily_limits():
-    config = {"providers": {"sonnet": {"provider": "ollama", "model": "qwen2.5:14b"}, "daily_limits": {"ollama": 350, "gemini": 170}}}
+    config = {
+        "providers": {
+            "sonnet": {"provider": "ollama", "model": "qwen2.5:14b"},
+            "daily_limits": {"ollama": 350, "gemini": 170},
+        }
+    }
     result = resolve_provider_config("sonnet", config)
     assert result["daily_limits"] == {"ollama": 350, "gemini": 170}
 
@@ -177,11 +185,16 @@ def test_resolve_backward_compat_empty_chain():
 
 
 def test_resolve_chain_with_daily_limits_combined():
-    config = {"providers": {
-        "sonnet": {"provider": "ollama", "model": "qwen2.5:14b",
-                   "fallback_chain": [{"provider": "gemini", "model": "gemini-2.0-flash"}]},
-        "daily_limits": {"ollama": 350},
-    }}
+    config = {
+        "providers": {
+            "sonnet": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [{"provider": "gemini", "model": "gemini-2.0-flash"}],
+            },
+            "daily_limits": {"ollama": 350},
+        }
+    }
     result = resolve_provider_config("sonnet", config)
     assert result["fallback_chain"] == [{"provider": "gemini", "model": "gemini-2.0-flash"}]
     assert result["daily_limits"] == {"ollama": 350}
@@ -190,6 +203,7 @@ def test_resolve_chain_with_daily_limits_combined():
 # ---------------------------------------------------------------------------
 # call_model() dispatcher tests
 # ---------------------------------------------------------------------------
+
 
 def _make_result(provider="gemini", data=None):
     """Return a ModelResult for use in call_model() tests."""
@@ -207,6 +221,7 @@ def _make_result(provider="gemini", data=None):
 def _migrated_conn(tmp_path):
     """Return an in-memory SQLite connection with the scoring_costs table."""
     from job_finder.web.db_migrate import run_migrations
+
     db_path = str(tmp_path / "test.db")
     run_migrations(db_path)
     conn = sqlite3.connect(db_path)
@@ -222,16 +237,20 @@ def test_call_model_routes_to_configured_provider(tmp_path):
     conn = _migrated_conn(tmp_path)
     expected_result = _make_result(provider="gemini")
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = expected_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
-    mock_make_adapter.assert_called_once_with("gemini", None, conn, config, job_id=None, purpose="")
+    mock_make_adapter.assert_called_once_with(
+        "gemini", None, conn, config, job_id=None, purpose=""
+    )
     assert result.provider == "gemini"
 
 
@@ -241,21 +260,31 @@ def test_call_model_retries_on_schema_failure(tmp_path):
 
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
-    schema = {"type": "object", "required": ["score"], "properties": {"score": {"type": "integer"}}}
+    schema = {
+        "type": "object",
+        "required": ["score"],
+        "properties": {"score": {"type": "integer"}},
+    }
 
     # First call: missing required field — fails schema. Second call: passes.
     bad_result = _make_result(data={"wrong_key": 1})
     good_result = _make_result(data={"score": 80})
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.side_effect = [bad_result, good_result]
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
+            "sonnet",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            config,
             output_schema=schema,
         )
 
@@ -280,7 +309,11 @@ def test_call_model_fallback_to_anthropic(tmp_path):
         }
     }
     conn = _migrated_conn(tmp_path)
-    schema = {"type": "object", "required": ["score"], "properties": {"score": {"type": "integer"}}}
+    schema = {
+        "type": "object",
+        "required": ["score"],
+        "properties": {"score": {"type": "integer"}},
+    }
 
     bad_result = _make_result(data={"wrong_key": 1})
     anthropic_result = _make_result(provider="anthropic", data={"score": 70})
@@ -296,10 +329,14 @@ def test_call_model_fallback_to_anthropic(tmp_path):
 
     mock_client = MagicMock()
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"), \
-         patch("job_finder.web.providers.anthropic_provider.AnthropicProvider") as mock_anthropic_cls:
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+        patch(
+            "job_finder.web.providers.anthropic_provider.AnthropicProvider"
+        ) as mock_anthropic_cls,
+    ):
         mock_gemini_adapter = MagicMock()
         mock_gemini_adapter.call.return_value = bad_result
         mock_make_adapter.return_value = mock_gemini_adapter
@@ -309,20 +346,29 @@ def test_call_model_fallback_to_anthropic(tmp_path):
         mock_anthropic_cls.return_value = mock_anthropic_instance
 
         result = call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
+            "sonnet",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            config,
             output_schema=schema,
             client=mock_client,
         )
 
-    mock_anthropic_cls.assert_called_once_with(client=mock_client, conn=conn, config=config, job_id=None, purpose="")
+    mock_anthropic_cls.assert_called_once_with(
+        client=mock_client, conn=conn, config=config, job_id=None, purpose=""
+    )
     assert result.provider == "anthropic"
     assert result.data == {"score": 70}
 
 
-@pytest.mark.parametrize("provider_name,model_name", [
-    ("gemini", "gemini-2.0-flash"),
-    ("ollama", "llama3"),
-])
+@pytest.mark.parametrize(
+    "provider_name,model_name",
+    [
+        ("gemini", "gemini-2.0-flash"),
+        ("ollama", "llama3"),
+    ],
+)
 def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tmp_path):
     """call_model does NOT call cost_gate when provider is free."""
     from job_finder.web.model_provider import call_model
@@ -330,9 +376,11 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
     config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
     conn = _migrated_conn(tmp_path)
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate,
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
@@ -350,22 +398,26 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
     conn = _migrated_conn(tmp_path)
     mock_client = MagicMock()
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True) as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True) as mock_cost_gate,
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = _make_result(provider="anthropic")
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client)
+        call_model(
+            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+        )
 
     mock_cost_gate.assert_called_once_with(conn, config, "sonnet")
 
 
 def test_call_model_raises_budget_exceeded(tmp_path):
     """call_model raises BudgetExceededError when cost_gate returns False for anthropic."""
-    from job_finder.web.model_provider import call_model
     from job_finder.web.claude_client import BudgetExceededError
+    from job_finder.web.model_provider import call_model
 
     config = {}  # default: anthropic
     conn = _migrated_conn(tmp_path)
@@ -392,14 +444,18 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
         schema_valid=True,
     )
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost") as mock_record_cost:
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost") as mock_record_cost,
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = anthropic_result
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client)
+        call_model(
+            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+        )
 
     mock_record_cost.assert_not_called()
 
@@ -412,8 +468,10 @@ def test_call_model_records_cost_for_gemini(tmp_path):
     conn = _migrated_conn(tmp_path)
     gemini_result = _make_result(provider="gemini", data={"score": 80})
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
@@ -435,19 +493,29 @@ def test_call_model_raises_on_no_fallback(tmp_path):
 
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
-    schema = {"type": "object", "required": ["score"], "properties": {"score": {"type": "integer"}}}
+    schema = {
+        "type": "object",
+        "required": ["score"],
+        "properties": {"score": {"type": "integer"}},
+    }
     bad_result = _make_result(data={"wrong_key": 1})
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = bad_result
         mock_make_adapter.return_value = mock_adapter
 
         with pytest.raises(RuntimeError, match="no fallback"):
             call_model(
-                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
+                "sonnet",
+                "sys",
+                [{"role": "user", "content": "hi"}],
+                conn,
+                config,
                 output_schema=schema,
             )
 
@@ -455,6 +523,8 @@ def test_call_model_raises_on_no_fallback(tmp_path):
 # ---------------------------------------------------------------------------
 # Daily rate limit tracker tests (TEST-03)
 # ---------------------------------------------------------------------------
+
+from datetime import UTC
 
 import job_finder.web.model_provider as _mp
 
@@ -507,9 +577,10 @@ def test_daily_increment_existing(_reset_daily_state):
 
 
 def test_daily_limit_resets_on_new_day(tmp_path, _reset_daily_state):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     conn = _migrated_conn(tmp_path)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -583,10 +654,12 @@ def test_cascade_skips_exhausted_provider(tmp_path, _reset_daily_state):
 
     gemini_result = _make_result(provider="gemini")
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
@@ -621,11 +694,14 @@ def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
             raise ValueError("Ollama unreachable")
         return mock_gemini_adapter
 
-    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect) as mock_make_adapter, \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
-
+    with (
+        patch(
+            "job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect
+        ) as mock_make_adapter,
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         result = call_model(
             "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
@@ -662,11 +738,12 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
             return mock_ollama_adapter
         return mock_gemini_adapter
 
-    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
-
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         result = call_model(
             "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
@@ -692,15 +769,14 @@ def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
         # ollama and gemini are blocked by limit check, never reach _make_adapter
         raise ValueError(f"unexpected call for {provider_name}")
 
-    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
-
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         with pytest.raises(RuntimeError, match="exhausted"):
-            call_model(
-                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
-            )
+            call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
@@ -736,13 +812,18 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
 
     original_messages = [{"role": "user", "content": "hi"}]
 
-    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
-
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         result = call_model(
-            "sonnet", "sys", original_messages, conn, _CASCADE_CONFIG,
+            "sonnet",
+            "sys",
+            original_messages,
+            conn,
+            _CASCADE_CONFIG,
             output_schema=schema,
         )
 
@@ -763,7 +844,11 @@ _CASCADE_VARIANT_CONFIG = {
             "provider": "ollama",
             "model": "qwen2.5:14b",
             "fallback_chain": [
-                {"provider": "gemini", "model": "gemini-2.0-flash", "prompt_variant": "fewshot-distribution"},
+                {
+                    "provider": "gemini",
+                    "model": "gemini-2.0-flash",
+                    "prompt_variant": "fewshot-distribution",
+                },
                 {"provider": "anthropic", "model": "claude-sonnet-4-6"},
             ],
         },
@@ -788,17 +873,22 @@ def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_dail
 
     gemini_result = _make_result(provider="gemini")
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet", "original system prompt",
-            [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
+            "sonnet",
+            "original system prompt",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            _CASCADE_VARIANT_CONFIG,
         )
 
     assert result.provider == "gemini"
@@ -818,17 +908,22 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
 
     ollama_result = _make_result(provider="ollama")
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = ollama_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet", "custom system prompt",
-            [{"role": "user", "content": "hi"}], conn, _CASCADE_VARIANT_CONFIG,
+            "sonnet",
+            "custom system prompt",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            _CASCADE_VARIANT_CONFIG,
         )
 
     # ollama was selected (primary, no prompt_variant)
@@ -847,11 +942,10 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
 
 from job_finder.web.model_provider import (
     _SUPPORTED_PROVIDERS,
-    _FREE_PROVIDERS,
-    is_supported_provider_name,
     ProviderCascadeExhaustedError,
-    tier_has_configured_provider,
     _make_adapter,
+    is_supported_provider_name,
+    tier_has_configured_provider,
 )
 
 
@@ -876,7 +970,9 @@ def test_make_adapter_unknown_provider_raises():
 
 def test_make_adapter_conn_none_for_non_anthropic():
     """conn=None is accepted for non-Anthropic providers."""
-    with patch("job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None):
+    with patch(
+        "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
+    ):
         adapter = _make_adapter("ollama", client=None, conn=None, config={})
     assert adapter is not None
 
@@ -948,14 +1044,13 @@ def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily
             raise ValueError("no key")
         raise ValueError(f"unexpected call for {provider_name}")
 
-    with patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect), \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True):
-
+    with (
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+    ):
         with pytest.raises(ProviderCascadeExhaustedError):
-            call_model(
-                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
-            )
+            call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
@@ -964,19 +1059,29 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 
     config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
-    schema = {"type": "object", "required": ["score"], "properties": {"score": {"type": "integer"}}}
+    schema = {
+        "type": "object",
+        "required": ["score"],
+        "properties": {"score": {"type": "integer"}},
+    }
     bad_result = _make_result(data={"wrong_key": 1})
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True), \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = bad_result
         mock_make_adapter.return_value = mock_adapter
 
         with pytest.raises(RuntimeError) as exc_info:
             call_model(
-                "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config,
+                "sonnet",
+                "sys",
+                [{"role": "user", "content": "hi"}],
+                conn,
+                config,
                 output_schema=schema,
             )
         assert not isinstance(exc_info.value, ProviderCascadeExhaustedError)
@@ -990,7 +1095,9 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 def test_tier_has_provider_non_anthropic_with_key():
     """Non-Anthropic primary + valid constructor -> True even when client=None."""
     config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
-    with patch("job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None):
+    with patch(
+        "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
+    ):
         assert tier_has_configured_provider("haiku", config, client=None) is True
 
 
@@ -1022,13 +1129,17 @@ def test_tier_has_provider_missing_api_key():
 
 def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
     """Mixed chain where primary is misconfigured but fallback is locally valid -> True."""
-    config = {"providers": {"haiku": {
-        "provider": "gemini",
-        "model": "gemini-2.0-flash",
-        "fallback_chain": [
-            {"provider": "anthropic", "model": "claude-haiku-4-5"},
-        ],
-    }}}
+    config = {
+        "providers": {
+            "haiku": {
+                "provider": "gemini",
+                "model": "gemini-2.0-flash",
+                "fallback_chain": [
+                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
+                ],
+            }
+        }
+    }
     mock_client = MagicMock()
     with patch.dict("os.environ", {}, clear=True):
         assert tier_has_configured_provider("haiku", config, client=mock_client) is True
@@ -1037,7 +1148,9 @@ def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
 def test_tier_has_provider_conn_none_accepted():
     """conn=None accepted without error (validates signature change)."""
     config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
-    with patch("job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None):
+    with patch(
+        "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
+    ):
         result = tier_has_configured_provider("haiku", config, client=None, conn=None)
     assert result is True
 
@@ -1061,33 +1174,48 @@ def test_cascade_ollama_primary_gemini_fallback(tmp_path, _reset_daily_state):
     """Ollama primary -> Gemini fallback -> Anthropic last-resort routes correctly."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"haiku": {
-        "provider": "ollama",
-        "model": "qwen2.5:14b",
-        "fallback_chain": [
-            {"provider": "gemini", "model": "gemini-2.0-flash"},
-            {"provider": "anthropic", "model": "claude-haiku-4-5"},
-        ],
-    }}}
+    config = {
+        "providers": {
+            "haiku": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [
+                    {"provider": "gemini", "model": "gemini-2.0-flash"},
+                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
+                ],
+            }
+        }
+    }
     conn = _migrated_conn(tmp_path)
     today = _mp._date.today().isoformat()
     _mp._daily_usage = {}
     _mp._usage_date = today
 
     ollama_result = ModelResult(
-        data={"score": 80}, cost_usd=0.0, input_tokens=100, output_tokens=50,
-        model="qwen2.5:14b", provider="ollama", schema_valid=True,
+        data={"score": 80},
+        cost_usd=0.0,
+        input_tokens=100,
+        output_tokens=50,
+        model="qwen2.5:14b",
+        provider="ollama",
+        schema_valid=True,
     )
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider._ensure_usage_current"), \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider._ensure_usage_current"),
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = ollama_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "haiku", "sys", [{"role": "user", "content": "hi"}], conn, config,
+            "haiku",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            config,
         )
 
     assert result.provider == "ollama"
@@ -1103,28 +1231,42 @@ def test_backward_compat_single_ollama_no_cascade(tmp_path):
     conn = _migrated_conn(tmp_path)
 
     ollama_result = ModelResult(
-        data={"score": 80}, cost_usd=0.0, input_tokens=100, output_tokens=50,
-        model="qwen2.5:14b", provider="ollama", schema_valid=True,
+        data={"score": 80},
+        cost_usd=0.0,
+        input_tokens=100,
+        output_tokens=50,
+        model="qwen2.5:14b",
+        provider="ollama",
+        schema_valid=True,
     )
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate", return_value=True):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate", return_value=True),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = ollama_result
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "haiku", "sys", [{"role": "user", "content": "hi"}], conn, config,
+            "haiku",
+            "sys",
+            [{"role": "user", "content": "hi"}],
+            conn,
+            config,
         )
 
     assert result.provider == "ollama"
     # Budget gate should be skipped (ollama is free)
 
 
-@pytest.mark.parametrize("provider_name,model_name", [
-    ("ollama", "qwen2.5:14b"),
-    ("gemini", "gemini-2.0-flash"),
-])
+@pytest.mark.parametrize(
+    "provider_name,model_name",
+    [
+        ("ollama", "qwen2.5:14b"),
+        ("gemini", "gemini-2.0-flash"),
+    ],
+)
 def test_call_model_skips_budget_for_free_providers(provider_name, model_name, tmp_path):
     """call_model does NOT call cost_gate for ollama and gemini."""
     from job_finder.web.model_provider import call_model
@@ -1132,9 +1274,11 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
     config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
     conn = _migrated_conn(tmp_path)
 
-    with patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter, \
-         patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate, \
-         patch("job_finder.web.model_provider.record_cost"):
+    with (
+        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider.cost_gate") as mock_cost_gate,
+        patch("job_finder.web.model_provider.record_cost"),
+    ):
         mock_adapter = MagicMock()
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter

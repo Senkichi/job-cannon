@@ -25,8 +25,8 @@ app = create_app()
 ENRICH_LIMIT = 200  # matches run_catchup.py default
 
 with app.app_context():
-    from job_finder.web.db_helpers import get_config_snapshot
     from job_finder.web.data_enricher import run_enrichment_backfill
+    from job_finder.web.db_helpers import get_config_snapshot
     from job_finder.web.scoring_runner import run_scoring
 
     config = get_config_snapshot(app)

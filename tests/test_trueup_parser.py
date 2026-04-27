@@ -1,6 +1,5 @@
 """Tests for TrueUp weekly digest parser (hello@trueup.io)."""
 
-import pytest
 from datetime import datetime
 
 from job_finder.parsers.trueup_parser import parse_trueup_alert
@@ -102,6 +101,7 @@ SAMPLE_TRUEUP_EMPTY = """\
 <table><tr><td>No jobs this week.</td></tr></table>
 </body></html>"""
 
+
 class TestTrueUpParser:
     def test_parses_job_cards(self):
         jobs = parse_trueup_alert(SAMPLE_TRUEUP_HTML)
@@ -160,6 +160,7 @@ class TestTrueUpParser:
         for job in jobs:
             assert "view all" not in job.title.lower()
             assert "my trueup" not in job.title.lower()
+
 
 class TestTrueUpEdgeCases:
     def test_empty_body(self):

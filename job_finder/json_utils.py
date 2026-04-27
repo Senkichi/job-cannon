@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ def utc_now_iso() -> str:
     All database timestamps should use this function so the codebase stores
     a consistent UTC baseline rather than mixing local time and UTC.
     """
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    return datetime.now(UTC).replace(tzinfo=None).isoformat()
 
 
 def safe_json_load(value: str | None, default: Any = None) -> Any:

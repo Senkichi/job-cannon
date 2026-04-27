@@ -6,18 +6,17 @@ counters) after the Haiku/Sonnet merge. The pre-v3 test file had parallel
 single "scoring" test since `_run_batch_bg` now drives the whole pipeline.
 """
 
+import os
 import sqlite3
 import tempfile
-import os
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from job_finder.web.db_migrate import run_migrations
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_db():
     """Create a temp DB with all migrations applied. Returns (path, conn)."""
@@ -28,9 +27,11 @@ def _make_db():
     conn.row_factory = sqlite3.Row
     return path, conn
 
+
 def _insert_session(conn, status="running", session_type="scoring", total=0):
     """Insert a batch_score_sessions row and return its id."""
     from job_finder.json_utils import utc_now_iso
+
     conn.execute(
         "INSERT INTO batch_score_sessions (session_type, status, total, scored, skipped, started_at) "
         "VALUES (?, ?, ?, 0, 0, ?)",
@@ -39,9 +40,11 @@ def _insert_session(conn, status="running", session_type="scoring", total=0):
     conn.commit()
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
+
 def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
     """Insert a job with classification IS NULL (unscored by v3 pipeline)."""
     from job_finder.json_utils import utc_now_iso
+
     now = utc_now_iso()
     conn.execute(
         "INSERT OR IGNORE INTO jobs (dedup_key, title, company, location, first_seen, last_seen) "
@@ -50,11 +53,13 @@ def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
     )
     conn.commit()
 
+
 def _get_session(conn, session_id):
     """Fetch a session row by id."""
     return conn.execute(
         "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
     ).fetchone()
+
 
 # ---------------------------------------------------------------------------
 # Test fixtures / common patches
@@ -74,6 +79,7 @@ _SHOULD_EXCLUDE_PATCH = "job_finder.web.blueprints.batch_scoring.should_exclude"
 # BATCH-04: Pre-loop cancellation check
 # ---------------------------------------------------------------------------
 
+
 class TestCancellationPreLoop:
     """BATCH-04: cancellation check fires once BEFORE the job loop."""
 
@@ -88,14 +94,19 @@ class TestCancellationPreLoop:
             _insert_unscored_job(conn, "job-cancel-2")
             # Session already set to 'cancelling' before the bg thread runs
             session_id = _insert_session(
-                conn, status="cancelling", session_type="scoring", total=2,
+                conn,
+                status="cancelling",
+                session_type="scoring",
+                total=2,
             )
 
             score_mock = MagicMock(return_value=MagicMock())
 
-            with patch(_SCORE_JOB_PATCH, score_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
-                 patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")):
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+            ):
                 _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             # Must NOT have scored any jobs
@@ -123,15 +134,20 @@ class TestCancellationPreLoop:
             _insert_unscored_job(conn, "job-run-2")
             _insert_unscored_job(conn, "job-run-3")
             session_id = _insert_session(
-                conn, status="running", session_type="scoring", total=3,
+                conn,
+                status="running",
+                session_type="scoring",
+                total=3,
             )
 
             score_mock = MagicMock(return_value=MagicMock())  # non-None → scored
 
-            with patch(_SCORE_JOB_PATCH, score_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
-                 patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
-                 patch("job_finder.web.activity_tracker.log_activity"):
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
                 _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             assert score_mock.call_count == 3, (
@@ -146,9 +162,11 @@ class TestCancellationPreLoop:
             if os.path.exists(path):
                 os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # BATCH-05: Deferred in-memory counters
 # ---------------------------------------------------------------------------
+
 
 class TestDeferredCounters:
     """BATCH-05: counters accumulated in memory, flushed periodically and before _finish_session."""
@@ -163,17 +181,22 @@ class TestDeferredCounters:
             _insert_unscored_job(conn, "job-ctr-2")
             _insert_unscored_job(conn, "job-ctr-3")
             session_id = _insert_session(
-                conn, status="running", session_type="scoring", total=3,
+                conn,
+                status="running",
+                session_type="scoring",
+                total=3,
             )
 
             # score_and_persist_job: return non-None, non-None, None (last job skipped)
             side_effects = [MagicMock(), MagicMock(), None]
             score_mock = MagicMock(side_effect=side_effects)
 
-            with patch(_SCORE_JOB_PATCH, score_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
-                 patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
-                 patch("job_finder.web.activity_tracker.log_activity"):
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
                 _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             session = _get_session(conn, session_id)
@@ -186,9 +209,11 @@ class TestDeferredCounters:
             if os.path.exists(path):
                 os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # Dead code removal
 # ---------------------------------------------------------------------------
+
 
 class TestDeadCodeRemoved:
     """_update_session_counter must be removed after BATCH-05 migration."""
@@ -196,6 +221,7 @@ class TestDeadCodeRemoved:
     def test_update_session_counter_removed(self):
         """_update_session_counter must NOT exist in batch_scoring module."""
         import job_finder.web.blueprints.batch_scoring as batch_scoring_module
+
         assert not hasattr(batch_scoring_module, "_update_session_counter"), (
             "_update_session_counter still defined in batch_scoring module; "
             "should have been removed as dead code after BATCH-05 migration"
@@ -206,26 +232,26 @@ class TestDeadCodeRemoved:
 # v3.0 Plan 3 Commit B invariants — unified route shape
 # ---------------------------------------------------------------------------
 
+
 class TestUnifiedRouteShape:
     """Plan 3 Commit B: single batch_score_start + _run_batch_bg, session_type='scoring'."""
 
     def test_batch_score_start_exists(self):
         """The unified batch_score_start route function exists."""
         from job_finder.web.blueprints import batch_scoring as bs
-        assert hasattr(bs, "batch_score_start"), (
-            "Plan 3 Commit B must define batch_score_start"
-        )
+
+        assert hasattr(bs, "batch_score_start"), "Plan 3 Commit B must define batch_score_start"
 
     def test_run_batch_bg_exists(self):
         """The unified _run_batch_bg worker function exists."""
         from job_finder.web.blueprints import batch_scoring as bs
-        assert hasattr(bs, "_run_batch_bg"), (
-            "Plan 3 Commit B must define _run_batch_bg"
-        )
+
+        assert hasattr(bs, "_run_batch_bg"), "Plan 3 Commit B must define _run_batch_bg"
 
     def test_legacy_haiku_sonnet_bg_functions_removed(self):
         """The old _run_batch_haiku_bg / _run_batch_sonnet_bg workers are gone."""
         from job_finder.web.blueprints import batch_scoring as bs
+
         assert not hasattr(bs, "_run_batch_haiku_bg"), (
             "_run_batch_haiku_bg still defined; Plan 3 Commit B must merge it into _run_batch_bg"
         )
@@ -240,6 +266,7 @@ class TestUnifiedRouteShape:
         source text to avoid false positives from docstring references.
         """
         from job_finder.web.blueprints import batch_scoring as bs
+
         consts = bs._run_batch_bg.__code__.co_consts
         sql_strings = [c for c in consts if isinstance(c, str) and "jobs" in c.lower()]
         combined = " ".join(sql_strings)
@@ -255,20 +282,23 @@ class TestUnifiedRouteShape:
     def _build_app(self, db_path):
         """Helper — build a real create_app-backed Flask app with full templates."""
         from job_finder.web import create_app
-        app = create_app(config={
-            "db": {"path": db_path},
-            "scoring": {"daily_budget_usd": 25.0},
-            "profile": {
-                "target_titles": ["Staff Data Scientist"],
-                "target_locations": ["Remote"],
-                "min_salary": 150000,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": [],
-            },
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        })
+
+        app = create_app(
+            config={
+                "db": {"path": db_path},
+                "scoring": {"daily_budget_usd": 25.0},
+                "profile": {
+                    "target_titles": ["Staff Data Scientist"],
+                    "target_locations": ["Remote"],
+                    "min_salary": 150000,
+                    "industries": [],
+                    "exclusions": {"title_keywords": [], "companies": []},
+                    "skills": [],
+                },
+                "sources": {},
+                "output": {"default_format": "cli", "max_results": 50},
+            }
+        )
         app.config["TESTING"] = True
         return app
 
@@ -325,8 +355,14 @@ class TestUnifiedRouteShape:
 # runs against the real DB.
 # ---------------------------------------------------------------------------
 
-def _insert_unscored_job_with_jd(conn, dedup_key, title="Engineer", company="Acme",
-                                  jd_full="Required: SQL, Python. Build dashboards."):
+
+def _insert_unscored_job_with_jd(
+    conn,
+    dedup_key,
+    title="Engineer",
+    company="Acme",
+    jd_full="Required: SQL, Python. Build dashboards.",
+):
     """Insert a job with classification IS NULL AND jd_full populated.
 
     The existing _insert_unscored_job helper leaves jd_full empty, which causes
@@ -335,6 +371,7 @@ def _insert_unscored_job_with_jd(conn, dedup_key, title="Engineer", company="Acm
     test we need a job that actually flows into the persist branch.
     """
     from job_finder.json_utils import utc_now_iso
+
     now = utc_now_iso()
     conn.execute(
         "INSERT OR IGNORE INTO jobs (dedup_key, title, company, location, jd_full, "
@@ -356,13 +393,17 @@ class TestBatchScoringEndToEnd:
 
     def _make_score_job_mock(self, sub_scores=None):
         """Return a mock for job_scorer.score_job that emits a real ScoringResult."""
-        from job_finder.web.job_scorer import ScoringResult
         from job_finder.db import JobAssessment
+        from job_finder.web.job_scorer import ScoringResult
 
         if sub_scores is None:
             sub_scores = {
-                "title_fit": 4, "location_fit": 5, "comp_fit": 4,
-                "domain_match": 4, "seniority_match": 4, "skills_match": 4,
+                "title_fit": 4,
+                "location_fit": 5,
+                "comp_fit": 4,
+                "domain_match": 4,
+                "seniority_match": 4,
+                "skills_match": 4,
             }
         assessment = JobAssessment(
             sub_scores=sub_scores,
@@ -376,7 +417,9 @@ class TestBatchScoringEndToEnd:
             provider="test_provider",
         )
         result = ScoringResult(
-            status="ok", data=assessment, provider="test_provider",
+            status="ok",
+            data=assessment,
+            provider="test_provider",
         )
         return MagicMock(return_value=result)
 
@@ -393,12 +436,16 @@ class TestBatchScoringEndToEnd:
         path, conn = _make_db()
         try:
             _insert_unscored_job_with_jd(
-                conn, "job-e2e-1",
+                conn,
+                "job-e2e-1",
                 title="Senior Data Engineer",
                 jd_full="Build pipelines. Required: Python, SQL, AWS. 5+ years experience.",
             )
             session_id = _insert_session(
-                conn, status="running", session_type="scoring", total=1,
+                conn,
+                status="running",
+                session_type="scoring",
+                total=1,
             )
 
             score_job_mock = self._make_score_job_mock()
@@ -407,10 +454,12 @@ class TestBatchScoringEndToEnd:
             # The orchestrator imports score_job lazily via:
             #   from job_finder.web.job_scorer import score_job as _default_scorer
             # so we patch at the source module.
-            with patch("job_finder.web.job_scorer.score_job", score_job_mock), \
-                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
-                 patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
-                 patch("job_finder.web.activity_tracker.log_activity"):
+            with (
+                patch("job_finder.web.job_scorer.score_job", score_job_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
                 _run_batch_bg(path, session_id, _MOCK_CONFIG)
 
             # Real persist_job_assessment must have written classification + sub_scores.
@@ -458,6 +507,7 @@ class TestBatchScoringEndToEnd:
         diagnose than a downstream assertion in _run_batch_bg.
         """
         import inspect
+
         from job_finder.web.scoring_orchestrator import score_and_persist_job
 
         sig = inspect.signature(score_and_persist_job)

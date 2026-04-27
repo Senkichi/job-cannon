@@ -7,11 +7,11 @@ Covers:
 - API fetch failures not counted as processed (allow retry)
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from job_finder.sources.gmail_source import GmailSource
-
 
 # Minimal single-sender parser map used throughout tests to avoid
 # 8x amplification from SENDER_PARSERS looping over all real senders.

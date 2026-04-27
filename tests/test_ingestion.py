@@ -9,10 +9,10 @@ Tests:
 - ZipRecruiter parser returns list (even when HTML is unrecognized)
 """
 
+import os
 import sqlite3
 import tempfile
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,6 +24,7 @@ from job_finder.web.db_migrate import run_migrations
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def migrated_db_path():
@@ -38,6 +39,7 @@ def migrated_db_path():
     yield path
     if os.path.exists(path):
         os.remove(path)
+
 
 @pytest.fixture
 def minimal_config(migrated_db_path):
@@ -74,6 +76,7 @@ def minimal_config(migrated_db_path):
         },
     }
 
+
 def _make_job(title="Senior Data Scientist", company="Acme", location="Remote") -> Job:
     """Create a minimal Job for testing."""
     return Job(
@@ -84,22 +87,26 @@ def _make_job(title="Senior Data Scientist", company="Acme", location="Remote") 
         source_url=f"https://example.com/{title.lower().replace(' ', '-')}",
     )
 
+
 # ---------------------------------------------------------------------------
 # Test: email_parse_log entry created on success
 # ---------------------------------------------------------------------------
+
 
 class TestEmailParseLog:
     def test_gmail_success_creates_log_entry(self, minimal_config, migrated_db_path):
         """After a successful Gmail run, an email_parse_log entry is written."""
         fake_jobs = [_make_job()]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (fake_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Verify email_parse_log has an entry
@@ -114,13 +121,15 @@ class TestEmailParseLog:
 
     def test_gmail_failure_creates_error_log_entry(self, minimal_config, migrated_db_path):
         """When GmailSource raises, an error entry is written to email_parse_log."""
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.side_effect = Exception("OAuth token expired")
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Verify error is in summary
@@ -129,30 +138,32 @@ class TestEmailParseLog:
 
         # Verify email_parse_log has an error entry
         conn = sqlite3.connect(migrated_db_path)
-        rows = conn.execute(
-            "SELECT * FROM email_parse_log WHERE error IS NOT NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM email_parse_log WHERE error IS NOT NULL").fetchall()
         conn.close()
 
         assert len(rows) >= 1
 
+
 # ---------------------------------------------------------------------------
 # Test: Per-source error isolation
 # ---------------------------------------------------------------------------
+
 
 class TestSourceErrorIsolation:
     def test_gmail_failure_does_not_stop_serpapi(self, minimal_config, migrated_db_path):
         """If Gmail throws an exception, SerpAPI still runs."""
         serpapi_jobs = [_make_job(title="Staff DS", company="TechCorp")]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.side_effect = Exception("Gmail OAuth failed")
             mock_serp_instance = MockSerpAPI.return_value
             mock_serp_instance.fetch_jobs.return_value = serpapi_jobs
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Gmail should have errored
@@ -169,14 +180,16 @@ class TestSourceErrorIsolation:
         """If SerpAPI throws, Gmail still persists its jobs."""
         gmail_jobs = [_make_job(title="Senior DS", company="StartupCo")]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             mock_gmail_instance = MockGmail.return_value
             mock_gmail_instance.fetch_jobs.return_value = (gmail_jobs, set())
             MockSerpAPI.side_effect = Exception("SerpAPI quota exceeded")
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # SerpAPI should have errored
@@ -188,9 +201,11 @@ class TestSourceErrorIsolation:
         conn.close()
         assert count >= 1
 
+
 # ---------------------------------------------------------------------------
 # Test: Per-job error isolation
 # ---------------------------------------------------------------------------
+
 
 class TestJobErrorIsolation:
     def test_single_job_failure_does_not_halt_others(self, minimal_config, migrated_db_path):
@@ -210,15 +225,17 @@ class TestJobErrorIsolation:
                 raise sqlite3.OperationalError("disk full")
             return True
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
-             patch("job_finder.web.ingestion_runner.upsert_job", side_effect=mock_upsert):
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+            patch("job_finder.web.ingestion_runner.upsert_job", side_effect=mock_upsert),
+        ):
             mock_gmail_instance = MockGmail.return_value
             mock_gmail_instance.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Should have 1 error for the failing job
@@ -226,20 +243,24 @@ class TestJobErrorIsolation:
         # But the other 2 jobs should be accounted for
         assert summary["jobs_new"] == 2
 
+
 # ---------------------------------------------------------------------------
 # Test: Summary dict structure
 # ---------------------------------------------------------------------------
 
+
 class TestSummaryDict:
     def test_run_ingestion_returns_summary_dict(self, minimal_config, migrated_db_path):
         """run_ingestion always returns a dict with the expected keys."""
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = ([], set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         expected_keys = {
@@ -260,14 +281,16 @@ class TestSummaryDict:
         gmail_jobs = [_make_job(title="Senior DS", company="Co1")]
         serp_jobs = [_make_job(title="Staff DS", company="Co2")]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
             # SerpAPISource is instantiated with an api_key, so mock the class
             MockSerpAPI.return_value.fetch_jobs.return_value = serp_jobs
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         assert summary["gmail_fetched"] == 1
@@ -277,13 +300,15 @@ class TestSummaryDict:
 
     def test_empty_run_returns_zero_counts(self, minimal_config, migrated_db_path):
         """When no jobs are fetched, all counts are zero and no errors."""
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = ([], set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         assert summary["gmail_fetched"] == 0
@@ -292,14 +317,17 @@ class TestSummaryDict:
         assert summary["gmail_errors"] == []
         assert summary["serpapi_errors"] == []
 
+
 # ---------------------------------------------------------------------------
 # Test: ZipRecruiter parser
 # ---------------------------------------------------------------------------
+
 
 class TestZipRecruiterParser:
     def test_parser_returns_list_on_empty_body(self):
         """parse_ziprecruiter_alert returns an empty list for empty input."""
         from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
         result = parse_ziprecruiter_alert("", email_date=None)
         assert isinstance(result, list)
         assert result == []
@@ -307,6 +335,7 @@ class TestZipRecruiterParser:
     def test_parser_returns_list_on_unrecognized_html(self):
         """parse_ziprecruiter_alert returns empty list for unrecognized HTML."""
         from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
         html = "<html><body><p>Some random content with no job structure.</p></body></html>"
         result = parse_ziprecruiter_alert(html, email_date=None)
         assert isinstance(result, list)
@@ -314,6 +343,7 @@ class TestZipRecruiterParser:
     def test_parser_returns_list_on_malformed_html(self):
         """parse_ziprecruiter_alert does not raise on malformed HTML."""
         from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
+
         html = "<html><unclosed><div>bad html"
         result = parse_ziprecruiter_alert(html)
         assert isinstance(result, list)
@@ -360,9 +390,11 @@ class TestZipRecruiterParser:
             assert isinstance(job, Job)
             assert job.source == "ziprecruiter"
 
+
 # ---------------------------------------------------------------------------
 # Test: first_seen uses email date (Phase 6 requirement)
 # ---------------------------------------------------------------------------
+
 
 class TestFirstSeenEmailDate:
     """Tests that upsert_job uses posted_date as first_seen for Gmail jobs."""
@@ -422,7 +454,7 @@ class TestFirstSeenEmailDate:
         run_migrations(path)
 
         try:
-            before = datetime.now(timezone.utc).replace(tzinfo=None)
+            before = datetime.now(UTC).replace(tzinfo=None)
             job = Job(
                 title="Staff Engineer",
                 company="SerpCo",
@@ -436,7 +468,7 @@ class TestFirstSeenEmailDate:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             upsert_job(conn, job)
-            after = datetime.now(timezone.utc).replace(tzinfo=None)
+            after = datetime.now(UTC).replace(tzinfo=None)
             conn.close()
 
             conn = sqlite3.connect(path)
@@ -456,12 +488,14 @@ class TestFirstSeenEmailDate:
             if __import__("os").path.exists(path):
                 __import__("os").remove(path)
 
+
 # ---------------------------------------------------------------------------
 # Test: Smart upsert_job merge — locations_raw, location concatenation,
 #       description dedup (Phase 6 Plan 02 requirement)
 # ---------------------------------------------------------------------------
 
 import json as _json
+
 
 class TestSmartUpsertJobMerge:
     """Tests for the smart upsert_job merge behavior added in Plan 06-02."""
@@ -704,9 +738,11 @@ class TestSmartUpsertJobMerge:
             if os.path.exists(path):
                 os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # Test: Company auto-population hook (Phase 7 Plan 01)
 # ---------------------------------------------------------------------------
+
 
 class TestCompanyAutoPopulation:
     """Tests for company auto-population in pipeline_runner._score_and_persist."""
@@ -733,9 +769,7 @@ class TestCompanyAutoPopulation:
             source_url="https://www.linkedin.com/jobs/view/999/",
         )
 
-    def test_lever_job_creates_company_with_ats_platform(
-        self, minimal_config, migrated_db_path
-    ):
+    def test_lever_job_creates_company_with_ats_platform(self, minimal_config, migrated_db_path):
         """After ingesting a Lever job, company record has ats_platform='lever' and correct slug."""
         lever_jobs = [
             Job(
@@ -747,20 +781,20 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (lever_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        company = conn.execute(
-            "SELECT * FROM companies WHERE name = 'stripe'"
-        ).fetchone()
+        company = conn.execute("SELECT * FROM companies WHERE name = 'stripe'").fetchone()
         conn.close()
 
         assert company is not None, "Company record should be created after ingestion"
@@ -782,20 +816,20 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (non_ats_jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        company = conn.execute(
-            "SELECT * FROM companies WHERE name = 'betterhelp'"
-        ).fetchone()
+        company = conn.execute("SELECT * FROM companies WHERE name = 'betterhelp'").fetchone()
         conn.close()
 
         assert company is not None, "Company record should be created for non-ATS jobs too"
@@ -816,17 +850,19 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI, \
-             patch(
-                 "job_finder.web.ats_company.upsert_company",
-                 side_effect=Exception("DB connection failed"),
-             ):
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+            patch(
+                "job_finder.web.ats_company.upsert_company",
+                side_effect=Exception("DB connection failed"),
+            ),
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, minimal_config)
 
         # Ingestion should complete successfully despite company upsert failure
@@ -845,13 +881,15 @@ class TestCompanyAutoPopulation:
             )
         ]
 
-        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail, \
-             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI:
-
+        with (
+            patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
+            patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerpAPI,
+        ):
             MockGmail.return_value.fetch_jobs.return_value = (jobs, set())
             MockSerpAPI.return_value.fetch_jobs.return_value = []
 
             from job_finder.web.pipeline_runner import run_ingestion
+
             run_ingestion(migrated_db_path, minimal_config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -866,6 +904,7 @@ class TestCompanyAutoPopulation:
             "Job should be linked to its company via company_id"
         )
 
+
 # ---------------------------------------------------------------------------
 # Test: ScoringResult unwrap (Phase 11 plan 01)
 # ---------------------------------------------------------------------------
@@ -878,6 +917,7 @@ class TestCompanyAutoPopulation:
 # ---------------------------------------------------------------------------
 # Test: Gmail pagination cap (SAFE-03, Phase 11 plan 01)
 # ---------------------------------------------------------------------------
+
 
 class TestGmailPaginationCap:
     """Regression tests: GmailSource._search_messages respects max_messages=500 cap."""
@@ -919,19 +959,16 @@ class TestGmailPaginationCap:
 
         result = source._search_messages("test query")
 
-        assert len(result) == 500, (
-            f"Expected exactly 500 messages (cap), got {len(result)}"
-        )
+        assert len(result) == 500, f"Expected exactly 500 messages (cap), got {len(result)}"
         # Should have called .list().execute() at most 5 times (5 pages × 100 = 500)
         # Possibly 6 times if the cap check happens after the 5th page extends to 500
-        assert page_call_count <= 6, (
-            f"Expected at most 6 API pages fetched, got {page_call_count}"
-        )
+        assert page_call_count <= 6, f"Expected at most 6 API pages fetched, got {page_call_count}"
 
 
 # ---------------------------------------------------------------------------
 # Test: DataForSEO e2e — jobs flow through run_ingestion into database
 # ---------------------------------------------------------------------------
+
 
 class TestDataForSEOIngestion:
     """E2E: DataForSEO submit/collect pipeline is wired into run_ingestion."""
@@ -1005,6 +1042,7 @@ class TestDataForSEOIngestion:
             return_value=mock_source,
         ):
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, dataforseo_config)
 
         assert summary["dataforseo_fetched"] == 3
@@ -1032,6 +1070,7 @@ class TestDataForSEOIngestion:
             return_value=mock_source,
         ):
             from job_finder.web.pipeline_runner import run_ingestion
+
             run_ingestion(migrated_db_path, dataforseo_config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1051,6 +1090,7 @@ class TestDataForSEOIngestion:
             "job_finder.sources.dataforseo_source.DataForSEOSource",
         ) as MockCls:
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, dataforseo_config)
 
         MockCls.assert_not_called()
@@ -1065,6 +1105,7 @@ class TestDataForSEOIngestion:
             side_effect=Exception("API auth failed"),
         ):
             from job_finder.web.pipeline_runner import run_ingestion
+
             summary = run_ingestion(migrated_db_path, dataforseo_config)
 
         assert summary["dataforseo_fetched"] == 0
@@ -1125,8 +1166,7 @@ class TestUnifiedScorerFlagGate:
         with (
             patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
-            patch("job_finder.web.scoring_runner.run_scoring",
-                  side_effect=fake_unified),
+            patch("job_finder.web.scoring_runner.run_scoring", side_effect=fake_unified),
         ):
             MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
             MockSerp.return_value.fetch_jobs.return_value = []
@@ -1135,7 +1175,9 @@ class TestUnifiedScorerFlagGate:
         return flags
 
     def test_flag_false_no_longer_disables_scoring(
-        self, minimal_config, migrated_db_path,
+        self,
+        minimal_config,
+        migrated_db_path,
     ):
         """Plan 4 Commit E removed the use_unified_scorer toggle.
         Setting it to False (legacy escape hatch) is now a no-op -- the
@@ -1149,7 +1191,9 @@ class TestUnifiedScorerFlagGate:
         assert flags["unified_called"] is True
 
     def test_flag_absent_defaults_true(
-        self, minimal_config, migrated_db_path,
+        self,
+        minimal_config,
+        migrated_db_path,
     ):
         """Config with no use_unified_scorer key -> unified runner invoked
         (Plan 4 Commit E made this unconditional)."""
@@ -1157,7 +1201,9 @@ class TestUnifiedScorerFlagGate:
         assert flags["unified_called"] is True
 
     def test_flag_true_populates_classification_summary_keys(
-        self, minimal_config, migrated_db_path,
+        self,
+        minimal_config,
+        migrated_db_path,
     ):
         """Flag True path writes classified_{apply,consider,skip,reject} keys
         into the run summary."""
@@ -1183,8 +1229,7 @@ class TestUnifiedScorerFlagGate:
         with (
             patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
             patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp,
-            patch("job_finder.web.scoring_runner.run_scoring",
-                  side_effect=fake_unified),
+            patch("job_finder.web.scoring_runner.run_scoring", side_effect=fake_unified),
         ):
             MockGmail.return_value.fetch_jobs.return_value = (gmail_jobs, set())
             MockSerp.return_value.fetch_jobs.return_value = []
@@ -1203,12 +1248,14 @@ class TestUnifiedScorerConfigShape:
     def test_config_example_has_no_legacy_use_unified_scorer_flag(self):
         """Plan 4 Commit E removed use_unified_scorer from config.example.yaml."""
         from pathlib import Path
+
         text = Path("config.example.yaml").read_text(encoding="utf-8")
         assert "use_unified_scorer" not in text
 
     def test_config_example_has_providers_scoring_block(self):
         """config.example.yaml documents the providers.scoring block template."""
         from pathlib import Path
+
         text = Path("config.example.yaml").read_text(encoding="utf-8")
         # Commented example — search for the scoring: sub-block and qwen model.
         assert "scoring:" in text
@@ -1217,6 +1264,7 @@ class TestUnifiedScorerConfigShape:
     def test_config_yaml_has_providers_scoring_block(self):
         """config.yaml (user config) has providers.scoring after Plan 4."""
         from pathlib import Path
+
         text = Path("config.yaml").read_text(encoding="utf-8")
         # Active scoring block (not commented) — must be indented under providers:.
         assert "\n  scoring:\n" in text
@@ -1225,6 +1273,7 @@ class TestUnifiedScorerConfigShape:
     def test_config_yaml_no_legacy_provider_blocks(self):
         """Plan 4 Commit E collapsed providers.haiku/providers.sonnet."""
         from pathlib import Path
+
         text = Path("config.yaml").read_text(encoding="utf-8")
         assert "\n  haiku:\n" not in text
         assert "\n  sonnet:\n" not in text
@@ -1241,7 +1290,4 @@ class TestCascadeConfigScoringFixture:
         scoring = providers["scoring"]
         assert scoring["model"] == "qwen2.5:14b"
         assert scoring["provider"] == "ollama"
-        assert any(
-            link.get("provider") == "anthropic"
-            for link in scoring["fallback_chain"]
-        )
+        assert any(link.get("provider") == "anthropic" for link in scoring["fallback_chain"])

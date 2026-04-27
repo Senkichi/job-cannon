@@ -36,10 +36,10 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_FRESHNESS_DAYS = 1            # Re-crawl daily to catch new postings early
-_PLAYWRIGHT_TIMEOUT_MS = 15000 # Page load timeout
-_JS_SETTLE_MS = 2000           # Wait for JS to finish rendering
-_POLITE_DELAY = 1.0            # Seconds between companies
+_FRESHNESS_DAYS = 1  # Re-crawl daily to catch new postings early
+_PLAYWRIGHT_TIMEOUT_MS = 15000  # Page load timeout
+_JS_SETTLE_MS = 2000  # Wait for JS to finish rendering
+_POLITE_DELAY = 1.0  # Seconds between companies
 
 # Minimum text/html ratio to consider a page statically rendered.
 # Below this, the page is likely JS-heavy and needs Playwright.
@@ -48,10 +48,25 @@ _STATIC_MIN_TEXT_LEN = 500
 
 # Links with these path prefixes are navigation, not job listings
 _NAV_PATH_PREFIXES = (
-    "/about", "/contact", "/blog", "/news", "/press", "/privacy",
-    "/terms", "/legal", "/login", "/signup", "/register", "/faq",
-    "/help", "/support", "/accessibility", "/sitemap", "/cookie",
-    "/search", "/events",
+    "/about",
+    "/contact",
+    "/blog",
+    "/news",
+    "/press",
+    "/privacy",
+    "/terms",
+    "/legal",
+    "/login",
+    "/signup",
+    "/register",
+    "/faq",
+    "/help",
+    "/support",
+    "/accessibility",
+    "/sitemap",
+    "/cookie",
+    "/search",
+    "/events",
 )
 
 # Regex to strip trailing location text from concatenated title+location
@@ -401,13 +416,20 @@ def _try_playwright_active(
             for page_url in page_urls:
                 try:
                     resp = requests.get(
-                        page_url, timeout=_TIMEOUT, headers=_HEADERS,
+                        page_url,
+                        timeout=_TIMEOUT,
+                        headers=_HEADERS,
                     )
                     if resp.status_code < 400:
                         page_soup = BeautifulSoup(resp.text, "html.parser")
-                        _merge_jobs(_extract_jobs_from_soup(
-                            page_soup, page_url, target_titles, exclusions,
-                        ))
+                        _merge_jobs(
+                            _extract_jobs_from_soup(
+                                page_soup,
+                                page_url,
+                                target_titles,
+                                exclusions,
+                            )
+                        )
                 except Exception:
                     pass
                 time.sleep(_INTERACTION_DELAY_S)
@@ -418,9 +440,14 @@ def _try_playwright_active(
                 if submit_search_form(page, keyword):
                     html = page.content()
                     soup = BeautifulSoup(html, "html.parser")
-                    _merge_jobs(_extract_jobs_from_soup(
-                        soup, url, target_titles, exclusions,
-                    ))
+                    _merge_jobs(
+                        _extract_jobs_from_soup(
+                            soup,
+                            url,
+                            target_titles,
+                            exclusions,
+                        )
+                    )
                     if all_jobs:
                         break
                     time.sleep(_INTERACTION_DELAY_S)
@@ -430,12 +457,17 @@ def _try_playwright_active(
             for api_url in captured_apis:
                 try:
                     resp = requests.get(
-                        api_url, timeout=_TIMEOUT, headers=_HEADERS,
+                        api_url,
+                        timeout=_TIMEOUT,
+                        headers=_HEADERS,
                     )
                     if resp.status_code < 400:
                         data = resp.json()
                         api_jobs = parse_api_response(
-                            data, target_titles, exclusions, url,
+                            data,
+                            target_titles,
+                            exclusions,
+                            url,
                         )
                         if api_jobs:
                             _merge_jobs(api_jobs)
@@ -447,7 +479,8 @@ def _try_playwright_active(
         if all_jobs:
             logger.info(
                 "playwright_active('%s'): %d jobs via interaction",
-                url, len(all_jobs),
+                url,
+                len(all_jobs),
             )
 
         return all_jobs, discovered_api
@@ -489,7 +522,8 @@ def _try_cached_api(
         if resp.status_code >= 400:
             logger.debug(
                 "Cached API endpoint returned %d: %s",
-                resp.status_code, api_endpoint,
+                resp.status_code,
+                api_endpoint,
             )
             return None
 
@@ -502,7 +536,9 @@ def _try_cached_api(
 
 
 def _cache_api_endpoint(
-    db_path: str, company_id: int, api_endpoint: str,
+    db_path: str,
+    company_id: int,
+    api_endpoint: str,
 ) -> None:
     """Store a discovered API endpoint for future fast-path access."""
     try:
@@ -513,7 +549,9 @@ def _cache_api_endpoint(
             )
             conn.commit()
         logger.info(
-            "Cached API endpoint for company %d: %s", company_id, api_endpoint,
+            "Cached API endpoint for company %d: %s",
+            company_id,
+            api_endpoint,
         )
     except Exception as e:
         logger.debug("Failed to cache API endpoint: %s", e)
@@ -583,9 +621,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     target_titles = profile_cfg.get("target_titles", [])
     exclusions_cfg = profile_cfg.get("exclusions", {})
     title_exclusions = (
-        exclusions_cfg.get("title_keywords", [])
-        if isinstance(exclusions_cfg, dict)
-        else []
+        exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
     )
 
     summary = {
@@ -611,9 +647,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     # (v3.0 Phase 34 Plan 3 Commit A: classification IN ('apply','consider')
     # replaces haiku_score >= threshold)
     with standalone_connection(db_path) as conn:
-        freshness_days = config.get("careers_crawl", {}).get(
-            "freshness_days", _FRESHNESS_DAYS
-        )
+        freshness_days = config.get("careers_crawl", {}).get("freshness_days", _FRESHNESS_DAYS)
 
         companies = conn.execute(
             """SELECT c.id, c.name_raw, c.careers_url, c.careers_api_endpoint,
@@ -647,7 +681,11 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     logger.info("careers_crawler: %d companies in batch", len(companies))
 
     merged_summary, merged_keys = _crawl_companies(
-        companies, db_path, config, target_titles, title_exclusions,
+        companies,
+        db_path,
+        config,
+        target_titles,
+        title_exclusions,
     )
     # Merge worker results into top-level summary
     for key in merged_summary:
@@ -709,10 +747,20 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
 
 
 _SUMMARY_KEYS = [
-    "companies_crawled", "jobs_found", "jobs_new", "scored",
-    "classified_apply", "classified_consider", "classified_skip", "classified_reject",
-    "playwright_rendered", "interactive",
-    "api_cached", "url_param_hits", "ai_navigated", "ai_replayed",
+    "companies_crawled",
+    "jobs_found",
+    "jobs_new",
+    "scored",
+    "classified_apply",
+    "classified_consider",
+    "classified_skip",
+    "classified_reject",
+    "playwright_rendered",
+    "interactive",
+    "api_cached",
+    "url_param_hits",
+    "ai_navigated",
+    "ai_replayed",
 ]
 
 
@@ -744,7 +792,7 @@ def _crawl_companies(
 
     # --- Per-worker function (own browser + DB connection) ---
     def _crawl_worker(company_batch: list) -> tuple[dict, list[str]]:
-        local_summary = {key: 0 for key in _SUMMARY_KEYS}
+        local_summary = dict.fromkeys(_SUMMARY_KEYS, 0)
         local_summary["errors"] = []
         local_new_keys: list[str] = []
 
@@ -762,7 +810,8 @@ def _crawl_companies(
 
                     logger.info(
                         "careers_crawler: crawling %s via %s",
-                        company_name, careers_url,
+                        company_name,
+                        careers_url,
                     )
 
                     try:
@@ -771,11 +820,18 @@ def _crawl_companies(
                         # === Tier cache: try last-successful tier first ===
                         if cached_tier and cached_tier != "static":
                             jobs = _try_cached_tier(
-                                cached_tier, browser, company,
-                                careers_url, api_endpoint,
-                                target_titles, title_exclusions,
-                                search_keywords, config,
-                                db_path, company_id, local_summary,
+                                cached_tier,
+                                browser,
+                                company,
+                                careers_url,
+                                api_endpoint,
+                                target_titles,
+                                title_exclusions,
+                                search_keywords,
+                                config,
+                                db_path,
+                                company_id,
+                                local_summary,
                             )
                             if jobs:
                                 tier_used = cached_tier
@@ -785,7 +841,8 @@ def _crawl_companies(
                             # Fast path: cached API endpoint
                             if api_endpoint:
                                 api_jobs = _try_cached_api(
-                                    api_endpoint, target_titles,
+                                    api_endpoint,
+                                    target_titles,
                                     title_exclusions,
                                 )
                                 if api_jobs is not None:
@@ -798,7 +855,8 @@ def _crawl_companies(
                             # Tier 1: Static HTML
                             if not jobs and tier_used != "api_cached":
                                 static_result = _try_static_extract(
-                                    careers_url, target_titles,
+                                    careers_url,
+                                    target_titles,
                                     title_exclusions,
                                 )
                                 if static_result:
@@ -809,8 +867,10 @@ def _crawl_companies(
                             if not jobs and tier_used != "api_cached":
                                 if search_keywords:
                                     param_jobs = probe_url_params(
-                                        careers_url, search_keywords,
-                                        target_titles, title_exclusions,
+                                        careers_url,
+                                        search_keywords,
+                                        target_titles,
+                                        title_exclusions,
                                     )
                                     if param_jobs:
                                         jobs = param_jobs
@@ -820,13 +880,13 @@ def _crawl_companies(
                             # Tier 3: Playwright active
                             if not jobs and tier_used != "api_cached":
                                 if interactive_enabled:
-                                    pw_jobs, discovered_api = (
-                                        _try_playwright_active(
-                                            browser, careers_url,
-                                            target_titles,
-                                            title_exclusions,
-                                            search_keywords, config,
-                                        )
+                                    pw_jobs, discovered_api = _try_playwright_active(
+                                        browser,
+                                        careers_url,
+                                        target_titles,
+                                        title_exclusions,
+                                        search_keywords,
+                                        config,
                                     )
                                     jobs = pw_jobs
                                     tier_used = "playwright"
@@ -834,31 +894,46 @@ def _crawl_companies(
 
                                     if discovered_api:
                                         _cache_api_endpoint(
-                                            db_path, company_id,
+                                            db_path,
+                                            company_id,
                                             discovered_api,
                                         )
                                 else:
                                     jobs = _try_playwright_extract(
-                                        browser, careers_url,
-                                        target_titles, title_exclusions,
+                                        browser,
+                                        careers_url,
+                                        target_titles,
+                                        title_exclusions,
                                     )
                                     tier_used = "playwright"
                                     local_summary["playwright_rendered"] += 1
 
                             # === Tier 4: AI-navigated (replay cached recipe, or discover new) ===
                             ai_nav_enabled = config.get("careers_crawl", {}).get(
-                                "ai_navigation_enabled", True,
+                                "ai_navigation_enabled",
+                                True,
                             )
                             if not jobs and ai_nav_enabled:
                                 jobs, tier_used = _try_ai_navigation(
-                                    browser, company, careers_url,
-                                    target_titles, title_exclusions,
-                                    config, db_path, local_summary,
+                                    browser,
+                                    company,
+                                    careers_url,
+                                    target_titles,
+                                    title_exclusions,
+                                    config,
+                                    db_path,
+                                    local_summary,
                                 )
 
                         _upsert_and_log(
-                            jobs, company_id, company_name, now, db_path,
-                            local_summary, local_new_keys, tier_used,
+                            jobs,
+                            company_id,
+                            company_name,
+                            now,
+                            db_path,
+                            local_summary,
+                            local_new_keys,
+                            tier_used,
                         )
 
                     except Exception as company_err:
@@ -866,7 +941,8 @@ def _crawl_companies(
                         local_summary["errors"].append(error_msg)
                         logger.error(
                             "careers_crawler error for '%s': %s",
-                            company_name, company_err,
+                            company_name,
+                            company_err,
                         )
                         _update_timestamp_on_error(db_path, company_id, now)
 
@@ -879,15 +955,12 @@ def _crawl_companies(
     # --- Distribute companies round-robin across workers ---
     batches = [companies[i::max_workers] for i in range(max_workers)]
 
-    merged_summary: dict = {key: 0 for key in _SUMMARY_KEYS}
+    merged_summary: dict = dict.fromkeys(_SUMMARY_KEYS, 0)
     merged_summary["errors"] = []
     all_new_keys: list[str] = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(_crawl_worker, batch)
-            for batch in batches if batch
-        ]
+        futures = [executor.submit(_crawl_worker, batch) for batch in batches if batch]
         for future in concurrent.futures.as_completed(futures):
             try:
                 worker_summary, worker_keys = future.result()
@@ -931,7 +1004,10 @@ def _try_cached_tier(
                 return api_jobs
         elif cached_tier == "url_param" and search_keywords:
             param_jobs = probe_url_params(
-                careers_url, search_keywords, target_titles, title_exclusions,
+                careers_url,
+                search_keywords,
+                target_titles,
+                title_exclusions,
             )
             if param_jobs:
                 local_summary["url_param_hits"] += 1
@@ -941,9 +1017,12 @@ def _try_cached_tier(
             interactive_enabled = crawl_cfg.get("interactive_enabled", True)
             if interactive_enabled:
                 pw_jobs, discovered_api = _try_playwright_active(
-                    browser, careers_url,
-                    target_titles, title_exclusions,
-                    search_keywords, config,
+                    browser,
+                    careers_url,
+                    target_titles,
+                    title_exclusions,
+                    search_keywords,
+                    config,
                 )
                 if pw_jobs:
                     local_summary["playwright_rendered"] += 1
@@ -952,7 +1031,10 @@ def _try_cached_tier(
                     return pw_jobs
             else:
                 pw_jobs = _try_playwright_extract(
-                    browser, careers_url, target_titles, title_exclusions,
+                    browser,
+                    careers_url,
+                    target_titles,
+                    title_exclusions,
                 )
                 if pw_jobs:
                     local_summary["playwright_rendered"] += 1
@@ -968,19 +1050,24 @@ def _try_cached_tier(
                         RecipeStaleError,
                         replay_navigation_recipe,
                     )
+
                     recipe = json.loads(nav_recipe_raw)
                     page = browser.new_page()
                     try:
                         page.goto(careers_url, timeout=15000, wait_until="domcontentloaded")
                         page.wait_for_timeout(2000)
                         jobs = replay_navigation_recipe(
-                            page, recipe, target_titles, title_exclusions,
+                            page,
+                            recipe,
+                            target_titles,
+                            title_exclusions,
                         )
                         if jobs:
                             local_summary["ai_replayed"] += 1
                             return jobs
                     except RecipeStaleError:
                         from job_finder.web.ai_career_navigator import clear_nav_recipe
+
                         clear_nav_recipe(db_path, company_id)
                     finally:
                         try:
@@ -1039,7 +1126,10 @@ def _try_ai_navigation(
             try:
                 recipe = json.loads(nav_recipe_raw)
                 jobs = replay_navigation_recipe(
-                    page, recipe, target_titles, title_exclusions,
+                    page,
+                    recipe,
+                    target_titles,
+                    title_exclusions,
                 )
                 if jobs:
                     local_summary["ai_replayed"] += 1
@@ -1070,7 +1160,10 @@ def _try_ai_navigation(
 
             try:
                 jobs = replay_navigation_recipe(
-                    page, recipe, target_titles, title_exclusions,
+                    page,
+                    recipe,
+                    target_titles,
+                    title_exclusions,
                 )
                 if jobs:
                     local_summary["ai_navigated"] += 1
@@ -1156,12 +1249,17 @@ def _upsert_and_log(
     if company_jobs_found:
         logger.info(
             "careers_crawler: %s — %d jobs found (%d new) [%s]",
-            company_name, company_jobs_found, company_jobs_new, tier_used,
+            company_name,
+            company_jobs_found,
+            company_jobs_new,
+            tier_used,
         )
 
 
 def _update_timestamp_on_error(
-    db_path: str, company_id: int, now: str,
+    db_path: str,
+    company_id: int,
+    now: str,
 ) -> None:
     """Update crawl timestamp on error so company doesn't block the queue."""
     try:
@@ -1208,6 +1306,7 @@ def _score_new_jobs(
     _scoring_client = None
     try:
         import anthropic
+
         _scoring_client = anthropic.Anthropic()
     except (ImportError, Exception):
         pass
@@ -1247,12 +1346,15 @@ def _score_new_jobs(
                             job_row.update(enriched)
                     except Exception as enrich_err:
                         logger.debug(
-                            "careers_crawl enrichment failed for '%s' "
-                            "(non-fatal): %s", dedup_key, enrich_err,
+                            "careers_crawl enrichment failed for '%s' (non-fatal): %s",
+                            dedup_key,
+                            enrich_err,
                         )
 
                 result = score_and_persist_job(
-                    job_row, conn, config,
+                    job_row,
+                    conn,
+                    config,
                 )
                 if result is None:
                     continue
@@ -1263,6 +1365,8 @@ def _score_new_jobs(
                     summary[key] = summary.get(key, 0) + 1
             except Exception as e:
                 logger.warning(
-                    "careers_crawl scoring error for '%s': %s", dedup_key, e,
+                    "careers_crawl scoring error for '%s': %s",
+                    dedup_key,
+                    e,
                     exc_info=True,
                 )

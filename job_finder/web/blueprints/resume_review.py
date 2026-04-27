@@ -10,7 +10,7 @@ Routes:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -28,14 +28,14 @@ from flask import (
     url_for,
 )
 
-from job_finder.web.activity_tracker import (
-    log_activity,
-    ACTION_UPLOAD_RESUME_PDF,
-    ACTION_CONFLICT_REVIEW,
-    ACTION_SAVE_CONFLICTS,
-    ACTION_EXTRACT_STYLE,
-)
 from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.web.activity_tracker import (
+    ACTION_CONFLICT_REVIEW,
+    ACTION_EXTRACT_STYLE,
+    ACTION_SAVE_CONFLICTS,
+    ACTION_UPLOAD_RESUME_PDF,
+    log_activity,
+)
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile
@@ -68,6 +68,7 @@ CONFLICT_SCHEMA = {
     "required": ["conflicts"],
     "additionalProperties": False,
 }
+
 
 @resume_review_bp.route("/upload-pdf", methods=["POST"], strict_slashes=False)
 def upload_pdf():
@@ -109,12 +110,12 @@ def upload_pdf():
     # Archive raw file
     upload_dir = Path(_UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     archive_path = upload_dir / f"{timestamp}_{uploaded.filename}"
     archive_path.write_bytes(pdf_bytes)
 
     # Insert into DB
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     conn = get_db(db_path)
     cursor = conn.execute(
@@ -137,6 +138,7 @@ def upload_pdf():
 
     return redirect(url_for("resume_review.conflict_review", upload_id=upload_id))
 
+
 def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list:
     """Call Haiku to compare PDF resume text against the profile and return conflict list.
 
@@ -151,11 +153,7 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         Returns [] on error.
     """
     try:
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
         system = (
             "You are a resume conflict analyzer. Compare a PDF resume against a structured "
@@ -194,6 +192,7 @@ def _compare_conflicts(raw_text: str, profile: dict, conn, config: dict) -> list
         logger.warning("_compare_conflicts: failed to compare conflicts: %s", e)
         return []
 
+
 @resume_review_bp.route("/review/<int:upload_id>", strict_slashes=False)
 def conflict_review(upload_id: int):
     """Conflict review page: Haiku compares PDF text against profile.
@@ -203,9 +202,7 @@ def conflict_review(upload_id: int):
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     conn = get_db(db_path)
 
-    row = conn.execute(
-        "SELECT * FROM resume_upload_reviews WHERE id = ?", (upload_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM resume_upload_reviews WHERE id = ?", (upload_id,)).fetchone()
     if row is None:
         return "Upload not found", 404
 
@@ -232,6 +229,7 @@ def conflict_review(upload_id: int):
         upload_id=upload_id,
         upload=row,
     )
+
 
 @resume_review_bp.route("/save-conflicts/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def save_conflicts(upload_id: int):
@@ -269,7 +267,9 @@ def save_conflicts(upload_id: int):
 
         conflict = conflicts[conflict_index]
         conflict_type = conflict.get("type", "")
-        apply_text = decision.get("custom_text") if action == "edit" else conflict.get("pdf_version", "")
+        apply_text = (
+            decision.get("custom_text") if action == "edit" else conflict.get("pdf_version", "")
+        )
 
         if not apply_text:
             continue
@@ -283,14 +283,16 @@ def save_conflicts(upload_id: int):
         elif conflict_type == "new_position":
             if "positions" not in profile:
                 profile["positions"] = []
-            profile["positions"].append({
-                "title": apply_text[:100],
-                "company": conflict.get("position_company", ""),
-                "start_date": "",
-                "end_date": None,
-                "achievements": [],
-                "skills": [],
-            })
+            profile["positions"].append(
+                {
+                    "title": apply_text[:100],
+                    "company": conflict.get("position_company", ""),
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": [],
+                    "skills": [],
+                }
+            )
 
         elif conflict_type == "achievement_diff":
             target_company = conflict.get("position_company", "")
@@ -323,6 +325,7 @@ def save_conflicts(upload_id: int):
     flash("Changes saved successfully.", "success")
     return redirect(url_for("profile.index"))
 
+
 @resume_review_bp.route("/extract-style/<int:upload_id>", methods=["POST"], strict_slashes=False)
 def extract_style(upload_id: int):
     """Trigger Sonnet style extraction from an uploaded resume PDF.
@@ -332,16 +335,18 @@ def extract_style(upload_id: int):
     db_path = current_app.config.get("DB_PATH", "jobs.db")
     conn = get_db(db_path)
 
-    row = conn.execute(
-        "SELECT * FROM resume_upload_reviews WHERE id = ?", (upload_id,)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM resume_upload_reviews WHERE id = ?", (upload_id,)).fetchone()
     if row is None:
         return "Upload not found", 404
 
     row = dict(row)
     config = current_app.config.get("JF_CONFIG", {})
 
-    from job_finder.web.resume_style_guide import extract_style_guide, load_style_guide, save_style_guide
+    from job_finder.web.resume_style_guide import (
+        extract_style_guide,
+        load_style_guide,
+        save_style_guide,
+    )
 
     existing_guide = load_style_guide()
     new_guide = extract_style_guide(row["raw_text"], existing_guide, conn, config)
@@ -371,6 +376,7 @@ def extract_style(upload_id: int):
     flash("Style guide extracted successfully.", "success")
     return redirect(url_for("profile.index"))
 
+
 @resume_review_bp.route("/save-style-guide", methods=["POST"], strict_slashes=False)
 def save_style_guide_route():
     """Save manually edited style guide from profile page.
@@ -388,6 +394,7 @@ def save_style_guide_route():
         data["section_order"] = [s.strip() for s in data["section_order"].split(",") if s.strip()]
 
     from job_finder.web.resume_style_guide import save_style_guide
+
     save_style_guide(data)
 
     flash("Style guide updated.", "success")

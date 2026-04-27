@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -25,6 +25,7 @@ def tmp_db_path():
     yield path
     if os.path.exists(path):
         os.remove(path)
+
 
 @pytest.fixture
 def sample_db_with_jobs():
@@ -142,6 +143,7 @@ def sample_db_with_jobs():
     if os.path.exists(path):
         os.remove(path)
 
+
 @pytest.fixture
 def app(tmp_db_path):
     """Standard test Flask app with full config superset.
@@ -174,10 +176,12 @@ def app(tmp_db_path):
     application.config["TESTING"] = True
     return application
 
+
 @pytest.fixture
 def client(app):
     """Flask test client from the shared app fixture."""
     return app.test_client()
+
 
 @pytest.fixture
 def migrated_db():
@@ -201,6 +205,7 @@ def migrated_db():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
+
 
 @pytest.fixture(scope="class")
 def migrated_db_class():
@@ -233,6 +238,7 @@ def migrated_db_class():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
+
 
 @pytest.fixture
 def migrated_db_with_jobs():
@@ -273,9 +279,15 @@ def migrated_db_with_jobs():
                 '["linkedin"]',
                 '["https://www.linkedin.com/jobs/view/1111/"]',
                 "1111",
-                180000, 240000,
+                180000,
+                240000,
                 "Build data products at Stripe.",
-                five_days_ago, now, 8.5, '{}', "interested", "reviewing",
+                five_days_ago,
+                now,
+                8.5,
+                "{}",
+                "interested",
+                "reviewing",
             ),
             (
                 "betterhelp|data scientist|san jose ca",
@@ -285,9 +297,15 @@ def migrated_db_with_jobs():
                 '["linkedin"]',
                 '["https://www.linkedin.com/jobs/view/2222/"]',
                 "2222",
-                150000, 200000,
+                150000,
+                200000,
                 "Run experiments at BetterHelp.",
-                five_days_ago, now, 7.2, '{}', "unreviewed", "reviewing",
+                five_days_ago,
+                now,
+                7.2,
+                "{}",
+                "unreviewed",
+                "reviewing",
             ),
             (
                 "thumbtack|staff data scientist|united states",
@@ -297,9 +315,15 @@ def migrated_db_with_jobs():
                 '["linkedin"]',
                 '["https://www.linkedin.com/jobs/view/3333/"]',
                 "3333",
-                200000, 280000,
+                200000,
+                280000,
                 "Lead data science at Thumbtack.",
-                five_days_ago, now, 9.1, '{}', "interested", "applied",
+                five_days_ago,
+                now,
+                9.1,
+                "{}",
+                "interested",
+                "applied",
             ),
         ],
     )
@@ -310,6 +334,7 @@ def migrated_db_with_jobs():
     conn.close()
     if os.path.exists(path):
         os.remove(path)
+
 
 @pytest.fixture
 def sample_resume_data():
@@ -354,6 +379,7 @@ def sample_resume_data():
             }
         ],
     }
+
 
 @pytest.fixture(autouse=True)
 def mock_run_oneshot():
@@ -510,13 +536,24 @@ def make_model_result():
     """
     from job_finder.web.model_provider import ModelResult
 
-    def _factory(data, *, provider="ollama", cost_usd=0.0,
-                 input_tokens=100, output_tokens=50,
-                 model="qwen2.5:14b", schema_valid=True):
+    def _factory(
+        data,
+        *,
+        provider="ollama",
+        cost_usd=0.0,
+        input_tokens=100,
+        output_tokens=50,
+        model="qwen2.5:14b",
+        schema_valid=True,
+    ):
         return ModelResult(
-            data=data, cost_usd=cost_usd,
-            input_tokens=input_tokens, output_tokens=output_tokens,
-            model=model, provider=provider, schema_valid=schema_valid,
+            data=data,
+            cost_usd=cost_usd,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=model,
+            provider=provider,
+            schema_valid=schema_valid,
         )
 
     return _factory
@@ -537,4 +574,3 @@ def mock_scheduler_pidfile():
         return_value=True,
     ) as mock:
         yield mock
-

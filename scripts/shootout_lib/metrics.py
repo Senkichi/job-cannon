@@ -7,14 +7,14 @@ Per Phase 33 CONTEXT §D-15/D-16/D-17/D-20/D-23:
   - Retry-rate gate: rate > 0.20 → WARN; suppressed when n<20
   - Tiebreaker precedence: uniformity → retry → latency → VRAM
 """
+
 from __future__ import annotations
 
 import statistics
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 from scipy.stats import bootstrap
-
 
 _DIMENSIONS: tuple[str, ...] = (
     "title_fit",

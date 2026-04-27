@@ -16,9 +16,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.stdout.reconfigure(line_buffering=True)
 
-from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.backfill_companies import cleanup_orphan_companies
 from job_finder.config import load_config
+from job_finder.web.backfill_companies import cleanup_orphan_companies
+from job_finder.web.db_helpers import standalone_connection
 
 GARBAGE_PATTERNS = [
     re.compile(r"https?://", re.IGNORECASE),
@@ -45,16 +45,14 @@ def cleanup_garbage(conn: sqlite3.Connection, garbage: list[dict], dry_run: bool
         cid = g["id"]
         name = g["name_raw"][:60]
 
-        linked = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)
-        ).fetchone()[0]
+        linked = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)).fetchone()[
+            0
+        ]
 
         print(f"  {'[DRY] ' if dry_run else ''}DELETE company id={cid} ({linked} jobs) — {name}")
 
         if not dry_run:
-            result = conn.execute(
-                "UPDATE jobs SET company_id = NULL WHERE company_id = ?", (cid,)
-            )
+            result = conn.execute("UPDATE jobs SET company_id = NULL WHERE company_id = ?", (cid,))
             jobs_unlinked += result.rowcount
             conn.execute("DELETE FROM companies WHERE id = ?", (cid,))
 
@@ -78,7 +76,9 @@ def main():
             return
 
         result = cleanup_garbage(conn, garbage, dry_run)
-        print(f"\n{'[DRY RUN] ' if dry_run else ''}Deleted: {result['deleted']}, Jobs unlinked: {result['jobs_unlinked']}")
+        print(
+            f"\n{'[DRY RUN] ' if dry_run else ''}Deleted: {result['deleted']}, Jobs unlinked: {result['jobs_unlinked']}"
+        )
 
         if not dry_run:
             orphan_result = cleanup_orphan_companies(conn)

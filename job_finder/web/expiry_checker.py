@@ -29,8 +29,7 @@ import re
 import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -62,12 +61,8 @@ _GREENHOUSE_ERROR_RE = re.compile(r"[?&]error=true")
 # Posting ID extraction
 # ---------------------------------------------------------------------------
 
-_LEVER_POSTING_RE = re.compile(
-    r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE
-)
-_GREENHOUSE_POSTING_RE = re.compile(
-    r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE
-)
+_LEVER_POSTING_RE = re.compile(r"jobs\.lever\.co/[^/]+/([a-f0-9-]+)", re.IGNORECASE)
+_GREENHOUSE_POSTING_RE = re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/(\d+)", re.IGNORECASE)
 _ASHBY_POSTING_RE = re.compile(
     r"jobs\.ashbyhq\.com/[^/]+/([a-f0-9-]+)"
     # No IGNORECASE — Ashby slugs are case-sensitive
@@ -80,7 +75,7 @@ _POSTING_PATTERNS = {
 }
 
 
-def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
+def _extract_posting_id(url: str, ats_platform: str) -> str | None:
     """Extract the individual posting ID from an ATS URL.
 
     Used by Signal 1 (per-posting ATS API). Covers the three platforms
@@ -98,6 +93,7 @@ def _extract_posting_id(url: str, ats_platform: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Signal 1: ATS API Check (per-posting)
 # ---------------------------------------------------------------------------
+
 
 def _check_ats_api(slug: str, posting_id: str, ats_platform: str) -> str:
     """Check if a specific job posting is still live via the ATS API."""
@@ -143,7 +139,7 @@ except ImportError:
 
 
 def _check_careers_page(
-    homepage_url: Optional[str],
+    homepage_url: str | None,
     job_title: str,
     target_titles: list[str],
     exclusions: list[str],
@@ -169,7 +165,10 @@ def _check_careers_page(
                 if _title_matches(result_title, [job_title], []):
                     return LIVE
             else:
-                if job_title.lower() in result_title.lower() or result_title.lower() in job_title.lower():
+                if (
+                    job_title.lower() in result_title.lower()
+                    or result_title.lower() in job_title.lower()
+                ):
                     return LIVE
 
         return INCONCLUSIVE
@@ -191,7 +190,7 @@ _MAX_CAREERS_FAILURES = 3
 _CAREERS_SKIP_DAYS = 7
 
 
-def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
+def _record_careers_outcome(company_id: int | None, success: bool) -> None:
     """Track careers-page check outcome for backoff logic."""
     if company_id is None:
         return
@@ -203,10 +202,14 @@ def _record_careers_outcome(company_id: Optional[int], success: bool) -> None:
             count = _careers_failure_counts.get(company_id, 0) + 1
             _careers_failure_counts[company_id] = count
             if count >= _MAX_CAREERS_FAILURES:
-                _careers_skip_until[company_id] = datetime.now(timezone.utc) + timedelta(days=_CAREERS_SKIP_DAYS)
+                _careers_skip_until[company_id] = datetime.now(UTC) + timedelta(
+                    days=_CAREERS_SKIP_DAYS
+                )
                 logger.info(
                     "_record_careers_outcome: company %d hit %d failures, skipping for %d days",
-                    company_id, count, _CAREERS_SKIP_DAYS,
+                    company_id,
+                    count,
+                    _CAREERS_SKIP_DAYS,
                 )
 
 
@@ -256,12 +259,15 @@ _EXPIRED_BODY_MARKERS = (
     "cette offre n\u2019est plus disponible",
 )
 
-_EXPIRED_BODY_REGEXES = tuple(re.compile(p) for p in (
-    r"this job\b.{0,50}\bis no longer available",
-    r"this job\b.{0,30}\bis no longer accepting",
-    r"no longer active",
-    r"expired\s+on\s+\w+",
-))
+_EXPIRED_BODY_REGEXES = tuple(
+    re.compile(p)
+    for p in (
+        r"this job\b.{0,50}\bis no longer available",
+        r"this job\b.{0,30}\bis no longer accepting",
+        r"no longer active",
+        r"expired\s+on\s+\w+",
+    )
+)
 
 
 def quick_liveness_check(url: str, timeout: int = 8) -> str:
@@ -316,9 +322,10 @@ def check_job_liveness(job_row: dict) -> str:
 # Signal cascade orchestrator (per job)
 # ---------------------------------------------------------------------------
 
+
 def _check_job_expiry(
     job: dict,
-    company: Optional[dict],
+    company: dict | None,
     config: dict,
     skip_careers: bool = False,
 ) -> tuple[str, str]:
@@ -380,7 +387,8 @@ def _check_job_expiry(
 # Parallel cascade worker
 # ---------------------------------------------------------------------------
 
-def _cascade_worker(job: dict, company: Optional[dict], config: dict) -> tuple[str, str, str]:
+
+def _cascade_worker(job: dict, company: dict | None, config: dict) -> tuple[str, str, str]:
     """Execute the cascade for one job in a ThreadPoolExecutor worker.
 
     Returns (dedup_key, result, evidence). Worker path is fully read-only
@@ -393,7 +401,7 @@ def _cascade_worker(job: dict, company: Optional[dict], config: dict) -> tuple[s
     skip_careers = False
     with _careers_lock:
         skip_until = _careers_skip_until.get(company_id) if company_id else None
-    if skip_until and datetime.now(timezone.utc) < skip_until:
+    if skip_until and datetime.now(UTC) < skip_until:
         skip_careers = True
 
     try:
@@ -416,6 +424,7 @@ def _cascade_worker(job: dict, company: Optional[dict], config: dict) -> tuple[s
 # Phase C: parallel HTTP cascade
 # ---------------------------------------------------------------------------
 
+
 def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
     """Parallel cascade for jobs not yet resolved by Phase B.
 
@@ -429,13 +438,14 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
         legacy_expiry_cfg.get("recheck_days", 3),
     )
     max_workers = staleness_cfg.get(
-        "cascade_parallel_workers", _DEFAULT_PARALLEL_WORKERS,
+        "cascade_parallel_workers",
+        _DEFAULT_PARALLEL_WORKERS,
     )
 
     summary = {"checked": 0, "archived": 0, "live": 0, "inconclusive": 0}
 
     with standalone_connection(db_path) as conn:
-        recheck_cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat()
+        recheck_cutoff = (datetime.now(UTC) - timedelta(days=recheck_days)).isoformat()
         rows = conn.execute(
             """
             SELECT j.*, c.ats_platform, c.ats_slug, c.homepage_url, c.id AS company_row_id
@@ -455,10 +465,10 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
             return summary
 
         # Build work items: (job_dict, company_dict_or_none)
-        work_items: list[tuple[dict, Optional[dict]]] = []
+        work_items: list[tuple[dict, dict | None]] = []
         for row in rows:
             job = dict(row)
-            company: Optional[dict] = None
+            company: dict | None = None
             if job.get("ats_platform"):
                 company = {
                     "ats_platform": job["ats_platform"],
@@ -476,7 +486,9 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
             work_items.append((job, company))
 
         logger.info(
-            "_run_phase_c_cascade: %d jobs, %d workers", len(work_items), max_workers,
+            "_run_phase_c_cascade: %d jobs, %d workers",
+            len(work_items),
+            max_workers,
         )
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -492,7 +504,8 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
                 except Exception as e:
                     logger.warning(
                         "_run_phase_c_cascade: worker future failed for %s: %s",
-                        job.get("dedup_key"), e,
+                        job.get("dedup_key"),
+                        e,
                     )
                     summary["inconclusive"] += 1
                     continue
@@ -502,12 +515,17 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
                 if result == EXPIRED:
                     persist_job_expiry_state(conn, dedup_key, EXPIRED, now)
                     update_pipeline_status(
-                        conn, dedup_key, "archived",
-                        source="expiry_check", evidence=evidence,
+                        conn,
+                        dedup_key,
+                        "archived",
+                        source="expiry_check",
+                        evidence=evidence,
                     )
                     summary["archived"] += 1
                     logger.info(
-                        "_run_phase_c_cascade: archived %s (%s)", dedup_key, evidence,
+                        "_run_phase_c_cascade: archived %s (%s)",
+                        dedup_key,
+                        evidence,
                     )
                 elif result == LIVE:
                     persist_job_expiry_state(conn, dedup_key, LIVE, now)
@@ -523,6 +541,7 @@ def _run_phase_c_cascade(db_path: str, config: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Public API: unified staleness orchestrator
 # ---------------------------------------------------------------------------
+
 
 def run_staleness_check(db_path: str, config: dict) -> dict:
     """Unified nightly staleness orchestrator.
@@ -542,7 +561,10 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
         if not legacy_expiry_cfg.get("enabled", True):
             logger.info("run_staleness_check: disabled via config")
             return {
-                "phase_b": {}, "phase_a": {}, "phase_c": {}, "disabled": True,
+                "phase_b": {},
+                "phase_a": {},
+                "phase_c": {},
+                "disabled": True,
             }
 
     summary: dict = {"phase_b": {}, "phase_a": {}, "phase_c": {}}
@@ -551,6 +573,7 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
     if staleness_cfg.get("batch_ats_enabled", True):
         try:
             from job_finder.web.ats_reconciler import reconcile_all_companies
+
             summary["phase_b"] = reconcile_all_companies(db_path, config)
         except Exception:
             logger.exception("run_staleness_check: Phase B failed")
@@ -561,6 +584,7 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
     # --- Phase A: time-based stale / archive ---
     try:
         from job_finder.web.stale_detector import run_stale_detection
+
         summary["phase_a"] = run_stale_detection(db_path)
     except Exception:
         logger.exception("run_staleness_check: Phase A failed")
@@ -580,6 +604,7 @@ def run_staleness_check(db_path: str, config: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Deprecated alias — retained for one release to avoid breaking callers
 # ---------------------------------------------------------------------------
+
 
 def run_expiry_check(db_path: str, config: dict) -> dict:
     """DEPRECATED: use run_staleness_check instead.

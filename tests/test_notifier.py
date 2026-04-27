@@ -12,7 +12,8 @@ Covers:
 import threading
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
+
 
 class TestSendNotification(unittest.TestCase):
     """Test send_notification fires in a daemon thread."""
@@ -53,6 +54,7 @@ class TestSendNotification(unittest.TestCase):
     def test_passes_url_as_on_click(self):
         """send_notification passes url as on_click kwarg to toast."""
         import sys
+
         from job_finder.web.notifier import send_notification
 
         with patch("threading.Thread") as mock_thread:
@@ -99,12 +101,14 @@ class TestSendNotification(unittest.TestCase):
         _, toast_kwargs = mock_toast.call_args
         assert "on_click" not in toast_kwargs, "on_click must not be passed when url is None"
 
+
 class TestFallbackGraceful(unittest.TestCase):
     """Test graceful fallback when win11toast is not importable."""
 
     def test_no_exception_on_import_error(self):
         """send_notification silently swallows ImportError from win11toast."""
         import sys
+
         from job_finder.web.notifier import send_notification
 
         # Simulate win11toast not being installed
@@ -160,12 +164,14 @@ class TestFallbackGraceful(unittest.TestCase):
             except Exception as e:
                 self.fail(f"Thread target must swallow exceptions, got: {e}")
 
+
 class TestToggleGating(unittest.TestCase):
     """Test that each notification type respects its config toggle."""
 
     def setUp(self):
         """Reset cooldown state before each test to prevent cross-test pollution."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def test_notify_high_score_sends_when_enabled(self):
@@ -175,7 +181,9 @@ class TestToggleGating(unittest.TestCase):
         config = {"notifications": {"high_score": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_high_score("Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config)
+            notify_high_score(
+                "Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config
+            )
             mock_send.assert_called_once()
 
     def test_notify_high_score_skips_when_disabled(self):
@@ -185,7 +193,9 @@ class TestToggleGating(unittest.TestCase):
         config = {"notifications": {"high_score": False}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_high_score("Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config)
+            notify_high_score(
+                "Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config
+            )
             mock_send.assert_not_called()
 
     def test_notify_high_score_default_enabled(self):
@@ -195,7 +205,9 @@ class TestToggleGating(unittest.TestCase):
         config = {}  # no notifications section
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_high_score("Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config)
+            notify_high_score(
+                "Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config
+            )
             mock_send.assert_called_once()
 
     def test_notify_pipeline_change_sends_when_enabled(self):
@@ -205,7 +217,9 @@ class TestToggleGating(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             mock_send.assert_called_once()
 
     def test_notify_pipeline_change_skips_when_disabled(self):
@@ -215,7 +229,9 @@ class TestToggleGating(unittest.TestCase):
         config = {"notifications": {"pipeline_change": False}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             mock_send.assert_not_called()
 
     def test_notify_budget_alert_sends_when_enabled(self):
@@ -238,12 +254,14 @@ class TestToggleGating(unittest.TestCase):
             notify_budget_alert(85.0, config)
             mock_send.assert_not_called()
 
+
 class TestHighScoreURL(unittest.TestCase):
     """Test URL construction for high-score notifications."""
 
     def setUp(self):
         """Reset cooldown state before each test."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def test_url_points_to_job_detail(self):
@@ -253,9 +271,13 @@ class TestHighScoreURL(unittest.TestCase):
         config = {"notifications": {"high_score": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_high_score("Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config)
+            notify_high_score(
+                "Data Scientist", "Acme Corp", 82.0, "acme|data-scientist|sf", config
+            )
             call_args = mock_send.call_args
-            url = call_args.kwargs.get("url") or (call_args.args[2] if len(call_args.args) > 2 else None)
+            url = call_args.kwargs.get("url") or (
+                call_args.args[2] if len(call_args.args) > 2 else None
+            )
             assert url is not None, "URL must be provided"
             assert "/jobs/" in url
 
@@ -270,7 +292,9 @@ class TestHighScoreURL(unittest.TestCase):
         with patch("job_finder.web.notifier.send_notification") as mock_send:
             notify_high_score("Data Scientist", "Acme Corp", 82.0, dedup_key, config)
             call_args = mock_send.call_args
-            url = call_args.kwargs.get("url") or (call_args.args[2] if len(call_args.args) > 2 else None)
+            url = call_args.kwargs.get("url") or (
+                call_args.args[2] if len(call_args.args) > 2 else None
+            )
             assert url is not None
             # Pipe characters should be encoded
             assert "|" not in url.split("/jobs/")[1]
@@ -284,9 +308,12 @@ class TestHighScoreURL(unittest.TestCase):
         with patch("job_finder.web.notifier.send_notification") as mock_send:
             notify_high_score("Data Scientist", "Acme Corp", 82.0, "acme|ds|sf", config)
             call_args = mock_send.call_args
-            body = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            body = (
+                call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            )
             assert "Acme Corp" in body
             assert "82" in body  # score should appear
+
 
 class TestBudgetAlertURL(unittest.TestCase):
     """Test URL construction for budget alert notifications."""
@@ -294,6 +321,7 @@ class TestBudgetAlertURL(unittest.TestCase):
     def setUp(self):
         """Reset cooldown state before each test."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def test_url_points_to_settings(self):
@@ -305,7 +333,9 @@ class TestBudgetAlertURL(unittest.TestCase):
         with patch("job_finder.web.notifier.send_notification") as mock_send:
             notify_budget_alert(85.0, config)
             call_args = mock_send.call_args
-            url = call_args.kwargs.get("url") or (call_args.args[2] if len(call_args.args) > 2 else None)
+            url = call_args.kwargs.get("url") or (
+                call_args.args[2] if len(call_args.args) > 2 else None
+            )
             assert url is not None, "URL must be provided"
             assert "/settings" in url
 
@@ -318,7 +348,9 @@ class TestBudgetAlertURL(unittest.TestCase):
         with patch("job_finder.web.notifier.send_notification") as mock_send:
             notify_budget_alert(85.0, config)
             call_args = mock_send.call_args
-            body = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            body = (
+                call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            )
             assert "85" in body
 
     def test_body_distinguishes_80_and_100_percent(self):
@@ -332,11 +364,16 @@ class TestBudgetAlertURL(unittest.TestCase):
             with patch("job_finder.web.notifier.send_notification") as mock_send:
                 notify_budget_alert(pct, config)
                 call_args = mock_send.call_args
-                bodies[pct] = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+                bodies[pct] = (
+                    call_args.args[1]
+                    if len(call_args.args) > 1
+                    else call_args.kwargs.get("body", "")
+                )
 
         assert "80" in bodies[80.0]
         assert "100" in bodies[100.0]
         assert bodies[80.0] != bodies[100.0], "80% and 100% bodies must differ"
+
 
 class TestPipelineChangeLabels(unittest.TestCase):
     """Test that detection_type maps to human-readable labels."""
@@ -344,6 +381,7 @@ class TestPipelineChangeLabels(unittest.TestCase):
     def setUp(self):
         """Reset cooldown state before each test."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def test_rejection_label(self):
@@ -353,7 +391,9 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
             title = call_args.args[0] if call_args.args else call_args.kwargs.get("title", "")
             assert "Rejection" in title or "rejection" in title.lower()
@@ -365,7 +405,9 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("interview_invite", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "interview_invite", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
             title = call_args.args[0] if call_args.args else call_args.kwargs.get("title", "")
             assert "Interview" in title or "interview" in title.lower()
@@ -377,7 +419,9 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("application_confirmation", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "application_confirmation", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
             title = call_args.args[0] if call_args.args else call_args.kwargs.get("title", "")
             assert "Application" in title or "Confirm" in title or "confirm" in title.lower()
@@ -401,7 +445,9 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("custom_event", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "custom_event", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
             title = call_args.args[0] if call_args.args else call_args.kwargs.get("title", "")
             # Should not crash; title should contain something readable
@@ -414,9 +460,13 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
-            body = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            body = (
+                call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("body", "")
+            )
             assert "Acme Corp" in body
             assert "Data Scientist" in body
 
@@ -427,11 +477,16 @@ class TestPipelineChangeLabels(unittest.TestCase):
         config = {"notifications": {"pipeline_change": True}}
 
         with patch("job_finder.web.notifier.send_notification") as mock_send:
-            notify_pipeline_change("rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config)
+            notify_pipeline_change(
+                "rejection", "Data Scientist", "Acme Corp", "acme|ds|sf", config
+            )
             call_args = mock_send.call_args
-            url = call_args.kwargs.get("url") or (call_args.args[2] if len(call_args.args) > 2 else None)
+            url = call_args.kwargs.get("url") or (
+                call_args.args[2] if len(call_args.args) > 2 else None
+            )
             assert url is not None
             assert "/jobs/" in url
+
 
 class TestNotifierDedup:
     """Tests for 24-hour notification cooldown guard."""
@@ -439,27 +494,32 @@ class TestNotifierDedup:
     def setup_method(self):
         """Reset the module-level dedup state before each test."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def teardown_method(self):
         """Reset the module-level dedup state after each test to prevent leakage."""
         from job_finder.web import notifier
+
         notifier._NOTIFY_SEEN.clear()
 
     def test_can_notify_first_call_returns_true(self):
         """_can_notify returns True on the first call for a (key, type) pair."""
         from job_finder.web.notifier import _can_notify
+
         assert _can_notify("key1", "high_score") is True
 
     def test_can_notify_second_call_within_24h_returns_false(self):
         """_can_notify returns False on immediate second call (within 24h)."""
         from job_finder.web.notifier import _can_notify
+
         _can_notify("key1", "high_score")  # first call
         assert _can_notify("key1", "high_score") is False
 
     def test_can_notify_different_type_same_key_returns_true(self):
         """Different notification_type with same dedup_key is independent."""
         from job_finder.web.notifier import _can_notify
+
         _can_notify("key1", "high_score")  # fires for high_score
         # pipeline_change for same key should still be allowed
         assert _can_notify("key1", "pipeline_change") is True
@@ -467,6 +527,7 @@ class TestNotifierDedup:
     def test_can_notify_different_key_same_type_returns_true(self):
         """Different dedup_key with same notification_type is independent."""
         from job_finder.web.notifier import _can_notify
+
         _can_notify("key1", "high_score")  # fires for key1
         # key2 for same type should still be allowed
         assert _can_notify("key2", "high_score") is True
@@ -520,6 +581,7 @@ class TestNotifierDedup:
             notify_budget_alert(100.0, config)
             # Budget alert has no dedup guard — both calls should send
             assert mock_send.call_count == 2
+
 
 class TestNotifierIntegration(unittest.TestCase):
     """Integration tests for thread daemon behavior."""

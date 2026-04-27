@@ -7,6 +7,7 @@ cost_gate() or record_cost() directly.
 
 Phase 25 deliverable — part of the multi-provider routing system.
 """
+
 from __future__ import annotations
 
 import logging
@@ -96,7 +97,7 @@ class AnthropicProvider(BaseProvider):
         return ModelResult(
             data=data,
             cost_usd=cost_usd,
-            input_tokens=0,    # call_claude records internally; not re-exposed
+            input_tokens=0,  # call_claude records internally; not re-exposed
             output_tokens=0,
             model=model,
             provider="anthropic",

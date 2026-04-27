@@ -1,11 +1,10 @@
 """Tests for company research service layer."""
 
-import json
+import os
 import sqlite3
 import tempfile
-import os
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,12 +19,11 @@ def research_db():
     run_migrations(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     conn.execute(
         "INSERT INTO companies (name, name_raw, homepage_url, industry, company_size, "
         "ats_probe_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("testco", "TestCo Inc", "https://testco.com", "SaaS", "500",
-         "pending", now, now),
+        ("testco", "TestCo Inc", "https://testco.com", "SaaS", "500", "pending", now, now),
     )
     conn.commit()
     yield path, conn
@@ -38,13 +36,15 @@ class TestGetCachedCompanyResearch:
 
     def test_returns_none_when_no_research(self, research_db):
         from job_finder.web.company_research import get_cached_company_research
+
         path, conn = research_db
         assert get_cached_company_research(conn, 1) is None
 
     def test_returns_done_row_within_ttl(self, research_db):
         from job_finder.web.company_research import get_cached_company_research
+
         path, conn = research_db
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -57,8 +57,9 @@ class TestGetCachedCompanyResearch:
 
     def test_returns_none_for_stale_cache(self, research_db):
         from job_finder.web.company_research import get_cached_company_research
+
         path, conn = research_db
-        old = (datetime.now(timezone.utc) - timedelta(hours=100)).isoformat()
+        old = (datetime.now(UTC) - timedelta(hours=100)).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -69,8 +70,9 @@ class TestGetCachedCompanyResearch:
 
     def test_returns_generating_row(self, research_db):
         from job_finder.web.company_research import get_cached_company_research
+
         path, conn = research_db
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
             (1, "generating", now),
@@ -87,6 +89,7 @@ class TestStartCompanyResearch:
     @patch("job_finder.web.company_research.threading.Thread")
     def test_creates_generating_row_and_returns_id(self, mock_thread, research_db):
         from job_finder.web.company_research import start_company_research
+
         path, conn = research_db
         mock_thread_instance = MagicMock()
         mock_thread.return_value = mock_thread_instance
@@ -109,10 +112,11 @@ class TestRunCompanyResearchBackground:
     @patch("job_finder.web.company_research.anthropic.Anthropic")
     def test_successful_research_sets_done(self, mock_anthropic, mock_call, research_db):
         from job_finder.web.company_research import run_company_research_background
+
         path, conn = research_db
 
         # Insert a generating row
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
             (1, "generating", now),
@@ -129,9 +133,7 @@ class TestRunCompanyResearchBackground:
         # Re-read from a fresh connection (background uses standalone_connection)
         check_conn = sqlite3.connect(path)
         check_conn.row_factory = sqlite3.Row
-        row = check_conn.execute(
-            "SELECT * FROM company_research WHERE id = 1"
-        ).fetchone()
+        row = check_conn.execute("SELECT * FROM company_research WHERE id = 1").fetchone()
         check_conn.close()
         assert row["status"] == "done"
         assert row["research_json"] is not None
@@ -140,9 +142,10 @@ class TestRunCompanyResearchBackground:
     @patch("job_finder.web.company_research.anthropic.Anthropic")
     def test_failed_research_sets_error(self, mock_anthropic, mock_call, research_db):
         from job_finder.web.company_research import run_company_research_background
+
         path, conn = research_db
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
             (1, "generating", now),
@@ -155,9 +158,7 @@ class TestRunCompanyResearchBackground:
 
         check_conn = sqlite3.connect(path)
         check_conn.row_factory = sqlite3.Row
-        row = check_conn.execute(
-            "SELECT * FROM company_research WHERE id = 1"
-        ).fetchone()
+        row = check_conn.execute("SELECT * FROM company_research WHERE id = 1").fetchone()
         check_conn.close()
         assert row["status"] == "error"
         assert "API timeout" in row["error_msg"]

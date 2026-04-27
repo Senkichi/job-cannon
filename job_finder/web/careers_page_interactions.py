@@ -18,7 +18,7 @@ import json
 import logging
 import re
 import time
-from urllib.parse import urljoin, urlparse, urlencode, parse_qs, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_INTERACTION_DELAY_S = 0.5       # Delay between intra-company requests
-_INTERACTION_WAIT_MS = 1500      # Wait after click/scroll for DOM update
+_INTERACTION_DELAY_S = 0.5  # Delay between intra-company requests
+_INTERACTION_WAIT_MS = 1500  # Wait after click/scroll for DOM update
 _MAX_PAGINATION_PAGES = 5
 _MAX_LOAD_MORE_CLICKS = 5
 _MAX_SCROLLS = 5
@@ -63,28 +63,68 @@ _SEARCH_PARAM_NAMES = ["q", "search", "query", "keywords", "keyword", "title"]
 
 # Patterns in XHR/fetch URLs that indicate a jobs API
 _API_PATTERNS = [
-    "/api/jobs", "/api/positions", "/api/openings", "/api/careers",
-    "/api/v1/jobs", "/api/v2/jobs",
-    "/jobs.json", "/positions.json", "/openings.json", "/careers.json",
+    "/api/jobs",
+    "/api/positions",
+    "/api/openings",
+    "/api/careers",
+    "/api/v1/jobs",
+    "/api/v2/jobs",
+    "/jobs.json",
+    "/positions.json",
+    "/openings.json",
+    "/careers.json",
     "/wday/cxs/",  # Workday REST API
 ]
 
 # JSON keys that typically hold job arrays
-_JOB_ARRAY_KEYS = ["jobs", "results", "data", "positions", "openings",
-                    "postings", "items", "jobPostings", "records", "hits"]
+_JOB_ARRAY_KEYS = [
+    "jobs",
+    "results",
+    "data",
+    "positions",
+    "openings",
+    "postings",
+    "items",
+    "jobPostings",
+    "records",
+    "hits",
+]
 
 # Fields that indicate a dict is a job object
-_JOB_TITLE_FIELDS = ["title", "name", "position", "jobTitle", "job_title",
-                      "positionTitle", "role"]
-_JOB_URL_FIELDS = ["url", "link", "href", "applyUrl", "apply_url",
-                    "detailUrl", "detail_url", "jobUrl", "canonicalUrl"]
+_JOB_TITLE_FIELDS = ["title", "name", "position", "jobTitle", "job_title", "positionTitle", "role"]
+_JOB_URL_FIELDS = [
+    "url",
+    "link",
+    "href",
+    "applyUrl",
+    "apply_url",
+    "detailUrl",
+    "detail_url",
+    "jobUrl",
+    "canonicalUrl",
+]
 
 # Navigation path prefixes to skip (not job links)
 _NAV_PATH_PREFIXES = (
-    "/about", "/contact", "/blog", "/news", "/press", "/privacy",
-    "/terms", "/legal", "/login", "/signup", "/register", "/faq",
-    "/help", "/support", "/accessibility", "/sitemap", "/cookie",
-    "/search", "/events",
+    "/about",
+    "/contact",
+    "/blog",
+    "/news",
+    "/press",
+    "/privacy",
+    "/terms",
+    "/legal",
+    "/login",
+    "/signup",
+    "/register",
+    "/faq",
+    "/help",
+    "/support",
+    "/accessibility",
+    "/sitemap",
+    "/cookie",
+    "/search",
+    "/events",
 )
 
 
@@ -137,7 +177,9 @@ def probe_url_params(
 
             try:
                 resp = requests.get(
-                    search_url, timeout=_TIMEOUT, headers=_HEADERS,
+                    search_url,
+                    timeout=_TIMEOUT,
+                    headers=_HEADERS,
                 )
                 if resp.status_code >= 400:
                     continue
@@ -148,7 +190,10 @@ def probe_url_params(
                     try:
                         json_data = resp.json()
                         jobs = parse_api_response(
-                            json_data, target_titles, exclusions, careers_url,
+                            json_data,
+                            target_titles,
+                            exclusions,
+                            careers_url,
                         )
                         if jobs:
                             winning_param = param_name
@@ -163,7 +208,10 @@ def probe_url_params(
                 # Try HTML extraction
                 soup = BeautifulSoup(resp.text, "html.parser")
                 jobs = _extract_jobs_from_soup(
-                    soup, search_url, target_titles, exclusions,
+                    soup,
+                    search_url,
+                    target_titles,
+                    exclusions,
                 )
 
                 if jobs:
@@ -176,7 +224,9 @@ def probe_url_params(
 
             except Exception as e:
                 logger.debug(
-                    "probe_url_params failed for '%s': %s", search_url, e,
+                    "probe_url_params failed for '%s': %s",
+                    search_url,
+                    e,
                 )
 
             time.sleep(_INTERACTION_DELAY_S)
@@ -184,7 +234,9 @@ def probe_url_params(
     if all_jobs:
         logger.info(
             "probe_url_params('%s'): %d jobs via ?%s= param",
-            careers_url, len(all_jobs), winning_param,
+            careers_url,
+            len(all_jobs),
+            winning_param,
         )
 
     return all_jobs
@@ -378,7 +430,8 @@ def submit_search_form(page, keyword: str) -> bool:
                 page.wait_for_timeout(_INTERACTION_WAIT_MS)
                 logger.debug(
                     "submit_search_form: submitted '%s' via %s",
-                    keyword, selector,
+                    keyword,
+                    selector,
                 )
                 return True
         except Exception:
@@ -515,6 +568,6 @@ def _find_job_array(data) -> list | None:
 def _extract_field(obj: dict, field_names: list[str]):
     """Extract the first matching field value from a dict."""
     for name in field_names:
-        if name in obj and obj[name]:
+        if obj.get(name):
             return obj[name]
     return None

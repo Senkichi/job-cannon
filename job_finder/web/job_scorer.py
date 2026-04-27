@@ -17,6 +17,7 @@ success criterion is ordinal stability — axis rankings preserved
 across repeated invocations. No byte-identical test here; rescore
 gates (Plan 4 G1-G4) capture the same intent via G3 correlation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,16 +28,16 @@ from typing import Any
 from job_finder.db import JobAssessment
 from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_prompts.v3_scoring_prompt import (
-    V3_SCORING_PROMPT,
-    JOB_ASSESSMENT_SCHEMA,
     FEWSHOT_EXAMPLES,
     FIELD_REINFORCEMENT,
+    JOB_ASSESSMENT_SCHEMA,
+    V3_SCORING_PROMPT,
 )
 
 log = logging.getLogger(__name__)
 
 # Re-export the schema for callers that need the dispatcher-layer constant.
-__all__ = ["score_job", "ScoringResult", "JOB_ASSESSMENT_SCHEMA"]
+__all__ = ["JOB_ASSESSMENT_SCHEMA", "ScoringResult", "score_job"]
 
 # Canonical sub-score keys (matches v3 prompt schema + CONTEXT D-05).
 # The LLM emits these at the TOP LEVEL of the response alongside `rationale`
@@ -100,11 +101,7 @@ def _build_user_message(job: dict) -> str:
         comp = f"\nSalary: {salary_min or '?'}-{salary_max or '?'}"
     jd = (job.get("jd_full") or "")[:_MAX_JD_CHARS]
     return (
-        f"Title: {title}\n"
-        f"Company: {company}\n"
-        f"Location: {location}"
-        f"{comp}\n\n"
-        f"Job Description:\n{jd}"
+        f"Title: {title}\nCompany: {company}\nLocation: {location}{comp}\n\nJob Description:\n{jd}"
     )
 
 
@@ -215,6 +212,4 @@ def score_job(
         )
 
     assessment = _coerce_assessment(result.data, result.provider)
-    return ScoringResult(
-        status="ok", data=assessment, provider=result.provider
-    )
+    return ScoringResult(status="ok", data=assessment, provider=result.provider)

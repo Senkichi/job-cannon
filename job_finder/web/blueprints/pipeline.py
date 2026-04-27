@@ -22,6 +22,7 @@ DYNAMIC_COLUMNS = ["technical", "onsite", "offer", "accepted"]
 # Columns always hidden in the Kanban (they clutter the board).
 HIDDEN_COLUMNS = ["archived", "withdrawn"]
 
+
 @pipeline_bp.route("/", strict_slashes=False)
 def index():
     """Kanban pipeline view — jobs grouped by pipeline stage."""
@@ -60,6 +61,7 @@ def index():
         "pipeline/index.html",
         columns=columns,
     )
+
 
 @pipeline_bp.route("/move", methods=["POST"], strict_slashes=False)
 def move():

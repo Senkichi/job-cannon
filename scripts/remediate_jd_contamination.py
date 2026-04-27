@@ -139,7 +139,9 @@ def run(db_path: str, apply: bool) -> dict:
             # Salary from structured sources is trustworthy — keep it.
             if tier == "serpapi" or _has_ats_hit(conn, company_id):
                 counts["salary_kept"] += 1
-                logger.info("SALARY-KEPT  %s (structured source: %s)", dedup_key[:60], tier or "ats")
+                logger.info(
+                    "SALARY-KEPT  %s (structured source: %s)", dedup_key[:60], tier or "ats"
+                )
                 continue
 
             # Salary from AI extraction on contaminated text — null it.

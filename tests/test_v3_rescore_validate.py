@@ -2,12 +2,12 @@
 
 Each gate function exercised against synthetic report dicts.
 """
+
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -18,20 +18,23 @@ from scripts.v3_rescore_validate import (
     gate_g3_correlation,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _DIMS = (
-    "title_fit", "location_fit", "comp_fit",
-    "domain_match", "seniority_match", "skills_match",
+    "title_fit",
+    "location_fit",
+    "comp_fit",
+    "domain_match",
+    "seniority_match",
+    "skills_match",
 )
 
 
 def _row(legacy: int, mean_sub: float, status: str = "ok") -> dict:
     """Build a per-row result with sub-scores all equal to mean_sub."""
-    sub = {dim: mean_sub for dim in _DIMS}
+    sub = dict.fromkeys(_DIMS, mean_sub)
     return {
         "dedup_key": f"co|job-{legacy}",
         "legacy_sonnet_score": legacy,
@@ -172,13 +175,14 @@ def test_g2_skips_rows_with_null_legacy_score():
         {
             "dedup_key": f"co|nolegacy-{i}",
             "legacy_sonnet_score": None,
-            "new_sub_scores": {dim: 4 for dim in _DIMS},
+            "new_sub_scores": dict.fromkeys(_DIMS, 4),
             "status": "ok",
         }
         for i in range(20)
     ]
     verdict, evidence = gate_g2_monotonicity(
-        _report(rows + null_legacy_rows, batch_number=3), strict=True,
+        _report(rows + null_legacy_rows, batch_number=3),
+        strict=True,
     )
     assert verdict == "pass"
     # q1 totals reflect ONLY rows with legacy_sonnet_score != None.
@@ -228,9 +232,10 @@ def test_g3_threshold_uniform_across_batches():
 def test_g3_fail_when_r_below_noise_floor():
     # Build an essentially uncorrelated sequence (random) to fail the floor.
     import random
+
     rng = random.Random(11)
     rows = []
-    for i in range(50):
+    for _i in range(50):
         legacy = rng.uniform(0, 100)
         mean = rng.uniform(1, 5)
         rows.append(_row(legacy, mean))
@@ -285,9 +290,9 @@ def test_main_writes_gates_back_into_report(tmp_path):
     report_path.write_text(json.dumps(_report(rows, batch_number=1)))
 
     result = subprocess.run(
-        [sys.executable, "scripts/v3_rescore_validate.py",
-         "--batch-report", str(report_path)],
-        capture_output=True, text=True,
+        [sys.executable, "scripts/v3_rescore_validate.py", "--batch-report", str(report_path)],
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, f"stderr={result.stderr}"
     payload = json.loads(report_path.read_text())
@@ -297,9 +302,14 @@ def test_main_writes_gates_back_into_report(tmp_path):
 
 def test_main_returns_2_on_missing_file(tmp_path):
     result = subprocess.run(
-        [sys.executable, "scripts/v3_rescore_validate.py",
-         "--batch-report", str(tmp_path / "nonexistent.json")],
-        capture_output=True, text=True,
+        [
+            sys.executable,
+            "scripts/v3_rescore_validate.py",
+            "--batch-report",
+            str(tmp_path / "nonexistent.json"),
+        ],
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 2
 
@@ -307,7 +317,8 @@ def test_main_returns_2_on_missing_file(tmp_path):
 def test_cli_help_exits_zero():
     result = subprocess.run(
         [sys.executable, "scripts/v3_rescore_validate.py", "--help"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0
     assert "--batch-report" in result.stdout

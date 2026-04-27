@@ -23,7 +23,6 @@ from flask import (
 )
 
 from job_finder.web.db_helpers import get_db
-
 from job_finder.web.profile_schema import (
     extract_profile_from_markdown,
     load_profile,
@@ -37,6 +36,7 @@ profile_bp = Blueprint("profile", __name__, url_prefix="/profile")
 
 _PROFILE_PATH = "experience_profile.json"
 _UPLOAD_DIR = "data/resume_uploads"
+
 
 def _get_all_skills(profile: dict) -> list:
     """Gather all unique skills from positions for autocomplete."""
@@ -52,6 +52,7 @@ def _get_all_skills(profile: dict) -> list:
                 seen.add(skill)
 
     return all_skills
+
 
 def _load_profile_page_extras() -> dict:
     """Load supplementary variables required by profile/index.html.
@@ -84,6 +85,7 @@ def _load_profile_page_extras() -> dict:
         pass
 
     from job_finder.web.resume_style_guide import load_style_guide
+
     style_guide = load_style_guide()
 
     profile_mtime = 0
@@ -98,6 +100,7 @@ def _load_profile_page_extras() -> dict:
         "style_guide": style_guide,
         "profile_mtime": profile_mtime,
     }
+
 
 @profile_bp.route("/", strict_slashes=False)
 def index():
@@ -114,6 +117,7 @@ def index():
         all_skills=all_skills,
         **extras,
     )
+
 
 @profile_bp.route("/save", methods=["POST"], strict_slashes=False)
 def save():
@@ -154,6 +158,7 @@ def save():
         flash(f"Error saving profile: {exc}", "error")
         return redirect(url_for("profile.index"))
 
+
 @profile_bp.route("/import", methods=["POST"], strict_slashes=False)
 def import_markdown():
     """Accept .md file upload, extract structured profile via Claude Opus."""
@@ -187,11 +192,14 @@ def import_markdown():
         **extras,
     )
 
+
 @profile_bp.route("/reorder-positions", methods=["POST"], strict_slashes=False)
 def reorder_positions():
     """HTMX endpoint: reorder positions by new index list and save."""
     try:
-        indices = request.json if request.is_json else json.loads(request.form.get("indices", "[]"))
+        indices = (
+            request.json if request.is_json else json.loads(request.form.get("indices", "[]"))
+        )
         profile = load_profile(_PROFILE_PATH)
         positions = profile.get("positions", [])
 
@@ -215,11 +223,14 @@ def reorder_positions():
     except (ValueError, KeyError, IndexError) as exc:
         return str(exc), 400
 
+
 @profile_bp.route("/reorder-skills", methods=["POST"], strict_slashes=False)
 def reorder_skills():
     """HTMX endpoint: reorder top-level skills and save."""
     try:
-        new_order = request.json if request.is_json else json.loads(request.form.get("skills", "[]"))
+        new_order = (
+            request.json if request.is_json else json.loads(request.form.get("skills", "[]"))
+        )
         profile = load_profile(_PROFILE_PATH)
 
         if isinstance(new_order, list):

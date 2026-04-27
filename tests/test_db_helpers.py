@@ -4,9 +4,8 @@ The function is re-exported from job_finder.web.db_helpers for backward
 compatibility, so both import paths are valid.
 """
 
-import pytest
-
 from job_finder.web.db_helpers import safe_json_load
+
 
 class TestSafeJsonLoad:
     """Tests for safe_json_load pure function.
@@ -79,4 +78,3 @@ class TestSafeJsonLoad:
         result = safe_json_load("42", default={})
         assert result == 42
         assert not isinstance(result, dict)
-

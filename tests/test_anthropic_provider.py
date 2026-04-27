@@ -17,7 +17,6 @@ import pytest
 from job_finder.web.model_provider import BaseProvider, ModelResult
 from job_finder.web.providers.anthropic_provider import AnthropicProvider
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -146,26 +145,30 @@ def test_call_without_schema(provider):
 def test_call_propagates_budget_exceeded(provider):
     from job_finder.web.claude_client import BudgetExceededError
 
-    with patch(
-        "job_finder.web.providers.anthropic_provider.call_claude",
-        side_effect=BudgetExceededError("Monthly budget cap reached"),
+    with (
+        patch(
+            "job_finder.web.providers.anthropic_provider.call_claude",
+            side_effect=BudgetExceededError("Monthly budget cap reached"),
+        ),
+        pytest.raises(BudgetExceededError),
     ):
-        with pytest.raises(BudgetExceededError):
-            provider.call(
-                model="claude-sonnet-4-6",
-                system="System",
-                messages=[{"role": "user", "content": "Hi"}],
-            )
+        provider.call(
+            model="claude-sonnet-4-6",
+            system="System",
+            messages=[{"role": "user", "content": "Hi"}],
+        )
 
 
 def test_call_propagates_api_error(provider):
-    with patch(
-        "job_finder.web.providers.anthropic_provider.call_claude",
-        side_effect=RuntimeError("API connection failed"),
+    with (
+        patch(
+            "job_finder.web.providers.anthropic_provider.call_claude",
+            side_effect=RuntimeError("API connection failed"),
+        ),
+        pytest.raises(RuntimeError, match="API connection failed"),
     ):
-        with pytest.raises(RuntimeError, match="API connection failed"):
-            provider.call(
-                model="claude-sonnet-4-6",
-                system="System",
-                messages=[{"role": "user", "content": "Hi"}],
-            )
+        provider.call(
+            model="claude-sonnet-4-6",
+            system="System",
+            messages=[{"role": "user", "content": "Hi"}],
+        )

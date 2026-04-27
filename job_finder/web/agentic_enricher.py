@@ -20,7 +20,6 @@ Usage:
 import logging
 import re
 import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +91,7 @@ def _search_ddg(query: str, max_results: int = 5) -> list[dict]:
     """
     try:
         from ddgs import DDGS
+
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
     except Exception as exc:
@@ -111,7 +111,7 @@ def _rank_urls(search_results: list[dict]) -> list[str]:
     _PRIORITY_DOMAINS constants. This ensures all callers share the same policy.
     """
     # Imported here to keep module-level imports clean and avoid circular refs
-    from job_finder.web.domain_policy import is_blocked_domain, domain_priority
+    from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 
     seen = set()
     urls = []
@@ -147,13 +147,11 @@ def _create_browser(playwright):
         locale="en-US",
     )
     page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
+    page.add_init_script('Object.defineProperty(navigator, "webdriver", {get: () => undefined})')
     return browser, page
 
 
-def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
+def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
     """Fetch a URL with Playwright and return cleaned text content.
 
     Uses extract_content_from_html() from enrichment_tiers for density-based
@@ -167,9 +165,10 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
     if "linkedin.com/jobs/" in url:
         try:
             from job_finder.web.enrichment_tiers import fetch_linkedin_jd
+
             li_text = fetch_linkedin_jd(url)
             if li_text and len(li_text) >= 300:
-                return li_text[:_MAX_JD_CHARS * 2]
+                return li_text[: _MAX_JD_CHARS * 2]
         except Exception as exc:
             logger.debug("LinkedIn lightweight extractor failed for %s: %s", url[:80], exc)
         # Fall through to Playwright if LinkedIn extractor fails
@@ -182,9 +181,10 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
 
         from job_finder.web.enrichment_tiers import (
             extract_content_from_html,
-            is_short_auth_page,
             is_chrome_or_login_page,
+            is_short_auth_page,
         )
+
         text = extract_content_from_html(html)
         if not text:
             return None
@@ -197,7 +197,7 @@ def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> Optional[str]:
             logger.debug("Chrome/login page detected on %s", url[:80])
             return None
 
-        return text[:_MAX_JD_CHARS * 2]  # Keep extra for validation, trim later
+        return text[: _MAX_JD_CHARS * 2]  # Keep extra for validation, trim later
 
     except Exception as exc:
         logger.debug("Playwright fetch failed for %s: %s", url[:80], exc)
@@ -252,7 +252,9 @@ def _generate_queries(
         logger.warning(
             "OllamaProvider provider error in _generate_queries for '%s' @ '%s': %s — "
             "falling back to heuristic queries",
-            title[:40], company[:20], exc,
+            title[:40],
+            company[:20],
+            exc,
         )
         return _fallback_queries(title, company)
 
@@ -335,7 +337,7 @@ def enrich_single_job(
     page,
     model: str,
     provider,  # OllamaProvider — passed from run_agentic_backfill
-) -> Optional[str]:
+) -> str | None:
     """Run the agentic enrichment loop for a single job.
 
     Args:
@@ -356,7 +358,9 @@ def enrich_single_job(
         return None
 
     # Step 1: Generate search queries via OllamaProvider
-    queries = _generate_queries(title, company, n=_MAX_SEARCH_QUERIES, provider=provider, model=model)
+    queries = _generate_queries(
+        title, company, n=_MAX_SEARCH_QUERIES, provider=provider, model=model
+    )
     logger.info("Agentic: %d queries for '%s' @ '%s'", len(queries), title[:40], company[:20])
 
     # Step 2: Search and collect candidate URLs
@@ -374,7 +378,7 @@ def enrich_single_job(
     logger.info("Agentic: %d candidate URLs", len(all_urls))
 
     # Step 3: Fetch and validate pages
-    best_text: Optional[str] = None
+    best_text: str | None = None
     best_confidence: float = 0.0
 
     # Failure reason counters for observability
@@ -383,7 +387,7 @@ def enrich_single_job(
     low_conf = 0
     auth_walls = 0
 
-    for i, url in enumerate(all_urls[:_MAX_FETCH_ATTEMPTS]):
+    for _i, url in enumerate(all_urls[:_MAX_FETCH_ATTEMPTS]):
         text = _fetch_page_text(page, url)
         if not text:
             auth_walls += 1
@@ -395,14 +399,21 @@ def enrich_single_job(
         # the page before paying Ollama inference cost.
         # Uses shared company_tokens() + company_name_in_text() from enrichment_tiers
         # (same logic used by fetch_ddg_jds for DDG tier validation).
-        from job_finder.web.enrichment_tiers import company_tokens as _company_tokens, company_name_in_text
+        from job_finder.web.enrichment_tiers import (
+            company_name_in_text,
+        )
+        from job_finder.web.enrichment_tiers import (
+            company_tokens as _company_tokens,
+        )
+
         tokens = _company_tokens(company)
         if not tokens:
             # DEFECT 015 FIX: fail CLOSED — degenerate company name (all stop-words).
             # Skip rather than burn inference budget on a heuristic that cannot operate.
             logger.debug(
                 "Agentic: skipping %s (company '%s' yields no meaningful tokens)",
-                url[:60], company[:30],
+                url[:60],
+                company[:30],
             )
             company_miss += 1
             continue
@@ -431,8 +442,13 @@ def enrich_single_job(
     logger.info(
         "Agentic: '%s' @ '%s' — urls=%d, fetched=%d, company_mismatch=%d, "
         "low_confidence=%d, auth_wall=%d",
-        title[:40], company[:20], len(all_urls), fetch_ok, company_miss,
-        low_conf, auth_walls,
+        title[:40],
+        company[:20],
+        len(all_urls),
+        fetch_ok,
+        company_miss,
+        low_conf,
+        auth_walls,
     )
 
     if best_text and best_confidence >= 0.5:
@@ -481,9 +497,11 @@ def run_agentic_backfill(
     # network work. ImportError covers missing playwright/ollama packages;
     # RuntimeError covers Ollama service unreachable (OllamaProvider._check_health).
     try:
-        from job_finder.web.providers.ollama_provider import OllamaProvider
         from playwright.sync_api import sync_playwright
+
         from job_finder.web.db_helpers import standalone_connection
+        from job_finder.web.providers.ollama_provider import OllamaProvider
+
         provider = OllamaProvider(config=config)
     except (ImportError, RuntimeError) as exc:
         logger.warning("Agentic backfill unavailable: %s", exc)
@@ -596,6 +614,8 @@ def run_agentic_backfill(
     # removes the early-exit guard cannot cause ZeroDivisionError here.
     logger.info(
         "Agentic enrichment complete: %d/%d jobs enriched (%.0f%%)",
-        enriched_count, total, 100 * enriched_count / (total or 1),
+        enriched_count,
+        total,
+        100 * enriched_count / (total or 1),
     )
     return enriched_count

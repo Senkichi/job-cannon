@@ -14,6 +14,7 @@ Row selection is stratified by legacy sonnet_score quartile and deterministic
 via ORDER BY printf('%s%d', dedup_key, seed). Distinct seeds per batch
 produce distinct row sets for reproducibility on re-run (CONTEXT D-19).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,8 +33,8 @@ import yaml
 # this script is invoked via `uv run --active python scripts/v3_rescore.py`.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from job_finder.db import persist_job_assessment  # noqa: E402
-from job_finder.web.job_scorer import score_job  # noqa: E402
+from job_finder.db import persist_job_assessment
+from job_finder.web.job_scorer import score_job
 
 log = logging.getLogger(__name__)
 
@@ -134,9 +135,7 @@ def run_batch(
     model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
     for i, key in enumerate(dedup_keys, 1):
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE dedup_key = ?", (key,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM jobs WHERE dedup_key = ?", (key,)).fetchone()
         if row is None:
             results.append({"dedup_key": key, "status": "missing"})
             continue
@@ -144,55 +143,63 @@ def run_batch(
         job = dict(row)
 
         if not force and job.get("classification"):
-            results.append({
-                "dedup_key": key,
-                "status": "already_scored",
-                "new_classification": job["classification"],
-            })
+            results.append(
+                {
+                    "dedup_key": key,
+                    "status": "already_scored",
+                    "new_classification": job["classification"],
+                }
+            )
             continue
 
         try:
             sr = score_job(job, conn, config)
         except Exception as exc:  # pragma: no cover - defensive
             failures += 1
-            results.append({
-                "dedup_key": key,
-                "legacy_sonnet_score": job.get("sonnet_score"),
-                "status": "error",
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "dedup_key": key,
+                    "legacy_sonnet_score": job.get("sonnet_score"),
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
             continue
 
         if sr.status != "ok" or sr.data is None:
             failures += 1
-            results.append({
-                "dedup_key": key,
-                "legacy_sonnet_score": job.get("sonnet_score"),
-                "status": sr.status,
-                "provider": sr.provider,
-                "error": sr.error,
-            })
+            results.append(
+                {
+                    "dedup_key": key,
+                    "legacy_sonnet_score": job.get("sonnet_score"),
+                    "status": sr.status,
+                    "provider": sr.provider,
+                    "error": sr.error,
+                }
+            )
             continue
 
-        persist_job_assessment(
-            conn, key, sr.data, provider=sr.provider, model=model
-        )
+        persist_job_assessment(conn, key, sr.data, provider=sr.provider, model=model)
 
-        results.append({
-            "dedup_key": key,
-            "legacy_sonnet_score": job.get("sonnet_score"),
-            "new_sub_scores": dict(sr.data.sub_scores),
-            "new_classification_placeholder": sr.data.classification,
-            "provider": sr.provider,
-            "model": model,
-            "status": "ok",
-            "error": None,
-        })
+        results.append(
+            {
+                "dedup_key": key,
+                "legacy_sonnet_score": job.get("sonnet_score"),
+                "new_sub_scores": dict(sr.data.sub_scores),
+                "new_classification_placeholder": sr.data.classification,
+                "provider": sr.provider,
+                "model": model,
+                "status": "ok",
+                "error": None,
+            }
+        )
 
         if i % 10 == 0:
             log.info(
                 "batch %d progress: %d/%d rescored",
-                batch_number, i, len(dedup_keys),
+                batch_number,
+                i,
+                len(dedup_keys),
             )
             _checkpoint_report(report_path, results, batch_number, seed, failures)
 
@@ -221,9 +228,7 @@ def _load_db_path(config: dict, override: str | None) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="v3.0 rescore runner (Phase 34 Plan 4)"
-    )
+    parser = argparse.ArgumentParser(description="v3.0 rescore runner (Phase 34 Plan 4)")
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--batch-number", type=int, required=True)
@@ -238,8 +243,8 @@ def main(argv: list[str] | None = None) -> int:
         "--include-no-sonnet",
         action="store_true",
         help="Include rows with sonnet_score IS NULL (the leftover pool that "
-             "never went through legacy scoring). Required for the B4 sweep "
-             "that converges global G1 to zero.",
+        "never went through legacy scoring). Required for the B4 sweep "
+        "that converges global G1 to zero.",
     )
     parser.add_argument("--config-path", default="config.yaml")
     args = parser.parse_args(argv)
@@ -257,14 +262,21 @@ def main(argv: list[str] | None = None) -> int:
     conn = sqlite3.connect(db_path)
     try:
         keys = select_batch_rows(
-            conn, args.batch_size, args.seed,
+            conn,
+            args.batch_size,
+            args.seed,
             exclude_rescored=not args.force_rescore,
             include_no_sonnet=args.include_no_sonnet,
         )
         log.info("selected %d rows for batch %d", len(keys), args.batch_number)
         report = run_batch(
-            conn, config, keys, report_path,
-            args.batch_number, args.seed, force=args.force_rescore,
+            conn,
+            config,
+            keys,
+            report_path,
+            args.batch_number,
+            args.seed,
+            force=args.force_rescore,
         )
         log.info(
             "batch %d complete: %d rescored, %d failed, %.0fs",

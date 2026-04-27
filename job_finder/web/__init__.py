@@ -19,19 +19,20 @@ from flask import Flask, redirect, url_for
 load_dotenv()
 
 from job_finder.config import (
+    DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_HAIKU_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
     DEFAULT_MODEL_HAIKU,
     DEFAULT_MODEL_SONNET,
-    DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
+
 
 def _setup_file_logging() -> None:
     """Attach RotatingFileHandler to root logger if not already attached.
@@ -77,9 +78,11 @@ def _setup_file_logging() -> None:
     # is pure noise. WARNING level keeps real DDGS-side warnings visible.
     logging.getLogger("ddgs").setLevel(logging.WARNING)
 
+
 logger = logging.getLogger(__name__)
 
-def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
+
+def create_app(config_path: str = "config.yaml", config: dict | None = None) -> Flask:
     """Create and configure the Flask application.
 
     Args:
@@ -127,9 +130,10 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
         _setup_file_logging()
 
         from job_finder.web.startup_backfills import (
-            run_description_reformat_once,
             run_data_backfills_once,
+            run_description_reformat_once,
         )
+
         run_description_reformat_once(app.config["DB_PATH"], cfg)
         run_data_backfills_once(app.config["DB_PATH"], cfg)
 
@@ -164,21 +168,21 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     app.jinja_env.filters["format_description"] = format_description_filter
 
     # --- Blueprint registration ---
+    from job_finder.web.blueprints.batch_scoring import batch_scoring_bp
     from job_finder.web.blueprints.companies import companies_bp
     from job_finder.web.blueprints.costs import costs_bp
     from job_finder.web.blueprints.dashboard import dashboard_bp
-    from job_finder.web.blueprints.batch_scoring import batch_scoring_bp
-    from job_finder.web.blueprints.sync import sync_bp
     from job_finder.web.blueprints.detections import detections_bp
     from job_finder.web.blueprints.feedback import feedback_bp
+    from job_finder.web.blueprints.guidelines import guidelines_bp
     from job_finder.web.blueprints.jobs import jobs_bp
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
-    from job_finder.web.blueprints.resume import resume_bp
-    from job_finder.web.blueprints.guidelines import guidelines_bp
-    from job_finder.web.blueprints.resume_review import resume_review_bp
     from job_finder.web.blueprints.profile_recommendations import profile_recs_bp
+    from job_finder.web.blueprints.resume import resume_bp
+    from job_finder.web.blueprints.resume_review import resume_review_bp
     from job_finder.web.blueprints.settings import settings_bp
+    from job_finder.web.blueprints.sync import sync_bp
 
     # companies_bp, resume_bp, feedback_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
     app.register_blueprint(companies_bp)
@@ -206,6 +210,7 @@ def create_app(config_path: str = "config.yaml", config: dict = None) -> Flask:
     # Start AFTER blueprints are registered so the scheduler job can import from
     # the web package without circular imports. Skipped when TESTING=True.
     from job_finder.web.scheduler import init_scheduler
+
     init_scheduler(app)
 
     return app

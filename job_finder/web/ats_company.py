@@ -9,11 +9,11 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from job_finder.config import get_company_allowlist, get_company_denylist, load_config
-from job_finder.web.dedup_normalizer import normalize_company
 from job_finder.web.ats_prober import _PROBE_STATUS_PRECEDENCE
+from job_finder.web.dedup_normalizer import normalize_company
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ _HAS_ALPHA_RE = re.compile(r"[a-zA-Z]")
 # Patterns that indicate a company name is actually a URL, HTML fragment, or
 # other parser artifact — not a real company name.
 _GARBAGE_PATTERNS = [
-    re.compile(r"https?://", re.IGNORECASE),            # URLs
-    re.compile(r"<\s*\w+[^>]*>", re.IGNORECASE),        # HTML tags
-    re.compile(r"Edit alert\s", re.IGNORECASE),          # LinkedIn email alert artifacts
+    re.compile(r"https?://", re.IGNORECASE),  # URLs
+    re.compile(r"<\s*\w+[^>]*>", re.IGNORECASE),  # HTML tags
+    re.compile(r"Edit alert\s", re.IGNORECASE),  # LinkedIn email alert artifacts
 ]
 
 
@@ -58,6 +58,7 @@ def _get_effective_config() -> dict:
     """
     try:
         from flask import current_app
+
         return current_app.config.get("JF_CONFIG", {})
     except RuntimeError:
         # No active Flask application context (background/CLI path)
@@ -99,16 +100,22 @@ def classify_company_name(
 
     # Hard reject: empty after cleanup
     if not cleaned:
-        return CompanyNameDecision(cleaned_name=None, action="reject", reason="empty_after_cleanup")
+        return CompanyNameDecision(
+            cleaned_name=None, action="reject", reason="empty_after_cleanup"
+        )
 
     # Hard reject: no alphabetic characters (punctuation-only, digits-only)
     if not _HAS_ALPHA_RE.search(cleaned):
-        return CompanyNameDecision(cleaned_name=None, action="reject", reason="no_alpha_characters")
+        return CompanyNameDecision(
+            cleaned_name=None, action="reject", reason="no_alpha_characters"
+        )
 
     # Hard reject: URLs, HTML tags, email alert artifacts
     for pattern in _GARBAGE_PATTERNS:
         if pattern.search(name):
-            return CompanyNameDecision(cleaned_name=None, action="reject", reason="garbage_pattern")
+            return CompanyNameDecision(
+                cleaned_name=None, action="reject", reason="garbage_pattern"
+            )
 
     # Config-aware checks
     if config is not None:
@@ -118,7 +125,9 @@ def classify_company_name(
         # Allowlist overrides overlong and denylist (escape hatch for false positives)
         if cleaned in allowlist:
             original_lowered = name.strip().lower()
-            action: Literal["accept", "normalize"] = "normalize" if cleaned != original_lowered else "accept"
+            action: Literal["accept", "normalize"] = (
+                "normalize" if cleaned != original_lowered else "accept"
+            )
             return CompanyNameDecision(cleaned_name=cleaned, action=action, reason=None)
 
         # Overlong reject (only checked when config available for allowlist bypass)
@@ -126,7 +135,8 @@ def classify_company_name(
             logger.warning(
                 "Rejecting overlong company name (%d chars): '%s...' — "
                 "add to config.yaml filters.company_allowlist if legitimate",
-                len(name.strip()), name[:60],
+                len(name.strip()),
+                name[:60],
             )
             return CompanyNameDecision(cleaned_name=None, action="reject", reason="overlong")
 
@@ -138,7 +148,8 @@ def classify_company_name(
         if len(name.strip()) > _MAX_COMPANY_NAME_LEN:
             logger.warning(
                 "Rejecting overlong company name (%d chars): '%s...'",
-                len(name.strip()), name[:60],
+                len(name.strip()),
+                name[:60],
             )
             return CompanyNameDecision(cleaned_name=None, action="reject", reason="overlong")
 
@@ -150,11 +161,11 @@ def classify_company_name(
 def upsert_company(
     conn: sqlite3.Connection,
     name: str,
-    ats_platform: Optional[str] = None,
-    ats_slug: Optional[str] = None,
+    ats_platform: str | None = None,
+    ats_slug: str | None = None,
     ats_probe_status: str = "pending",
-    homepage_url: Optional[str] = None,
-) -> Optional[int]:
+    homepage_url: str | None = None,
+) -> int | None:
     """Create or update a company record in the companies table.
 
     Enforces company name rules at the write boundary: rejects empty, non-alpha,
@@ -194,9 +205,7 @@ def upsert_company(
                 conn.commit()
             except Exception:
                 pass
-        logger.debug(
-            "upsert_company: rejected '%s' (reason=%s)", name[:60], decision.reason
-        )
+        logger.debug("upsert_company: rejected '%s' (reason=%s)", name[:60], decision.reason)
         return None
 
     now = datetime.now().isoformat()
@@ -275,10 +284,10 @@ def upsert_company(
 def find_or_create_company(
     conn: sqlite3.Connection,
     name: str,
-    ats_platform: Optional[str] = None,
-    ats_slug: Optional[str] = None,
-    homepage_url: Optional[str] = None,
-) -> Optional[int]:
+    ats_platform: str | None = None,
+    ats_slug: str | None = None,
+    homepage_url: str | None = None,
+) -> int | None:
     """Find existing company by normalized name or fuzzy match, or create new.
 
     Lookup order:
@@ -316,6 +325,7 @@ def find_or_create_company(
     # 2. Fuzzy match against all existing companies
     try:
         from job_finder.web.company_resolver import fuzzy_match_company
+
         all_rows = conn.execute("SELECT id, name FROM companies").fetchall()
         company_list = [(r["id"], r["name"]) for r in all_rows]
         matched_id, _score = fuzzy_match_company(name, company_list)
@@ -331,7 +341,8 @@ def find_or_create_company(
 
     # 3. Create new company record
     return upsert_company(
-        conn, name,
+        conn,
+        name,
         ats_platform=ats_platform,
         ats_slug=ats_slug,
         homepage_url=homepage_url,

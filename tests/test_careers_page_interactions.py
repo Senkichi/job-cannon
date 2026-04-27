@@ -1,8 +1,6 @@
 """Tests for careers page interaction helpers."""
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from job_finder.web.careers_page_interactions import (
     click_load_more,
@@ -14,7 +12,6 @@ from job_finder.web.careers_page_interactions import (
     submit_search_form,
 )
 
-
 # ---------------------------------------------------------------------------
 # deduplicate_keywords
 # ---------------------------------------------------------------------------
@@ -22,25 +19,35 @@ from job_finder.web.careers_page_interactions import (
 
 class TestDeduplicateKeywords:
     def test_removes_superstrings(self):
-        result = deduplicate_keywords([
-            "Data Scientist",
-            "Senior Data Scientist",
-            "Staff Data Scientist",
-        ])
+        result = deduplicate_keywords(
+            [
+                "Data Scientist",
+                "Senior Data Scientist",
+                "Staff Data Scientist",
+            ]
+        )
         assert result == ["Data Scientist"]
 
     def test_keeps_unrelated_titles(self):
-        result = deduplicate_keywords([
-            "Data Scientist",
-            "ML Engineer",
-            "Analytics Lead",
-        ])
+        result = deduplicate_keywords(
+            [
+                "Data Scientist",
+                "ML Engineer",
+                "Analytics Lead",
+            ]
+        )
         assert len(result) == 3
 
     def test_caps_at_three(self):
-        result = deduplicate_keywords([
-            "A", "B", "C", "D", "E",
-        ])
+        result = deduplicate_keywords(
+            [
+                "A",
+                "B",
+                "C",
+                "D",
+                "E",
+            ]
+        )
         assert len(result) == 3
 
     def test_empty_input(self):
@@ -50,10 +57,12 @@ class TestDeduplicateKeywords:
         assert deduplicate_keywords(["Data Scientist"]) == ["Data Scientist"]
 
     def test_case_insensitive_containment(self):
-        result = deduplicate_keywords([
-            "data scientist",
-            "Senior Data Scientist",
-        ])
+        result = deduplicate_keywords(
+            [
+                "data scientist",
+                "Senior Data Scientist",
+            ]
+        )
         assert result == ["data scientist"]
 
 
@@ -70,34 +79,48 @@ class TestParseApiResponse:
             {"title": "Accountant", "url": "/jobs/3"},
         ]
         result = parse_api_response(
-            data, ["data scientist", "engineer"], [], "https://example.com",
+            data,
+            ["data scientist", "engineer"],
+            [],
+            "https://example.com",
         )
         assert len(result) == 2
         assert result[0]["title"] == "Data Scientist"
         assert result[0]["url"] == "https://example.com/jobs/1"
 
     def test_jobs_wrapper(self):
-        data = {"jobs": [
-            {"title": "Software Engineer", "url": "https://example.com/j/1"},
-        ]}
+        data = {
+            "jobs": [
+                {"title": "Software Engineer", "url": "https://example.com/j/1"},
+            ]
+        }
         result = parse_api_response(data, ["engineer"], [])
         assert len(result) == 1
 
     def test_results_wrapper(self):
-        data = {"results": [
-            {"name": "Product Manager", "link": "/pm"},
-        ]}
+        data = {
+            "results": [
+                {"name": "Product Manager", "link": "/pm"},
+            ]
+        }
         result = parse_api_response(
-            data, ["product manager"], [], "https://example.com",
+            data,
+            ["product manager"],
+            [],
+            "https://example.com",
         )
         assert len(result) == 1
         assert result[0]["title"] == "Product Manager"
         assert result[0]["url"] == "https://example.com/pm"
 
     def test_nested_data_wrapper(self):
-        data = {"data": {"jobs": [
-            {"title": "Analyst", "href": "/a/1"},
-        ]}}
+        data = {
+            "data": {
+                "jobs": [
+                    {"title": "Analyst", "href": "/a/1"},
+                ]
+            }
+        }
         result = parse_api_response(data, ["analyst"], [])
         assert len(result) == 1
 
@@ -201,9 +224,7 @@ class TestClickLoadMore:
         button = MagicMock()
         button.text_content.return_value = "Load More"
 
-        page.query_selector_all.side_effect = lambda sel: (
-            [button] if sel == "button" else []
-        )
+        page.query_selector_all.side_effect = lambda sel: [button] if sel == "button" else []
 
         # After first click, no more buttons
         click_count = 0
@@ -256,9 +277,7 @@ class TestScrollForContent:
 
     def test_no_growth_returns_false(self):
         page = MagicMock()
-        page.evaluate.side_effect = lambda script: (
-            None if "scrollTo" in script else 1000
-        )
+        page.evaluate.side_effect = lambda script: None if "scrollTo" in script else 1000
 
         result = scroll_for_content(page, max_scrolls=3)
         assert result is False
@@ -311,9 +330,7 @@ class TestFollowPagination:
 
     def test_respects_max_pages(self):
         page = MagicMock()
-        links = "".join(
-            f'<a href="?page={i}">{i}</a>' for i in range(2, 20)
-        )
+        links = "".join(f'<a href="?page={i}">{i}</a>' for i in range(2, 20))
         page.content.return_value = f"<html><body>{links}</body></html>"
         urls = follow_pagination(page, "https://example.com/careers", max_pages=3)
         assert len(urls) == 3

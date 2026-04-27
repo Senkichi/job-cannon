@@ -19,11 +19,10 @@ Error codes:
     no_folder_id   -- token is valid but Drive folder is not configured
 """
 
-from pathlib import Path
-
 from flask import g
 
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
 
 def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
     """Return a structured dict describing current Google Drive readiness.
@@ -51,11 +50,13 @@ def get_drive_status(config: dict, token_path: str = "token.json") -> dict:
     g.drive_status = result
     return result
 
+
 def _compute_drive_status(config: dict, token_path: str) -> dict:
     """Internal: compute Drive status without caching."""
     try:
         # 1-4. Token existence, scope check, and refresh via centralized function
-        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        from job_finder.gmail_auth import AuthenticationError, get_credentials
+
         try:
             creds = get_credentials(token_path)
         except AuthenticationError as exc:

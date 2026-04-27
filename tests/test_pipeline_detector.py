@@ -4,19 +4,22 @@ Tests the detection engine: Gmail query, classify, match, score, auto-update or 
 Uses unittest.mock to mock Gmail API calls.
 """
 
-import json
-import sqlite3
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _insert_job(conn, dedup_key, title, company, pipeline_status="reviewing",
-                first_seen=None, location="Remote"):
+
+def _insert_job(
+    conn,
+    dedup_key,
+    title,
+    company,
+    pipeline_status="reviewing",
+    first_seen=None,
+    location="Remote",
+):
     """Insert a test job row into the migrated DB."""
     if first_seen is None:
         first_seen = (datetime.now() - timedelta(days=5)).isoformat()
@@ -29,23 +32,38 @@ def _insert_job(conn, dedup_key, title, company, pipeline_status="reviewing",
             pipeline_status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            dedup_key, title, company, location,
-            '["linkedin"]', '["https://linkedin.com/jobs/1"]',
-            "1", 150000, 200000, "Test job description",
-            first_seen, last_seen, 8.5, '{}', "interested", pipeline_status,
+            dedup_key,
+            title,
+            company,
+            location,
+            '["linkedin"]',
+            '["https://linkedin.com/jobs/1"]',
+            "1",
+            150000,
+            200000,
+            "Test job description",
+            first_seen,
+            last_seen,
+            8.5,
+            "{}",
+            "interested",
+            pipeline_status,
         ),
     )
     conn.commit()
 
+
 # ---------------------------------------------------------------------------
 # Unit tests: _classify_email
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyEmail:
     """Tests for _classify_email(subject, body)."""
 
     def test_classify_rejection_unfortunately_subject(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="unfortunately, we will not be moving forward",
             body="Thank you for your interest.",
@@ -54,6 +72,7 @@ class TestClassifyEmail:
 
     def test_classify_rejection_not_moving_forward_body(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Your application at Stripe",
             body="After careful consideration, we are not moving forward with your application.",
@@ -62,6 +81,7 @@ class TestClassifyEmail:
 
     def test_classify_rejection_other_candidates(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Application update",
             body="We have decided to move forward with other candidates.",
@@ -70,6 +90,7 @@ class TestClassifyEmail:
 
     def test_classify_interview_subject_interview(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Interview invitation - Senior Data Scientist",
             body="We would love to schedule an interview with you.",
@@ -78,6 +99,7 @@ class TestClassifyEmail:
 
     def test_classify_interview_next_steps(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Next steps for your application",
             body="We would like to discuss next steps in the hiring process.",
@@ -86,6 +108,7 @@ class TestClassifyEmail:
 
     def test_classify_interview_phone_screen(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Phone screen invitation",
             body="We would like to schedule a phone screen with you.",
@@ -94,6 +117,7 @@ class TestClassifyEmail:
 
     def test_classify_confirmation_application_received(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Application received - Data Scientist",
             body="We have received your application and will review it shortly.",
@@ -102,6 +126,7 @@ class TestClassifyEmail:
 
     def test_classify_confirmation_thank_you_for_applying(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Thank you for applying",
             body="Thank you for applying to the Data Scientist position.",
@@ -110,6 +135,7 @@ class TestClassifyEmail:
 
     def test_classify_none_unrelated_newsletter(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Weekly newsletter - Top 10 jobs this week",
             body="Check out these exciting opportunities in data science.",
@@ -118,21 +144,25 @@ class TestClassifyEmail:
 
     def test_classify_none_marketing_email(self):
         from job_finder.web.pipeline_detector import _classify_email
+
         result = _classify_email(
             subject="Special offer: 50% off premium membership",
             body="Upgrade your account today and get access to premium features.",
         )
         assert result is None
 
+
 # ---------------------------------------------------------------------------
 # Unit tests: _company_in_email
 # ---------------------------------------------------------------------------
+
 
 class TestCompanyInEmail:
     """Tests for _company_in_email(company, body, subject)."""
 
     def test_exact_match_in_body(self):
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Stripe",
             body="Dear candidate, Stripe has reviewed your application.",
@@ -142,6 +172,7 @@ class TestCompanyInEmail:
 
     def test_exact_match_in_subject(self):
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Stripe",
             body="We have reviewed your application.",
@@ -152,6 +183,7 @@ class TestCompanyInEmail:
     def test_no_substring_false_positive(self):
         """'Apple' should NOT match 'Pineapple'."""
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Apple",
             body="We work with Pineapple Corp on this initiative.",
@@ -161,6 +193,7 @@ class TestCompanyInEmail:
 
     def test_case_insensitive_match(self):
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "BetterHelp",
             body="Thank you for your interest in BETTERHELP.",
@@ -170,6 +203,7 @@ class TestCompanyInEmail:
 
     def test_no_match_unrelated_company(self):
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Stripe",
             body="We regret to inform you that we are going in a different direction.",
@@ -180,6 +214,7 @@ class TestCompanyInEmail:
     def test_multi_word_company_requires_all_sig_words(self):
         """'Alameda County' should NOT match email mentioning only 'county'."""
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Alameda County",
             body="The county has reviewed your application.",
@@ -189,6 +224,7 @@ class TestCompanyInEmail:
 
     def test_multi_word_company_matches_when_all_present(self):
         from job_finder.web.pipeline_detector import _company_in_email
+
         result = _company_in_email(
             "Alameda County",
             body="Thank you for your interest in Alameda County.",
@@ -196,9 +232,11 @@ class TestCompanyInEmail:
         )
         assert result is True
 
+
 # ---------------------------------------------------------------------------
 # Unit tests: _title_in_email
 # ---------------------------------------------------------------------------
+
 
 class TestTitleInEmail:
     """Tests for _title_in_email(title, subject, body)."""
@@ -206,88 +244,119 @@ class TestTitleInEmail:
     def test_single_sig_word_matches(self):
         """Title with 1 significant word: that word must appear."""
         from job_finder.web.pipeline_detector import _title_in_email
+
         # "Senior Data Scientist" -> sig words: ["scientist"] (senior, data are stop words)
         assert _title_in_email("Senior Data Scientist", "Scientist role", "") is True
 
     def test_single_sig_word_no_match(self):
         from job_finder.web.pipeline_detector import _title_in_email
+
         assert _title_in_email("Senior Data Scientist", "Manager role", "") is False
 
     def test_multi_sig_words_requires_two_matches(self):
         """Title with 3 sig words needs 2+ to match."""
         from job_finder.web.pipeline_detector import _title_in_email
+
         # "Information Systems Manager" -> sig words: ["information", "systems", "manager"]
         # Only "manager" in text -> 1 match < 2 required -> False
-        assert _title_in_email(
-            "Information Systems Manager",
-            "Manager position available",
-            "",
-        ) is False
+        assert (
+            _title_in_email(
+                "Information Systems Manager",
+                "Manager position available",
+                "",
+            )
+            is False
+        )
 
     def test_multi_sig_words_two_matches_sufficient(self):
         from job_finder.web.pipeline_detector import _title_in_email
-        assert _title_in_email(
-            "Information Systems Manager",
-            "Information Systems role",
-            "",
-        ) is True
+
+        assert (
+            _title_in_email(
+                "Information Systems Manager",
+                "Information Systems role",
+                "",
+            )
+            is True
+        )
 
     def test_multi_sig_words_all_match(self):
         from job_finder.web.pipeline_detector import _title_in_email
-        assert _title_in_email(
-            "Software Engineer",
-            "Software Engineer position",
-            "",
-        ) is True
+
+        assert (
+            _title_in_email(
+                "Software Engineer",
+                "Software Engineer position",
+                "",
+            )
+            is True
+        )
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _sender_is_ats
 # ---------------------------------------------------------------------------
+
 
 class TestSenderIsAts:
     """Tests for _sender_is_ats(from_address)."""
 
     def test_greenhouse_sender(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("no-reply@greenhouse.io") is True
 
     def test_lever_sender(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("noreply@lever.co") is True
 
     def test_ashby_sender(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("no-reply@ashbyhq.com") is True
 
     def test_subdomain_ats_match(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("jobs@mail.greenhouse.io") is True
 
     def test_with_name_and_brackets(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("Stripe Recruiting <noreply@greenhouse.io>") is True
 
     def test_gmail_not_ats(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("recruiter@gmail.com") is False
 
     def test_yahoo_not_ats(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("hr@yahoo.com") is False
 
     def test_empty_string(self):
         from job_finder.web.pipeline_detector import _sender_is_ats
+
         assert _sender_is_ats("") is False
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: score_match
 # ---------------------------------------------------------------------------
 
+
 class TestScoreMatch:
     """Tests for score_match(email, job)."""
 
-    def _make_job(self, company="Stripe", title="Senior Data Scientist",
-                  pipeline_status="reviewing", first_seen=None):
+    def _make_job(
+        self,
+        company="Stripe",
+        title="Senior Data Scientist",
+        pipeline_status="reviewing",
+        first_seen=None,
+    ):
         """Return a minimal job dict for testing."""
         if first_seen is None:
             first_seen = (datetime.now() - timedelta(days=5)).isoformat()
@@ -299,8 +368,9 @@ class TestScoreMatch:
             "first_seen": first_seen,
         }
 
-    def _make_email(self, subject="", body="", from_address="", date=None,
-                    detection_type="rejection"):
+    def _make_email(
+        self, subject="", body="", from_address="", date=None, detection_type="rejection"
+    ):
         """Return a minimal email dict for testing."""
         if date is None:
             date = datetime.now().isoformat()
@@ -315,6 +385,7 @@ class TestScoreMatch:
 
     def test_three_signal_match_auto_update_threshold(self):
         from job_finder.web.pipeline_detector import score_match
+
         job = self._make_job(company="Stripe", title="Senior Data Scientist")
         email = self._make_email(
             subject="Update on your application at Stripe",
@@ -329,6 +400,7 @@ class TestScoreMatch:
 
     def test_one_signal_match_review_queue_threshold(self):
         from job_finder.web.pipeline_detector import score_match
+
         job = self._make_job(company="Stripe", title="Senior Data Scientist")
         email = self._make_email(
             subject="Update on your Stripe application",
@@ -343,6 +415,7 @@ class TestScoreMatch:
 
     def test_zero_signal_match_no_match(self):
         from job_finder.web.pipeline_detector import score_match
+
         job = self._make_job(company="Stripe", title="Senior Data Scientist")
         email = self._make_email(
             subject="Application update",
@@ -359,6 +432,7 @@ class TestScoreMatch:
     def test_ats_domain_only_counts_with_detection_type(self):
         """ATS domain signal only counts if detection_type is not None (Pitfall 3)."""
         from job_finder.web.pipeline_detector import score_match
+
         job = self._make_job(company="Stripe", title="Senior Data Scientist")
         email = self._make_email(
             subject="New job alert",
@@ -369,27 +443,32 @@ class TestScoreMatch:
         score, signals = score_match(email, job)
         assert "ats_domain" not in signals
 
+
 # ---------------------------------------------------------------------------
 # Unit tests: _extract_snippet
 # ---------------------------------------------------------------------------
+
 
 class TestExtractSnippet:
     """Tests for _extract_snippet(body, detection_type)."""
 
     def test_returns_relevant_sentence_for_rejection(self):
         from job_finder.web.pipeline_detector import _extract_snippet
+
         body = "Thank you for applying. Unfortunately, we are not moving forward with your application. We wish you all the best."
         snippet = _extract_snippet(body, "rejection")
         assert "unfortunately" in snippet.lower() or "not moving forward" in snippet.lower()
 
     def test_max_200_chars(self):
         from job_finder.web.pipeline_detector import _extract_snippet
+
         body = "Unfortunately " + "x" * 300 + " other candidates are a better fit."
         snippet = _extract_snippet(body, "rejection")
         assert len(snippet) <= 200
 
     def test_fallback_to_first_sentence(self):
         from job_finder.web.pipeline_detector import _extract_snippet
+
         body = "Dear candidate. We wanted to reach out about your application."
         snippet = _extract_snippet(body, "rejection")
         assert len(snippet) > 0
@@ -397,21 +476,24 @@ class TestExtractSnippet:
 
     def test_returns_empty_for_empty_body(self):
         from job_finder.web.pipeline_detector import _extract_snippet
+
         snippet = _extract_snippet("", "rejection")
         assert snippet == ""
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: get_pending_detections and resolve_detection (db.py helpers)
 # ---------------------------------------------------------------------------
+
 
 class TestDbHelpers:
     """Integration tests for get_pending_detections() and resolve_detection()."""
 
     def test_get_pending_detections_returns_pending_only(self, migrated_db):
         from job_finder.db import get_pending_detections
+
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior data scientist|remote",
-                    "Senior Data Scientist", "Stripe")
+        _insert_job(conn, "stripe|senior data scientist|remote", "Senior Data Scientist", "Stripe")
         now = datetime.now().isoformat()
         # Insert one pending and one confirmed detection
         conn.execute(
@@ -420,8 +502,19 @@ class TestDbHelpers:
                 matched_signals, snippet, email_subject, email_from,
                 email_date, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("msg_pending", "rejection", "stripe|senior data scientist|remote",
-             2, '["company"]', "snippet", "subj", "from@gmail.com", now, "pending", now),
+            (
+                "msg_pending",
+                "rejection",
+                "stripe|senior data scientist|remote",
+                2,
+                '["company"]',
+                "snippet",
+                "subj",
+                "from@gmail.com",
+                now,
+                "pending",
+                now,
+            ),
         )
         conn.execute(
             """INSERT INTO pipeline_detections
@@ -429,9 +522,19 @@ class TestDbHelpers:
                 matched_signals, snippet, email_subject, email_from,
                 email_date, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("msg_confirmed", "rejection", "stripe|senior data scientist|remote",
-             3, '["company","ats_domain","timing"]', "snippet", "subj",
-             "from@greenhouse.io", now, "confirmed", now),
+            (
+                "msg_confirmed",
+                "rejection",
+                "stripe|senior data scientist|remote",
+                3,
+                '["company","ats_domain","timing"]',
+                "snippet",
+                "subj",
+                "from@greenhouse.io",
+                now,
+                "confirmed",
+                now,
+            ),
         )
         conn.commit()
 
@@ -442,9 +545,9 @@ class TestDbHelpers:
 
     def test_get_pending_detections_includes_job_details(self, migrated_db):
         from job_finder.db import get_pending_detections
+
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior data scientist|remote",
-                    "Senior Data Scientist", "Stripe")
+        _insert_job(conn, "stripe|senior data scientist|remote", "Senior Data Scientist", "Stripe")
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO pipeline_detections
@@ -452,9 +555,19 @@ class TestDbHelpers:
                 matched_signals, snippet, email_subject, email_from,
                 email_date, status, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("msg_001", "rejection", "stripe|senior data scientist|remote",
-             2, '["company"]', "We are not moving forward.", "Update",
-             "from@gmail.com", now, "pending", now),
+            (
+                "msg_001",
+                "rejection",
+                "stripe|senior data scientist|remote",
+                2,
+                '["company"]',
+                "We are not moving forward.",
+                "Update",
+                "from@gmail.com",
+                now,
+                "pending",
+                now,
+            ),
         )
         conn.commit()
 
@@ -468,6 +581,7 @@ class TestDbHelpers:
 
     def test_resolve_detection_updates_status_confirmed(self, migrated_db):
         from job_finder.db import resolve_detection
+
         path, conn = migrated_db
         now = datetime.now().isoformat()
         conn.execute(
@@ -494,6 +608,7 @@ class TestDbHelpers:
 
     def test_resolve_detection_updates_status_dismissed(self, migrated_db):
         from job_finder.db import resolve_detection
+
         path, conn = migrated_db
         now = datetime.now().isoformat()
         conn.execute(
@@ -517,15 +632,18 @@ class TestDbHelpers:
         ).fetchone()
         assert row[0] == "dismissed"
 
+
 # ---------------------------------------------------------------------------
 # Integration tests: _process_email (high-confidence and low-confidence)
 # ---------------------------------------------------------------------------
 
+
 class TestProcessEmail:
     """Integration tests for the full email processing flow."""
 
-    def _make_email(self, message_id, subject, body, from_address,
-                    detection_type="rejection", date=None):
+    def _make_email(
+        self, message_id, subject, body, from_address, detection_type="rejection", date=None
+    ):
         if date is None:
             date = datetime.now().isoformat()
         return {
@@ -540,9 +658,15 @@ class TestProcessEmail:
     def test_high_confidence_calls_update_pipeline_status(self, migrated_db):
         """3+ signal match should call update_pipeline_status with source='auto-detected'."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior data scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "stripe|senior data scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="reviewing",
+        )
 
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
@@ -581,9 +705,15 @@ class TestProcessEmail:
     def test_low_confidence_inserts_pending_detection(self, migrated_db):
         """1-2 signal match should insert pending detection, NOT update status."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "thumbtack|senior data scientist|remote",
-                    "Senior Data Scientist", "Thumbtack", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "thumbtack|senior data scientist|remote",
+            "Senior Data Scientist",
+            "Thumbtack",
+            pipeline_status="reviewing",
+        )
 
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
@@ -616,9 +746,15 @@ class TestProcessEmail:
     def test_message_dedup_prevents_reprocessing(self, migrated_db):
         """Same gmail_message_id should not be processed twice."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "betterhelp|data scientist|remote",
-                    "Data Scientist", "BetterHelp", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "betterhelp|data scientist|remote",
+            "Data Scientist",
+            "BetterHelp",
+            pipeline_status="reviewing",
+        )
 
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
@@ -650,9 +786,15 @@ class TestProcessEmail:
     def test_zero_signal_email_silently_dropped(self, migrated_db):
         """0-signal email should not create any detections."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior data scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "stripe|senior data scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="reviewing",
+        )
 
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
@@ -678,9 +820,15 @@ class TestProcessEmail:
     def test_no_company_match_skipped_even_with_other_signals(self, migrated_db):
         """Email with title/timing signals but no company match should be skipped."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "acme|software engineer|remote",
-                    "Software Engineer", "Acme Corp", pipeline_status="applied")
+        _insert_job(
+            conn,
+            "acme|software engineer|remote",
+            "Software Engineer",
+            "Acme Corp",
+            pipeline_status="applied",
+        )
 
         jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
 
@@ -703,9 +851,15 @@ class TestProcessEmail:
     def test_none_detection_type_skipped(self, migrated_db):
         """Emails with None detection_type (unclassified) should be skipped."""
         from job_finder.web.pipeline_detector import _process_email
+
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior data scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "stripe|senior data scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="reviewing",
+        )
 
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
@@ -725,9 +879,11 @@ class TestProcessEmail:
         ).fetchone()[0]
         assert count == 0
 
+
 # ---------------------------------------------------------------------------
 # Edge-case tests: score_match, _company_in_email, _title_in_email (DEBT-06)
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Edge cases for scoring and matching helpers — prevents false-positive auto-status updates.
@@ -857,9 +1013,11 @@ class TestEdgeCases:
         # ATS domain should NOT contribute to score when detection_type is None
         assert "ats_domain" not in signals
 
+
 # ---------------------------------------------------------------------------
 # Tests: update_pipeline_status duplicate event guard
 # ---------------------------------------------------------------------------
+
 
 class TestUpdatePipelineStatusDedup:
     """Test that update_pipeline_status skips event insertion if status already matches."""
@@ -869,14 +1027,23 @@ class TestUpdatePipelineStatusDedup:
         from job_finder.db import update_pipeline_status
 
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior-data-scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "stripe|senior-data-scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="reviewing",
+        )
 
         # First call transitions from reviewing -> rejected
-        update_pipeline_status(conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected")
+        update_pipeline_status(
+            conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected"
+        )
 
         # Second call with same status should be a no-op
-        update_pipeline_status(conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected")
+        update_pipeline_status(
+            conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected"
+        )
 
         # Only one pipeline_events row should exist
         count = conn.execute(
@@ -889,14 +1056,23 @@ class TestUpdatePipelineStatusDedup:
         from job_finder.db import update_pipeline_status
 
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior-data-scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="reviewing")
+        _insert_job(
+            conn,
+            "stripe|senior-data-scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="reviewing",
+        )
 
         # Transition reviewing -> applied
-        update_pipeline_status(conn, "stripe|senior-data-scientist|remote", "applied", source="manual")
+        update_pipeline_status(
+            conn, "stripe|senior-data-scientist|remote", "applied", source="manual"
+        )
 
         # Transition applied -> rejected (different status)
-        update_pipeline_status(conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected")
+        update_pipeline_status(
+            conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected"
+        )
 
         # Two events should exist (one per unique transition)
         count = conn.execute(
@@ -909,11 +1085,18 @@ class TestUpdatePipelineStatusDedup:
         from job_finder.db import update_pipeline_status
 
         path, conn = migrated_db
-        _insert_job(conn, "stripe|senior-data-scientist|remote",
-                    "Senior Data Scientist", "Stripe", pipeline_status="rejected")
+        _insert_job(
+            conn,
+            "stripe|senior-data-scientist|remote",
+            "Senior Data Scientist",
+            "Stripe",
+            pipeline_status="rejected",
+        )
 
         # Already at rejected — calling again should be no-op
-        update_pipeline_status(conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected")
+        update_pipeline_status(
+            conn, "stripe|senior-data-scientist|remote", "rejected", source="auto-detected"
+        )
 
         row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = 'stripe|senior-data-scientist|remote'"

@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,12 +13,10 @@ from job_finder.web.ai_career_navigator import (
     _execute_step,
     _extract_with_recipe,
     _flatten_a11y_node,
-    _take_snapshot,
     cache_nav_recipe,
     clear_nav_recipe,
     replay_navigation_recipe,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -96,9 +94,13 @@ class TestFlattenA11yNode:
         assert len(lines) == 3
 
     def test_skips_generic_nodes_without_name(self):
-        node = {"role": "generic", "name": "", "children": [
-            {"role": "button", "name": "OK"},
-        ]}
+        node = {
+            "role": "generic",
+            "name": "",
+            "children": [
+                {"role": "button", "name": "OK"},
+            ],
+        }
         lines = []
         _flatten_a11y_node(node, lines, depth=0)
         # Generic node skipped, but its child should appear
@@ -143,9 +145,15 @@ class TestExecuteStep:
         page.get_by_role.return_value = locator
         locator.first = MagicMock()
 
-        result = _execute_step(page, {
-            "action": "type", "role": "textbox", "name": "Search", "value": "engineer",
-        })
+        result = _execute_step(
+            page,
+            {
+                "action": "type",
+                "role": "textbox",
+                "name": "Search",
+                "value": "engineer",
+            },
+        )
         assert result is True
         locator.first.fill.assert_called_once()
 
@@ -195,7 +203,8 @@ class TestReplayNavigationRecipe:
         """
 
         jobs = replay_navigation_recipe(
-            page, sample_recipe,
+            page,
+            sample_recipe,
             target_titles=["data scientist"],
             exclusions=[],
         )
@@ -208,7 +217,8 @@ class TestReplayNavigationRecipe:
 
         with pytest.raises(RecipeStaleError):
             replay_navigation_recipe(
-                page, sample_recipe,
+                page,
+                sample_recipe,
                 target_titles=["data scientist"],
                 exclusions=[],
             )
@@ -222,7 +232,8 @@ class TestReplayNavigationRecipe:
         page.content.return_value = "<html><body></body></html>"
 
         replay_navigation_recipe(
-            page, sample_recipe,
+            page,
+            sample_recipe,
             target_titles=["machine learning"],
             exclusions=[],
         )
@@ -250,7 +261,8 @@ class TestReplayNavigationRecipe:
         """
 
         jobs = replay_navigation_recipe(
-            page, recipe,
+            page,
+            recipe,
             target_titles=["data analyst"],
             exclusions=[],
         )
@@ -267,9 +279,7 @@ class TestRecipeCaching:
         cache_nav_recipe(tmp_db_path, 1, sample_recipe)
 
         conn = sqlite3.connect(tmp_db_path)
-        row = conn.execute(
-            "SELECT careers_nav_recipe FROM companies WHERE id = 1"
-        ).fetchone()
+        row = conn.execute("SELECT careers_nav_recipe FROM companies WHERE id = 1").fetchone()
         conn.close()
 
         assert row is not None
@@ -282,9 +292,7 @@ class TestRecipeCaching:
         clear_nav_recipe(tmp_db_path, 1)
 
         conn = sqlite3.connect(tmp_db_path)
-        row = conn.execute(
-            "SELECT careers_nav_recipe FROM companies WHERE id = 1"
-        ).fetchone()
+        row = conn.execute("SELECT careers_nav_recipe FROM companies WHERE id = 1").fetchone()
         conn.close()
 
         assert row[0] is None
@@ -308,7 +316,8 @@ class TestExtractWithRecipe:
         """
 
         jobs = _extract_with_recipe(
-            page, {"method": "links_in_page"},
+            page,
+            {"method": "links_in_page"},
             target_titles=["data scientist"],
             exclusions=[],
         )
@@ -326,7 +335,8 @@ class TestExtractWithRecipe:
         """
 
         jobs = _extract_with_recipe(
-            page, {"method": "links_in_page"},
+            page,
+            {"method": "links_in_page"},
             target_titles=["data scientist"],
             exclusions=[],
         )
@@ -343,7 +353,8 @@ class TestExtractWithRecipe:
         """
 
         jobs = _extract_with_recipe(
-            page, {"method": "links_in_page"},
+            page,
+            {"method": "links_in_page"},
             target_titles=["data scientist"],
             exclusions=["junior"],
         )
@@ -384,6 +395,7 @@ class TestDiscoverNavigationRecipeCascade:
 
     def _run_discovery(self, config, careers_url="https://example.com/careers"):
         from job_finder.web.ai_career_navigator import discover_navigation_recipe
+
         return discover_navigation_recipe(
             page=self._build_page_mock(),
             careers_url=careers_url,
@@ -399,14 +411,23 @@ class TestDiscoverNavigationRecipeCascade:
         return mock_conn
 
     def test_uses_call_model_when_providers_configured(
-        self, cascade_config_haiku, make_model_result,
+        self,
+        cascade_config_haiku,
+        make_model_result,
     ):
-        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
-             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
-             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
-             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
-             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
-                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+        with (
+            patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc,
+            patch("job_finder.web.ai_career_navigator.call_model") as mock_cm,
+            patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc,
+            patch(
+                "job_finder.web.ai_career_navigator._take_snapshot",
+                return_value="<snapshot text more than fifty chars to pass guard>",
+            ),
+            patch(
+                "job_finder.web.ai_career_navigator._extract_with_recipe",
+                side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]],
+            ),
+        ):
             self._stub_connection(mock_sc)
             mock_cm.return_value = make_model_result(self._RECIPE)
 
@@ -420,12 +441,19 @@ class TestDiscoverNavigationRecipeCascade:
         assert recipe["extraction"]["method"] == "links_in_page"
 
     def test_uses_call_claude_when_no_providers(self):
-        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
-             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
-             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
-             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
-             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
-                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+        with (
+            patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc,
+            patch("job_finder.web.ai_career_navigator.call_model") as mock_cm,
+            patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc,
+            patch(
+                "job_finder.web.ai_career_navigator._take_snapshot",
+                return_value="<snapshot text more than fifty chars to pass guard>",
+            ),
+            patch(
+                "job_finder.web.ai_career_navigator._extract_with_recipe",
+                side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]],
+            ),
+        ):
             self._stub_connection(mock_sc)
             mock_cc.return_value = (self._RECIPE, 0.001)
 
@@ -437,12 +465,20 @@ class TestDiscoverNavigationRecipeCascade:
 
     def test_cascade_exhausted_falls_back_to_cli(self, cascade_config_haiku):
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
-        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
-             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
-             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
-             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
-             patch("job_finder.web.ai_career_navigator._extract_with_recipe",
-                   side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]]):
+
+        with (
+            patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc,
+            patch("job_finder.web.ai_career_navigator.call_model") as mock_cm,
+            patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc,
+            patch(
+                "job_finder.web.ai_career_navigator._take_snapshot",
+                return_value="<snapshot text more than fifty chars to pass guard>",
+            ),
+            patch(
+                "job_finder.web.ai_career_navigator._extract_with_recipe",
+                side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]],
+            ),
+        ):
             self._stub_connection(mock_sc)
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = (self._RECIPE, 0.001)
@@ -455,11 +491,17 @@ class TestDiscoverNavigationRecipeCascade:
 
     def test_cascade_and_cli_both_fail_returns_none(self, cascade_config_haiku):
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
-        with patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc, \
-             patch("job_finder.web.ai_career_navigator.call_model") as mock_cm, \
-             patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc, \
-             patch("job_finder.web.ai_career_navigator._take_snapshot", return_value="<snapshot text more than fifty chars to pass guard>"), \
-             patch("job_finder.web.ai_career_navigator._extract_with_recipe", return_value=[]):
+
+        with (
+            patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc,
+            patch("job_finder.web.ai_career_navigator.call_model") as mock_cm,
+            patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc,
+            patch(
+                "job_finder.web.ai_career_navigator._take_snapshot",
+                return_value="<snapshot text more than fifty chars to pass guard>",
+            ),
+            patch("job_finder.web.ai_career_navigator._extract_with_recipe", return_value=[]),
+        ):
             self._stub_connection(mock_sc)
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")

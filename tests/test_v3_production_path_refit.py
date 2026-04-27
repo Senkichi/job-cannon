@@ -23,6 +23,7 @@ Three layers of evidence — fast first, slow last:
      against live Ollama qwen2.5:14b, and asserts paired MAE <= 1.0. Opt-in
      via ``pytest -m integration`` (requires Ollama + qwen2.5:14b pulled).
 """
+
 from __future__ import annotations
 
 import json
@@ -39,8 +40,12 @@ BASELINE_GOLD = BASELINE_DIR / "baseline_gold.json"
 QWEN_CACHE = BASELINE_DIR / "qwen2_5_14b.json"
 
 _SUB_SCORE_KEYS = (
-    "title_fit", "location_fit", "comp_fit",
-    "domain_match", "seniority_match", "skills_match",
+    "title_fit",
+    "location_fit",
+    "comp_fit",
+    "domain_match",
+    "seniority_match",
+    "skills_match",
 )
 _G4_MAE_THRESHOLD = 1.0
 
@@ -166,6 +171,7 @@ def test_g4_score_job_production_wiring():
 def test_g4_refit_live_ollama():
     """Live MAE measurement against Phase 33 gold. Requires Ollama + qwen2.5:14b."""
     import yaml
+
     from job_finder.web.job_scorer import score_job
 
     if not BASELINE_SAMPLE.exists() or not BASELINE_GOLD.exists():
@@ -195,6 +201,5 @@ def test_g4_refit_live_ollama():
     mae, paired = _paired_mae(gold, candidate_map)
     assert paired >= 50, f"only {paired} paired rows -- live run produced too few results"
     assert mae <= _G4_MAE_THRESHOLD, (
-        f"G4 live refit failed: MAE={mae:.3f} > {_G4_MAE_THRESHOLD} "
-        f"(paired n={paired})"
+        f"G4 live refit failed: MAE={mae:.3f} > {_G4_MAE_THRESHOLD} (paired n={paired})"
     )

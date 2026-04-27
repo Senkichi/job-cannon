@@ -9,21 +9,18 @@ Covers:
     - Report JSON shape on disk.
     - CLI argparse smoke (--help exits 0).
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from scripts.v3_rescore import run_batch, select_batch_rows
 from job_finder.db import JobAssessment
 from job_finder.web.job_scorer import ScoringResult
-
+from scripts.v3_rescore import run_batch, select_batch_rows
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -60,8 +57,7 @@ def _make_jobs_db(num_rows: int = 40) -> sqlite3.Connection:
     for i in range(num_rows):
         score = (i + 1) * (100 / num_rows)
         conn.execute(
-            "INSERT INTO jobs (dedup_key, title, sonnet_score, jd_full) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO jobs (dedup_key, title, sonnet_score, jd_full) VALUES (?, ?, ?, ?)",
             (f"co|job-{i:03d}", f"Job {i}", score, long_jd),
         )
     conn.commit()
@@ -71,13 +67,19 @@ def _make_jobs_db(num_rows: int = 40) -> sqlite3.Connection:
 def _good_assessment() -> JobAssessment:
     return JobAssessment(
         sub_scores={
-            "title_fit": 4, "location_fit": 3, "comp_fit": 4,
-            "domain_match": 5, "seniority_match": 4, "skills_match": 3,
+            "title_fit": 4,
+            "location_fit": 3,
+            "comp_fit": 4,
+            "domain_match": 5,
+            "seniority_match": 4,
+            "skills_match": 3,
         },
         classification="",
         rationale={
-            "strengths": [], "gaps": [],
-            "talking_points": [], "resume_priority_skills": [],
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
         },
         provider="ollama",
     )
@@ -199,9 +201,7 @@ def test_select_batch_rows_include_no_sonnet_picks_them_up():
 
 
 def _ok_result() -> ScoringResult:
-    return ScoringResult(
-        status="ok", data=_good_assessment(), provider="ollama"
-    )
+    return ScoringResult(status="ok", data=_good_assessment(), provider="ollama")
 
 
 def test_run_batch_persists_each_row(tmp_path):
@@ -212,7 +212,12 @@ def test_run_batch_persists_each_row(tmp_path):
 
     with patch("scripts.v3_rescore.score_job", return_value=_ok_result()) as mock_score:
         report = run_batch(
-            conn, config, keys, report_path, batch_number=1, seed=42,
+            conn,
+            config,
+            keys,
+            report_path,
+            batch_number=1,
+            seed=42,
         )
 
     assert mock_score.call_count == 4
@@ -238,8 +243,14 @@ def test_run_batch_writes_report_with_per_row_results(tmp_path):
     assert payload["seed"] == 42
     assert len(payload["per_row_results"]) == 3
     first = payload["per_row_results"][0]
-    assert {"dedup_key", "legacy_sonnet_score", "new_sub_scores",
-            "provider", "model", "status"} <= set(first)
+    assert {
+        "dedup_key",
+        "legacy_sonnet_score",
+        "new_sub_scores",
+        "provider",
+        "model",
+        "status",
+    } <= set(first)
 
 
 def test_run_batch_skips_already_classified_rows(tmp_path):
@@ -264,9 +275,7 @@ def test_run_batch_records_error_status(tmp_path):
     config = {"providers": {"scoring": {"model": "qwen2.5:14b"}}}
     report_path = tmp_path / "report.json"
 
-    err_result = ScoringResult(
-        status="error", data=None, provider="ollama", error="boom"
-    )
+    err_result = ScoringResult(status="error", data=None, provider="ollama", error="boom")
     with patch("scripts.v3_rescore.score_job", return_value=err_result):
         report = run_batch(conn, config, keys, report_path, batch_number=1, seed=42)
 
@@ -303,7 +312,13 @@ def test_run_batch_force_rescore_overwrites(tmp_path):
 
     with patch("scripts.v3_rescore.score_job", return_value=_ok_result()) as mock_score:
         report = run_batch(
-            conn, config, keys, report_path, batch_number=1, seed=42, force=True,
+            conn,
+            config,
+            keys,
+            report_path,
+            batch_number=1,
+            seed=42,
+            force=True,
         )
     assert mock_score.call_count == 1
     assert report["per_row_results"][0]["status"] == "ok"
@@ -317,7 +332,8 @@ def test_run_batch_force_rescore_overwrites(tmp_path):
 def test_cli_help_exits_zero():
     result = subprocess.run(
         [sys.executable, "scripts/v3_rescore.py", "--help"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0
     assert "--batch-size" in result.stdout

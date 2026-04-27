@@ -16,6 +16,7 @@ import pytest
 
 from job_finder.web.resume_style_guide import load_style_guide, save_style_guide
 
+
 class TestLoadStyleGuide:
     def test_load_style_guide_returns_empty_dict_when_file_missing(self, tmp_path):
         """load_style_guide on a non-existent path returns {}."""
@@ -31,6 +32,7 @@ class TestLoadStyleGuide:
             json.dump(data, f)
         result = load_style_guide(path)
         assert isinstance(result, dict)
+
 
 class TestSaveLoadRoundtrip:
     def test_save_load_roundtrip(self, tmp_path):
@@ -57,7 +59,7 @@ class TestSaveLoadRoundtrip:
         """save_style_guide writes with indent=2 (human-readable)."""
         path = str(tmp_path / "style_guide.json")
         save_style_guide({"key": "value"}, path)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             raw = f.read()
         # indent=2 means the file contains newlines and spaces
         assert "\n" in raw
@@ -71,13 +73,15 @@ class TestSaveLoadRoundtrip:
         loaded = load_style_guide(path)
         assert loaded["greeting"] == "Bonjour — caf\u00e9"
         # Verify the file contains the actual unicode character, not escaped
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             raw = f.read()
         assert "\u00e9" in raw
+
 
 # ---------------------------------------------------------------------------
 # _build_style_guide_directives tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildStyleGuideDirectives:
     def test_build_style_guide_directives_returns_list(self):
@@ -128,38 +132,57 @@ class TestBuildStyleGuideDirectives:
         assert any("Tone" in d for d in result)
         assert not any("Verb tense:" in d for d in result)
 
+
 # ---------------------------------------------------------------------------
 # extract_style_guide tests
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaExpansion:
     def test_schema_has_all_new_fields(self):
         from job_finder.web.resume_style_guide import STYLE_GUIDE_SCHEMA
+
         new_fields = [
-            "summary_formula", "skills_format", "bullet_formula",
-            "bullet_counts", "confidentiality_rules", "typography_rules",
-            "jd_mirroring_rules", "anti_patterns", "role_archetype",
+            "summary_formula",
+            "skills_format",
+            "bullet_formula",
+            "bullet_counts",
+            "confidentiality_rules",
+            "typography_rules",
+            "jd_mirroring_rules",
+            "anti_patterns",
+            "role_archetype",
         ]
         for field in new_fields:
             assert field in STYLE_GUIDE_SCHEMA["properties"], f"Missing: {field}"
 
     def test_consistency_notes_removed_from_schema(self):
         from job_finder.web.resume_style_guide import STYLE_GUIDE_SCHEMA
+
         assert "consistency_notes" not in STYLE_GUIDE_SCHEMA["properties"]
 
     def test_consistency_notes_removed_from_field_labels(self):
         from job_finder.web.resume_style_guide import FIELD_LABELS
+
         assert "consistency_notes" not in FIELD_LABELS
 
     def test_required_fields_unchanged(self):
         from job_finder.web.resume_style_guide import STYLE_GUIDE_SCHEMA
+
         assert STYLE_GUIDE_SCHEMA["required"] == [
-            "bullet_style", "verb_tense", "section_order", "tone", "date_format"
+            "bullet_style",
+            "verb_tense",
+            "section_order",
+            "tone",
+            "date_format",
         ]
 
     def test_directives_bullet_counts_dict(self):
         from job_finder.web.resume_style_guide import _build_style_guide_directives
-        guide = {"bullet_counts": {"current": "4-6", "previous": "2-3", "prior": "1-2", "early": "1"}}
+
+        guide = {
+            "bullet_counts": {"current": "4-6", "previous": "2-3", "prior": "1-2", "early": "1"}
+        }
         result = _build_style_guide_directives(guide)
         assert len(result) == 1
         assert "Bullet counts:" in result[0]
@@ -168,6 +191,7 @@ class TestSchemaExpansion:
 
     def test_directives_anti_patterns_list(self):
         from job_finder.web.resume_style_guide import _build_style_guide_directives
+
         guide = {"anti_patterns": ["Starting with 'Led'", "Vague metrics"]}
         result = _build_style_guide_directives(guide)
         assert any("Anti-patterns:" in d for d in result)
@@ -175,6 +199,7 @@ class TestSchemaExpansion:
 
     def test_directives_new_string_fields(self):
         from job_finder.web.resume_style_guide import _build_style_guide_directives
+
         guide = {
             "summary_formula": "Title + years + specialization",
             "skills_format": "Grouped by category",
@@ -185,10 +210,17 @@ class TestSchemaExpansion:
             "role_archetype": "IC technical leader",
         }
         result = _build_style_guide_directives(guide)
-        for label in ["Summary formula", "Skills format", "Bullet formula",
-                      "Confidentiality rules", "Typography rules",
-                      "JD mirroring rules", "Role archetype"]:
+        for label in [
+            "Summary formula",
+            "Skills format",
+            "Bullet formula",
+            "Confidentiality rules",
+            "Typography rules",
+            "JD mirroring rules",
+            "Role archetype",
+        ]:
             assert any(label in d for d in result), f"Missing directive for: {label}"
+
 
 class TestExtractStyleGuide:
     @pytest.fixture
@@ -272,10 +304,15 @@ class TestExtractStyleGuide:
         from job_finder.web.resume_style_guide import extract_style_guide
 
         existing = {
-            "bullet_style": "dashes", "verb_tense": "past",
-            "section_order": [], "tone": "direct", "date_format": "MMM YYYY",
+            "bullet_style": "dashes",
+            "verb_tense": "past",
+            "section_order": [],
+            "tone": "direct",
+            "date_format": "MMM YYYY",
         }
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")):
+        with patch(
+            "job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")
+        ):
             result = extract_style_guide(
                 raw_text="Resume content...",
                 existing_guide=existing,
@@ -284,10 +321,12 @@ class TestExtractStyleGuide:
             )
         assert result is None
 
+
 class TestMigrateStyleGuide:
     @pytest.fixture
     def migrated_conn(self, tmp_db_path):
         from job_finder.web.db_migrate import run_migrations
+
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
@@ -298,10 +337,19 @@ class TestMigrateStyleGuide:
     def sample_config(self):
         return {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 50.0}}
 
-    def test_migrate_calls_call_claude_with_correct_purpose(self, migrated_conn, sample_config, tmp_path):
+    def test_migrate_calls_call_claude_with_correct_purpose(
+        self, migrated_conn, sample_config, tmp_path
+    ):
         from job_finder.web.resume_style_guide import migrate_style_guide
+
         guide_path = str(tmp_path / "style_guide.json")
-        existing = {"bullet_style": "dashes", "verb_tense": "past", "section_order": ["Summary"], "tone": "direct", "date_format": "MMM YYYY"}
+        existing = {
+            "bullet_style": "dashes",
+            "verb_tense": "past",
+            "section_order": ["Summary"],
+            "tone": "direct",
+            "date_format": "MMM YYYY",
+        }
         with open(guide_path, "w") as f:
             json.dump(existing, f)
 
@@ -321,8 +369,15 @@ class TestMigrateStyleGuide:
 
     def test_migrate_preserves_existing_fields(self, migrated_conn, sample_config, tmp_path):
         from job_finder.web.resume_style_guide import migrate_style_guide
+
         guide_path = str(tmp_path / "style_guide.json")
-        existing = {"bullet_style": "dashes", "verb_tense": "past", "section_order": ["Summary"], "tone": "direct", "date_format": "MMM YYYY"}
+        existing = {
+            "bullet_style": "dashes",
+            "verb_tense": "past",
+            "section_order": ["Summary"],
+            "tone": "direct",
+            "date_format": "MMM YYYY",
+        }
         with open(guide_path, "w") as f:
             json.dump(existing, f)
 
@@ -340,10 +395,13 @@ class TestMigrateStyleGuide:
 
     def test_migrate_returns_none_on_error(self, migrated_conn, sample_config, tmp_path):
         from job_finder.web.resume_style_guide import migrate_style_guide
+
         guide_path = str(tmp_path / "style_guide.json")
         with open(guide_path, "w") as f:
             json.dump({}, f)
 
-        with patch("job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")):
+        with patch(
+            "job_finder.web.resume_style_guide.call_claude", side_effect=Exception("API error")
+        ):
             result = migrate_style_guide(sample_config, migrated_conn, style_guide_path=guide_path)
         assert result is None

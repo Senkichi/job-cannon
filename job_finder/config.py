@@ -4,9 +4,9 @@ All config fallback values live here so they stay in sync across the
 codebase.  Import the constant you need rather than hard-coding a number.
 """
 
-import yaml
 from pathlib import Path
 
+import yaml
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 
@@ -42,15 +42,17 @@ DEFAULT_PROFILE_PATH = "experience_profile.json"
 # --- Company denylist (single source of truth) ---
 # Placeholder company names that should not produce company records
 # and should be excluded from scoring.
-COMPANY_DENYLIST: frozenset[str] = frozenset({
-    "unknown",
-    "medical jobs",
-    "clinical jobs",
-    "remotehunter",
-    "jobgether",
-    "mercor",
-    "crossing hurdles",
-})
+COMPANY_DENYLIST: frozenset[str] = frozenset(
+    {
+        "unknown",
+        "medical jobs",
+        "clinical jobs",
+        "remotehunter",
+        "jobgether",
+        "mercor",
+        "crossing hurdles",
+    }
+)
 
 
 def get_company_allowlist(config: dict) -> frozenset[str]:
@@ -128,7 +130,7 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
         )
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             try:
                 cfg = yaml.safe_load(f)
             except yaml.YAMLError as exc:

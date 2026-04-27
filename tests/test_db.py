@@ -1,8 +1,8 @@
 """Tests for db.py module-level functions, including load_job_context (DEBT-05)."""
 
+import os
 import sqlite3
 import tempfile
-import os
 from datetime import datetime
 
 import pytest
@@ -12,6 +12,7 @@ from job_finder.web.db_migrate import run_migrations
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def migrated_conn():
@@ -30,9 +31,17 @@ def migrated_conn():
     if os.path.exists(path):
         os.remove(path)
 
-def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
-                location="Remote", pipeline_status="discovered",
-                classification=None, sub_scores_json=None):
+
+def _insert_job(
+    conn,
+    dedup_key,
+    title="Test Job",
+    company="Test Co",
+    location="Remote",
+    pipeline_status="discovered",
+    classification=None,
+    sub_scores_json=None,
+):
     """Insert a minimal job row for testing.
 
     Plan 5: `sonnet_score` / `haiku_score` params were replaced by the v3
@@ -48,16 +57,30 @@ def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
              pipeline_status, first_seen, last_seen, score, score_breakdown,
              user_interest, classification, sub_scores_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (dedup_key, title, company, location, '["test"]',
-         f'["https://example.com/{dedup_key}"]',
-         pipeline_status, now, now, 7.0, '{}', 'unreviewed',
-         classification, sub_scores_json),
+        (
+            dedup_key,
+            title,
+            company,
+            location,
+            '["test"]',
+            f'["https://example.com/{dedup_key}"]',
+            pipeline_status,
+            now,
+            now,
+            7.0,
+            "{}",
+            "unreviewed",
+            classification,
+            sub_scores_json,
+        ),
     )
     conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # Tests: load_job_context (DEBT-05)
 # ---------------------------------------------------------------------------
+
 
 class TestLoadJobContext:
     """Tests for load_job_context shared helper (DEBT-05)."""
@@ -65,12 +88,14 @@ class TestLoadJobContext:
     def test_returns_none_for_nonexistent_job(self, migrated_conn):
         """load_job_context returns None when dedup_key not found."""
         from job_finder.db import load_job_context
+
         result = load_job_context(migrated_conn, "nonexistent|job key")
         assert result is None
 
     def test_returns_dict_with_required_keys(self, migrated_conn):
         """load_job_context returns dict with 'job', 'resume_history', 'prep_row' keys."""
         from job_finder.db import load_job_context
+
         _insert_job(migrated_conn, "acme|senior engineer")
 
         result = load_job_context(migrated_conn, "acme|senior engineer")
@@ -83,6 +108,7 @@ class TestLoadJobContext:
     def test_job_key_is_dict(self, migrated_conn):
         """load_job_context result['job'] is a dict with expected fields."""
         from job_finder.db import load_job_context
+
         _insert_job(migrated_conn, "acme|senior engineer", title="Senior Engineer", company="Acme")
 
         result = load_job_context(migrated_conn, "acme|senior engineer")
@@ -95,6 +121,7 @@ class TestLoadJobContext:
     def test_resume_history_is_list(self, migrated_conn):
         """load_job_context result['resume_history'] is a list (empty when no records)."""
         from job_finder.db import load_job_context
+
         _insert_job(migrated_conn, "acme|senior engineer")
 
         result = load_job_context(migrated_conn, "acme|senior engineer")
@@ -105,6 +132,7 @@ class TestLoadJobContext:
     def test_prep_row_is_none_when_no_preps(self, migrated_conn):
         """load_job_context result['prep_row'] is None when no interview_preps exist."""
         from job_finder.db import load_job_context
+
         _insert_job(migrated_conn, "acme|senior engineer")
 
         result = load_job_context(migrated_conn, "acme|senior engineer")
@@ -114,6 +142,7 @@ class TestLoadJobContext:
     def test_resume_history_contains_records(self, migrated_conn):
         """load_job_context result['resume_history'] includes existing resume_generations rows."""
         from job_finder.db import load_job_context
+
         dedup_key = "stripe|data scientist"
         _insert_job(migrated_conn, dedup_key)
 
@@ -123,7 +152,14 @@ class TestLoadJobContext:
             "INSERT INTO resume_generations "
             "(job_id, generated_at, model, status, doc_url, generation_type) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (dedup_key, now, "claude-sonnet-4-6", "done", "https://docs.google.com/test", "single"),
+            (
+                dedup_key,
+                now,
+                "claude-sonnet-4-6",
+                "done",
+                "https://docs.google.com/test",
+                "single",
+            ),
         )
         migrated_conn.commit()
 
@@ -136,6 +172,7 @@ class TestLoadJobContext:
     def test_prep_row_returned_when_exists(self, migrated_conn):
         """load_job_context result['prep_row'] contains most recent interview_preps row."""
         from job_finder.db import load_job_context
+
         dedup_key = "google|product manager"
         _insert_job(migrated_conn, dedup_key)
 
@@ -157,6 +194,7 @@ class TestLoadJobContext:
     def test_resume_history_ordered_newest_first(self, migrated_conn):
         """load_job_context resume_history is ordered by generated_at DESC."""
         from job_finder.db import load_job_context
+
         dedup_key = "meta|ml engineer"
         _insert_job(migrated_conn, dedup_key)
 
@@ -185,6 +223,7 @@ class TestLoadJobContext:
     def test_resume_history_includes_validation_report(self, migrated_conn):
         """load_job_context resume_history rows include validation_report column."""
         from job_finder.db import load_job_context
+
         dedup_key = "anthropic|ml researcher"
         _insert_job(migrated_conn, dedup_key)
 
@@ -194,8 +233,15 @@ class TestLoadJobContext:
             "INSERT INTO resume_generations "
             "(job_id, generated_at, model, status, doc_url, generation_type, validation_report) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (dedup_key, now, "claude-sonnet-4-6", "done",
-             "https://docs.google.com/test", "single", validation_json),
+            (
+                dedup_key,
+                now,
+                "claude-sonnet-4-6",
+                "done",
+                "https://docs.google.com/test",
+                "single",
+                validation_json,
+            ),
         )
         migrated_conn.commit()
 
@@ -203,7 +249,7 @@ class TestLoadJobContext:
 
         assert len(result["resume_history"]) == 1
         row = result["resume_history"][0]
-        assert "validation_report" in row.keys(), (
+        assert "validation_report" in row.keys(), (  # noqa: SIM118 — sqlite3.Row, not dict
             "resume_history row missing validation_report column"
         )
         assert row["validation_report"] == validation_json
@@ -211,6 +257,7 @@ class TestLoadJobContext:
     def test_resume_history_validation_report_null_when_not_set(self, migrated_conn):
         """load_job_context resume_history rows have validation_report=None when not stored."""
         from job_finder.db import load_job_context
+
         dedup_key = "openai|engineer"
         _insert_job(migrated_conn, dedup_key)
 
@@ -227,14 +274,16 @@ class TestLoadJobContext:
 
         assert len(result["resume_history"]) == 1
         row = result["resume_history"][0]
-        assert "validation_report" in row.keys(), (
+        assert "validation_report" in row.keys(), (  # noqa: SIM118 — sqlite3.Row, not dict
             "resume_history row missing validation_report column"
         )
         assert row["validation_report"] is None
 
+
 # ---------------------------------------------------------------------------
 # Tests: update_pipeline_status evidence parameter (Phase 30 infrastructure)
 # ---------------------------------------------------------------------------
+
 
 class TestUpdatePipelineStatusEvidence:
     """Tests for evidence parameter on update_pipeline_status() (Phase 30 INFRA-01)."""
@@ -242,6 +291,7 @@ class TestUpdatePipelineStatusEvidence:
     def test_evidence_written_to_pipeline_events(self, migrated_conn):
         """Evidence string is written to pipeline_events.evidence on status change."""
         from job_finder.db import update_pipeline_status
+
         _insert_job(migrated_conn, "test|evidence|job", pipeline_status="discovered")
         update_pipeline_status(
             migrated_conn,
@@ -259,6 +309,7 @@ class TestUpdatePipelineStatusEvidence:
     def test_default_evidence_is_empty_string(self, migrated_conn):
         """Calling update_pipeline_status without evidence kwarg writes empty string."""
         from job_finder.db import update_pipeline_status
+
         _insert_job(migrated_conn, "test|default-evidence|job", pipeline_status="discovered")
         update_pipeline_status(migrated_conn, "test|default-evidence|job", "reviewing")
         event = migrated_conn.execute(
@@ -270,6 +321,7 @@ class TestUpdatePipelineStatusEvidence:
     def test_same_status_no_event_even_with_evidence(self, migrated_conn):
         """Calling update_pipeline_status with same status is a no-op even with evidence."""
         from job_finder.db import update_pipeline_status
+
         _insert_job(migrated_conn, "test|noop-evidence|job", pipeline_status="archived")
         update_pipeline_status(
             migrated_conn,
@@ -289,7 +341,8 @@ class TestPersistJobExpiryState:
 
     def test_writes_expiry_status_and_checked_at(self, migrated_conn):
         """persist_job_expiry_state writes expiry_status and expiry_checked_at atomically."""
-        from job_finder.db import persist_job_expiry_state, get_job
+        from job_finder.db import get_job, persist_job_expiry_state
+
         _insert_job(migrated_conn, "acme|expiry-test")
         persist_job_expiry_state(
             migrated_conn, "acme|expiry-test", "expired", "2026-04-09T12:00:00Z"
@@ -301,17 +354,17 @@ class TestPersistJobExpiryState:
 
     def test_writes_live_status(self, migrated_conn):
         """persist_job_expiry_state persists 'live' status."""
-        from job_finder.db import persist_job_expiry_state, get_job
+        from job_finder.db import get_job, persist_job_expiry_state
+
         _insert_job(migrated_conn, "acme|live-test")
-        persist_job_expiry_state(
-            migrated_conn, "acme|live-test", "live", "2026-04-09T12:00:00Z"
-        )
+        persist_job_expiry_state(migrated_conn, "acme|live-test", "live", "2026-04-09T12:00:00Z")
         result = get_job(migrated_conn, "acme|live-test")
         assert result["expiry_status"] == "live"
 
     def test_writes_inconclusive_status(self, migrated_conn):
         """persist_job_expiry_state persists 'inconclusive' status."""
-        from job_finder.db import persist_job_expiry_state, get_job
+        from job_finder.db import get_job, persist_job_expiry_state
+
         _insert_job(migrated_conn, "acme|inconclusive-test")
         persist_job_expiry_state(
             migrated_conn, "acme|inconclusive-test", "inconclusive", "2026-04-09T12:00:00Z"
@@ -325,7 +378,8 @@ class TestPersistJobArchetype:
 
     def test_writes_job_archetype(self, migrated_conn):
         """persist_job_archetype writes job_archetype to jobs table."""
-        from job_finder.db import persist_job_archetype, get_job
+        from job_finder.db import get_job, persist_job_archetype
+
         _insert_job(migrated_conn, "acme|archetype-test")
         persist_job_archetype(migrated_conn, "acme|archetype-test", "platform_engineering")
         result = get_job(migrated_conn, "acme|archetype-test")
@@ -334,7 +388,8 @@ class TestPersistJobArchetype:
 
     def test_overwrites_existing_archetype(self, migrated_conn):
         """persist_job_archetype overwrites a previously set archetype."""
-        from job_finder.db import persist_job_archetype, get_job
+        from job_finder.db import get_job, persist_job_archetype
+
         _insert_job(migrated_conn, "acme|archetype-overwrite")
         persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "ml_engineering")
         persist_job_archetype(migrated_conn, "acme|archetype-overwrite", "analytics_lead")
@@ -343,7 +398,8 @@ class TestPersistJobArchetype:
 
     def test_job_archetype_in_jobs_all_columns(self, migrated_conn):
         """get_job() returns job_archetype — confirms JOBS_ALL_COLUMNS includes it."""
-        from job_finder.db import persist_job_archetype, get_job
+        from job_finder.db import get_job, persist_job_archetype
+
         _insert_job(migrated_conn, "acme|archetype-columns-test")
         persist_job_archetype(migrated_conn, "acme|archetype-columns-test", "platform_engineering")
         result = get_job(migrated_conn, "acme|archetype-columns-test")
@@ -357,6 +413,7 @@ class TestOpusScoreInAllColumns:
     def test_opus_score_in_get_job(self, migrated_conn):
         """get_job() returns opus_score column."""
         from job_finder.db import get_job
+
         _insert_job(migrated_conn, "acme|opus-score-test")
         result = get_job(migrated_conn, "acme|opus-score-test")
         assert result is not None
@@ -369,8 +426,12 @@ class TestOpusScoreInAllColumns:
 # ---------------------------------------------------------------------------
 
 _ALL_KEYS = (
-    "title_fit", "location_fit", "comp_fit",
-    "domain_match", "seniority_match", "skills_match",
+    "title_fit",
+    "location_fit",
+    "comp_fit",
+    "domain_match",
+    "seniority_match",
+    "skills_match",
 )
 
 
@@ -390,8 +451,9 @@ class TestJobAssessmentDataclass:
     def test_job_assessment_is_frozen(self):
         """JobAssessment instances are immutable (attempted mutation raises)."""
         from job_finder.db import JobAssessment
+
         a = JobAssessment(
-            sub_scores={k: 3 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 3),
             classification="",
             rationale=_rationale_sample(),
             provider="ollama",
@@ -402,13 +464,14 @@ class TestJobAssessmentDataclass:
     def test_job_assessment_has_expected_fields(self):
         """D-05 fields: sub_scores, classification, rationale, provider (optional)."""
         from job_finder.db import JobAssessment
+
         a = JobAssessment(
-            sub_scores={k: 4 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 4),
             classification="apply",
             rationale=_rationale_sample(),
             provider="ollama",
         )
-        assert a.sub_scores == {k: 4 for k in _ALL_KEYS}
+        assert a.sub_scores == dict.fromkeys(_ALL_KEYS, 4)
         assert a.classification == "apply"
         assert a.rationale["strengths"] == ["Strong Python", "ML background"]
         assert a.provider == "ollama"
@@ -416,8 +479,9 @@ class TestJobAssessmentDataclass:
     def test_job_assessment_provider_defaults_to_none(self):
         """provider field is optional (defaults to None)."""
         from job_finder.db import JobAssessment
+
         a = JobAssessment(
-            sub_scores={k: 3 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 3),
             classification="",
             rationale=_rationale_sample(),
         )
@@ -427,29 +491,33 @@ class TestJobAssessmentDataclass:
 class TestDeriveClassification:
     """derive_classification implements CONTEXT D-06 rule exactly."""
 
-    @pytest.mark.parametrize("sub_scores,note,expected", [
-        # legitimacy_note truthy -> reject regardless of sub_scores
-        ({k: 5 for k in _ALL_KEYS}, "scam_pattern_matched", "reject"),
-        ({k: 3 for k in _ALL_KEYS}, "ghost_job", "reject"),
-        ({k: 2 for k in _ALL_KEYS}, "stale_posting", "reject"),
-        # any sub-score == 1 -> reject (legitimacy_note None/empty)
-        ({**{k: 5 for k in _ALL_KEYS}, "title_fit": 1}, None, "reject"),
-        ({**{k: 5 for k in _ALL_KEYS}, "skills_match": 1}, None, "reject"),
-        ({**{k: 5 for k in _ALL_KEYS}, "location_fit": 1}, "", "reject"),
-        # all sub-scores >= 3 -> apply
-        ({k: 3 for k in _ALL_KEYS}, None, "apply"),
-        ({k: 5 for k in _ALL_KEYS}, None, "apply"),
-        ({**{k: 3 for k in _ALL_KEYS}, "title_fit": 5, "skills_match": 4}, None, "apply"),
-        # all >= 2 but not all >= 3 -> consider
-        ({k: 2 for k in _ALL_KEYS}, None, "consider"),
-        ({**{k: 2 for k in _ALL_KEYS}, "title_fit": 3, "skills_match": 3}, None, "consider"),
-        ({**{k: 5 for k in _ALL_KEYS}, "title_fit": 2}, None, "consider"),
-        # empty legitimacy_note is falsy and does not trigger reject
-        ({k: 4 for k in _ALL_KEYS}, "", "apply"),
-    ])
+    @pytest.mark.parametrize(
+        "sub_scores,note,expected",
+        [
+            # legitimacy_note truthy -> reject regardless of sub_scores
+            (dict.fromkeys(_ALL_KEYS, 5), "scam_pattern_matched", "reject"),
+            (dict.fromkeys(_ALL_KEYS, 3), "ghost_job", "reject"),
+            (dict.fromkeys(_ALL_KEYS, 2), "stale_posting", "reject"),
+            # any sub-score == 1 -> reject (legitimacy_note None/empty)
+            ({**dict.fromkeys(_ALL_KEYS, 5), "title_fit": 1}, None, "reject"),
+            ({**dict.fromkeys(_ALL_KEYS, 5), "skills_match": 1}, None, "reject"),
+            ({**dict.fromkeys(_ALL_KEYS, 5), "location_fit": 1}, "", "reject"),
+            # all sub-scores >= 3 -> apply
+            (dict.fromkeys(_ALL_KEYS, 3), None, "apply"),
+            (dict.fromkeys(_ALL_KEYS, 5), None, "apply"),
+            ({**dict.fromkeys(_ALL_KEYS, 3), "title_fit": 5, "skills_match": 4}, None, "apply"),
+            # all >= 2 but not all >= 3 -> consider
+            (dict.fromkeys(_ALL_KEYS, 2), None, "consider"),
+            ({**dict.fromkeys(_ALL_KEYS, 2), "title_fit": 3, "skills_match": 3}, None, "consider"),
+            ({**dict.fromkeys(_ALL_KEYS, 5), "title_fit": 2}, None, "consider"),
+            # empty legitimacy_note is falsy and does not trigger reject
+            (dict.fromkeys(_ALL_KEYS, 4), "", "apply"),
+        ],
+    )
     def test_derive_classification_rule(self, sub_scores, note, expected):
         """CONTEXT D-06 truth table — exhaustive parametrized coverage."""
         from job_finder.db import derive_classification
+
         assert derive_classification(sub_scores, note) == expected
 
     def test_derive_classification_skip_branch_documented_edge(self):
@@ -460,17 +528,19 @@ class TestDeriveClassification:
         The branch is retained for defense against future domain changes.
         """
         from job_finder.db import derive_classification
+
         # Passing a hypothetical 0 (outside the documented 1-5 domain) would hit skip.
         # This test documents the guarantee without relying on out-of-domain values
         # reaching production (schema validator rejects <1 upstream).
-        out_of_domain = {k: 0 for k in _ALL_KEYS}
+        out_of_domain = dict.fromkeys(_ALL_KEYS, 0)
         assert derive_classification(out_of_domain, None) == "skip"
 
     def test_derive_classification_legitimacy_precedence(self):
         """legitimacy_note check runs BEFORE sub-score checks (order-sensitive)."""
         from job_finder.db import derive_classification
+
         # Would be "apply" on sub-scores alone, but legitimacy_note wins.
-        assert derive_classification({k: 5 for k in _ALL_KEYS}, "scam") == "reject"
+        assert derive_classification(dict.fromkeys(_ALL_KEYS, 5), "scam") == "reject"
 
 
 class TestPersistJobAssessment:
@@ -479,10 +549,11 @@ class TestPersistJobAssessment:
     def test_happy_path_writes_all_columns(self, migrated_conn):
         """Writing a valid JobAssessment updates all 5 target columns."""
         from job_finder.db import JobAssessment, persist_job_assessment
+
         _insert_job(migrated_conn, "acme|v3-happy-path")
 
         assessment = JobAssessment(
-            sub_scores={k: 4 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 4),
             classification="",  # sentinel — persist overwrites
             rationale=_rationale_sample(),
             provider=None,
@@ -502,23 +573,23 @@ class TestPersistJobAssessment:
         ).fetchone()
 
         import json as _json
+
         assert row["classification"] == "apply"
-        assert _json.loads(row["sub_scores_json"]) == {k: 4 for k in _ALL_KEYS}
-        assert _json.loads(row["fit_analysis"])["strengths"] == [
-            "Strong Python", "ML background"
-        ]
+        assert _json.loads(row["sub_scores_json"]) == dict.fromkeys(_ALL_KEYS, 4)
+        assert _json.loads(row["fit_analysis"])["strengths"] == ["Strong Python", "ML background"]
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
 
     def test_classification_derived_not_trusted(self, migrated_conn):
         """Classification is derived from sub_scores + legitimacy_note; passed-in value ignored."""
         from job_finder.db import JobAssessment, persist_job_assessment
+
         _insert_job(migrated_conn, "acme|v3-derive")
 
         # Pass "reject" on the assessment object — should be IGNORED.
         # Sub-scores all 3 -> should derive "apply" since legitimacy_note is NULL.
         assessment = JobAssessment(
-            sub_scores={k: 3 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 3),
             classification="reject",  # stale / lying field — must be ignored
             rationale=_rationale_sample(),
         )
@@ -532,6 +603,7 @@ class TestPersistJobAssessment:
     def test_legitimacy_note_sources_from_row(self, migrated_conn):
         """legitimacy_note is read from the jobs row, not from the assessment (D-07)."""
         from job_finder.db import JobAssessment, persist_job_assessment
+
         _insert_job(migrated_conn, "acme|v3-legit")
         # Set legitimacy_note on the row (simulates ingestion-time scam detection)
         migrated_conn.execute(
@@ -542,7 +614,7 @@ class TestPersistJobAssessment:
 
         # Even with all-5 sub-scores, legitimacy_note forces reject.
         assessment = JobAssessment(
-            sub_scores={k: 5 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 5),
             classification="",
             rationale=_rationale_sample(),
         )
@@ -558,7 +630,7 @@ class TestPersistJobAssessment:
         from job_finder.db import JobAssessment, persist_job_assessment
 
         assessment = JobAssessment(
-            sub_scores={k: 4 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 4),
             classification="",
             rationale=_rationale_sample(),
         )
@@ -573,6 +645,7 @@ class TestPersistJobAssessment:
     def test_provider_coalesce_preserves_existing(self, migrated_conn):
         """Passing provider=None preserves an existing scoring_provider value."""
         from job_finder.db import JobAssessment, persist_job_assessment
+
         _insert_job(migrated_conn, "acme|v3-coalesce")
         # Pre-seed a scoring_provider (simulates earlier scoring attempt)
         migrated_conn.execute(
@@ -582,19 +655,21 @@ class TestPersistJobAssessment:
         migrated_conn.commit()
 
         assessment = JobAssessment(
-            sub_scores={k: 4 for k in _ALL_KEYS},
+            sub_scores=dict.fromkeys(_ALL_KEYS, 4),
             classification="",
             rationale=_rationale_sample(),
         )
         # Call with provider=None and model=None — COALESCE should keep existing.
         persist_job_assessment(
-            migrated_conn, "acme|v3-coalesce", assessment,
-            provider=None, model=None,
+            migrated_conn,
+            "acme|v3-coalesce",
+            assessment,
+            provider=None,
+            model=None,
         )
 
         row = migrated_conn.execute(
-            "SELECT scoring_provider, scoring_model "
-            "FROM jobs WHERE dedup_key = 'acme|v3-coalesce'"
+            "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = 'acme|v3-coalesce'"
         ).fetchone()
         assert row["scoring_provider"] == "anthropic"  # preserved
         assert row["scoring_model"] is None  # was NULL, stays NULL
@@ -602,6 +677,7 @@ class TestPersistJobAssessment:
     def test_sub_scores_serialized_with_stable_key_order(self, migrated_conn):
         """sub_scores_json uses CONTEXT D-05 key order (title_fit first)."""
         from job_finder.db import JobAssessment, persist_job_assessment
+
         _insert_job(migrated_conn, "acme|v3-order")
 
         # Build dict in intentionally-wrong order to prove ordering is enforced.
@@ -626,15 +702,21 @@ class TestPersistJobAssessment:
 
         # Parse as list of items to verify order matches D-05.
         import json as _json
+
         # Python 3.7+ dict preserves insertion order. json.loads preserves that.
         parsed = _json.loads(row["sub_scores_json"])
         assert list(parsed.keys()) == [
-            "title_fit", "location_fit", "comp_fit",
-            "domain_match", "seniority_match", "skills_match",
+            "title_fit",
+            "location_fit",
+            "comp_fit",
+            "domain_match",
+            "seniority_match",
+            "skills_match",
         ]
 
     def test_legacy_persist_functions_removed(self):
         """Plan 4 Commit E removed persist_haiku_score + persist_sonnet_score."""
         from job_finder import db
+
         assert not hasattr(db, "persist_haiku_score")
         assert not hasattr(db, "persist_sonnet_score")

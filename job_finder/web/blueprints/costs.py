@@ -21,6 +21,7 @@ from job_finder.web.db_helpers import get_db
 
 costs_bp = Blueprint("costs", __name__, url_prefix="/costs")
 
+
 @costs_bp.route("/", strict_slashes=False)
 def index():
     """Cost Monitor page — 30-day chart, budget bar, stat cards, feature table."""

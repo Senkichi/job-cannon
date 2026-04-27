@@ -10,9 +10,7 @@ Covers:
   - "url_jd" key written when fetch_direct_jd succeeds on ATS URL
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
-
 
 # ---------------------------------------------------------------------------
 # is_short_auth_page()
@@ -162,7 +160,9 @@ class TestSearchSerpapiTupleReturn:
         """Generic exception → (None, [])."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
-        with patch("job_finder.web.enrichment_tiers.requests.get", side_effect=Exception("net error")):
+        with patch(
+            "job_finder.web.enrichment_tiers.requests.get", side_effect=Exception("net error")
+        ):
             result, urls = search_serpapi("query", "key")
         assert result is None
         assert urls == []
@@ -171,13 +171,15 @@ class TestSearchSerpapiTupleReturn:
         """Successful call returns (dict, list) not just dict."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
-        resp = self._make_response([
-            {
-                "title": "Data Scientist",
-                "company_name": "Acme Corp",
-                "description": "Build ML models at scale.",
-            }
-        ])
+        resp = self._make_response(
+            [
+                {
+                    "title": "Data Scientist",
+                    "company_name": "Acme Corp",
+                    "description": "Build ML models at scale.",
+                }
+            ]
+        )
         with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp):
             result = search_serpapi("Data Scientist Acme Corp", "key")
 
@@ -191,20 +193,24 @@ class TestSearchSerpapiTupleReturn:
         """Glassdoor/Indeed apply_options are filtered out by is_blocked_domain()."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
-        resp = self._make_response([
-            {
-                "title": "Data Scientist",
-                "company_name": "Acme Corp",
-                "description": "Good job description.",
-                "apply_options": [
-                    {"link": "https://www.glassdoor.com/job/12345"},
-                    {"link": "https://www.indeed.com/viewjob?jk=abc"},
-                    {"link": "https://boards.greenhouse.io/acme/jobs/1"},
-                ],
-            }
-        ])
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp), \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=None):
+        resp = self._make_response(
+            [
+                {
+                    "title": "Data Scientist",
+                    "company_name": "Acme Corp",
+                    "description": "Good job description.",
+                    "apply_options": [
+                        {"link": "https://www.glassdoor.com/job/12345"},
+                        {"link": "https://www.indeed.com/viewjob?jk=abc"},
+                        {"link": "https://boards.greenhouse.io/acme/jobs/1"},
+                    ],
+                }
+            ]
+        )
+        with (
+            patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp),
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=None),
+        ):
             _, apply_urls = search_serpapi("Data Scientist Acme Corp", "key")
 
         # Glassdoor and Indeed must be filtered out
@@ -216,27 +222,31 @@ class TestSearchSerpapiTupleReturn:
 
     def test_apply_options_sorted_by_domain_priority(self):
         """apply_options sorted greenhouse < lever < builtin (priority ascending)."""
-        from job_finder.web.enrichment_tiers import search_serpapi
         from job_finder.web.domain_policy import domain_priority
+        from job_finder.web.enrichment_tiers import search_serpapi
 
         greenhouse_url = "https://boards.greenhouse.io/acme/jobs/1"
         builtin_url = "https://builtin.com/job/acme/ds/123"
         lever_url = "https://jobs.lever.co/acme/abc"
 
-        resp = self._make_response([
-            {
-                "title": "DS",
-                "company_name": "Acme",
-                "description": "job description",
-                "apply_options": [
-                    {"link": builtin_url},    # lower priority
-                    {"link": greenhouse_url}, # highest priority
-                    {"link": lever_url},      # second priority
-                ],
-            }
-        ])
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp), \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=None):
+        resp = self._make_response(
+            [
+                {
+                    "title": "DS",
+                    "company_name": "Acme",
+                    "description": "job description",
+                    "apply_options": [
+                        {"link": builtin_url},  # lower priority
+                        {"link": greenhouse_url},  # highest priority
+                        {"link": lever_url},  # second priority
+                    ],
+                }
+            ]
+        )
+        with (
+            patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp),
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=None),
+        ):
             _, apply_urls = search_serpapi("DS Acme", "key")
 
         # Verify sorted by domain_priority ascending
@@ -251,18 +261,22 @@ class TestSearchSerpapiTupleReturn:
 
         fetched_jd = "Full job description from greenhouse.io ATS backend." * 10
 
-        resp = self._make_response([
-            {
-                "title": "DS",
-                "company_name": "Acme",
-                # No "description" key — so jd_full absent, triggering ATS fetch
-                "apply_options": [
-                    {"link": "https://boards.greenhouse.io/acme/jobs/1"},
-                ],
-            }
-        ])
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp), \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=fetched_jd):
+        resp = self._make_response(
+            [
+                {
+                    "title": "DS",
+                    "company_name": "Acme",
+                    # No "description" key — so jd_full absent, triggering ATS fetch
+                    "apply_options": [
+                        {"link": "https://boards.greenhouse.io/acme/jobs/1"},
+                    ],
+                }
+            ]
+        )
+        with (
+            patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp),
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd", return_value=fetched_jd),
+        ):
             result_dict, apply_urls = search_serpapi("DS Acme", "key")
 
         assert result_dict is not None
@@ -279,19 +293,23 @@ class TestSearchSerpapiTupleReturn:
         from job_finder.web.enrichment_tiers import search_serpapi
 
         ats_jd = "Full ATS job description with structured requirements and responsibilities."
-        resp = self._make_response([
-            {
-                "title": "DS",
-                "company_name": "Acme",
-                "description": "Short Google Jobs snippet.",
-                "apply_options": [
-                    {"link": "https://boards.greenhouse.io/acme/jobs/1"},
-                ],
-            }
-        ])
+        resp = self._make_response(
+            [
+                {
+                    "title": "DS",
+                    "company_name": "Acme",
+                    "description": "Short Google Jobs snippet.",
+                    "apply_options": [
+                        {"link": "https://boards.greenhouse.io/acme/jobs/1"},
+                    ],
+                }
+            ]
+        )
         mock_fetch = MagicMock(return_value=ats_jd)
-        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp), \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd", mock_fetch):
+        with (
+            patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp),
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd", mock_fetch),
+        ):
             result_dict, _ = search_serpapi("DS Acme", "key")
 
         # fetch_direct_jd SHOULD be called even though jd_full is present
@@ -304,13 +322,15 @@ class TestSearchSerpapiTupleReturn:
         """Job with no apply_options → apply_urls is []."""
         from job_finder.web.enrichment_tiers import search_serpapi
 
-        resp = self._make_response([
-            {
-                "title": "DS",
-                "company_name": "Acme",
-                "description": "Some job description text.",
-            }
-        ])
+        resp = self._make_response(
+            [
+                {
+                    "title": "DS",
+                    "company_name": "Acme",
+                    "description": "Some job description text.",
+                }
+            ]
+        )
         with patch("job_finder.web.enrichment_tiers.requests.get", return_value=resp):
             result_dict, apply_urls = search_serpapi("DS Acme", "key")
 
@@ -330,12 +350,22 @@ class TestSearchDdgWeb:
         from job_finder.web.enrichment_tiers import search_ddg_web
 
         mock_results = [
-            {"href": "https://boards.greenhouse.io/acme/jobs/1", "title": "DS at Acme", "body": "Job description body."},
-            {"href": "https://example.com/job/2", "title": "Another", "body": "Another body text."},
+            {
+                "href": "https://boards.greenhouse.io/acme/jobs/1",
+                "title": "DS at Acme",
+                "body": "Job description body.",
+            },
+            {
+                "href": "https://example.com/job/2",
+                "title": "Another",
+                "body": "Another body text.",
+            },
         ]
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -359,8 +389,10 @@ class TestSearchDdgWeb:
             {"href": "https://boards.greenhouse.io/acme/jobs/1", "title": "t", "body": "b"},
         ]
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -376,8 +408,8 @@ class TestSearchDdgWeb:
 
     def test_urls_sorted_by_priority(self):
         """ATS platforms (greenhouse, lever) sorted before generic sites."""
-        from job_finder.web.enrichment_tiers import search_ddg_web
         from job_finder.web.domain_policy import domain_priority
+        from job_finder.web.enrichment_tiers import search_ddg_web
 
         mock_results = [
             {"href": "https://example.com/job/1", "title": "t", "body": "b"},
@@ -385,8 +417,10 @@ class TestSearchDdgWeb:
             {"href": "https://jobs.lever.co/acme/abc", "title": "t", "body": "b"},
         ]
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -402,8 +436,10 @@ class TestSearchDdgWeb:
         """No search results → empty URLs and empty snippet."""
         from job_finder.web.enrichment_tiers import search_ddg_web
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -427,8 +463,10 @@ class TestSearchDdgWeb:
                 raise RuntimeError("rate limited")
             return [{"href": "https://example.com/job/1", "title": "t", "body": "b"}]
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -444,12 +482,13 @@ class TestSearchDdgWeb:
         from job_finder.web.enrichment_tiers import search_ddg_web
 
         mock_results = [
-            {"href": f"https://example{i}.com/job", "title": "t", "body": "b"}
-            for i in range(12)
+            {"href": f"https://example{i}.com/job", "title": "t", "body": "b"} for i in range(12)
         ]
 
-        with patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS, \
-             patch("job_finder.web.enrichment_tiers.time.sleep"):
+        with (
+            patch("job_finder.web.enrichment_tiers.DDGS") as MockDDGS,
+            patch("job_finder.web.enrichment_tiers.time.sleep"),
+        ):
             mock_ddgs_instance = MagicMock()
             mock_ddgs_instance.__enter__ = MagicMock(return_value=mock_ddgs_instance)
             mock_ddgs_instance.__exit__ = MagicMock(return_value=False)
@@ -471,7 +510,10 @@ class TestFetchDdgJds:
 
     # Mock JD text must contain a JD content marker (e.g., "responsibilities")
     # to pass the has_jd_content() check added for quality validation.
-    _MOCK_JD = "About the role: Key responsibilities include data analysis. Qualifications: 3+ years experience. " * 5
+    _MOCK_JD = (
+        "About the role: Key responsibilities include data analysis. Qualifications: 3+ years experience. "
+        * 5
+    )
 
     def test_linkedin_url_routes_to_linkedin_extractor(self):
         """LinkedIn URLs use fetch_linkedin_jd(), not fetch_direct_jd()."""
@@ -479,8 +521,10 @@ class TestFetchDdgJds:
 
         long_jd = self._MOCK_JD
 
-        with patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li, \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct:
+        with (
+            patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li,
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct,
+        ):
             mock_li.return_value = long_jd
 
             jd_text, source_url = fetch_ddg_jds(["https://www.linkedin.com/jobs/view/123456/"])
@@ -496,8 +540,10 @@ class TestFetchDdgJds:
 
         long_jd = self._MOCK_JD
 
-        with patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li, \
-             patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct:
+        with (
+            patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li,
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct,
+        ):
             mock_direct.return_value = long_jd
 
             jd_text, source_url = fetch_ddg_jds(["https://boards.greenhouse.io/acme/jobs/1"])
@@ -548,10 +594,12 @@ class TestFetchDdgJds:
         with patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct:
             mock_direct.side_effect = [None, long_jd]
 
-            jd_text, source_url = fetch_ddg_jds([
-                "https://example1.com/job",
-                "https://example2.com/job",
-            ])
+            jd_text, source_url = fetch_ddg_jds(
+                [
+                    "https://example1.com/job",
+                    "https://example2.com/job",
+                ]
+            )
 
         assert jd_text == long_jd
         assert source_url == "https://example2.com/job"
@@ -560,8 +608,10 @@ class TestFetchDdgJds:
         """Blocked domains are skipped in fetch loop."""
         from job_finder.web.enrichment_tiers import fetch_ddg_jds
 
-        with patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct, \
-             patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li:
+        with (
+            patch("job_finder.web.enrichment_tiers.fetch_direct_jd") as mock_direct,
+            patch("job_finder.web.enrichment_tiers.fetch_linkedin_jd") as mock_li,
+        ):
             # Should not be called because glassdoor is blocked
             mock_direct.return_value = "A" * 300
 
@@ -593,16 +643,25 @@ class TestExtractWithHaikuCascade:
     }
 
     def test_uses_call_model_when_providers_configured(
-        self, migrated_db, cascade_config_haiku, make_model_result,
+        self,
+        migrated_db,
+        cascade_config_haiku,
+        make_model_result,
     ):
         from job_finder.web.enrichment_tiers import extract_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.return_value = make_model_result(self._HAIKU_PAYLOAD)
             result = extract_with_haiku(
-                "ddg snippet text", self._JOB_ROW, conn, cascade_config_haiku,
+                "ddg snippet text",
+                self._JOB_ROW,
+                conn,
+                cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -614,13 +673,19 @@ class TestExtractWithHaikuCascade:
 
     def test_uses_call_claude_when_no_providers(self, migrated_db):
         from job_finder.web.enrichment_tiers import extract_with_haiku
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = (self._HAIKU_PAYLOAD, 0.001)
             result = extract_with_haiku(
-                "ddg snippet", self._JOB_ROW, conn, config={},
+                "ddg snippet",
+                self._JOB_ROW,
+                conn,
+                config={},
             )
 
         mock_cm.assert_not_called()
@@ -628,18 +693,26 @@ class TestExtractWithHaikuCascade:
         assert result["jd_full"].startswith("Full job description")
 
     def test_cascade_exhausted_falls_back_to_cli(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.enrichment_tiers import extract_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = (self._HAIKU_PAYLOAD, 0.001)
             result = extract_with_haiku(
-                "ddg snippet", self._JOB_ROW, conn, cascade_config_haiku,
+                "ddg snippet",
+                self._JOB_ROW,
+                conn,
+                cascade_config_haiku,
             )
 
         mock_cm.assert_called_once()
@@ -647,18 +720,26 @@ class TestExtractWithHaikuCascade:
         assert result["jd_full"].startswith("Full job description")
 
     def test_cascade_and_cli_both_fail_returns_empty_dict(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.enrichment_tiers import extract_with_haiku
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
             result = extract_with_haiku(
-                "ddg snippet", self._JOB_ROW, conn, cascade_config_haiku,
+                "ddg snippet",
+                self._JOB_ROW,
+                conn,
+                cascade_config_haiku,
             )
 
         assert result == {}
@@ -683,16 +764,25 @@ class TestExtractWithSonnetCascade:
     }
 
     def test_uses_call_model_when_providers_configured(
-        self, migrated_db, cascade_config_sonnet, make_model_result,
+        self,
+        migrated_db,
+        cascade_config_sonnet,
+        make_model_result,
     ):
         from job_finder.web.enrichment_tiers import extract_with_sonnet
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.return_value = make_model_result(self._SONNET_PAYLOAD)
             result = extract_with_sonnet(
-                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+                self._FRAGMENTS,
+                self._JOB_ROW,
+                conn,
+                cascade_config_sonnet,
             )
 
         mock_cm.assert_called_once()
@@ -704,13 +794,19 @@ class TestExtractWithSonnetCascade:
 
     def test_uses_call_claude_when_no_providers(self, migrated_db):
         from job_finder.web.enrichment_tiers import extract_with_sonnet
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = (self._SONNET_PAYLOAD, 0.004)
             result = extract_with_sonnet(
-                self._FRAGMENTS, self._JOB_ROW, conn, config={},
+                self._FRAGMENTS,
+                self._JOB_ROW,
+                conn,
+                config={},
             )
 
         mock_cm.assert_not_called()
@@ -718,18 +814,26 @@ class TestExtractWithSonnetCascade:
         assert result["jd_full"] == "Aggregated full JD."
 
     def test_cascade_exhausted_falls_back_to_cli(
-        self, migrated_db, cascade_config_sonnet,
+        self,
+        migrated_db,
+        cascade_config_sonnet,
     ):
         from job_finder.web.enrichment_tiers import extract_with_sonnet
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = (self._SONNET_PAYLOAD, 0.004)
             result = extract_with_sonnet(
-                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+                self._FRAGMENTS,
+                self._JOB_ROW,
+                conn,
+                cascade_config_sonnet,
             )
 
         mock_cm.assert_called_once()
@@ -737,18 +841,26 @@ class TestExtractWithSonnetCascade:
         assert result["jd_full"] == "Aggregated full JD."
 
     def test_cascade_and_cli_both_fail_returns_empty_dict(
-        self, migrated_db, cascade_config_sonnet,
+        self,
+        migrated_db,
+        cascade_config_sonnet,
     ):
         from job_finder.web.enrichment_tiers import extract_with_sonnet
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.enrichment_tiers.call_model") as mock_cm, \
-             patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.enrichment_tiers.call_model") as mock_cm,
+            patch("job_finder.web.enrichment_tiers.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
             result = extract_with_sonnet(
-                self._FRAGMENTS, self._JOB_ROW, conn, cascade_config_sonnet,
+                self._FRAGMENTS,
+                self._JOB_ROW,
+                conn,
+                cascade_config_sonnet,
             )
 
         assert result == {}

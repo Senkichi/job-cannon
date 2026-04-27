@@ -10,7 +10,6 @@ Provides:
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 
@@ -59,6 +58,7 @@ EMPTY_PROFILE = {
 # Validation
 # ---------------------------------------------------------------------------
 
+
 def validate_profile(profile: dict) -> list:
     """Validate a profile dict and return advisory warnings.
 
@@ -80,45 +80,55 @@ def validate_profile(profile: dict) -> list:
 
         # Check: no achievements
         if not achievements:
-            warnings.append({
-                "field": f"positions[{company}].achievements",
-                "message": f"Position at {company} has no achievements",
-                "severity": "warning",
-            })
+            warnings.append(
+                {
+                    "field": f"positions[{company}].achievements",
+                    "message": f"Position at {company} has no achievements",
+                    "severity": "warning",
+                }
+            )
 
         # Check: achievement without quantified impact (no numbers or %)
         for achievement in achievements:
             has_number = bool(re.search(r"\d+(?:[,\.]\d+)?[%x]?|\d+x", achievement))
             if not has_number:
                 short = achievement[:50] + "..." if len(achievement) > 50 else achievement
-                warnings.append({
-                    "field": f"positions[{company}].achievements",
-                    "message": f"Achievement lacks quantified impact: '{short}'",
-                    "severity": "info",
-                })
+                warnings.append(
+                    {
+                        "field": f"positions[{company}].achievements",
+                        "message": f"Achievement lacks quantified impact: '{short}'",
+                        "severity": "info",
+                    }
+                )
 
         # Check: skills in position not present in top-level skills list
         for skill in skills:
             if skill and skill not in top_level_skills:
-                warnings.append({
-                    "field": f"positions[{company}].skills",
-                    "message": f"Skill '{skill}' in {company} position not in main skills list",
-                    "severity": "info",
-                })
+                warnings.append(
+                    {
+                        "field": f"positions[{company}].skills",
+                        "message": f"Skill '{skill}' in {company} position not in main skills list",
+                        "severity": "info",
+                    }
+                )
 
         # Check: no skills tagged on position
         if not skills:
-            warnings.append({
-                "field": f"positions[{company}].skills",
-                "message": f"Position at {company} has no skills tagged",
-                "severity": "warning",
-            })
+            warnings.append(
+                {
+                    "field": f"positions[{company}].skills",
+                    "message": f"Position at {company} has no skills tagged",
+                    "severity": "warning",
+                }
+            )
 
     return warnings
+
 
 # ---------------------------------------------------------------------------
 # File I/O
 # ---------------------------------------------------------------------------
+
 
 def load_profile(profile_path: str = "experience_profile.json") -> dict:
     """Load the experience profile from a JSON file.
@@ -133,13 +143,16 @@ def load_profile(profile_path: str = "experience_profile.json") -> dict:
     if not path.exists():
         return dict(EMPTY_PROFILE)
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         try:
             return json.load(f)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in profile file {path}: {exc}") from exc
 
-def save_profile(profile: dict, profile_path: str = "experience_profile.json", *, force: bool = False) -> None:
+
+def save_profile(
+    profile: dict, profile_path: str = "experience_profile.json", *, force: bool = False
+) -> None:
     """Save the experience profile to a JSON file.
 
     Safety guards (skipped when *force=True*):
@@ -159,7 +172,7 @@ def save_profile(profile: dict, profile_path: str = "experience_profile.json", *
 
     if not force and path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 existing = json.load(f)
             existing_positions = existing.get("positions", [])
             existing_skills = existing.get("skills", [])
@@ -181,20 +194,25 @@ def save_profile(profile: dict, profile_path: str = "experience_profile.json", *
             return
 
         # Guard 2: suspicious reduction — both dimensions shrink
-        if (existing_has_data
-                and len(incoming_positions) < len(existing_positions)
-                and len(incoming_skills) < len(existing_skills)):
+        if (
+            existing_has_data
+            and len(incoming_positions) < len(existing_positions)
+            and len(incoming_skills) < len(existing_skills)
+        ):
             logger.warning(
                 "save_profile: suspicious reduction detected (%d->%d positions, %d->%d skills) "
                 "at %s. Save aborted. Use force=True for intentional changes.",
-                len(existing_positions), len(incoming_positions),
-                len(existing_skills), len(incoming_skills),
+                len(existing_positions),
+                len(incoming_positions),
+                len(existing_skills),
+                len(incoming_skills),
                 profile_path,
             )
             return
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
+
 
 # ---------------------------------------------------------------------------
 # Opus-powered markdown extraction
@@ -232,6 +250,7 @@ Rules:
 
 Resume/markdown to extract from:
 """
+
 
 def extract_profile_from_markdown(markdown_text: str) -> dict:
     """Extract a structured profile from markdown text using Claude Opus.
@@ -271,6 +290,11 @@ def extract_profile_from_markdown(markdown_text: str) -> dict:
 
         return extracted
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("extract_profile_from_markdown failed: %s", exc)
-        return {"error": str(exc), "positions": [], "skills": [], "resume_preferences": {"summary_style": "", "emphasis": []}}
+        return {
+            "error": str(exc),
+            "positions": [],
+            "skills": [],
+            "resume_preferences": {"summary_style": "", "emphasis": []},
+        }

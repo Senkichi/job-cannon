@@ -43,10 +43,7 @@ def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) 
             return False
 
     # Must not match any exclusion keyword
-    if any(ex.lower() in title_lower for ex in exclusions):
-        return False
-
-    return True
+    return not any(ex.lower() in title_lower for ex in exclusions)
 
 
 def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
@@ -105,22 +102,28 @@ def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> li
         categories = posting.get("categories") or {}
         location = categories.get("location") or categories.get("team") or ""
 
-        results.append({
-            "title": title,
-            "company_source": "Lever",
-            "location": location,
-            "description": posting.get("descriptionPlain") or "",
-            "source_url": posting.get("hostedUrl") or "",
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "comp_json": comp_json,
-        })
+        results.append(
+            {
+                "title": title,
+                "company_source": "Lever",
+                "location": location,
+                "description": posting.get("descriptionPlain") or "",
+                "source_url": posting.get("hostedUrl") or "",
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "comp_json": comp_json,
+            }
+        )
 
-    logger.debug("scan_lever('%s'): %d postings fetched, %d matched", slug, len(postings), len(results))
+    logger.debug(
+        "scan_lever('%s'): %d postings fetched, %d matched", slug, len(postings), len(results)
+    )
     return results
 
 
-def scan_greenhouse(board_token: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+def scan_greenhouse(
+    board_token: str, target_titles: list[str], exclusions: list[str]
+) -> list[dict]:
     """Scan Greenhouse API for keyword-matched job postings.
 
     Fetches all active jobs with content and pay transparency data.
@@ -186,20 +189,24 @@ def scan_greenhouse(board_token: str, target_titles: list[str], exclusions: list
         # Content is the full job description HTML
         description = posting.get("content") or ""
 
-        results.append({
-            "title": title,
-            "company_source": "Greenhouse",
-            "location": location,
-            "description": description,
-            "source_url": posting.get("absolute_url") or "",
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "comp_json": comp_json,
-        })
+        results.append(
+            {
+                "title": title,
+                "company_source": "Greenhouse",
+                "location": location,
+                "description": description,
+                "source_url": posting.get("absolute_url") or "",
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "comp_json": comp_json,
+            }
+        )
 
     logger.debug(
         "scan_greenhouse('%s'): %d postings fetched, %d matched",
-        board_token, len(postings), len(results),
+        board_token,
+        len(postings),
+        len(results),
     )
     return results
 
@@ -223,7 +230,9 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
         Empty list on error or no matches.
     """
     # NOTE: No lowercasing — Ashby slugs are case-sensitive (Research Pitfall 3)
-    url = f"https://api.ashbyhq.com/posting-api/job-board/{job_board_name}?includeCompensation=true"
+    url = (
+        f"https://api.ashbyhq.com/posting-api/job-board/{job_board_name}?includeCompensation=true"
+    )
     try:
         resp = requests.get(url, timeout=_PROBE_TIMEOUT)
     except Exception as e:
@@ -270,20 +279,24 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
 
         description = posting.get("descriptionPlain") or posting.get("descriptionHtml") or ""
 
-        results.append({
-            "title": title,
-            "company_source": "Ashby",
-            "location": location,
-            "description": description,
-            "source_url": posting.get("jobUrl") or "",
-            "salary_min": salary_min,
-            "salary_max": salary_max,
-            "comp_json": comp_json,
-        })
+        results.append(
+            {
+                "title": title,
+                "company_source": "Ashby",
+                "location": location,
+                "description": description,
+                "source_url": posting.get("jobUrl") or "",
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "comp_json": comp_json,
+            }
+        )
 
     logger.debug(
         "scan_ashby('%s'): %d postings fetched, %d matched",
-        job_board_name, len(postings), len(results),
+        job_board_name,
+        len(postings),
+        len(results),
     )
     return results
 
@@ -368,26 +381,31 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
             external_path = posting.get("externalPath", "")
             source_url = (
                 f"https://{subdomain}.myworkdayjobs.com/en-US/{board}/job/{external_path}"
-                if external_path else ""
+                if external_path
+                else ""
             )
 
             # Fetch the full description via the Workday detail endpoint.
             # Without this, Workday jobs land in the DB with jd_full=NULL and
             # Sonnet can never evaluate them (skips on empty JD).
-            description = _fetch_workday_description(
-                subdomain, tenant, board, external_path
-            ) if external_path else ""
+            description = (
+                _fetch_workday_description(subdomain, tenant, board, external_path)
+                if external_path
+                else ""
+            )
 
-            results.append({
-                "title": title,
-                "company_source": "Workday",
-                "location": location,
-                "description": description,
-                "source_url": source_url,
-                "salary_min": None,
-                "salary_max": None,
-                "comp_json": None,
-            })
+            results.append(
+                {
+                    "title": title,
+                    "company_source": "Workday",
+                    "location": location,
+                    "description": description,
+                    "source_url": source_url,
+                    "salary_min": None,
+                    "salary_max": None,
+                    "comp_json": None,
+                }
+            )
 
             time.sleep(_DETAIL_FETCH_SLEEP_S)
 
@@ -400,14 +418,15 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
 
     logger.debug(
         "scan_workday('%s'): %d total, %d fetched, %d matched",
-        slug, total_fetched, total_fetched, len(results),
+        slug,
+        total_fetched,
+        total_fetched,
+        len(results),
     )
     return results
 
 
-def _fetch_workday_description(
-    subdomain: str, tenant: str, board: str, external_path: str
-) -> str:
+def _fetch_workday_description(subdomain: str, tenant: str, board: str, external_path: str) -> str:
     """Fetch the full job description via Workday CXS detail endpoint.
 
     Workday's list endpoint returns only titles and metadata; the full HTML
@@ -515,25 +534,28 @@ def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[s
 
             posting_id = posting.get("id", "")
             source_url = (
-                f"https://jobs.smartrecruiters.com/{slug}/{posting_id}"
-                if posting_id else ""
+                f"https://jobs.smartrecruiters.com/{slug}/{posting_id}" if posting_id else ""
             )
 
             # Fetch the full description via the posting detail endpoint.
             # The list endpoint returns only name + id + location; without a
             # secondary fetch, jd_full stays NULL and Sonnet skips the job.
-            description = _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
+            description = (
+                _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
+            )
 
-            results.append({
-                "title": title,
-                "company_source": "SmartRecruiters",
-                "location": location,
-                "description": description,
-                "source_url": source_url,
-                "salary_min": None,
-                "salary_max": None,
-                "comp_json": None,
-            })
+            results.append(
+                {
+                    "title": title,
+                    "company_source": "SmartRecruiters",
+                    "location": location,
+                    "description": description,
+                    "source_url": source_url,
+                    "salary_min": None,
+                    "salary_max": None,
+                    "comp_json": None,
+                }
+            )
 
             time.sleep(_DETAIL_FETCH_SLEEP_S)
 
@@ -545,7 +567,10 @@ def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[s
 
     logger.debug(
         "scan_smartrecruiters('%s'): %d total, %d fetched, %d matched",
-        slug, total_fetched, total_fetched, len(results),
+        slug,
+        total_fetched,
+        total_fetched,
+        len(results),
     )
     return results
 

@@ -63,8 +63,7 @@ def resolve_detection(
     _VALID_RESOLUTIONS = ("confirmed", "dismissed")
     if resolution not in _VALID_RESOLUTIONS:
         raise ValueError(
-            f"Invalid resolution: {resolution!r}. "
-            f"Must be one of: {', '.join(_VALID_RESOLUTIONS)}."
+            f"Invalid resolution: {resolution!r}. Must be one of: {', '.join(_VALID_RESOLUTIONS)}."
         )
     now = utc_now_iso()
     conn.execute(

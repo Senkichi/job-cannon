@@ -12,13 +12,12 @@ Tests cover:
 """
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 # ---------------------------------------------------------------------------
 # Helper: insert scoring_costs rows
 # ---------------------------------------------------------------------------
+
 
 def _insert_cost_rows(conn, rows):
     """Insert rows into scoring_costs. Each row: (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp)."""
@@ -29,27 +28,34 @@ def _insert_cost_rows(conn, rows):
     )
     conn.commit()
 
+
 # ---------------------------------------------------------------------------
 # Tests: get_daily_cost_breakdown
 # ---------------------------------------------------------------------------
+
 
 class TestGetDailyCostBreakdown:
     def test_empty_when_no_rows(self, migrated_db):
         """Returns empty list when scoring_costs is empty."""
         path, conn = migrated_db
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn)
         assert result == []
 
     def test_returns_list_of_dicts(self, migrated_db):
         """Returns list of dicts with date, purpose, spend keys."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
+            ],
+        )
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn)
         assert len(result) == 1
         assert "date" in result[0]
@@ -59,14 +65,18 @@ class TestGetDailyCostBreakdown:
     def test_groups_by_date_and_purpose(self, migrated_db):
         """Groups multiple rows by date+purpose, summing spend."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
-            ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
-            ("job3", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.002, ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
+                ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
+                ("job3", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.002, ts),
+            ],
+        )
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn)
         # Should have 2 rows: one per purpose
         assert len(result) == 2
@@ -77,15 +87,19 @@ class TestGetDailyCostBreakdown:
     def test_sorted_ascending_by_date(self, migrated_db):
         """Results are sorted ascending by date."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         yesterday = now - timedelta(days=1)
         ts_now = now.strftime("%Y-%m-%dT12:00:00Z")
         ts_yesterday = yesterday.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts_now),
-            ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts_yesterday),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts_now),
+                ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts_yesterday),
+            ],
+        )
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn)
         dates = [r["date"] for r in result]
         assert dates == sorted(dates)
@@ -93,14 +107,18 @@ class TestGetDailyCostBreakdown:
     def test_filters_old_rows_beyond_days(self, migrated_db):
         """Rows older than days parameter are excluded."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_ts = (now - timedelta(days=35)).strftime("%Y-%m-%dT12:00:00Z")
         recent_ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
-            ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, recent_ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
+                ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, recent_ts),
+            ],
+        )
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn, days=30)
         # Old row should be excluded
         assert len(result) == 1
@@ -109,36 +127,47 @@ class TestGetDailyCostBreakdown:
     def test_spend_is_float(self, migrated_db):
         """Spend values are floats."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
+            ],
+        )
         from job_finder.web.claude_client import get_daily_cost_breakdown
+
         result = get_daily_cost_breakdown(conn)
         assert isinstance(result[0]["spend"], float)
+
 
 # ---------------------------------------------------------------------------
 # Tests: get_monthly_feature_breakdown
 # ---------------------------------------------------------------------------
+
 
 class TestGetMonthlyFeatureBreakdown:
     def test_empty_when_no_rows(self, migrated_db):
         """Returns empty list when scoring_costs is empty."""
         path, conn = migrated_db
         from job_finder.web.claude_client import get_monthly_feature_breakdown
+
         result = get_monthly_feature_breakdown(conn)
         assert result == []
 
     def test_returns_list_of_dicts(self, migrated_db):
         """Returns list of dicts with purpose, calls, spend keys."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, ts),
+            ],
+        )
         from job_finder.web.claude_client import get_monthly_feature_breakdown
+
         result = get_monthly_feature_breakdown(conn)
         assert len(result) == 1
         assert "purpose" in result[0]
@@ -148,16 +177,20 @@ class TestGetMonthlyFeatureBreakdown:
     def test_scoped_to_current_month(self, migrated_db):
         """Rows from previous months are excluded."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Row from previous month
         prev_month = (now.replace(day=1) - timedelta(days=1)).replace(day=15)
         old_ts = prev_month.strftime("%Y-%m-%dT12:00:00Z")
         current_ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
-            ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, current_ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
+                ("job2", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, current_ts),
+            ],
+        )
         from job_finder.web.claude_client import get_monthly_feature_breakdown
+
         result = get_monthly_feature_breakdown(conn)
         # Only the current month row
         assert len(result) == 1
@@ -166,13 +199,17 @@ class TestGetMonthlyFeatureBreakdown:
     def test_sorted_by_spend_desc(self, migrated_db):
         """Results sorted by spend descending."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.0001, ts),
-            ("job2", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.002, ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.0001, ts),
+                ("job2", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.002, ts),
+            ],
+        )
         from job_finder.web.claude_client import get_monthly_feature_breakdown
+
         result = get_monthly_feature_breakdown(conn)
         assert result[0]["purpose"] == "sonnet_eval"
         assert result[1]["purpose"] == "haiku_score"
@@ -180,19 +217,25 @@ class TestGetMonthlyFeatureBreakdown:
     def test_empty_when_no_current_month_rows(self, migrated_db):
         """Returns empty list when no rows exist for current calendar month."""
         path, conn = migrated_db
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         prev_month = (now.replace(day=1) - timedelta(days=1)).replace(day=15)
         old_ts = prev_month.strftime("%Y-%m-%dT12:00:00Z")
-        _insert_cost_rows(conn, [
-            ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
-        ])
+        _insert_cost_rows(
+            conn,
+            [
+                ("job1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.000125, old_ts),
+            ],
+        )
         from job_finder.web.claude_client import get_monthly_feature_breakdown
+
         result = get_monthly_feature_breakdown(conn)
         assert result == []
+
 
 # ---------------------------------------------------------------------------
 # Tests: /costs route
 # ---------------------------------------------------------------------------
+
 
 class TestCostsRoute:
     def test_get_costs_returns_200(self, client):
@@ -270,9 +313,11 @@ class TestCostsRoute:
         # Template renders: Cap: ${{ "%.0f" | format(budget_cap) }} → "Cap: $42"
         assert "42" in html
 
+
 # ---------------------------------------------------------------------------
 # Tests: sidebar nav
 # ---------------------------------------------------------------------------
+
 
 class TestSidebarNav:
     def test_sidebar_contains_costs_link(self, client):
@@ -288,9 +333,11 @@ class TestSidebarNav:
         # Check sidebar label
         assert ">Costs<" in html
 
+
 # ---------------------------------------------------------------------------
 # Tests: dashboard cost card link
 # ---------------------------------------------------------------------------
+
 
 class TestDashboardCostCardLink:
     def test_dashboard_cost_card_has_view_details_link(self, client):
@@ -315,7 +362,7 @@ class TestProviderBreakdownRendering:
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "

@@ -64,6 +64,7 @@ def _acquire_scheduler_pidfile(app) -> bool:
         if existing_pid and existing_pid != os.getpid():
             try:
                 import psutil
+
                 alive = psutil.pid_exists(existing_pid)
             except Exception:
                 alive = False
@@ -141,6 +142,7 @@ def _ensure_ollama_running(config: dict, *, poll_seconds: int = 30) -> None:
     if not ollama_exe:
         # Fall back to PATH lookup (Linux/macOS or Windows with PATH entry)
         import shutil
+
         ollama_exe = shutil.which("ollama")
 
     if not ollama_exe:
@@ -188,9 +190,11 @@ def _ensure_ollama_running(config: dict, *, poll_seconds: int = 30) -> None:
         poll_seconds,
     )
 
+
 # ---------------------------------------------------------------------------
 # Job closure factories -- reduce per-job boilerplate
 # ---------------------------------------------------------------------------
+
 
 def _make_simple_job(app, name, import_func):
     """Factory for scheduler jobs that need only config + db_path + try/except.
@@ -202,6 +206,7 @@ def _make_simple_job(app, name, import_func):
             Called lazily inside the closure to defer imports.
             The returned function must accept (db_path, config).
     """
+
     def wrapper():
         with app.app_context():
             config = get_config_snapshot(app)
@@ -211,10 +216,11 @@ def _make_simple_job(app, name, import_func):
                 logger.info("%s: %s", name, result)
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
+
     return wrapper
 
-def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
-                      *, guard=None):
+
+def _make_tracked_job(app, name, import_func, import_action, extract_metadata, *, guard=None):
     """Factory for scheduler jobs with timing and activity logging.
 
     Returns a zero-arg ``wrapper`` closure suitable for ``scheduler.add_job``.
@@ -236,10 +242,13 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
         guard: Optional callable(config) -> bool. If provided and returns
             False, the job exits early without running.
     """
+
     def wrapper():
         import time as _time
+
         with app.app_context():
             from job_finder.web.activity_tracker import log_activity
+
             config = get_config_snapshot(app)
             db_path = app.config.get("DB_PATH", "jobs.db")
             action = import_action()
@@ -258,14 +267,17 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata,
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
                 log_activity(
-                    db_path, action,
+                    db_path,
+                    action,
                     metadata={
                         "status": "failed",
                         "error": type(e).__name__,
                         "duration_seconds": round(_time.time() - t0, 2),
                     },
                 )
+
     return wrapper
+
 
 def init_scheduler(app) -> None:
     """Initialize and start the background scheduler.
@@ -316,9 +328,11 @@ def init_scheduler(app) -> None:
         def run_pipeline():
             """Wrapped ingestion job executed by APScheduler."""
             import time as _time
+
             with app.app_context():
-                from job_finder.web.activity_tracker import log_activity, ACTION_SCHEDULED_SYNC
+                from job_finder.web.activity_tracker import ACTION_SCHEDULED_SYNC, log_activity
                 from job_finder.web.pipeline_runner import run_ingestion
+
                 config = get_config_snapshot(app)
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 t0 = _time.time()
@@ -362,8 +376,8 @@ def init_scheduler(app) -> None:
             trigger=CronTrigger(hour="0,8,16"),
             id="ingestion_poll",
             replace_existing=True,
-            max_instances=1,   # prevents overlap on long runs
-            coalesce=True,     # skip missed runs if app was down
+            max_instances=1,  # prevents overlap on long runs
+            coalesce=True,  # skip missed runs if app was down
         )
 
         # -- Unified staleness check (nightly 2:00 AM) ---------------------
@@ -376,15 +390,18 @@ def init_scheduler(app) -> None:
 
         def _import_staleness():
             from job_finder.web.expiry_checker import run_staleness_check
+
             return run_staleness_check
 
         def _import_staleness_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_STALENESS
+
             return ACTION_SCHEDULED_STALENESS
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Staleness check",
+                app,
+                "Staleness check",
                 import_func=_import_staleness,
                 import_action=_import_staleness_action,
                 extract_metadata=lambda r: {
@@ -404,7 +421,8 @@ def init_scheduler(app) -> None:
                     "cascade_inconclusive": r.get("phase_c", {}).get("inconclusive", 0),
                 },
                 guard=lambda config: config.get("staleness", {}).get(
-                    "enabled", config.get("expiry", {}).get("enabled", True),
+                    "enabled",
+                    config.get("expiry", {}).get("enabled", True),
                 ),
             ),
             trigger=CronTrigger(hour=2, minute=0),
@@ -418,15 +436,18 @@ def init_scheduler(app) -> None:
 
         def _import_detection():
             from job_finder.web.pipeline_detector import run_pipeline_detection
+
             return run_pipeline_detection
 
         def _import_detection_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_PIPELINE_DETECTION
+
             return ACTION_SCHEDULED_PIPELINE_DETECTION
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Pipeline detection",
+                app,
+                "Pipeline detection",
                 import_func=_import_detection,
                 import_action=_import_detection_action,
                 extract_metadata=lambda r: {
@@ -446,6 +467,7 @@ def init_scheduler(app) -> None:
 
         def _import_feedback():
             from job_finder.web.resume_feedback import run_drive_feedback_poll
+
             return run_drive_feedback_poll
 
         scheduler.add_job(
@@ -461,6 +483,7 @@ def init_scheduler(app) -> None:
 
         def _import_consolidation():
             from job_finder.web.resume_feedback import run_preference_consolidation
+
             return run_preference_consolidation
 
         scheduler.add_job(
@@ -476,15 +499,18 @@ def init_scheduler(app) -> None:
 
         def _import_rejection():
             from job_finder.web.rejection_analyzer import run_rejection_analysis
+
             return run_rejection_analysis
 
         def _import_rejection_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_REJECTION_ANALYSIS
+
             return ACTION_SCHEDULED_REJECTION_ANALYSIS
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Rejection analysis",
+                app,
+                "Rejection analysis",
                 import_func=_import_rejection,
                 import_action=_import_rejection_action,
                 extract_metadata=lambda r: {
@@ -503,6 +529,7 @@ def init_scheduler(app) -> None:
 
         def _import_rejection_patterns():
             from job_finder.web.rejection_patterns import run_rejection_pattern_analysis
+
             return run_rejection_pattern_analysis
 
         scheduler.add_job(
@@ -518,15 +545,18 @@ def init_scheduler(app) -> None:
 
         def _import_ats_scan():
             from job_finder.web.ats_scanner import run_ats_scan
+
             return run_ats_scan
 
         def _import_ats_scan_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_ATS_SCAN
+
             return ACTION_SCHEDULED_ATS_SCAN
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "ATS scan",
+                app,
+                "ATS scan",
                 import_func=_import_ats_scan,
                 import_action=_import_ats_scan_action,
                 extract_metadata=lambda r: {
@@ -547,6 +577,7 @@ def init_scheduler(app) -> None:
 
         def _import_slug_probe():
             from job_finder.web.ats_scanner import probe_ats_slugs
+
             return probe_ats_slugs
 
         scheduler.add_job(
@@ -562,6 +593,7 @@ def init_scheduler(app) -> None:
 
         def _import_ats_promote():
             from job_finder.web.ats_scanner import promote_ats_from_source_urls
+
             return promote_ats_from_source_urls
 
         scheduler.add_job(
@@ -577,15 +609,18 @@ def init_scheduler(app) -> None:
 
         def _import_careers_crawl():
             from job_finder.web.careers_crawler import crawl_careers_batch
+
             return crawl_careers_batch
 
         def _import_careers_crawl_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_CAREERS_CRAWL
+
             return ACTION_SCHEDULED_CAREERS_CRAWL
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Careers crawl",
+                app,
+                "Careers crawl",
                 import_func=_import_careers_crawl,
                 import_action=_import_careers_crawl_action,
                 extract_metadata=lambda r: {
@@ -594,9 +629,7 @@ def init_scheduler(app) -> None:
                     "jobs_new": r.get("jobs_new", 0),
                     "playwright_rendered": r.get("playwright_rendered", 0),
                 },
-                guard=lambda config: config.get("careers_crawl", {}).get(
-                    "enabled", True
-                ),
+                guard=lambda config: config.get("careers_crawl", {}).get("enabled", True),
             ),
             trigger=CronTrigger(hour=5, minute=0),
             id="careers_crawl",
@@ -608,6 +641,7 @@ def init_scheduler(app) -> None:
         # -- Company linkage backfill (daily 5:00 AM) ----------------------
         def _import_company_linkage():
             from job_finder.web.backfill_companies import run_company_linkage
+
             return run_company_linkage
 
         scheduler.add_job(
@@ -623,6 +657,7 @@ def init_scheduler(app) -> None:
 
         def _import_orphan_cleanup():
             from job_finder.web.backfill_companies import run_orphan_cleanup
+
             return run_orphan_cleanup
 
         scheduler.add_job(
@@ -638,6 +673,7 @@ def init_scheduler(app) -> None:
 
         def _import_homepage_discovery():
             from job_finder.web.homepage_discoverer import run_homepage_discovery
+
             return run_homepage_discovery
 
         scheduler.add_job(
@@ -655,6 +691,7 @@ def init_scheduler(app) -> None:
         # backlog with acceptable failure rates (manual judgment call).
         def _import_enrichment():
             from job_finder.web.backfill_companies import run_scheduled_enrichment
+
             return run_scheduled_enrichment
 
         scheduler.add_job(
@@ -673,6 +710,7 @@ def init_scheduler(app) -> None:
 
         def _import_registry_hygiene():
             from job_finder.web.backfill_companies import run_registry_hygiene
+
             return run_registry_hygiene
 
         scheduler.add_job(
@@ -701,6 +739,7 @@ def init_scheduler(app) -> None:
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 try:
                     from job_finder.web.data_enricher import run_enrichment_backfill
+
                     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
                     enriched = run_enrichment_backfill(
                         db_path,
@@ -714,8 +753,9 @@ def init_scheduler(app) -> None:
                     return
 
                 try:
-                    from job_finder.web.scoring_runner import run_scoring
                     from job_finder.web.db_helpers import standalone_connection
+                    from job_finder.web.scoring_runner import run_scoring
+
                     with standalone_connection(db_path) as score_conn:
                         rows = score_conn.execute(
                             "SELECT dedup_key FROM jobs "
@@ -751,17 +791,20 @@ def init_scheduler(app) -> None:
 
         def _import_agentic_backfill():
             from job_finder.web.agentic_enricher import run_agentic_backfill
+
             # Lambda wrapper matches the _import_stale pattern exactly:
             # returns a callable(db_path, config) rather than the raw function.
             return lambda db_path, config: run_agentic_backfill(db_path, config)
 
         def _import_agentic_action():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_AGENTIC_BACKFILL
+
             return ACTION_SCHEDULED_AGENTIC_BACKFILL
 
         scheduler.add_job(
             _make_tracked_job(
-                app, "Agentic backfill",
+                app,
+                "Agentic backfill",
                 import_func=_import_agentic_backfill,
                 import_action=_import_agentic_action,
                 # "jobs_enriched" matches naming convention used by other tracked jobs
@@ -785,6 +828,7 @@ def init_scheduler(app) -> None:
 
                 try:
                     from job_finder.web.db_helpers import standalone_connection as _sc
+
                     with _sc(db_path) as conn:
                         # 1. Did ingestion run in the last 14 hours?
                         row = conn.execute(
@@ -820,6 +864,7 @@ def init_scheduler(app) -> None:
                         # 4. OAuth token validity
                         try:
                             from job_finder.gmail_auth import get_credentials
+
                             get_credentials()
                         except Exception as e:
                             issues.append(f"OAuth token invalid: {e}")
@@ -843,7 +888,10 @@ def init_scheduler(app) -> None:
 
         scheduler.start()
         _scheduler = scheduler
-        logger.info("Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 local); enrichment 1h after each (1:00, 9:00, 17:00 local)")
+        logger.info(
+            "Scheduler started: ingestion 3x/day (0:00, 8:00, 16:00 local); enrichment 1h after each (1:00, 9:00, 17:00 local)"
+        )
+
 
 def run_sync_now(app) -> dict:
     """Trigger an immediate ingestion run (for the Sync Now button).
@@ -858,6 +906,7 @@ def run_sync_now(app) -> dict:
         Summary dict from run_ingestion, or an error dict if ingestion failed.
     """
     from job_finder.web.pipeline_runner import run_ingestion
+
     config = get_config_snapshot(app)
     db_path = app.config.get("DB_PATH", "jobs.db")
 
@@ -888,6 +937,7 @@ def run_sync_now(app) -> dict:
     # Run pipeline detection after ingestion (non-blocking on failure)
     try:
         from job_finder.web.pipeline_detector import run_pipeline_detection
+
         detection_result = run_pipeline_detection(db_path, config)
         summary["detection_auto_updated"] = detection_result.get("auto_updated", 0)
         summary["detection_queued"] = detection_result.get("queued", 0)
@@ -903,12 +953,14 @@ def run_sync_now(app) -> dict:
 
     return summary
 
+
 def get_scheduler() -> BackgroundScheduler | None:
     """Return the running scheduler instance (or None if not started).
 
     Used for status checks and monitoring.
     """
     return _scheduler
+
 
 def reset_scheduler() -> None:
     """Reset the scheduler singleton (test helper only).

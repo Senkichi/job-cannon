@@ -5,6 +5,7 @@ Phase 25 deliverable — part of the multi-provider routing system.
 NOTE: This implementation requires google-generativeai >= 0.8.5.
 The API may differ from earlier versions; ensure compatibility.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from typing import Any
 try:
     import google.generativeai as genai
     from google.generativeai import types
+
     _GENAI_AVAILABLE = True
 except ImportError:
     _GENAI_AVAILABLE = False
@@ -54,13 +56,10 @@ class GeminiProvider(BaseProvider):
             api_key_env = provider_cfg.get("api_key_env", "GEMINI_API_KEY")
             api_key = os.environ.get(api_key_env)
             if not api_key:
-                raise ValueError(
-                    f"Gemini API key not set — expected env var {api_key_env!r}"
-                )
+                raise ValueError(f"Gemini API key not set — expected env var {api_key_env!r}")
             genai.configure(api_key=api_key)
             # Defer model instantiation to call() so we can use the specified model
             self._api_key = api_key
-
 
     def call(
         self,
@@ -122,10 +121,13 @@ class GeminiProvider(BaseProvider):
                 # Retry on transient errors (rate limits, timeouts)
                 # Check for common transient error indicators
                 error_str = str(exc).lower()
-                if attempt == 0 and ("429" in error_str or "rate" in error_str or "timeout" in error_str):
+                if attempt == 0 and (
+                    "429" in error_str or "rate" in error_str or "timeout" in error_str
+                ):
                     logger.warning(
                         "Gemini transient error on attempt 1, retrying in %.1fs: %s",
-                        self._retry_sleep, exc,
+                        self._retry_sleep,
+                        exc,
                     )
                     time.sleep(self._retry_sleep)
                     continue

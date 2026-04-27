@@ -20,7 +20,7 @@ rejection_reviewed=1 so they are not re-included in future batches.
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from job_finder.config import DEFAULT_MODEL_OPUS
 from job_finder.web.claude_client import call_claude, cost_gate
@@ -105,6 +105,7 @@ _SYSTEM_PROMPT = (
 # Core analysis function
 # ---------------------------------------------------------------------------
 
+
 def run_rejection_analysis(db_path: str, config: dict) -> dict:
     """Run Opus batch rejection analysis on all unreviewed rejected jobs.
 
@@ -124,6 +125,7 @@ def run_rejection_analysis(db_path: str, config: dict) -> dict:
     """
     with standalone_connection(db_path) as conn:
         return _run_analysis(conn, config)
+
 
 def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     """Internal: run analysis within an open connection."""
@@ -187,11 +189,7 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
     )
 
     # Determine Opus model from config
-    opus_model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("opus", DEFAULT_MODEL_OPUS)
-    )
+    opus_model = config.get("scoring", {}).get("models", {}).get("opus", DEFAULT_MODEL_OPUS)
 
     # Single Opus call for ALL rejections
     try:
@@ -220,7 +218,7 @@ def _run_analysis(conn: sqlite3.Connection, config: dict) -> dict:
         }
 
     # Store report
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     cursor = conn.execute(
         """
         INSERT INTO rejection_reports (report_text, rejections_analyzed, generated_at, cost_usd)

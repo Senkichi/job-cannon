@@ -2,9 +2,18 @@
 
 import logging
 import time as _time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from flask import Blueprint, abort, current_app, make_response, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 
 from job_finder.db import (
     get_distinct_locations,
@@ -16,18 +25,21 @@ from job_finder.db import (
     update_pipeline_status,
 )
 from job_finder.web.activity_tracker import (
-    log_activity,
     ACTION_EXPAND_JOB,
-    ACTION_STATUS_CHANGE,
     ACTION_PASTE_JD,
     ACTION_RESCORE,
     ACTION_SAVE_JD,
+    ACTION_STATUS_CHANGE,
+    log_activity,
 )
+
 
 def _get_stale_count(conn) -> int:
     """Return count of jobs with is_stale = 1."""
     row = conn.execute("SELECT COUNT(*) FROM jobs WHERE is_stale = 1").fetchone()
     return row[0] if row else 0
+
+
 from job_finder.web.blueprints import PIPELINE_STATUSES, trigger_interview_prep_if_applied
 from job_finder.web.db_helpers import get_db
 from job_finder.web.drive_status import get_drive_status
@@ -35,6 +47,7 @@ from job_finder.web.drive_status import get_drive_status
 logger = logging.getLogger(__name__)
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
+
 
 def _safe_float(raw: str, param_name: str) -> float | None:
     """Coerce a query-string value to float, or abort 400 on malformed input."""
@@ -45,6 +58,7 @@ def _safe_float(raw: str, param_name: str) -> float | None:
     except (ValueError, TypeError):
         abort(400, description=f"Invalid value for {param_name}: {raw!r}")
 
+
 def _safe_int(raw: str, param_name: str) -> int | None:
     """Coerce a query-string value to int, or abort 400 on malformed input."""
     if not raw:
@@ -53,6 +67,7 @@ def _safe_int(raw: str, param_name: str) -> int | None:
         return int(raw)
     except (ValueError, TypeError):
         abort(400, description=f"Invalid value for {param_name}: {raw!r}")
+
 
 def _get_filter_kwargs() -> dict:
     """Extract and coerce filter query parameters from request.args."""
@@ -78,6 +93,7 @@ def _get_filter_kwargs() -> dict:
         "hide_stale": args.get("hide_stale") == "on" if args else True,
         "show_hidden": args.get("show_hidden") == "on",
     }
+
 
 def relative_date(iso_str):
     """Format date as 'Mar 3 (1w ago)' — absolute then relative.
@@ -122,10 +138,12 @@ def relative_date(iso_str):
 
     return f"{abs_part} ({rel})"
 
+
 @jobs_bp.record_once
 def _register_filters(state):
     """Register the relative_date Jinja2 filter when blueprint is registered."""
     state.app.jinja_env.filters["relative_date"] = relative_date
+
 
 @jobs_bp.route("/", strict_slashes=False)
 def index():
@@ -157,6 +175,7 @@ def index():
         hidden_count=hidden_count,
     )
 
+
 @jobs_bp.route("/table", strict_slashes=False)
 def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
@@ -174,6 +193,7 @@ def table():
         pipeline_statuses=PIPELINE_STATUSES,
     )
 
+
 @jobs_bp.route("/archived-table", strict_slashes=False)
 def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
@@ -181,12 +201,15 @@ def archived_table():
         return redirect(url_for("jobs.index"))
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
-    jobs = get_filtered_jobs(conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200)
+    jobs = get_filtered_jobs(
+        conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200
+    )
     return render_template(
         "jobs/_table.html",
         jobs=jobs,
         pipeline_statuses=PIPELINE_STATUSES,
     )
+
 
 @jobs_bp.route("/<path:dedup_key>/expand", strict_slashes=False)
 def expand(dedup_key: str):
@@ -212,7 +235,11 @@ def expand(dedup_key: str):
             current_app.config["DB_PATH"],
             ACTION_EXPAND_JOB,
             entity_id=dedup_key,
-            metadata={"title": job.get("title"), "company": job.get("company"), "status": "success"},
+            metadata={
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "status": "success",
+            },
         )
     except Exception:
         logger.debug("log_activity failed in expand", exc_info=True)
@@ -225,6 +252,7 @@ def expand(dedup_key: str):
         prep_row=prep_row,
         drive_status=drive_status,
     )
+
 
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
@@ -241,6 +269,7 @@ def collapse(dedup_key: str):
         "jobs/_row_collapse_response.html",
         job=job,
     )
+
 
 @jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)
 def update_status(dedup_key: str):
@@ -312,6 +341,7 @@ def update_status(dedup_key: str):
 
     return resp
 
+
 @jobs_bp.route("/<path:dedup_key>/detail-inline", strict_slashes=False)
 def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
@@ -329,6 +359,7 @@ def detail_inline(dedup_key: str):
         events=events,
         pipeline_statuses=PIPELINE_STATUSES,
     )
+
 
 @jobs_bp.route("/<path:dedup_key>/paste-jd", methods=["POST"], strict_slashes=False)
 def paste_jd(dedup_key: str):
@@ -419,6 +450,7 @@ def paste_jd(dedup_key: str):
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
 
+
 @jobs_bp.route("/<path:dedup_key>/rescore", methods=["POST"], strict_slashes=False)
 def rescore(dedup_key: str):
     """HTMX POST -- re-trigger Sonnet evaluation for a job that already has jd_full.
@@ -489,8 +521,11 @@ def rescore(dedup_key: str):
                 db_path,
                 ACTION_RESCORE,
                 entity_id=dedup_key,
-                metadata={"status": "failed", "error": "ImportError",
-                          "duration_seconds": round(_time.time() - t0, 2)},
+                metadata={
+                    "status": "failed",
+                    "error": "ImportError",
+                    "duration_seconds": round(_time.time() - t0, 2),
+                },
             )
         except Exception:
             pass
@@ -502,8 +537,11 @@ def rescore(dedup_key: str):
                 db_path,
                 ACTION_RESCORE,
                 entity_id=dedup_key,
-                metadata={"status": "failed", "error": type(e).__name__,
-                          "duration_seconds": round(_time.time() - t0, 2)},
+                metadata={
+                    "status": "failed",
+                    "error": type(e).__name__,
+                    "duration_seconds": round(_time.time() - t0, 2),
+                },
             )
         except Exception:
             pass
@@ -521,6 +559,7 @@ def rescore(dedup_key: str):
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
 
+
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
@@ -530,6 +569,7 @@ def score_cell(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_score_cell.html", job=job)
+
 
 @jobs_bp.route("/<path:dedup_key>/interview-prep/status", strict_slashes=False)
 def interview_prep_status(dedup_key: str):
@@ -564,10 +604,14 @@ def interview_prep_status(dedup_key: str):
     # Timeout safety net: auto-error if generating for >15 minutes
     if status == "generating":
         try:
-            generated_at = datetime.fromisoformat(prep_row["generated_at"] if "generated_at" in prep_row.keys() else "")
-            elapsed_min = (datetime.now(timezone.utc).replace(tzinfo=None) - generated_at).total_seconds() / 60
+            generated_at = datetime.fromisoformat(dict(prep_row).get("generated_at", ""))
+            elapsed_min = (
+                datetime.now(UTC).replace(tzinfo=None) - generated_at
+            ).total_seconds() / 60
             if elapsed_min > 15:
-                logger.warning("Interview prep for %s timed out after %.1f min", dedup_key, elapsed_min)
+                logger.warning(
+                    "Interview prep for %s timed out after %.1f min", dedup_key, elapsed_min
+                )
                 conn.execute(
                     "UPDATE interview_preps SET status='error', error_msg=? WHERE id=? AND status='generating'",
                     ("Timed out (>15 min)", prep_row["id"]),
@@ -598,6 +642,7 @@ def interview_prep_status(dedup_key: str):
         )
 
     return "", 200
+
 
 @jobs_bp.route("/<path:dedup_key>/save-jd", methods=["POST"], strict_slashes=False)
 def save_jd(dedup_key: str):
@@ -657,6 +702,7 @@ def save_jd(dedup_key: str):
         drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
 
+
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
@@ -666,6 +712,7 @@ def jd_edit_form(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_jd_edit_form.html", job=job)
+
 
 @jobs_bp.route("/<path:dedup_key>", strict_slashes=False)
 def detail(dedup_key: str):

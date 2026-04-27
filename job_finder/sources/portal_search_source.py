@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Optional
 
 import requests
 
@@ -48,6 +47,7 @@ SERP_PORTALS: list[dict[str, str]] = [
 # Free API fetchers — zero cost, keyword-filtered client-side
 # ---------------------------------------------------------------------------
 
+
 def _fetch_remoteok(keywords: list[str]) -> list[Job]:
     """Fetch from RemoteOK free JSON API. No auth required."""
     try:
@@ -78,16 +78,18 @@ def _fetch_remoteok(keywords: list[str]) -> list[Job]:
         if not any(kw in text for kw in keywords_lower):
             continue
 
-        jobs.append(Job(
-            title=title,
-            company=company,
-            location=item.get("location") or "Remote",
-            source="portal_remoteok",
-            source_url=item.get("apply_url") or item.get("url") or "",
-            salary_min=_safe_int(item.get("salary_min")),
-            salary_max=_safe_int(item.get("salary_max")),
-            description=_truncate(item.get("description")),
-        ))
+        jobs.append(
+            Job(
+                title=title,
+                company=company,
+                location=item.get("location") or "Remote",
+                source="portal_remoteok",
+                source_url=item.get("apply_url") or item.get("url") or "",
+                salary_min=_safe_int(item.get("salary_min")),
+                salary_max=_safe_int(item.get("salary_max")),
+                description=_truncate(item.get("description")),
+            )
+        )
 
     logger.info("RemoteOK: %d jobs matched from %d listings", len(jobs), len(listings))
     return jobs
@@ -123,16 +125,18 @@ def _fetch_remotive(keywords: list[str]) -> list[Job]:
 
         salary_min, salary_max = _parse_salary_string(item.get("salary") or "")
 
-        jobs.append(Job(
-            title=title,
-            company=company,
-            location=item.get("candidate_required_location") or "Remote",
-            source="portal_remotive",
-            source_url=item.get("url") or "",
-            salary_min=salary_min,
-            salary_max=salary_max,
-            description=_truncate(item.get("description")),
-        ))
+        jobs.append(
+            Job(
+                title=title,
+                company=company,
+                location=item.get("candidate_required_location") or "Remote",
+                source="portal_remotive",
+                source_url=item.get("url") or "",
+                salary_min=salary_min,
+                salary_max=salary_max,
+                description=_truncate(item.get("description")),
+            )
+        )
 
     logger.info("Remotive: %d jobs matched from %d listings", len(jobs), len(listings))
     return jobs
@@ -144,7 +148,6 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
     Supports server-side search via query param, so we make one request
     per keyword to avoid downloading the entire 100K+ listing catalog.
     """
-    keywords_lower = [k.lower() for k in keywords]
     all_jobs: list[Job] = []
     seen_urls: set[str] = set()
 
@@ -174,16 +177,18 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
                 continue
             seen_urls.add(url)
 
-            all_jobs.append(Job(
-                title=title,
-                company=company,
-                location=item.get("location") or "Remote",
-                source="portal_himalayas",
-                source_url=url,
-                salary_min=_safe_int(item.get("minSalary")),
-                salary_max=_safe_int(item.get("maxSalary")),
-                description=_truncate(item.get("description")),
-            ))
+            all_jobs.append(
+                Job(
+                    title=title,
+                    company=company,
+                    location=item.get("location") or "Remote",
+                    source="portal_himalayas",
+                    source_url=url,
+                    salary_min=_safe_int(item.get("minSalary")),
+                    salary_max=_safe_int(item.get("maxSalary")),
+                    description=_truncate(item.get("description")),
+                )
+            )
 
         time.sleep(0.5)  # Polite delay between keyword requests
 
@@ -194,6 +199,7 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
 # ---------------------------------------------------------------------------
 # SERP-backed portal search (DataForSEO)
 # ---------------------------------------------------------------------------
+
 
 def fetch_serp_portals(
     keywords: list[str],
@@ -226,7 +232,7 @@ def fetch_serp_portals(
         for portal in portal_list:
             if len(queries) >= max_queries:
                 break
-            q = f'site:{portal["domain"]} {keyword}'
+            q = f"site:{portal['domain']} {keyword}"
             queries.append({"query": q, "location": ""})
             portal_map[q] = portal["name"]
         if len(queries) >= max_queries:
@@ -255,22 +261,25 @@ def fetch_serp_portals(
         # against portal domains (more reliable than query mapping for batched results).
         portal_name = _detect_portal_from_url(job.source_url, portal_list)
 
-        all_jobs.append(Job(
-            title=job.title,
-            company=job.company,
-            location=job.location,
-            source=f"portal_{portal_name}" if portal_name else "portal_serp",
-            source_url=job.source_url,
-            source_id=job.source_id,
-            salary_min=job.salary_min,
-            salary_max=job.salary_max,
-            description=job.description,
-            posted_date=job.posted_date,
-        ))
+        all_jobs.append(
+            Job(
+                title=job.title,
+                company=job.company,
+                location=job.location,
+                source=f"portal_{portal_name}" if portal_name else "portal_serp",
+                source_url=job.source_url,
+                source_id=job.source_id,
+                salary_min=job.salary_min,
+                salary_max=job.salary_max,
+                description=job.description,
+                posted_date=job.posted_date,
+            )
+        )
 
     logger.info(
         "Portal SERP search: %d queries -> %d jobs",
-        len(queries), len(all_jobs),
+        len(queries),
+        len(all_jobs),
     )
     return all_jobs
 
@@ -278,6 +287,7 @@ def fetch_serp_portals(
 # ---------------------------------------------------------------------------
 # Combined entry point
 # ---------------------------------------------------------------------------
+
 
 def fetch_all_portals(
     keywords: list[str],
@@ -333,7 +343,8 @@ def fetch_all_portals(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _safe_int(val) -> Optional[int]:
+
+def _safe_int(val) -> int | None:
     """Convert to int, returning None on failure."""
     if val is None:
         return None
@@ -346,7 +357,7 @@ def _safe_int(val) -> Optional[int]:
 _SALARY_RE = re.compile(r"\$?(\d[\d,]*)\s*[Kk]?\s*[-–—]\s*\$?(\d[\d,]*)\s*[Kk]?")
 
 
-def _parse_salary_string(s: str) -> tuple[Optional[int], Optional[int]]:
+def _parse_salary_string(s: str) -> tuple[int | None, int | None]:
     """Extract (min, max) from salary strings like '$150K - $200K'."""
     m = _SALARY_RE.search(s)
     if not m:

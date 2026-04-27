@@ -4,19 +4,17 @@ Covers: is_blocked_domain(), domain_priority(), PRIORITY_DOMAINS type assertion,
 and LinkedIn exclusion from BLOCKED_DOMAINS.
 """
 
-import pytest
-
 from job_finder.web.domain_policy import (
     BLOCKED_DOMAINS,
     PRIORITY_DOMAINS,
-    is_blocked_domain,
     domain_priority,
+    is_blocked_domain,
 )
-
 
 # ---------------------------------------------------------------------------
 # BLOCKED_DOMAINS membership
 # ---------------------------------------------------------------------------
+
 
 class TestBlockedDomainsMembership:
     def test_glassdoor_com_blocked(self):
@@ -46,6 +44,7 @@ class TestBlockedDomainsMembership:
 # PRIORITY_DOMAINS type
 # ---------------------------------------------------------------------------
 
+
 class TestPriorityDomainsType:
     def test_priority_domains_is_list(self):
         """PRIORITY_DOMAINS must be a list — domain_priority() uses enumerate() on it."""
@@ -64,6 +63,7 @@ class TestPriorityDomainsType:
 # ---------------------------------------------------------------------------
 # is_blocked_domain()
 # ---------------------------------------------------------------------------
+
 
 class TestIsBlockedDomain:
     def test_glassdoor_full_url(self):
@@ -106,6 +106,7 @@ class TestIsBlockedDomain:
 # ---------------------------------------------------------------------------
 # domain_priority()
 # ---------------------------------------------------------------------------
+
 
 class TestDomainPriority:
     def test_greenhouse_has_priority_below_100(self):

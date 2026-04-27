@@ -8,10 +8,9 @@ Covers:
 - _ensure_drive_folder: auto-creates folder, saves folder_id to config.yaml
 """
 
-import io
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,6 +21,7 @@ if "google_auth_oauthlib" not in sys.modules:
     _mock_oauthlib = MagicMock()
     sys.modules["google_auth_oauthlib"] = _mock_oauthlib
     sys.modules["google_auth_oauthlib.flow"] = _mock_oauthlib.flow
+
 
 class TestGetCredentials:
     """get_credentials() loads and refreshes OAuth credentials non-interactively."""
@@ -76,7 +76,7 @@ class TestGetCredentials:
 
     def test_raises_on_missing_token(self, tmp_path):
         """get_credentials raises AuthenticationError when token file is missing."""
-        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        from job_finder.gmail_auth import AuthenticationError, get_credentials
 
         token_path = str(tmp_path / "no_token.json")
 
@@ -85,7 +85,7 @@ class TestGetCredentials:
 
     def test_raises_on_refresh_failure(self, tmp_path):
         """get_credentials raises AuthenticationError when token refresh fails."""
-        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        from job_finder.gmail_auth import AuthenticationError, get_credentials
 
         token_path = str(tmp_path / "token.json")
         Path(token_path).write_text('{"token": "fake"}')
@@ -96,16 +96,18 @@ class TestGetCredentials:
         mock_creds.refresh_token = "refresh_tok"
         mock_creds.refresh.side_effect = Exception("network error")
 
-        with patch(
-            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
+        with (
+            patch(
+                "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+                return_value=mock_creds,
+            ),
+            pytest.raises(AuthenticationError, match="refresh failed"),
         ):
-            with pytest.raises(AuthenticationError, match="refresh failed"):
-                get_credentials(token_path)
+            get_credentials(token_path)
 
     def test_raises_on_invalid_no_refresh_token(self, tmp_path):
         """get_credentials raises when token is invalid and has no refresh token."""
-        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        from job_finder.gmail_auth import AuthenticationError, get_credentials
 
         token_path = str(tmp_path / "token.json")
         Path(token_path).write_text('{"token": "fake"}')
@@ -115,12 +117,14 @@ class TestGetCredentials:
         mock_creds.expired = False
         mock_creds.refresh_token = None
 
-        with patch(
-            "job_finder.gmail_auth.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
+        with (
+            patch(
+                "job_finder.gmail_auth.Credentials.from_authorized_user_file",
+                return_value=mock_creds,
+            ),
+            pytest.raises(AuthenticationError, match="cannot be refreshed"),
         ):
-            with pytest.raises(AuthenticationError, match="cannot be refreshed"):
-                get_credentials(token_path)
+            get_credentials(token_path)
 
 
 class TestCheckTokenScopes:
@@ -166,7 +170,7 @@ class TestCheckTokenScopes:
 
         token_path = str(tmp_path / "token.json")
         with open(token_path, "w") as f:
-            f.write('not valid json{')
+            f.write("not valid json{")
 
         with patch(
             "job_finder.gmail_auth.Credentials.from_authorized_user_file",
@@ -175,6 +179,7 @@ class TestCheckTokenScopes:
             result = _check_token_scopes(token_path)
 
         assert result == set()
+
 
 class TestAuthenticateUpgradeDetection:
     """authenticate() detects Gmail-only tokens and forces re-auth."""
@@ -211,18 +216,22 @@ class TestAuthenticateUpgradeDetection:
             gmail_auth.TOKEN_PATH = token_path
             gmail_auth.CREDENTIALS_PATH = creds_path
 
-            with patch.object(
-                gmail_auth.Credentials,
-                "from_authorized_user_file",
-                return_value=mock_gmail_only_creds,
-            ), patch(
-                "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
-
-                return_value=mock_flow,
-            ), patch(
-                "job_finder.gmail_auth._validate_drive_api",
-            ), patch(
-                "job_finder.gmail_auth._ensure_drive_folder",
+            with (
+                patch.object(
+                    gmail_auth.Credentials,
+                    "from_authorized_user_file",
+                    return_value=mock_gmail_only_creds,
+                ),
+                patch(
+                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                    return_value=mock_flow,
+                ),
+                patch(
+                    "job_finder.gmail_auth._validate_drive_api",
+                ),
+                patch(
+                    "job_finder.gmail_auth._ensure_drive_folder",
+                ),
             ):
                 gmail_auth.authenticate()
 
@@ -264,18 +273,22 @@ class TestAuthenticateUpgradeDetection:
             gmail_auth.TOKEN_PATH = token_path
             gmail_auth.CREDENTIALS_PATH = creds_path
 
-            with patch.object(
-                gmail_auth.Credentials,
-                "from_authorized_user_file",
-                return_value=mock_gmail_only_creds,
-            ), patch(
-                "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
-
-                return_value=mock_flow,
-            ), patch(
-                "job_finder.gmail_auth._validate_drive_api",
-            ), patch(
-                "job_finder.gmail_auth._ensure_drive_folder",
+            with (
+                patch.object(
+                    gmail_auth.Credentials,
+                    "from_authorized_user_file",
+                    return_value=mock_gmail_only_creds,
+                ),
+                patch(
+                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                    return_value=mock_flow,
+                ),
+                patch(
+                    "job_finder.gmail_auth._validate_drive_api",
+                ),
+                patch(
+                    "job_finder.gmail_auth._ensure_drive_folder",
+                ),
             ):
                 gmail_auth.authenticate()
         finally:
@@ -286,6 +299,7 @@ class TestAuthenticateUpgradeDetection:
         assert "Upgrading" in captured.out or "upgrade" in captured.out.lower(), (
             f"Should print upgrade message, got: {captured.out}"
         )
+
 
 class TestAuthenticateScopeChecklist:
     """authenticate() prints scope checklist after successful auth."""
@@ -317,14 +331,17 @@ class TestAuthenticateScopeChecklist:
             gmail_auth.TOKEN_PATH = token_path
             gmail_auth.CREDENTIALS_PATH = creds_path
 
-            with patch(
-                "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
-
-                return_value=mock_flow,
-            ), patch(
-                "job_finder.gmail_auth._validate_drive_api",
-            ), patch(
-                "job_finder.gmail_auth._ensure_drive_folder",
+            with (
+                patch(
+                    "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+                    return_value=mock_flow,
+                ),
+                patch(
+                    "job_finder.gmail_auth._validate_drive_api",
+                ),
+                patch(
+                    "job_finder.gmail_auth._ensure_drive_folder",
+                ),
             ):
                 gmail_auth.authenticate()
         finally:
@@ -340,6 +357,7 @@ class TestAuthenticateScopeChecklist:
             f"Should show checkmarks, got: {captured.out}"
         )
 
+
 class TestValidateDriveApi:
     """_validate_drive_api tests Drive API access."""
 
@@ -349,9 +367,7 @@ class TestValidateDriveApi:
 
         mock_creds = MagicMock()
         mock_service = MagicMock()
-        mock_service.files.return_value.list.return_value.execute.return_value = {
-            "files": []
-        }
+        mock_service.files.return_value.list.return_value.execute.return_value = {"files": []}
 
         with patch("job_finder.gmail_auth.build", return_value=mock_service):
             _validate_drive_api(mock_creds)
@@ -364,6 +380,7 @@ class TestValidateDriveApi:
     def test_prints_console_link_on_403(self, capsys):
         """_validate_drive_api prints Console link when HttpError 403 received."""
         from googleapiclient.errors import HttpError
+
         from job_finder.gmail_auth import _validate_drive_api
 
         mock_creds = MagicMock()
@@ -383,6 +400,7 @@ class TestValidateDriveApi:
         assert "console.cloud.google.com" in captured.out, (
             f"Should print Console link on 403, got: {captured.out}"
         )
+
 
 class TestEnsureDriveFolder:
     """_ensure_drive_folder auto-creates folder and saves folder_id to config.yaml."""
@@ -410,7 +428,7 @@ class TestEnsureDriveFolder:
 
         config_path = str(tmp_path / "config.yaml")
         with open(config_path, "w") as f:
-            f.write("drive:\n  folder_id: \"\"\n")
+            f.write('drive:\n  folder_id: ""\n')
 
         mock_creds = MagicMock()
         mock_service = MagicMock()
@@ -423,6 +441,7 @@ class TestEnsureDriveFolder:
 
         # Verify folder_id was saved to config.yaml
         import yaml
+
         with open(config_path) as f:
             saved_config = yaml.safe_load(f)
 

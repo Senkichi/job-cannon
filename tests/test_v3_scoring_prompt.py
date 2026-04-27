@@ -27,7 +27,6 @@ from job_finder.web.scoring_prompts.v3_scoring_prompt import (
     V3_SCORING_PROMPT,
 )
 
-
 _DIMENSIONS = (
     "title_fit",
     "location_fit",
@@ -143,7 +142,10 @@ def test_schema_rejects_out_of_range_value():
         "seniority_match": 3,
         "skills_match": 3,
         "rationale": {
-            "strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": [],
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
         },
         "legitimacy_note": None,
     }
@@ -161,7 +163,10 @@ def test_schema_rejects_missing_required_field():
         "seniority_match": 3,
         # skills_match deliberately missing
         "rationale": {
-            "strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": [],
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
         },
         "legitimacy_note": None,
     }
@@ -178,7 +183,7 @@ def test_fewshot_spans_all_ordinal_levels():
     """At least one value for each of 1..5 appears as an integer score in the fewshot JSON blocks."""
     for n in range(1, 6):
         # Find ": N" where N is a bare integer (followed by comma, close-brace, or whitespace).
-        pattern = rf':\s*{n}\s*[,\}}\n]'
+        pattern = rf":\s*{n}\s*[,\}}\n]"
         assert re.search(pattern, FEWSHOT_EXAMPLES), (
             f"ordinal level {n} not found as a score value in FEWSHOT_EXAMPLES"
         )

@@ -19,7 +19,6 @@ ATS URL redirect detection (Research Pitfall 6):
 import logging
 import sqlite3
 import time
-from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -130,6 +129,7 @@ def _extract_base_domain(url: str) -> str | None:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_careers_url_with_haiku(
     homepage_url: str,
     homepage_html: str,
@@ -230,6 +230,7 @@ def _find_careers_url_with_haiku(
 
     return None
 
+
 def _fetch_job_description(url: str) -> str:
     """Fetch a job page and extract cleaned description text.
 
@@ -257,6 +258,7 @@ def _fetch_job_description(url: str) -> str:
     except Exception as e:
         logger.debug("Failed to fetch job description from '%s': %s", url, e)
         return ""
+
 
 def _extract_jobs_with_haiku(
     careers_url: str,
@@ -353,13 +355,12 @@ def _extract_jobs_with_haiku(
         try:
             from job_finder.web.ats_scanner import _title_matches
         except ImportError:
+
             def _title_matches(title, target_titles, exclusions):
                 title_lower = title.lower()
                 if target_titles and not any(t.lower() in title_lower for t in target_titles):
                     return False
-                if any(ex.lower() in title_lower for ex in exclusions):
-                    return False
-                return True
+                return not any(ex.lower() in title_lower for ex in exclusions)
 
         filtered = []
         for job in jobs:
@@ -369,15 +370,19 @@ def _extract_jobs_with_haiku(
             url = job.get("url") or ""
             if url.startswith("/"):
                 url = urljoin(careers_url, url)
-            filtered.append({
-                "title": title,
-                "url": url,
-                "description": "",  # No JD fetch for Haiku-extracted jobs (too costly)
-            })
+            filtered.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "description": "",  # No JD fetch for Haiku-extracted jobs (too costly)
+                }
+            )
 
         logger.debug(
             "_extract_jobs_with_haiku('%s'): %d jobs extracted, %d after filter",
-            careers_url, len(jobs), len(filtered),
+            careers_url,
+            len(jobs),
+            len(filtered),
         )
         return filtered
 
@@ -385,14 +390,16 @@ def _extract_jobs_with_haiku(
         logger.debug("Haiku job extraction failed for '%s': %s", careers_url, e)
         return []
 
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def find_careers_url(
     homepage_url: str,
-    conn: Optional[sqlite3.Connection] = None,
-    config: Optional[dict] = None,
+    conn: sqlite3.Connection | None = None,
+    config: dict | None = None,
 ) -> str | None:
     """Detect careers page URL from company homepage.
 
@@ -450,6 +457,7 @@ def find_careers_url(
 
     # Detect <meta http-equiv="refresh"> redirects to careers URLs
     import re
+
     meta_refresh = soup.find("meta", attrs={"http-equiv": re.compile(r"^refresh$", re.I)})
     if meta_refresh:
         content = meta_refresh.get("content", "")
@@ -507,7 +515,11 @@ def find_careers_url(
         href_lower = href.lower()
         for pattern in _CAREERS_PATTERNS:
             # Match: href starts with pattern OR contains the pattern as a path segment
-            if href_lower == pattern or href_lower.startswith(pattern + "/") or href_lower.startswith(pattern + "?"):
+            if (
+                href_lower == pattern
+                or href_lower.startswith(pattern + "/")
+                or href_lower.startswith(pattern + "?")
+            ):
                 # Resolve relative URL to absolute
                 absolute_url = urljoin(homepage_url, href)
                 logger.debug(
@@ -535,7 +547,10 @@ def find_careers_url(
             candidate = f"https://{prefix}{base_domain}/"
             try:
                 probe = requests.head(
-                    candidate, timeout=3, headers=_HEADERS, allow_redirects=True,
+                    candidate,
+                    timeout=3,
+                    headers=_HEADERS,
+                    allow_redirects=True,
                 )
                 if probe.status_code >= 400:
                     continue
@@ -547,13 +562,15 @@ def find_careers_url(
                 if any(final.netloc.startswith(sub) for sub in _CAREERS_SUBDOMAINS):
                     logger.debug(
                         "find_careers_url('%s'): subdomain probe hit '%s'",
-                        homepage_url, probe.url,
+                        homepage_url,
+                        probe.url,
                     )
                     return probe.url
                 if any(p in final.path for p in _CAREERS_PATTERNS):
                     logger.debug(
                         "find_careers_url('%s'): subdomain probe hit '%s' (path match)",
-                        homepage_url, probe.url,
+                        homepage_url,
+                        probe.url,
                     )
                     return probe.url
             except Exception:
@@ -566,12 +583,13 @@ def find_careers_url(
 
     return None
 
+
 def scrape_careers_page(
     careers_url: str,
     target_titles: list[str],
     exclusions: list[str],
-    conn: Optional[sqlite3.Connection] = None,
-    config: Optional[dict] = None,
+    conn: sqlite3.Connection | None = None,
+    config: dict | None = None,
 ) -> list[dict]:
     """Extract keyword-matched job listings from a static careers page.
 
@@ -620,9 +638,7 @@ def scrape_careers_page(
             title_lower = title.lower()
             if target_titles and not any(t.lower() in title_lower for t in target_titles):
                 return False
-            if any(ex.lower() in title_lower for ex in exclusions):
-                return False
-            return True
+            return not any(ex.lower() in title_lower for ex in exclusions)
 
     results = []
     seen_urls = set()
@@ -647,10 +663,12 @@ def scrape_careers_page(
             continue
         seen_urls.add(absolute_url)
 
-        results.append({
-            "title": title,
-            "url": absolute_url,
-        })
+        results.append(
+            {
+                "title": title,
+                "url": absolute_url,
+            }
+        )
 
     logger.debug(
         "scrape_careers_page('%s'): %d matching jobs found",

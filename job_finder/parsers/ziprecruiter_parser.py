@@ -17,7 +17,6 @@ If the structure is unrecognized, an empty list is returned (graceful degradatio
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -25,7 +24,11 @@ from bs4 import BeautifulSoup
 from job_finder.models import Job
 from job_finder.parsers._common import (
     is_meta_email as _is_meta_email,
+)
+from job_finder.parsers._common import (
     looks_like_salary_text as _looks_like_salary_text,
+)
+from job_finder.parsers._common import (
     parse_salary_range,
 )
 
@@ -34,9 +37,18 @@ logger = logging.getLogger(__name__)
 # Known HTML template artifact strings that appear when email rendering engines
 # substitute placeholder text instead of real job data. These values must never
 # become job titles or company names.
-_PLACEHOLDER_STRINGS = frozenset({
-    "title", "body", "unknown", "name", "company", "location", "n/a", "none",
-})
+_PLACEHOLDER_STRINGS = frozenset(
+    {
+        "title",
+        "body",
+        "unknown",
+        "name",
+        "company",
+        "location",
+        "n/a",
+        "none",
+    }
+)
 
 
 # Patterns used to identify ZipRecruiter job links
@@ -45,7 +57,8 @@ ZIPRECRUITER_JOB_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-def parse_ziprecruiter_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
+
+def parse_ziprecruiter_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a ZipRecruiter job alert email body (HTML) into Job objects.
 
     Best-effort parsing -- if the HTML structure is unrecognized, logs a warning
@@ -88,9 +101,7 @@ def parse_ziprecruiter_alert(body: str, email_date: Optional[datetime] = None) -
         return []
 
 
-def _parse_with_link_strategy(
-    soup: BeautifulSoup, email_date: Optional[datetime]
-) -> list[Job]:
+def _parse_with_link_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
     """Strategy 1: Find job links pointing to ziprecruiter.com/jobs/."""
     jobs = []
     seen_urls = set()
@@ -111,9 +122,7 @@ def _parse_with_link_strategy(
     return jobs
 
 
-def _parse_with_card_strategy(
-    soup: BeautifulSoup, email_date: Optional[datetime]
-) -> list[Job]:
+def _parse_with_card_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
     """Strategy 2: Find job cards by common ZipRecruiter class/structure patterns."""
     jobs = []
 
@@ -141,9 +150,7 @@ def _parse_with_card_strategy(
     return jobs
 
 
-def _extract_job_from_link(
-    link_tag, href: str, email_date: Optional[datetime]
-) -> Optional[Job]:
+def _extract_job_from_link(link_tag, href: str, email_date: datetime | None) -> Job | None:
     """Extract job data from a ZipRecruiter job link and its surrounding context."""
     # Try to get text directly from the link
     link_text = link_tag.get_text(strip=True)
@@ -177,9 +184,7 @@ def _extract_job_from_link(
     )
 
 
-def _extract_job_from_container(
-    container, href: str, email_date: Optional[datetime]
-) -> Optional[Job]:
+def _extract_job_from_container(container, href: str, email_date: datetime | None) -> Job | None:
     """Extract job data from a container element (fallback strategy)."""
     text = container.get_text(separator="\n", strip=True)
     lines = [line.strip() for line in text.split("\n") if line.strip()]
@@ -222,7 +227,7 @@ def _extract_job_from_container(
     )
 
 
-def _extract_title_from_link(link_tag, link_text: str) -> Optional[str]:
+def _extract_title_from_link(link_tag, link_text: str) -> str | None:
     """Try to extract the job title from a link element."""
     # If the link text is a plausible job title (not a generic label), use it
     if link_text and len(link_text) > 3 and len(link_text) < 100:
@@ -302,7 +307,7 @@ def _extract_job_id(url: str) -> str:
     return ""
 
 
-def _extract_salary(text: str) -> tuple[Optional[int], Optional[int]]:
+def _extract_salary(text: str) -> tuple[int | None, int | None]:
     """Parse salary from text.
 
     Delegates to the shared ``parse_salary_range`` in ``_common.py``.

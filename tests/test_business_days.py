@@ -35,7 +35,8 @@ def test_from_weekend_sunday():
 
 def test_defaults_to_today(monkeypatch):
     fake_today = date(2026, 4, 6)
-    monkeypatch.setattr("job_finder.utils.business_days.date", type(
-        "MockDate", (date,), {"today": classmethod(lambda cls: fake_today)}
-    ))
+    monkeypatch.setattr(
+        "job_finder.utils.business_days.date",
+        type("MockDate", (date,), {"today": classmethod(lambda cls: fake_today)}),
+    )
     assert business_days_ago(1) == date(2026, 4, 3)

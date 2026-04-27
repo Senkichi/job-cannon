@@ -13,7 +13,7 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import anthropic
 
@@ -58,7 +58,7 @@ def get_cached_company_research(
     if row_dict["status"] == "done" and row_dict.get("completed_at"):
         try:
             completed = datetime.fromisoformat(row_dict["completed_at"])
-            age_hours = (datetime.now(timezone.utc) - completed.replace(tzinfo=timezone.utc)).total_seconds() / 3600
+            age_hours = (datetime.now(UTC) - completed.replace(tzinfo=UTC)).total_seconds() / 3600
             if age_hours > ttl_hours:
                 return None  # Stale cache
         except (ValueError, TypeError):
@@ -84,7 +84,7 @@ def start_company_research(
     Returns:
         The new research row ID.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     cursor = conn.execute(
         "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
         (company_id, "generating", now),
@@ -161,9 +161,13 @@ def run_company_research_background(
                 client=client,
             )
 
-            research_text = result_obj.data if isinstance(result_obj.data, str) else json.dumps(result_obj.data)
+            research_text = (
+                result_obj.data
+                if isinstance(result_obj.data, str)
+                else json.dumps(result_obj.data)
+            )
             cost_usd = result_obj.cost_usd
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
 
             conn.execute(
                 """UPDATE company_research
@@ -175,12 +179,14 @@ def run_company_research_background(
                 (research_text, cost_usd, now, research_id),
             )
             conn.commit()
-            logger.info("Company research complete for company %d (cost=%.4f)", company_id, cost_usd)
+            logger.info(
+                "Company research complete for company %d (cost=%.4f)", company_id, cost_usd
+            )
 
         except Exception as e:
             error_msg = str(e)[:500]
             logger.exception("Company research failed for company %d: %s", company_id, e)
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             conn.execute(
                 "UPDATE company_research SET status = 'error', error_msg = ?, completed_at = ? WHERE id = ?",
                 (error_msg, now, research_id),

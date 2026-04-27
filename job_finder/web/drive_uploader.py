@@ -16,8 +16,8 @@ Usage:
 
 import io
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request  # noqa: F401 — re-exported for test patching
+from google.oauth2.credentials import Credentials  # noqa: F401 — re-exported for test patching
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
@@ -33,6 +33,7 @@ SCOPES = [
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _GDOC_MIME = "application/vnd.google-apps.document"
+
 
 def get_drive_service(token_path: str = "token.json"):
     """Build and return an authenticated Google Drive v3 service.
@@ -51,7 +52,8 @@ def get_drive_service(token_path: str = "token.json"):
         ValueError: If token lacks the drive.file scope, or if token refresh fails.
     """
     try:
-        from job_finder.gmail_auth import get_credentials, AuthenticationError
+        from job_finder.gmail_auth import AuthenticationError, get_credentials
+
         creds = get_credentials(token_path)
     except AuthenticationError as exc:
         raise ValueError(str(exc)) from exc
@@ -64,6 +66,7 @@ def get_drive_service(token_path: str = "token.json"):
         )
 
     return build("drive", "v3", credentials=creds)
+
 
 def upload_to_drive(
     service,

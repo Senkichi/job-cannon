@@ -2,25 +2,23 @@
 
 import json
 import logging
-import sqlite3
+import sqlite3  # noqa: F401 — re-exported for test patching of standalone_connection internals
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.resume_generator import (
+    _STRATEGY_DESCRIPTIONS,
+    _SYSTEM_PROMPT,
     RESUME_SCHEMA,
     STRATEGY_POOL,
-    _STRATEGY_DESCRIPTIONS,
-    _RESUME_GUIDELINES,
-    _SYSTEM_PROMPT,
-    _format_education,
     _format_profile_positions,
     _get_accepted_preferences,
 )
 
 logger = logging.getLogger(__name__)
+
 
 def _haiku_select_strategies(
     job_row: dict,
@@ -39,16 +37,11 @@ def _haiku_select_strategies(
         List of exactly 3 strategy identifier strings from STRATEGY_POOL.
         Falls back to first 3 from STRATEGY_POOL if Haiku call fails.
     """
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("haiku", DEFAULT_MODEL_HAIKU)
-    )
+    model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
     # Build strategy descriptions for the prompt
     strategy_list = "\n".join(
-        f"- {name}: {_STRATEGY_DESCRIPTIONS.get(name, name)}"
-        for name in STRATEGY_POOL
+        f"- {name}: {_STRATEGY_DESCRIPTIONS.get(name, name)}" for name in STRATEGY_POOL
     )
 
     system = (
@@ -111,6 +104,7 @@ def _haiku_select_strategies(
         logger.warning("_haiku_select_strategies: Haiku call failed, using fallback: %s", e)
         return STRATEGY_POOL[:3]
 
+
 def _generate_single_variant(
     db_path: str,
     job_row: dict,
@@ -139,7 +133,6 @@ def _generate_single_variant(
             generate_resume_multi for partial-failure handling.
     """
     with standalone_connection(db_path) as conn:
-
         # Build strategy-specific system prompt
         strategy_desc = _STRATEGY_DESCRIPTIONS.get(strategy, strategy)
         strategy_system = (
@@ -148,11 +141,7 @@ def _generate_single_variant(
             f"Weight your achievement selection and summary framing toward this angle."
         )
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         # Check budget gate
         if not cost_gate(conn, config, "sonnet"):
@@ -204,7 +193,11 @@ def _generate_single_variant(
                 )
 
         # Inject style guide directives + accepted Drive feedback at same priority level
-        from job_finder.web.resume_style_guide import load_style_guide, _build_style_guide_directives
+        from job_finder.web.resume_style_guide import (
+            _build_style_guide_directives,
+            load_style_guide,
+        )
+
         style_guide = load_style_guide()
         style_directives = _build_style_guide_directives(style_guide)
         accepted_prefs = _get_accepted_preferences(conn)
@@ -242,6 +235,7 @@ def _generate_single_variant(
             max_tokens=4096,
         )
         return result
+
 
 def generate_resume_multi(
     db_path: str,
@@ -302,9 +296,7 @@ def generate_resume_multi(
                 variants.append(result)
                 logger.debug("generate_resume_multi: variant '%s' succeeded", strategy)
             except Exception as e:
-                logger.warning(
-                    "generate_resume_multi: variant '%s' failed: %s", strategy, e
-                )
+                logger.warning("generate_resume_multi: variant '%s' failed: %s", strategy, e)
 
     if not variants:
         raise RuntimeError("All resume variants failed")
@@ -317,6 +309,7 @@ def generate_resume_multi(
 
     # Step 3: Synthesis pass
     return _synthesize_variants(db_path, variants, job_row, config)
+
 
 def _synthesize_variants(
     db_path: str,
@@ -338,12 +331,7 @@ def _synthesize_variants(
         Final synthesized resume dict matching RESUME_SCHEMA.
     """
     with standalone_connection(db_path) as conn:
-
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         synthesis_system = (
             "You are a resume editor. You have multiple resume variants for the same candidate "

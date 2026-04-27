@@ -31,6 +31,7 @@ class MigrationBlockedError(Exception):
     will not have mutated any schema or data before the raise.
     """
 
+
 # Each migration is a list of SQL statement strings.
 # Storing as discrete strings avoids semicolon-splitting hazards in comments.
 MIGRATIONS = [
@@ -39,7 +40,6 @@ MIGRATIONS = [
         # Enable WAL mode -- persistent in the database file after first run.
         "PRAGMA journal_mode=WAL",
         "PRAGMA wal_autocheckpoint=1000",
-
         # Create the jobs table if it does not yet exist (fresh database).
         # This is identical to db.py._init_tables so both paths produce the same schema.
         """CREATE TABLE IF NOT EXISTS jobs (
@@ -59,7 +59,6 @@ MIGRATIONS = [
             score_breakdown TEXT DEFAULT '{}',
             user_interest TEXT DEFAULT 'unreviewed'
         )""",
-
         # Create the runs table if it does not yet exist.
         """CREATE TABLE IF NOT EXISTS runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,14 +68,12 @@ MIGRATIONS = [
             jobs_new INTEGER DEFAULT 0,
             jobs_scored INTEGER DEFAULT 0
         )""",
-
         # Add new columns to jobs table.
         # These use DEFAULT so they are safe with existing rows.
         # If the column already exists (migration re-run), the error is caught below.
         "ALTER TABLE jobs ADD COLUMN pipeline_status TEXT DEFAULT 'discovered'",
         "ALTER TABLE jobs ADD COLUMN posted_date TEXT",
         "ALTER TABLE jobs ADD COLUMN notes TEXT DEFAULT ''",
-
         # Supporting tables
         """CREATE TABLE IF NOT EXISTS pipeline_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +84,6 @@ MIGRATIONS = [
             source TEXT DEFAULT 'manual',
             evidence TEXT DEFAULT ''
         )""",
-
         """CREATE TABLE IF NOT EXISTS email_parse_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             message_id TEXT NOT NULL UNIQUE,
@@ -96,7 +92,6 @@ MIGRATIONS = [
             jobs_found INTEGER DEFAULT 0,
             error TEXT DEFAULT NULL
         )""",
-
         """CREATE TABLE IF NOT EXISTS resume_generations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT NOT NULL,
@@ -104,7 +99,6 @@ MIGRATIONS = [
             model TEXT NOT NULL,
             doc_url TEXT DEFAULT NULL
         )""",
-
         """CREATE TABLE IF NOT EXISTS scoring_costs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT,
@@ -115,7 +109,6 @@ MIGRATIONS = [
             cost_usd REAL DEFAULT 0.0,
             timestamp TEXT NOT NULL
         )""",
-
         # Indexes for query performance (IF NOT EXISTS -- safe to re-run)
         "CREATE INDEX IF NOT EXISTS idx_jobs_pipeline_status ON jobs(pipeline_status)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_score ON jobs(score DESC)",
@@ -123,7 +116,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_pipeline_events_job_id ON pipeline_events(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_email_parse_log_message_id ON email_parse_log(message_id)",
     ],
-
     # Migration 2: Add AI scoring columns and indexes.
     [
         "ALTER TABLE jobs ADD COLUMN haiku_score REAL DEFAULT NULL",
@@ -135,7 +127,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_jobs_haiku_score ON jobs(haiku_score DESC)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_is_stale ON jobs(is_stale)",
     ],
-
     # Migration 3: Add pipeline_detections table for the review queue and
     # auto-update log. Each row tracks one Gmail message and its classification.
     [
@@ -158,7 +149,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_pipeline_detections_job_id ON pipeline_detections(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_pipeline_detections_message_id ON pipeline_detections(gmail_message_id)",
     ],
-
     # Migration 4: Extend resume_generations table with status tracking columns
     # for async generation workflow. Adds indexes for common query patterns.
     [
@@ -171,7 +161,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_resume_generations_job_id ON resume_generations(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_resume_generations_status ON resume_generations(status)",
     ],
-
     # Migration 5: Add Phase 5 Intelligence tables — interview prep, resume
     # preferences feedback loop, rejection analysis reports — plus new columns
     # on existing tables for rejection review tracking and Drive poll timestamps.
@@ -190,7 +179,6 @@ MIGRATIONS = [
             cost_usd REAL DEFAULT 0.0
         )""",
         "CREATE INDEX IF NOT EXISTS idx_interview_preps_job_id ON interview_preps(job_id)",
-
         # resume_preferences_detected: per-preference rows from Drive diff analysis
         """CREATE TABLE IF NOT EXISTS resume_preferences_detected (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,7 +193,6 @@ MIGRATIONS = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_prefs_detected_job_id ON resume_preferences_detected(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_prefs_detected_accepted ON resume_preferences_detected(accepted)",
-
         # rejection_reports: Opus batch analysis reports stored for Dashboard display
         """CREATE TABLE IF NOT EXISTS rejection_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,14 +201,11 @@ MIGRATIONS = [
             generated_at TEXT NOT NULL,
             cost_usd REAL DEFAULT 0.0
         )""",
-
         # rejection_reviewed flag on jobs — 0=unreviewed, 1=included in a report
         "ALTER TABLE jobs ADD COLUMN rejection_reviewed INTEGER NOT NULL DEFAULT 0",
-
         # last_drive_polled_at on resume_generations — Drive feedback poll timestamp
         "ALTER TABLE resume_generations ADD COLUMN last_drive_polled_at TEXT DEFAULT NULL",
     ],
-
     # Migration 6: Phase 6 Data Quality — batch score session tracking, merge log
     # for smart deduplication, and new job columns for location normalization and
     # description reformatting. Also fixes first_seen timestamps retroactively.
@@ -239,7 +223,6 @@ MIGRATIONS = [
             error_msg TEXT DEFAULT NULL
         )""",
         "CREATE INDEX IF NOT EXISTS idx_batch_score_sessions_status ON batch_score_sessions(status)",
-
         # merge_log: audit trail for deduplication merges
         """CREATE TABLE IF NOT EXISTS merge_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,11 +232,9 @@ MIGRATIONS = [
             merged_at TEXT NOT NULL
         )""",
         "CREATE INDEX IF NOT EXISTS idx_merge_log_canonical ON merge_log(canonical_key)",
-
         # New columns on jobs for Phase 6 enrichment
         "ALTER TABLE jobs ADD COLUMN locations_raw TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN description_reformatted INTEGER DEFAULT 0",
-
         # Retroactive first_seen fix: update Gmail jobs' first_seen to the earliest
         # email_parse_log timestamp where the date matches (best-effort; per Research
         # Pitfall 5, matching is by date proximity since email_parse_log uses run-level
@@ -267,7 +248,6 @@ MIGRATIONS = [
             WHERE DATE(epl.processed_at) = DATE(jobs.first_seen)
         )""",
     ],
-
     # Migration 7: Phase 7 Company Tracking & ATS Discovery — companies registry,
     # company_scan_log for scan history, and jobs.company_id FK to link jobs to
     # their company record. Enables proactive ATS discovery via Lever/Greenhouse/Ashby.
@@ -288,7 +268,6 @@ MIGRATIONS = [
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""",
-
         # company_scan_log: scan history with FK to companies
         """CREATE TABLE IF NOT EXISTS company_scan_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,14 +276,11 @@ MIGRATIONS = [
             jobs_found INTEGER DEFAULT 0,
             error TEXT DEFAULT NULL
         )""",
-
         # jobs.company_id FK to link jobs to their company record
         "ALTER TABLE jobs ADD COLUMN company_id INTEGER DEFAULT NULL",
-
         # jobs.comp_data_json stores ATS compensation data (equity, bonus, benefits)
         # as JSON from Ashby/Lever probes for Haiku compensation context scoring.
         "ALTER TABLE jobs ADD COLUMN comp_data_json TEXT DEFAULT NULL",
-
         # Indexes for companies queries
         "CREATE INDEX IF NOT EXISTS idx_companies_name ON companies(name)",
         "CREATE INDEX IF NOT EXISTS idx_companies_ats_platform ON companies(ats_platform)",
@@ -312,7 +288,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_companies_scan_enabled ON companies(scan_enabled)",
         "CREATE INDEX IF NOT EXISTS idx_company_scan_log_company_id ON company_scan_log(company_id)",
     ],
-
     # Migration 8: Phase 10 Cost-Optimized Enrichment — enrichment_tier column
     # tracks the highest enrichment tier attempted per job. Values: 'free', 'ddg',
     # 'haiku', 'serpapi', 'sonnet', 'exhausted'. Existing enriched jobs are marked
@@ -323,7 +298,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_jobs_enrichment_tier ON jobs(enrichment_tier)",
         "UPDATE jobs SET enrichment_tier = 'serpapi' WHERE jd_full IS NOT NULL AND enrichment_tier IS NULL",
     ],
-
     # Migration 9: user_activity table — INST-01 (Phase 16).
     # Stores user action events for activity analytics and audit trails.
     [
@@ -337,7 +311,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_user_activity_action ON user_activity(action)",
         "CREATE INDEX IF NOT EXISTS idx_user_activity_occurred_at ON user_activity(occurred_at DESC)",
     ],
-
     # Migration 10: ATS retry columns — DEBT-01 (Phase 14).
     # Supports exponential backoff retry tracking for ATS probe failures.
     [
@@ -345,7 +318,6 @@ MIGRATIONS = [
         "ALTER TABLE jobs ADD COLUMN ats_last_error TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN ats_retry_after TEXT DEFAULT NULL",
     ],
-
     # Migration 11: resume_upload_reviews table — RESUME-01 (Phase 17).
     # Stores uploaded resume PDF metadata and review pipeline state.
     [
@@ -357,7 +329,6 @@ MIGRATIONS = [
             review_status TEXT NOT NULL DEFAULT 'pending'
         )""",
     ],
-
     # Migration 12: ATS retry columns on companies table — DEBT-01 (Phase 14).
     # Supports exponential backoff retry tracking for transient ATS probe failures.
     # Separate from Migration 10 which incorrectly added these to the jobs table.
@@ -366,7 +337,6 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN retry_after TEXT DEFAULT NULL",
         "ALTER TABLE companies ADD COLUMN miss_reason TEXT DEFAULT NULL",
     ],
-
     # Migration 13: Drop dead ATS retry columns from jobs table — Phase 19 cleanup.
     # Migration 10 (Phase 14) added ats_retry_count/ats_last_error/ats_retry_after to jobs in error.
     # The correct columns (retry_count/retry_after/miss_reason) were added to companies in Migration 12.
@@ -377,7 +347,6 @@ MIGRATIONS = [
         "ALTER TABLE jobs DROP COLUMN ats_last_error",
         "ALTER TABLE jobs DROP COLUMN ats_retry_after",
     ],
-
     # Migration 14: Phase 30 Infrastructure — expiry tracking + validation report storage.
     # Serves both Phase 31 (expiry detection) and Phase 32 (resume quality).
     [
@@ -385,7 +354,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_jobs_expiry_checked_at ON jobs(expiry_checked_at)",
         "ALTER TABLE resume_generations ADD COLUMN validation_report TEXT DEFAULT NULL",
     ],
-
     # Migration 15: Phase 40 Data Quality — clean poison jd_full values, delete garbage
     # notification rows, and promote long descriptions to jd_full. Three data fixes:
     #
@@ -402,14 +370,11 @@ MIGRATIONS = [
     [
         # Fix A: Null out LinkedIn login page jd_full values
         "UPDATE jobs SET jd_full = NULL, enrichment_tier = 'ddg' WHERE jd_full LIKE '%signing you in%' OR jd_full LIKE '%sign in or join%'",
-
         # Fix B: Delete garbage notification rows
         "DELETE FROM jobs WHERE title LIKE '%receive notifications%'",
-
         # Fix C: Promote long descriptions to jd_full
         "UPDATE jobs SET jd_full = SUBSTR(description, 1, 8000) WHERE jd_full IS NULL AND description IS NOT NULL AND LENGTH(description) > 200",
     ],
-
     # Migration 16: Add company enrichment columns to companies table.
     # enrich_company_info() returns company_size and industry from DuckDuckGo —
     # previously discarded; now persisted for scoring context and UI display.
@@ -417,7 +382,6 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN company_size TEXT DEFAULT NULL",
         "ALTER TABLE companies ADD COLUMN industry TEXT DEFAULT NULL",
     ],
-
     # Migration 17: Add homepage_probe_attempted_at column to companies table.
     # Enables retry-avoidance in run_homepage_discovery — companies already
     # attempted (whether found or not) are skipped on subsequent runs.
@@ -425,27 +389,23 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN homepage_probe_attempted_at TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_companies_homepage_probe_attempted_at ON companies(homepage_probe_attempted_at)",
     ],
-
     # Migration 18: Add provider column to scoring_costs table.
     # Tracks which provider (anthropic, gemini, ollama) handled each API call.
     # Default 'anthropic' for all existing rows (pre-multi-provider).
     [
         "ALTER TABLE scoring_costs ADD COLUMN provider TEXT DEFAULT 'anthropic'",
     ],
-
     # Migration 19: Add opus_score column for Opus baseline evaluation.
     # Stores Opus-generated scores as gold-standard baseline for model comparison.
     [
         "ALTER TABLE jobs ADD COLUMN opus_score REAL DEFAULT NULL",
     ],
-
     # Migration 20: Provider attribution for Sonnet scoring (ATTR-01).
     # Records which provider produced each Sonnet score.
     # Default 'anthropic' for all existing rows (pre-cascade).
     [
         "ALTER TABLE jobs ADD COLUMN scoring_provider TEXT DEFAULT 'anthropic'",
     ],
-
     # Migration 21: Clean up stub JDs — title restatements from AI enrichment.
     # When all free tiers failed, AI extraction echoed the title as jd_full
     # (e.g., "Data Manager at Mochi Health" for a Data Manager role).
@@ -464,7 +424,6 @@ MIGRATIONS = [
            WHERE jd_full IS NULL
              AND sonnet_score IS NOT NULL""",
     ],
-
     # Migration 22: Clean up chrome-polluted JDs — scraped website chrome, LinkedIn
     # login walls, company overview pages, and search result pages stored as jd_full.
     # These pass length checks but contain no usable job description content.
@@ -501,7 +460,6 @@ MIGRATIONS = [
            WHERE jd_full IS NOT NULL
              AND jd_full LIKE '%Past month%Past week%Past 24 hours%'""",
     ],
-
     # Migration 23: Recalibrate jobs_found_total from cumulative to current count
     # and add jobs_matched column to company_scan_log.
     [
@@ -510,7 +468,6 @@ MIGRATIONS = [
         )""",
         "ALTER TABLE company_scan_log ADD COLUMN jobs_matched INTEGER DEFAULT NULL",
     ],
-
     # Migration 24: Add composite index on email_parse_log(sender, processed_at)
     # to support the per-message Gmail dedup query:
     #   WHERE sender = 'gmail' AND processed_at >= datetime('now', ?)
@@ -520,7 +477,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_email_parse_log_sender_processed_at"
         " ON email_parse_log(sender, processed_at)",
     ],
-
     # Migration 25: Clean up Eightfold/Phenom PCS ATS SPA shell garbage in jd_full.
     # Eightfold-powered careers pages (vizientinc.com, bayer.com, caci.com, etc.)
     # inject CSS theming config as inline JSON on page load:
@@ -543,7 +499,6 @@ MIGRATIONS = [
                fit_analysis = NULL
            WHERE jd_full LIKE '%"themeOptions"%'
              AND enrichment_tier = 'exhausted'""",
-
         # Fix B: non-exhausted jobs — reset to re-run free tier cleanly
         """UPDATE jobs
            SET jd_full = NULL,
@@ -553,7 +508,6 @@ MIGRATIONS = [
            WHERE jd_full LIKE '%"themeOptions"%'
              AND (enrichment_tier IS NULL OR enrichment_tier != 'exhausted')""",
     ],
-
     # Migration 26: Enrichment retry metadata + last_scanned_at index.
     #
     # enrichment_* columns track DuckDuckGo company-metadata enrichment failures
@@ -575,7 +529,6 @@ MIGRATIONS = [
         "ALTER TABLE companies ADD COLUMN enrichment_last_error TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_companies_last_scanned_at ON companies(last_scanned_at)",
     ],
-
     # Migration 27: Career-ops scoring metadata columns + interview story reuse.
     #
     # expiry_status: per-job liveness verdict from scoring preflight
@@ -593,7 +546,6 @@ MIGRATIONS = [
         "ALTER TABLE jobs ADD COLUMN eval_blocks TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN job_archetype TEXT DEFAULT NULL",
     ],
-
     # Migration 28: Interview story reuse — reusable_stories_json on interview_preps.
     #
     # Stores up to 5 distinct {question, star_story, key_points} objects extracted
@@ -602,7 +554,6 @@ MIGRATIONS = [
     [
         "ALTER TABLE interview_preps ADD COLUMN reusable_stories_json TEXT DEFAULT NULL",
     ],
-
     # Migration 29: Company research table — on-demand company research lifecycle.
     #
     # Follows the resume-generation async pattern: pending → generating → done/error.
@@ -621,7 +572,6 @@ MIGRATIONS = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_company_research_company_id ON company_research(company_id)",
     ],
-
     # Migration 30: Persist careers_url on companies table.
     #
     # Caches the result of find_careers_url() so the HTML fallback scan loop
@@ -631,7 +581,6 @@ MIGRATIONS = [
     [
         "ALTER TABLE companies ADD COLUMN careers_url TEXT DEFAULT NULL",
     ],
-
     # Migration 31: Track when careers page was last crawled via Playwright.
     #
     # Enables freshness-based rotation in the careers crawler scheduled job.
@@ -640,14 +589,12 @@ MIGRATIONS = [
     [
         "ALTER TABLE companies ADD COLUMN careers_crawl_last_at TEXT DEFAULT NULL",
     ],
-
     # Migration 32: Legitimacy signals for ghost job detection.
     # Stores the computed legitimacy_note string after Haiku scoring for
     # analytics and dashboard display. Does not affect the scoring pipeline.
     [
         "ALTER TABLE jobs ADD COLUMN legitimacy_note TEXT DEFAULT NULL",
     ],
-
     # Migration 33: Liveness checker columns.
     # URL liveness verification tracks when each job was last checked,
     # its liveness status, and the reason for the determination.
@@ -657,7 +604,6 @@ MIGRATIONS = [
         "ALTER TABLE jobs ADD COLUMN liveness_reason TEXT DEFAULT NULL",
         "CREATE INDEX IF NOT EXISTS idx_jobs_liveness ON jobs(liveness_checked_at, pipeline_status)",
     ],
-
     # Migration 34: Rejection pattern reports table.
     # Stores zero-LLM-cost mechanical rejection analysis results for
     # dashboard display and trend tracking.
@@ -670,20 +616,17 @@ MIGRATIONS = [
             created_at TEXT NOT NULL
         )""",
     ],
-
     # Migration 35: Cache discovered careers API endpoints for direct HTTP
     # access on subsequent crawls (skips Playwright entirely).
     [
         "ALTER TABLE companies ADD COLUMN careers_api_endpoint TEXT DEFAULT NULL",
     ],
-
     # Migration 36: Careers crawl tier caching — stores which extraction tier
     # last succeeded per company (static/url_param/playwright/api_cached) to
     # skip lower tiers on subsequent crawls.
     [
         "ALTER TABLE companies ADD COLUMN careers_crawl_tier TEXT DEFAULT NULL",
     ],
-
     # Migration 37: AI-navigated careers crawler — cached navigation recipe.
     # Stores a Haiku-discovered navigation recipe (JSON) per company so that
     # subsequent crawls replay the recipe mechanically with zero AI cost.
@@ -692,7 +635,6 @@ MIGRATIONS = [
     [
         "ALTER TABLE companies ADD COLUMN careers_nav_recipe TEXT DEFAULT NULL",
     ],
-
     # Migration 38: Dashboard performance — add missing indexes.
     # Fixes 8-second dashboard load caused by full table scans on:
     #   - scoring_costs (4 aggregation queries per page load)
@@ -707,7 +649,6 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_company_scan_log_scanned_at ON company_scan_log(scanned_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen DESC)",
     ],
-
     # Migration 39: Drop dead liveness_* columns.
     # liveness_checker.py has been removed — its functionality merged into
     # expiry_checker.run_staleness_check (Phase C cascade writes expiry_status
@@ -721,7 +662,6 @@ MIGRATIONS = [
         "ALTER TABLE jobs DROP COLUMN liveness_status",
         "ALTER TABLE jobs DROP COLUMN liveness_reason",
     ],
-
     # Migration 40: v3.0 ordinal rubric scoring — additive schema.
     #
     # Adds unified ordinal-assessment columns alongside existing tier-specific columns.
@@ -802,6 +742,7 @@ def _migration_41_drop_legacy_scores(conn: sqlite3.Connection) -> None:
 
 MIGRATIONS.append(_migration_41_drop_legacy_scores)
 
+
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 
@@ -839,6 +780,7 @@ def run_migrations(db_path: str) -> None:
             except sqlite3.OperationalError:
                 pass  # Column already exists — expected on fresh DBs
 
+
 def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
     """Run retroactive dedup merge exactly once (guarded by sentinel in merge_log).
 
@@ -858,25 +800,32 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
 
         # Import here to avoid circular import at module load time
         from datetime import datetime as _dt
+
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
         merged_count = run_retroactive_dedup(conn)
         now_iso = _dt.now().isoformat()
 
         # Insert sentinel row to mark completion
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at)
             VALUES ('__sentinel__', '__sentinel__', 'migration_complete', ?)
-        """, (now_iso,))
+        """,
+            (now_iso,),
+        )
         conn.commit()
 
         if merged_count > 0:
             # Add activity feed entry so the user sees the merge count
             try:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)
                     VALUES (?, 'dedup_migration', ?, 0, 0)
-                """, (now_iso, merged_count))
+                """,
+                    (now_iso, merged_count),
+                )
                 conn.commit()
             except Exception as e:
                 logger.warning("Failed to log dedup migration run: %s", e)
@@ -892,13 +841,16 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
                     "SELECT canonical_key FROM merge_log WHERE merge_source = 'migration'"
                 ).fetchall()
                 for row in canonical_keys:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         UPDATE jobs
                            SET classification = NULL,
                                sub_scores_json = NULL,
                                fit_analysis = NULL
                          WHERE dedup_key = ?
-                    """, (row[0],))
+                    """,
+                        (row[0],),
+                    )
                 conn.commit()
             except Exception as e:
                 logger.warning("Failed to queue merged rows for re-scoring: %s", e)
@@ -908,9 +860,8 @@ def _run_retroactive_dedup_once(conn: sqlite3.Connection) -> None:
     except Exception as e:
         logger.warning("Retroactive dedup failed (non-fatal): %s", e)
 
-def _apply_migration(
-    conn: sqlite3.Connection, version: int, migration
-) -> None:
+
+def _apply_migration(conn: sqlite3.Connection, version: int, migration) -> None:
     """Apply a single migration (list of SQL statements OR callable) and update user_version.
 
     Two migration shapes are supported:

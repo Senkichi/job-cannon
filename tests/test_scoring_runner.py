@@ -4,19 +4,17 @@ Verifies that both functions issue exactly one SELECT with WHERE dedup_key IN (.
 instead of one per job key (N+1 query elimination).
 """
 
-import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _NOW = datetime.now().isoformat()
+
 
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None = None) -> None:
     """Insert a minimal job row for scoring tests."""
@@ -46,6 +44,7 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, jd_full: str | None = 
     )
     conn.commit()
 
+
 class _TrackingConnection:
     """Wraps a sqlite3.Connection to count SQL queries matching a pattern."""
 
@@ -64,6 +63,7 @@ class _TrackingConnection:
     def __getattr__(self, name: str):
         return getattr(self._conn, name)
 
+
 def _make_tracking_connection_factory(calls_out: list[str]):
     """Return a standalone_connection replacement that tracks dedup SELECT calls.
 
@@ -79,6 +79,7 @@ def _make_tracking_connection_factory(calls_out: list[str]):
             calls_out.extend(tracker.dedup_select_calls)
 
     return _factory
+
 
 # ---------------------------------------------------------------------------
 # Config shared across tests
@@ -135,20 +136,27 @@ class TestRunScoring:
 
         def fake_persist(job, conn, cfg, client=None):
             seen.append(job["dedup_key"])
-            from job_finder.web.job_scorer import ScoringResult
             from job_finder.db import JobAssessment
+            from job_finder.web.job_scorer import ScoringResult
+
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
                     sub_scores={
-                        "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                        "domain_match": 3, "seniority_match": 3,
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
                         "skills_match": 3,
                     },
                     classification="",
-                    rationale={"strengths": ["x"], "gaps": [],
-                               "talking_points": [],
-                               "resume_priority_skills": []},
+                    rationale={
+                        "strengths": ["x"],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
                     provider="ollama",
                 ),
                 provider="ollama",
@@ -159,7 +167,9 @@ class TestRunScoring:
             patch.object(sr, "check_job_liveness", return_value="live"),
         ):
             summary = sr.run_scoring(
-                ["sk-1", "sk-2", "sk-3"], self._scoring_cfg(), db_path,
+                ["sk-1", "sk-2", "sk-3"],
+                self._scoring_cfg(),
+                db_path,
             )
 
         assert sorted(seen) == ["sk-1", "sk-2", "sk-3"]
@@ -180,20 +190,27 @@ class TestRunScoring:
 
         def fake_persist(job, conn, cfg, client=None):
             scored_keys.append(job["dedup_key"])
-            from job_finder.web.job_scorer import ScoringResult
             from job_finder.db import JobAssessment
+            from job_finder.web.job_scorer import ScoringResult
+
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
                     sub_scores={
-                        "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                        "domain_match": 3, "seniority_match": 3,
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
                         "skills_match": 3,
                     },
                     classification="",
-                    rationale={"strengths": [], "gaps": [],
-                               "talking_points": [],
-                               "resume_priority_skills": []},
+                    rationale={
+                        "strengths": [],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
                     provider="ollama",
                 ),
                 provider="ollama",
@@ -209,7 +226,9 @@ class TestRunScoring:
             patch.object(sr, "check_job_liveness", side_effect=liveness_side),
         ):
             summary = sr.run_scoring(
-                ["live-1", "dead-1"], self._scoring_cfg(), db_path,
+                ["live-1", "dead-1"],
+                self._scoring_cfg(),
+                db_path,
             )
 
         assert scored_keys == ["live-1"]
@@ -226,22 +245,28 @@ class TestRunScoring:
         # Do NOT patch score_and_persist_job; we want the real dual-write
         # to land provider='groq' on the row.
         import job_finder.web.scoring_runner as sr
-        from job_finder.web.job_scorer import ScoringResult
         from job_finder.db import JobAssessment
+        from job_finder.web.job_scorer import ScoringResult
 
         def fake_inner_scorer(job, conn, cfg, client=None):
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
                     sub_scores={
-                        "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                        "domain_match": 3, "seniority_match": 3,
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
                         "skills_match": 3,
                     },
                     classification="",
-                    rationale={"strengths": ["x"], "gaps": [],
-                               "talking_points": [],
-                               "resume_priority_skills": []},
+                    rationale={
+                        "strengths": ["x"],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
                     provider="groq",
                 ),
                 provider="groq",
@@ -250,6 +275,7 @@ class TestRunScoring:
         # Patch the default score_job in the job_scorer module — that's what
         # score_and_persist_job imports lazily.
         import job_finder.web.job_scorer as js
+
         with (
             patch.object(js, "score_job", fake_inner_scorer),
             patch.object(sr, "check_job_liveness", return_value="live"),
@@ -257,6 +283,7 @@ class TestRunScoring:
             sr.run_scoring(["cascade-1"], self._scoring_cfg(), db_path)
 
         import sqlite3
+
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
@@ -269,6 +296,7 @@ class TestRunScoring:
     def test_legacy_functions_removed(self):
         """Plan 4 Commit E removed run_haiku_scoring + run_sonnet_evaluation."""
         import job_finder.web.scoring_runner as sr
+
         assert not hasattr(sr, "run_haiku_scoring")
         assert not hasattr(sr, "run_sonnet_evaluation")
         assert callable(sr.run_scoring)
@@ -277,6 +305,7 @@ class TestRunScoring:
         """Empty new_job_keys -> summary with all-zero counters, no DB work."""
         db_path, _ = migrated_db
         import job_finder.web.scoring_runner as sr
+
         summary = sr.run_scoring([], self._scoring_cfg(), db_path)
         assert summary["scored"] == 0
         assert summary["skipped_dead"] == 0
@@ -292,20 +321,27 @@ class TestRunScoring:
         import job_finder.web.scoring_runner as sr
 
         def fake_persist(job, conn, cfg, client=None):
-            from job_finder.web.job_scorer import ScoringResult
             from job_finder.db import JobAssessment
+            from job_finder.web.job_scorer import ScoringResult
+
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
                     sub_scores={
-                        "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                        "domain_match": 3, "seniority_match": 3,
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
                         "skills_match": 3,
                     },
                     classification="",
-                    rationale={"strengths": [], "gaps": [],
-                               "talking_points": [],
-                               "resume_priority_skills": []},
+                    rationale={
+                        "strengths": [],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
                     provider="ollama",
                 ),
                 provider="ollama",
@@ -316,7 +352,9 @@ class TestRunScoring:
             patch.object(sr, "check_job_liveness", return_value="live"),
         ):
             summary = sr.run_scoring(
-                ["present-1", "missing-1"], self._scoring_cfg(), db_path,
+                ["present-1", "missing-1"],
+                self._scoring_cfg(),
+                db_path,
             )
         # Only present-1 scored; missing-1 silently skipped.
         assert summary["scored"] == 1
@@ -331,6 +369,7 @@ class TestRunScoring:
 
         def fake_persist(job, conn, cfg, client=None):
             from job_finder.web.job_scorer import ScoringResult
+
             return ScoringResult(status="skipped", data=None)
 
         with (
@@ -351,8 +390,11 @@ class TestRunScoring:
 
         def fake_persist(job, conn, cfg, client=None):
             from job_finder.web.job_scorer import ScoringResult
+
             return ScoringResult(
-                status="error", data=None, error="dispatcher failed",
+                status="error",
+                data=None,
+                error="dispatcher failed",
             )
 
         with (
@@ -375,24 +417,30 @@ class TestRunScoring:
             _insert_job(setup_conn, k, jd_full="body")
         setup_conn.commit()
 
-        import job_finder.web.scoring_runner as sr
         import job_finder.web.job_scorer as js
-        from job_finder.web.job_scorer import ScoringResult
+        import job_finder.web.scoring_runner as sr
         from job_finder.db import JobAssessment
+        from job_finder.web.job_scorer import ScoringResult
 
         def fake_inner(job, conn, cfg, client=None):
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
                     sub_scores={
-                        "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                        "domain_match": 3, "seniority_match": 3,
+                        "title_fit": 3,
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
                         "skills_match": 3,
                     },
                     classification="",
-                    rationale={"strengths": ["s"], "gaps": [],
-                               "talking_points": [],
-                               "resume_priority_skills": []},
+                    rationale={
+                        "strengths": ["s"],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
                     provider="ollama",
                 ),
                 provider="ollama",
@@ -403,7 +451,9 @@ class TestRunScoring:
             patch.object(sr, "check_job_liveness", return_value="live"),
         ):
             summary = sr.run_scoring(
-                ["ca-1", "ca-2"], self._scoring_cfg(), db_path,
+                ["ca-1", "ca-2"],
+                self._scoring_cfg(),
+                db_path,
             )
         assert summary["scored"] == 2
         assert summary["classified_apply"] == 2

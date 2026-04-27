@@ -50,6 +50,7 @@ class Job:
             String in format "{normalized_company}|{normalized_title}"
         """
         from job_finder.normalizers import normalize_company, normalize_title
+
         return f"{normalize_company(company)}|{normalize_title(title)}"
 
     @property
@@ -61,4 +62,3 @@ class Job:
         Normalizes company suffixes (Inc., LLC) and title abbreviations (Sr.->Senior).
         """
         return Job.normalized_dedup_key(self.company, self.title)
-

@@ -11,7 +11,6 @@ Note: indeed_parser uses is_meta_email with _INDEED_META_PATTERNS as extra_patte
 """
 
 import re
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Salary parsing
@@ -19,12 +18,10 @@ from typing import Optional
 
 # Salary range: "$120K - $150K", "$120,000 - $150,000", "$168K-$255K"
 # Handles K-notation, comma-separated full-dollar amounts, and en-dash.
-SALARY_RANGE_RE = re.compile(
-    r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\s*[Kk]?"
-)
+SALARY_RANGE_RE = re.compile(r"\$(\d[\d,]*)\s*[Kk]?\s*[-\u2013]+\s*\$(\d[\d,]*)\s*[Kk]?")
 
 
-def parse_salary_range(text: str) -> tuple[Optional[int], Optional[int]]:
+def parse_salary_range(text: str) -> tuple[int | None, int | None]:
     """Extract a salary range from free-form text.
 
     Handles formats like:
@@ -98,5 +95,7 @@ def is_meta_email(body: str, extra_patterns: list[re.Pattern[str]] | None = None
         True if the body looks like a digest/count summary, not a job alert.
     """
     preamble = body[:200]
-    patterns = BASE_META_PATTERNS if extra_patterns is None else BASE_META_PATTERNS + extra_patterns
+    patterns = (
+        BASE_META_PATTERNS if extra_patterns is None else BASE_META_PATTERNS + extra_patterns
+    )
     return any(pattern.search(preamble) for pattern in patterns)

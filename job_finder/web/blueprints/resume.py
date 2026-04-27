@@ -20,13 +20,17 @@ Routes:
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote_plus
 
 from flask import Blueprint, current_app, render_template
 
 from job_finder.config import DEFAULT_MODEL_SONNET
-from job_finder.web.activity_tracker import log_activity, ACTION_GENERATE_RESUME, ACTION_QUICK_APPLY
+from job_finder.web.activity_tracker import (
+    ACTION_GENERATE_RESUME,
+    ACTION_QUICK_APPLY,
+    log_activity,
+)
 from job_finder.web.blueprints import trigger_interview_prep_if_applied
 from job_finder.web.db_helpers import get_db, standalone_connection
 from job_finder.web.docx_formatter import build_resume_docx
@@ -37,6 +41,7 @@ from job_finder.web.resume_generator import _generate_resume_background, generat
 logger = logging.getLogger(__name__)
 
 resume_bp = Blueprint("resume", __name__, url_prefix="/jobs")
+
 
 @resume_bp.route("/<path:dedup_key>/resume/generate", methods=["POST"], strict_slashes=False)
 def generate(dedup_key: str):
@@ -54,6 +59,7 @@ def generate(dedup_key: str):
 
     # Get job row
     from job_finder.db import get_job
+
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
@@ -70,12 +76,8 @@ def generate(dedup_key: str):
     job_row = dict(job)
 
     # Insert pending resume_generations row
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("sonnet", DEFAULT_MODEL_SONNET)
-    )
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
+    now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     cursor = conn.execute(
         "INSERT INTO resume_generations (job_id, generated_at, model, status, generation_type) "
@@ -114,7 +116,10 @@ def generate(dedup_key: str):
         gen_id=gen_id,
     )
 
-@resume_bp.route("/<path:dedup_key>/resume/status/<int:gen_id>", methods=["GET"], strict_slashes=False)
+
+@resume_bp.route(
+    "/<path:dedup_key>/resume/status/<int:gen_id>", methods=["GET"], strict_slashes=False
+)
 def status(dedup_key: str, gen_id: int):
     """Poll resume generation status.
 
@@ -159,7 +164,7 @@ def status(dedup_key: str, gen_id: int):
     if gen_status in ("pending", "generating") and row["generated_at"]:
         try:
             gen_at = datetime.fromisoformat(row["generated_at"])
-            elapsed_min = (datetime.now(timezone.utc).replace(tzinfo=None) - gen_at).total_seconds() / 60
+            elapsed_min = (datetime.now(UTC).replace(tzinfo=None) - gen_at).total_seconds() / 60
             if elapsed_min > 15:
                 logger.warning("Resume gen %d timed out after %.1f min", gen_id, elapsed_min)
                 conn.execute(
@@ -183,6 +188,7 @@ def status(dedup_key: str, gen_id: int):
         gen_id=gen_id,
     )
 
+
 @resume_bp.route("/<path:dedup_key>/quick-apply", methods=["POST"], strict_slashes=False)
 def quick_apply(dedup_key: str):
     """One-click apply: generate resume if needed, open tabs, set status to applied.
@@ -200,6 +206,7 @@ def quick_apply(dedup_key: str):
 
     # Get job context bundle
     from job_finder.db import load_job_context, update_pipeline_status
+
     ctx = load_job_context(conn, dedup_key)
     if ctx is None:
         return "", 404
@@ -227,7 +234,6 @@ def quick_apply(dedup_key: str):
 
         # Open a direct connection (not g.db) -- this call may take 30-60s
         with standalone_connection(db_path) as direct_conn:
-
             resume_data = generate_resume_single(job_row, profile, direct_conn, config)
 
             if resume_data is None:
@@ -245,7 +251,7 @@ def quick_apply(dedup_key: str):
             # Build document name
             company = job_row.get("company", "Unknown")
             title = job_row.get("title", "Resume")
-            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date_str = datetime.now(UTC).strftime("%Y-%m-%d")
             doc_name = f"{company} - {title} - {date_str}"
 
             # Upload to Drive
@@ -262,12 +268,8 @@ def quick_apply(dedup_key: str):
             )
 
             # Insert done resume_generations row
-            model = (
-                config.get("scoring", {})
-                .get("models", {})
-                .get("sonnet", DEFAULT_MODEL_SONNET)
-            )
-            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
+            now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             direct_conn.execute(
                 "INSERT INTO resume_generations "
                 "(job_id, generated_at, model, status, doc_url, generation_type) "
@@ -291,7 +293,9 @@ def quick_apply(dedup_key: str):
     # Build application URL
     source_urls_raw = job_row.get("source_urls", "[]")
     try:
-        source_urls = json.loads(source_urls_raw) if isinstance(source_urls_raw, str) else source_urls_raw
+        source_urls = (
+            json.loads(source_urls_raw) if isinstance(source_urls_raw, str) else source_urls_raw
+        )
     except (json.JSONDecodeError, TypeError):
         source_urls = []
 

@@ -17,8 +17,6 @@ def render_htmx_error_fragment(container_id: str, message: str) -> tuple[str, in
     """Return a standard HTMX error fragment with status 200."""
     escaped_message = html.escape(message)
     return (
-        f'<div id="{container_id}" class="text-xs text-red-400">'
-        f"{escaped_message}"
-        f"</div>",
+        f'<div id="{container_id}" class="text-xs text-red-400">{escaped_message}</div>',
         200,
     )

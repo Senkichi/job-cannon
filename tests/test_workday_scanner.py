@@ -1,10 +1,6 @@
 """Tests for Workday ATS scanner: URL detection, probing, and scanning."""
 
-import json
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Tests: Workday URL detection in ats_detection.py
@@ -17,6 +13,7 @@ class TestWorkdayUrlDetection:
     def test_workday_human_url_returns_workday_and_slug(self):
         """Human-facing myworkdayjobs.com URL returns ('workday', 'subdomain/board')."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://walmart.wd5.myworkdayjobs.com/WalmartExternal"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "workday"
@@ -25,6 +22,7 @@ class TestWorkdayUrlDetection:
     def test_workday_human_url_with_en_us_prefix(self):
         """Human URL with en-US locale prefix still extracts correctly."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/some-path"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "workday"
@@ -33,6 +31,7 @@ class TestWorkdayUrlDetection:
     def test_workday_api_url_returns_workday_and_slug(self):
         """API URL returns ('workday', 'subdomain/board')."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://walmart.wd5.myworkdayjobs.com/wday/cxs/walmart/WalmartExternal/jobs"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "workday"
@@ -41,6 +40,7 @@ class TestWorkdayUrlDetection:
     def test_workday_case_insensitive(self):
         """Workday URL detection is case-insensitive."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://WALMART.WD5.MYWORKDAYJOBS.COM/WalmartExternal"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "workday"
@@ -48,6 +48,7 @@ class TestWorkdayUrlDetection:
     def test_workday_url_does_not_match_non_workday(self):
         """Non-Workday URLs are not matched."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://www.walmart.com/careers"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
@@ -65,6 +66,7 @@ class TestProbeWorkday:
     def test_probe_returns_true_on_200(self, mock_post):
         """_probe_workday returns True when API returns 200."""
         from job_finder.web.ats_prober import _probe_workday
+
         mock_post.return_value = MagicMock(status_code=200)
         assert _probe_workday("walmart.wd5/WalmartExternal") is True
 
@@ -72,6 +74,7 @@ class TestProbeWorkday:
     def test_probe_returns_false_on_404(self, mock_post):
         """_probe_workday returns False when API returns 404."""
         from job_finder.web.ats_prober import _probe_workday
+
         mock_post.return_value = MagicMock(status_code=404)
         assert _probe_workday("invalid/board") is False
 
@@ -79,22 +82,28 @@ class TestProbeWorkday:
     def test_probe_returns_false_on_exception(self, mock_post):
         """_probe_workday returns False on connection error."""
         from job_finder.web.ats_prober import _probe_workday
+
         mock_post.side_effect = Exception("connection refused")
         assert _probe_workday("walmart.wd5/WalmartExternal") is False
 
     def test_probe_returns_false_on_invalid_slug(self):
         """_probe_workday returns False for slug without '/'."""
         from job_finder.web.ats_prober import _probe_workday
+
         assert _probe_workday("no-slash") is False
 
     @patch("job_finder.web.ats_prober.requests.post")
     def test_probe_sends_post_request_with_correct_url(self, mock_post):
         """_probe_workday constructs correct API URL from slug."""
         from job_finder.web.ats_prober import _probe_workday
+
         mock_post.return_value = MagicMock(status_code=200)
         _probe_workday("walmart.wd5/WalmartExternal")
         args, kwargs = mock_post.call_args
-        assert args[0] == "https://walmart.wd5.myworkdayjobs.com/wday/cxs/walmart/WalmartExternal/jobs"
+        assert (
+            args[0]
+            == "https://walmart.wd5.myworkdayjobs.com/wday/cxs/walmart/WalmartExternal/jobs"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +211,7 @@ class TestScanWorkday:
     def test_scan_rejects_invalid_slug_format(self, _mock_detail):
         """scan_workday returns empty list for slug without '/'."""
         from job_finder.web.ats_platforms import scan_workday
+
         results = scan_workday("no-slash", ["data scientist"], [])
         assert results == []
 
@@ -257,11 +267,13 @@ class TestScanWorkday:
         mock_response = MagicMock(status_code=200)
         mock_response.json.return_value = {
             "total": 1,
-            "jobPostings": [{
-                "title": "Data Scientist",
-                "locationsText": "Remote",
-                "externalPath": "Data-Scientist_R-12345",
-            }],
+            "jobPostings": [
+                {
+                    "title": "Data Scientist",
+                    "locationsText": "Remote",
+                    "externalPath": "Data-Scientist_R-12345",
+                }
+            ],
         }
         mock_post.return_value = mock_response
 
@@ -301,9 +313,7 @@ class TestFetchWorkdayDescription:
         }
         mock_get.return_value = mock_resp
 
-        text = _fetch_workday_description(
-            "walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1"
-        )
+        text = _fetch_workday_description("walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1")
         assert "Design and build" in text
         assert "scalable" in text
         assert "<b>" not in text  # HTML was stripped
@@ -319,9 +329,7 @@ class TestFetchWorkdayDescription:
         }
         mock_get.return_value = mock_resp
 
-        text = _fetch_workday_description(
-            "walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1"
-        )
+        text = _fetch_workday_description("walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1")
         assert text == "Plain text description here."
 
     @patch("job_finder.web.ats_platforms.requests.get")
@@ -330,9 +338,7 @@ class TestFetchWorkdayDescription:
         from job_finder.web.ats_platforms import _fetch_workday_description
 
         mock_get.return_value = MagicMock(status_code=404)
-        text = _fetch_workday_description(
-            "walmart.wd5", "walmart", "WalmartExternal", "/job/DNE"
-        )
+        text = _fetch_workday_description("walmart.wd5", "walmart", "WalmartExternal", "/job/DNE")
         assert text == ""
 
     @patch("job_finder.web.ats_platforms.requests.get")
@@ -341,9 +347,7 @@ class TestFetchWorkdayDescription:
         from job_finder.web.ats_platforms import _fetch_workday_description
 
         mock_get.side_effect = Exception("timeout")
-        text = _fetch_workday_description(
-            "walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1"
-        )
+        text = _fetch_workday_description("walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1")
         assert text == ""
 
     @patch("job_finder.web.ats_platforms.requests.get")
@@ -355,9 +359,7 @@ class TestFetchWorkdayDescription:
         mock_resp.json.return_value = {"other": "shape"}
         mock_get.return_value = mock_resp
 
-        text = _fetch_workday_description(
-            "walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1"
-        )
+        text = _fetch_workday_description("walmart.wd5", "walmart", "WalmartExternal", "/job/DS-1")
         assert text == ""
 
     @patch("job_finder.web.ats_platforms.requests.get")
@@ -370,11 +372,13 @@ class TestFetchWorkdayDescription:
         list_resp = MagicMock(status_code=200)
         list_resp.json.return_value = {
             "total": 1,
-            "jobPostings": [{
-                "title": "Senior Data Scientist",
-                "locationsText": "Remote",
-                "externalPath": "Senior-DS_R-1",
-            }],
+            "jobPostings": [
+                {
+                    "title": "Senior Data Scientist",
+                    "locationsText": "Remote",
+                    "externalPath": "Senior-DS_R-1",
+                }
+            ],
         }
         mock_post.return_value = list_resp
 

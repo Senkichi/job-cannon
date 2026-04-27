@@ -9,8 +9,6 @@ Tests:
 - reset_scheduler clears the singleton
 """
 
-import os
-import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +16,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_app(testing=False, db_path=None):
     """Create a minimal Flask app dict-like mock for scheduler tests."""
@@ -38,7 +37,9 @@ def _make_app(testing=False, db_path=None):
         },
         "DB_PATH": db_path,
     }
-    app.config.get = lambda key, default=None: app.config.get(key, default) if isinstance(app.config, dict) else default
+    app.config.get = lambda key, default=None: (
+        app.config.get(key, default) if isinstance(app.config, dict) else default
+    )
 
     # Make app.config behave like a real dict for .get() calls
     real_config = app.config
@@ -52,26 +53,31 @@ def _make_app(testing=False, db_path=None):
 
     return app
 
+
 # ---------------------------------------------------------------------------
 # Fixture: reset scheduler singleton between tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def reset_scheduler_state():
     """Always reset the scheduler singleton before and after each test."""
     from job_finder.web.scheduler import reset_scheduler
+
     reset_scheduler()
     yield
     reset_scheduler()
+
 
 # ---------------------------------------------------------------------------
 # Test: TESTING=True skips scheduler
 # ---------------------------------------------------------------------------
 
+
 class TestSchedulerTesting:
     def test_scheduler_not_started_in_test_mode(self):
         """init_scheduler skips when TESTING=True."""
-        from job_finder.web.scheduler import init_scheduler, get_scheduler
+        from job_finder.web.scheduler import get_scheduler, init_scheduler
 
         app = MagicMock()
         app.config = {"TESTING": True}
@@ -82,7 +88,7 @@ class TestSchedulerTesting:
 
     def test_scheduler_starts_when_not_testing(self):
         """init_scheduler starts the scheduler when TESTING is False/absent."""
-        from job_finder.web.scheduler import init_scheduler, get_scheduler, reset_scheduler
+        from job_finder.web.scheduler import get_scheduler, init_scheduler
 
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
@@ -96,16 +102,18 @@ class TestSchedulerTesting:
             mock_sched.start.assert_called_once()
             assert get_scheduler() is mock_sched
 
+
 # ---------------------------------------------------------------------------
 # Test: Werkzeug reloader guard
 # ---------------------------------------------------------------------------
+
 
 class TestReloaderGuard:
     def test_scheduler_skipped_in_reloader_child(self, monkeypatch):
         """init_scheduler skips when WERKZEUG_RUN_MAIN=true."""
         monkeypatch.setenv("WERKZEUG_RUN_MAIN", "true")
 
-        from job_finder.web.scheduler import init_scheduler, get_scheduler
+        from job_finder.web.scheduler import get_scheduler, init_scheduler
 
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
@@ -118,7 +126,7 @@ class TestReloaderGuard:
         """init_scheduler starts when WERKZEUG_RUN_MAIN is not set."""
         monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
 
-        from job_finder.web.scheduler import init_scheduler, get_scheduler
+        from job_finder.web.scheduler import get_scheduler, init_scheduler
 
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
@@ -131,9 +139,11 @@ class TestReloaderGuard:
 
             assert get_scheduler() is mock_sched
 
+
 # ---------------------------------------------------------------------------
 # Test: Double-init guard
 # ---------------------------------------------------------------------------
+
 
 class TestDoubleInitGuard:
     def test_init_called_twice_only_starts_once(self):
@@ -154,9 +164,11 @@ class TestDoubleInitGuard:
             assert MockScheduler.call_count == 1
             assert mock_sched.start.call_count == 1
 
+
 # ---------------------------------------------------------------------------
 # Test: 30-minute interval job registration
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerJobConfig:
     def test_ingestion_job_registered_with_cron_3x_daily(self):
@@ -166,9 +178,10 @@ class TestSchedulerJobConfig:
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
 
-        with patch("job_finder.web.scheduler.BackgroundScheduler") as MockScheduler, \
-             patch("job_finder.web.scheduler.CronTrigger") as MockCronTrigger:
-
+        with (
+            patch("job_finder.web.scheduler.BackgroundScheduler") as MockScheduler,
+            patch("job_finder.web.scheduler.CronTrigger") as MockCronTrigger,
+        ):
             mock_sched = MagicMock()
             MockScheduler.return_value = mock_sched
             mock_trigger = MagicMock()
@@ -206,9 +219,11 @@ class TestSchedulerJobConfig:
             kwargs = add_job_kwargs.kwargs if add_job_kwargs.kwargs else add_job_kwargs[1]
             assert kwargs.get("replace_existing") is True
 
+
 # ---------------------------------------------------------------------------
 # Test: run_sync_now
 # ---------------------------------------------------------------------------
+
 
 class TestRunSyncNow:
     def test_run_sync_now_returns_summary_dict(self):
@@ -255,17 +270,20 @@ class TestRunSyncNow:
         assert result["thordata_fetched"] == 0
         assert result["thordata_errors"] == []
 
+
 # ---------------------------------------------------------------------------
 # ATS scan scheduler tests (relocated from test_scoring.py, Phase 24)
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerAtsScan:
     """Verify ATS scan and slug probe jobs are registered in APScheduler."""
 
     def test_scheduler_registers_ats_scan_job(self):
         """init_scheduler registers 'ats_scan' CronTrigger job (Mon/Wed hour=7)."""
-        from job_finder.web.scheduler import reset_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import reset_scheduler
 
         # Reset so we can test init
         reset_scheduler()
@@ -282,6 +300,7 @@ class TestSchedulerAtsScan:
                 mock_scheduler_cls.return_value = mock_sched
 
                 from job_finder.web.scheduler import init_scheduler
+
                 init_scheduler(mock_app)
 
         # Check that add_job was called with id='ats_scan'
@@ -316,16 +335,18 @@ class TestSchedulerAtsScan:
                 mock_scheduler_cls.return_value = mock_sched
 
                 from job_finder.web.scheduler import init_scheduler
+
                 init_scheduler(mock_app)
 
         ats_call = next(
-            call for call in mock_sched.add_job.call_args_list
-            if call[1].get("id") == "ats_scan"
+            call for call in mock_sched.add_job.call_args_list if call[1].get("id") == "ats_scan"
         )
         wrapper = ats_call[0][0]
         closure_vars = {
             cell_name: cell.cell_contents
-            for cell_name, cell in zip(wrapper.__code__.co_freevars, wrapper.__closure__ or ())
+            for cell_name, cell in zip(
+                wrapper.__code__.co_freevars, wrapper.__closure__ or (), strict=False
+            )
         }
         extract_metadata = closure_vars["extract_metadata"]
 
@@ -356,8 +377,9 @@ class TestSchedulerAtsScan:
 
     def test_scheduler_registers_ats_slug_probe_job(self):
         """init_scheduler registers 'ats_slug_probe' CronTrigger job (Mon/Wed hour=7 min=30)."""
-        from job_finder.web.scheduler import reset_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import reset_scheduler
 
         reset_scheduler()
 
@@ -372,14 +394,17 @@ class TestSchedulerAtsScan:
                 mock_scheduler_cls.return_value = mock_sched
 
                 from job_finder.web.scheduler import init_scheduler
+
                 init_scheduler(mock_app)
 
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
         assert "ats_slug_probe" in job_ids_kw
 
+
 # ---------------------------------------------------------------------------
 # Staleness check scheduler tests (replaces old expiry_check/liveness_check)
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerExpiryCheck:
     """Verify unified staleness check job is registered in APScheduler.
@@ -390,8 +415,9 @@ class TestSchedulerExpiryCheck:
 
     def test_scheduler_registers_staleness_check_job(self):
         """init_scheduler registers 'staleness_check' CronTrigger job (hour=2, minute=0)."""
-        from job_finder.web.scheduler import reset_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import reset_scheduler
 
         reset_scheduler()
 
@@ -406,6 +432,7 @@ class TestSchedulerExpiryCheck:
                 mock_scheduler_cls.return_value = mock_sched
 
                 from job_finder.web.scheduler import init_scheduler
+
                 init_scheduler(mock_app)
 
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
@@ -415,9 +442,11 @@ class TestSchedulerExpiryCheck:
         assert "liveness_check" not in job_ids_kw
         assert "stale_detection" not in job_ids_kw
 
+
 # ---------------------------------------------------------------------------
 # Test: Arg-order regression (Phase 11 plan 01)
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerArgOrder:
     """Regression tests: scheduler calls run_ingestion/run_pipeline_detection
@@ -434,13 +463,21 @@ class TestSchedulerArgOrder:
         app.config = {"JF_CONFIG": config_dict, "DB_PATH": db_path}
 
         mock_summary = {
-            "gmail_fetched": 0, "gmail_errors": [], "serpapi_fetched": 0,
-            "serpapi_errors": [], "jobs_new": 0, "jobs_updated": 0,
-            "jobs_scored": 0, "job_errors": [], "duration_seconds": 0.0,
+            "gmail_fetched": 0,
+            "gmail_errors": [],
+            "serpapi_fetched": 0,
+            "serpapi_errors": [],
+            "jobs_new": 0,
+            "jobs_updated": 0,
+            "jobs_scored": 0,
+            "job_errors": [],
+            "duration_seconds": 0.0,
         }
 
-        with patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run_ingestion, \
-             patch("job_finder.web.pipeline_detector.run_pipeline_detection") as mock_detection:
+        with (
+            patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run_ingestion,
+            patch("job_finder.web.pipeline_detector.run_pipeline_detection") as mock_detection,
+        ):
             mock_run_ingestion.return_value = mock_summary
             mock_detection.return_value = {"auto_updated": 0, "queued": 0}
 
@@ -467,13 +504,21 @@ class TestSchedulerArgOrder:
         app.config = {"JF_CONFIG": config_dict, "DB_PATH": db_path}
 
         mock_summary = {
-            "gmail_fetched": 0, "gmail_errors": [], "serpapi_fetched": 0,
-            "serpapi_errors": [], "jobs_new": 0, "jobs_updated": 0,
-            "jobs_scored": 0, "job_errors": [], "duration_seconds": 0.0,
+            "gmail_fetched": 0,
+            "gmail_errors": [],
+            "serpapi_fetched": 0,
+            "serpapi_errors": [],
+            "jobs_new": 0,
+            "jobs_updated": 0,
+            "jobs_scored": 0,
+            "job_errors": [],
+            "duration_seconds": 0.0,
         }
 
-        with patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run_ingestion, \
-             patch("job_finder.web.pipeline_detector.run_pipeline_detection") as mock_detection:
+        with (
+            patch("job_finder.web.pipeline_runner.run_ingestion") as mock_run_ingestion,
+            patch("job_finder.web.pipeline_detector.run_pipeline_detection") as mock_detection,
+        ):
             mock_run_ingestion.return_value = mock_summary
             mock_detection.return_value = {"auto_updated": 0, "queued": 0}
 
@@ -526,8 +571,9 @@ class TestSchedulerAgenticBackfill:
 
     def test_agentic_backfill_job_registered(self):
         """init_scheduler registers 'agentic_backfill' CronTrigger job (hour=3, minute=30)."""
-        from job_finder.web.scheduler import reset_scheduler, init_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import init_scheduler, reset_scheduler
 
         reset_scheduler()
 
@@ -550,8 +596,9 @@ class TestSchedulerAgenticBackfill:
 
     def test_agentic_backfill_runs_on_schedule(self):
         """agentic_backfill is registered without next_run_time=None — runs on CronTrigger schedule."""
-        from job_finder.web.scheduler import reset_scheduler, init_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import init_scheduler, reset_scheduler
 
         reset_scheduler()
 
@@ -582,8 +629,9 @@ class TestSchedulerAgenticBackfill:
 
     def test_agentic_backfill_is_not_paused(self):
         """agentic_backfill must NOT be paused — it runs nightly on schedule."""
-        from job_finder.web.scheduler import reset_scheduler, init_scheduler
         from unittest.mock import MagicMock, patch
+
+        from job_finder.web.scheduler import init_scheduler, reset_scheduler
 
         reset_scheduler()
 

@@ -1,10 +1,6 @@
 """Tests for SmartRecruiters ATS scanner: URL detection, probing, and scanning."""
 
-import json
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Tests: SmartRecruiters URL detection
@@ -17,6 +13,7 @@ class TestSmartRecruitersUrlDetection:
     def test_jobs_url_returns_smartrecruiters_and_slug(self):
         """jobs.smartrecruiters.com/{slug}/... returns ('smartrecruiters', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.smartrecruiters.com/LinkedIn3/744000115714244-staff-data-scientist"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "smartrecruiters"
@@ -25,6 +22,7 @@ class TestSmartRecruitersUrlDetection:
     def test_careers_url_returns_smartrecruiters_and_slug(self):
         """careers.smartrecruiters.com/{slug}/... returns ('smartrecruiters', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://careers.smartrecruiters.com/AbbVie/positions"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "smartrecruiters"
@@ -33,6 +31,7 @@ class TestSmartRecruitersUrlDetection:
     def test_api_url_returns_smartrecruiters_and_slug(self):
         """API URL returns ('smartrecruiters', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://api.smartrecruiters.com/v1/companies/Visa/postings"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "smartrecruiters"
@@ -41,6 +40,7 @@ class TestSmartRecruitersUrlDetection:
     def test_case_insensitive(self):
         """URL detection is case-insensitive."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://JOBS.SMARTRECRUITERS.COM/MyCompany/12345"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "smartrecruiters"
@@ -48,6 +48,7 @@ class TestSmartRecruitersUrlDetection:
     def test_non_smartrecruiters_url_not_matched(self):
         """Non-SmartRecruiters URLs are not matched."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://www.smartrecruiters.com/about"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
@@ -65,6 +66,7 @@ class TestProbeSmartRecruiters:
     def test_probe_returns_true_when_jobs_found(self, mock_get):
         """Returns True when API returns 200 with totalFound > 0."""
         from job_finder.web.ats_prober import _probe_smartrecruiters
+
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {"totalFound": 851, "content": [{"name": "Engineer"}]}
         mock_get.return_value = mock_resp
@@ -74,6 +76,7 @@ class TestProbeSmartRecruiters:
     def test_probe_returns_false_when_zero_found(self, mock_get):
         """Returns False when API returns 200 but totalFound = 0."""
         from job_finder.web.ats_prober import _probe_smartrecruiters
+
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {"totalFound": 0, "content": []}
         mock_get.return_value = mock_resp
@@ -83,6 +86,7 @@ class TestProbeSmartRecruiters:
     def test_probe_returns_false_on_404(self, mock_get):
         """Returns False when API returns 404."""
         from job_finder.web.ats_prober import _probe_smartrecruiters
+
         mock_get.return_value = MagicMock(status_code=404)
         assert _probe_smartrecruiters("nonexistent") is False
 
@@ -90,6 +94,7 @@ class TestProbeSmartRecruiters:
     def test_probe_returns_false_on_exception(self, mock_get):
         """Returns False on connection error."""
         from job_finder.web.ats_prober import _probe_smartrecruiters
+
         mock_get.side_effect = Exception("connection refused")
         assert _probe_smartrecruiters("Visa") is False
 
@@ -97,6 +102,7 @@ class TestProbeSmartRecruiters:
     def test_probe_sends_accept_json_header(self, mock_get):
         """Probe sends Accept: application/json header."""
         from job_finder.web.ats_prober import _probe_smartrecruiters
+
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {"totalFound": 1, "content": []}
         mock_get.return_value = mock_resp
@@ -181,6 +187,7 @@ class TestScanSmartRecruiters:
     def test_scan_handles_http_error(self, mock_get, _mock_detail):
         """Returns empty list on non-200 status."""
         from job_finder.web.ats_platforms import scan_smartrecruiters
+
         mock_get.return_value = MagicMock(status_code=500)
         assert scan_smartrecruiters("TestCo", ["data scientist"], []) == []
 
@@ -192,12 +199,16 @@ class TestScanSmartRecruiters:
         page1 = MagicMock(status_code=200)
         page1.json.return_value = {
             "totalFound": 150,
-            "content": [self._make_posting(f"Data Analyst {i}", posting_id=str(i)) for i in range(100)],
+            "content": [
+                self._make_posting(f"Data Analyst {i}", posting_id=str(i)) for i in range(100)
+            ],
         }
         page2 = MagicMock(status_code=200)
         page2.json.return_value = {
             "totalFound": 150,
-            "content": [self._make_posting(f"Data Analyst {i}", posting_id=str(i)) for i in range(100, 150)],
+            "content": [
+                self._make_posting(f"Data Analyst {i}", posting_id=str(i)) for i in range(100, 150)
+            ],
         }
         mock_get.side_effect = [page1, page2]
 
@@ -209,6 +220,7 @@ class TestScanSmartRecruiters:
     def test_scan_request_exception(self, mock_get, _mock_detail):
         """Returns empty list on request exception."""
         from job_finder.web.ats_platforms import scan_smartrecruiters
+
         mock_get.side_effect = Exception("network error")
         assert scan_smartrecruiters("TestCo", ["data scientist"], []) == []
 
@@ -220,11 +232,13 @@ class TestScanSmartRecruiters:
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {
             "totalFound": 1,
-            "content": [{
-                "id": "999",
-                "name": "Data Scientist",
-                "location": {"city": "San Francisco", "region": "CA", "country": "US"},
-            }],
+            "content": [
+                {
+                    "id": "999",
+                    "name": "Data Scientist",
+                    "location": {"city": "San Francisco", "region": "CA", "country": "US"},
+                }
+            ],
         }
         mock_get.return_value = mock_resp
 
@@ -320,11 +334,13 @@ class TestFetchSmartRecruitersDescription:
         list_resp = MagicMock(status_code=200)
         list_resp.json.return_value = {
             "totalFound": 1,
-            "content": [{
-                "id": "abc-123",
-                "name": "Senior Data Scientist",
-                "location": {"city": "SF", "region": "CA", "country": "US"},
-            }],
+            "content": [
+                {
+                    "id": "abc-123",
+                    "name": "Senior Data Scientist",
+                    "location": {"city": "SF", "region": "CA", "country": "US"},
+                }
+            ],
         }
         detail_resp = MagicMock(status_code=200)
         detail_resp.json.return_value = {
@@ -343,4 +359,7 @@ class TestFetchSmartRecruitersDescription:
         assert "Must know Python" in results[0]["description"]
         # Second call is the detail fetch
         detail_call_url = mock_get.call_args_list[1][0][0]
-        assert detail_call_url == "https://api.smartrecruiters.com/v1/companies/TestCo/postings/abc-123"
+        assert (
+            detail_call_url
+            == "https://api.smartrecruiters.com/v1/companies/TestCo/postings/abc-123"
+        )

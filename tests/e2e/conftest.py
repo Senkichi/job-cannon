@@ -4,12 +4,12 @@ The 'from playwright.sync_api' import triggers nit-pick-supreme's browser_e2e.py
 engine detection (it rglobs for conftest.py files containing 'playwright').
 """
 
+import os
 import socket
 import sqlite3
 import tempfile
 import threading
 import time
-import os
 from datetime import datetime, timedelta
 
 import pytest
@@ -59,9 +59,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["linkedin"]',
                 '["https://linkedin.com/jobs/view/1111/"]',
                 "1111",
-                180000, 240000,
+                180000,
+                240000,
                 "Build data products at Stripe. Looking for ML expertise.",
-                week_ago, now, 8.5, '{"skills": 0.9}', "interested", "reviewing",
+                week_ago,
+                now,
+                8.5,
+                '{"skills": 0.9}',
+                "interested",
+                "reviewing",
             ),
             (
                 "acme|data engineer|new york ny",
@@ -71,9 +77,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["glassdoor"]',
                 '["https://glassdoor.com/job/2222"]',
                 "2222",
-                150000, 200000,
+                150000,
+                200000,
                 "Design and maintain data pipelines.",
-                week_ago, now, 7.0, '{"skills": 0.7}', "unreviewed", "discovered",
+                week_ago,
+                now,
+                7.0,
+                '{"skills": 0.7}',
+                "unreviewed",
+                "discovered",
             ),
             (
                 "widgetco|staff ml engineer|san francisco ca",
@@ -83,9 +95,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["linkedin"]',
                 '["https://linkedin.com/jobs/view/3333/"]',
                 "3333",
-                200000, 280000,
+                200000,
+                280000,
                 "Lead machine learning team at WidgetCo.",
-                week_ago, now, 9.1, '{"skills": 0.95}', "interested", "applied",
+                week_ago,
+                now,
+                9.1,
+                '{"skills": 0.95}',
+                "interested",
+                "applied",
             ),
             # Fresh job — first_seen today (for freshness toggle tests)
             (
@@ -96,9 +114,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["linkedin"]',
                 '["https://linkedin.com/jobs/view/4444/"]',
                 "4444",
-                160000, 220000,
+                160000,
+                220000,
                 "Brand new posting from today.",
-                today, now, 7.5, '{}', "unreviewed", "discovered",
+                today,
+                now,
+                7.5,
+                "{}",
+                "unreviewed",
+                "discovered",
             ),
             # Hidden jobs — excluded from default view
             (
@@ -109,9 +133,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["linkedin"]',
                 '["https://linkedin.com/jobs/view/5555/"]',
                 "5555",
-                80000, 100000,
+                80000,
+                100000,
                 "Entry-level internship position.",
-                month_ago, now, 3.0, '{}', "unreviewed", "dismissed",
+                month_ago,
+                now,
+                3.0,
+                "{}",
+                "unreviewed",
+                "dismissed",
             ),
             (
                 "oldco|data analyst|remote",
@@ -121,9 +151,15 @@ def _populate_sample_data(db_path: str) -> None:
                 '["glassdoor"]',
                 '["https://glassdoor.com/job/6666"]',
                 "6666",
-                90000, 120000,
+                90000,
+                120000,
                 "Data analysis role.",
-                month_ago, now, 4.0, '{}', "unreviewed", "rejected",
+                month_ago,
+                now,
+                4.0,
+                "{}",
+                "unreviewed",
+                "rejected",
             ),
         ],
     )

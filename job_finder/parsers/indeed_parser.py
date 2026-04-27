@@ -19,13 +19,12 @@ salary extraction (_extract_salary_from_text).
 import logging
 import re
 from datetime import datetime
-from typing import Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
 from job_finder.models import Job
-from job_finder.parsers._common import parse_salary_range, is_meta_email, looks_like_salary_text
+from job_finder.parsers._common import is_meta_email, looks_like_salary_text, parse_salary_range
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +108,18 @@ _INDEED_META_PATTERNS = [
 
 # Generic link texts that are NOT job titles
 _GENERIC_LINK_TEXTS = frozenset(
-    {"apply", "view", "click here", "apply now", "see more", "learn more",
-     "view job", "apply for job", "see all jobs", "view all jobs"}
+    {
+        "apply",
+        "view",
+        "click here",
+        "apply now",
+        "see more",
+        "learn more",
+        "view job",
+        "apply for job",
+        "see all jobs",
+        "view all jobs",
+    }
 )
 
 # Plain-text: header line separating preamble from job listings
@@ -177,7 +186,7 @@ def _extract_job_id_from_engage_url(url: str) -> str:
     return ""
 
 
-def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
+def _parse_plaintext(body: str, email_date: datetime | None) -> list[Job]:
     """Parse a plain-text Indeed alert email body into Job objects.
 
     Algorithm:
@@ -203,7 +212,7 @@ def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
     # Truncate at footer marker
     footer_match = _FOOTER_RE.search(body, job_section_start)
     if footer_match:
-        job_section = body[job_section_start:footer_match.start()]
+        job_section = body[job_section_start : footer_match.start()]
     else:
         job_section = body[job_section_start:]
 
@@ -224,7 +233,7 @@ def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
 
     for url_match in url_matches:
         url = url_match.group(0)
-        block_text = job_section[prev_end:url_match.start()]
+        block_text = job_section[prev_end : url_match.start()]
         prev_end = url_match.end()
 
         job = _parse_plaintext_job_block(block_text, url, email_date, extract_id_fn=id_fn)
@@ -237,9 +246,9 @@ def _parse_plaintext(body: str, email_date: Optional[datetime]) -> list[Job]:
 def _parse_plaintext_job_block(
     block_text: str,
     url: str,
-    email_date: Optional[datetime],
+    email_date: datetime | None,
     extract_id_fn=None,
-) -> Optional[Job]:
+) -> Job | None:
     """Parse a single job block (text preceding a delimiter URL).
 
     Shared by both alert (engage.indeed.com) and match (indeed.com/pagead)
@@ -292,13 +301,15 @@ def _parse_plaintext_job_block(
         # Use rfind to handle company names containing dashes (e.g., "Turn/River - SF, CA")
         dash_idx = company_location.rfind(" - ")
         company = company_location[:dash_idx].strip()
-        location = company_location[dash_idx + 3:].strip()
+        location = company_location[dash_idx + 3 :].strip()
     else:
         company = company_location
         location = "Unknown"
 
     # Extract salary from salary line if present
-    salary_min, salary_max = _extract_salary_from_text(salary_line) if salary_line else (None, None)
+    salary_min, salary_max = (
+        _extract_salary_from_text(salary_line) if salary_line else (None, None)
+    )
 
     # Extract source_id using the appropriate extractor
     id_fn = extract_id_fn or _extract_job_id_from_engage_url
@@ -317,7 +328,7 @@ def _parse_plaintext_job_block(
     )
 
 
-def parse_indeed_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
+def parse_indeed_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse an Indeed job alert email body into Job objects.
 
     Uses plain-text parsing as the primary strategy (real Indeed emails arrive
@@ -363,9 +374,7 @@ def parse_indeed_alert(body: str, email_date: Optional[datetime] = None) -> list
     return jobs
 
 
-def _parse_with_link_strategy(
-    soup: BeautifulSoup, email_date: Optional[datetime]
-) -> list[Job]:
+def _parse_with_link_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
     """Strategy 1: Find all anchor tags with Indeed job URLs."""
     jobs = []
     seen_urls: set[str] = set()
@@ -385,9 +394,7 @@ def _parse_with_link_strategy(
     return jobs
 
 
-def _parse_with_card_strategy(
-    soup: BeautifulSoup, email_date: Optional[datetime]
-) -> list[Job]:
+def _parse_with_card_strategy(soup: BeautifulSoup, email_date: datetime | None) -> list[Job]:
     """Strategy 2 (fallback): Find td/div containers with Indeed job links."""
     jobs = []
     seen_urls: set[str] = set()
@@ -415,9 +422,7 @@ def _parse_with_card_strategy(
     return jobs
 
 
-def _extract_job_from_link(
-    link_tag, href: str, email_date: Optional[datetime]
-) -> Optional[Job]:
+def _extract_job_from_link(link_tag, href: str, email_date: datetime | None) -> Job | None:
     """Extract job data from a job link and its surrounding context."""
     title = _extract_title_from_link(link_tag)
     if not title:
@@ -452,8 +457,8 @@ def _extract_job_from_link(
 
 
 def _extract_job_from_container(
-    container, link_tag, href: str, email_date: Optional[datetime]
-) -> Optional[Job]:
+    container, link_tag, href: str, email_date: datetime | None
+) -> Job | None:
     """Extract job data from a container element (card strategy)."""
     title = _extract_title_from_link(link_tag)
     if not title:
@@ -488,7 +493,7 @@ def _extract_job_from_container(
     )
 
 
-def _extract_title_from_link(link_tag) -> Optional[str]:
+def _extract_title_from_link(link_tag) -> str | None:
     """Extract job title from an anchor tag."""
     # Check heading elements inside the link first
     for tag in ["h1", "h2", "h3", "h4", "strong", "b"]:
@@ -564,7 +569,7 @@ def _looks_like_location(text: str) -> bool:
     return bool(_LOCATION_RE.search(text))
 
 
-def _extract_salary_from_text(text: str) -> tuple[Optional[int], Optional[int]]:
+def _extract_salary_from_text(text: str) -> tuple[int | None, int | None]:
     """Parse salary range from text. Returns (salary_min, salary_max).
 
     Checks for hourly indicators first to avoid K-notation misinterpretation
@@ -676,7 +681,7 @@ def _extract_cts_source_id(url: str) -> str:
     return ""
 
 
-def _parse_match_multi_job(body: str, email_date: Optional[datetime]) -> list[Job]:
+def _parse_match_multi_job(body: str, email_date: datetime | None) -> list[Job]:
     """Parse a multi-job Indeed match email.
 
     Same algorithm as _parse_plaintext but uses indeed.com/pagead/clk/dl URLs
@@ -689,7 +694,7 @@ def _parse_match_multi_job(body: str, email_date: Optional[datetime]) -> list[Jo
 
     # Truncate at footer
     footer_match = _MATCH_FOOTER_RE.search(body, start)
-    job_section = body[start:footer_match.start()] if footer_match else body[start:]
+    job_section = body[start : footer_match.start()] if footer_match else body[start:]
 
     url_matches = list(INDEED_MATCH_URL_RE.finditer(job_section))
     if not url_matches:
@@ -700,11 +705,13 @@ def _parse_match_multi_job(body: str, email_date: Optional[datetime]) -> list[Jo
 
     for url_match in url_matches:
         url = url_match.group(0)
-        block_text = job_section[prev_end:url_match.start()]
+        block_text = job_section[prev_end : url_match.start()]
         prev_end = url_match.end()
 
         job = _parse_plaintext_job_block(
-            block_text, url, email_date,
+            block_text,
+            url,
+            email_date,
             extract_id_fn=_extract_match_source_id,
         )
         if job:
@@ -713,7 +720,7 @@ def _parse_match_multi_job(body: str, email_date: Optional[datetime]) -> list[Jo
     return jobs
 
 
-def _parse_single_match(body: str, email_date: Optional[datetime]) -> list[Job]:
+def _parse_single_match(body: str, email_date: datetime | None) -> list[Job]:
     """Parse a single-job Indeed match email.
 
     Format: "We thought this job for a {title} at {company} in {location}
@@ -739,17 +746,19 @@ def _parse_single_match(body: str, email_date: Optional[datetime]) -> list[Job]:
         salary_text = intro_match.group(4).strip()
         salary_min, salary_max = _extract_salary_from_text(salary_text)
 
-        return [Job(
-            title=title,
-            company=company,
-            location=location,
-            source="indeed",
-            source_url=url,
-            source_id=source_id,
-            salary_min=salary_min,
-            salary_max=salary_max,
-            posted_date=email_date,
-        )]
+        return [
+            Job(
+                title=title,
+                company=company,
+                location=location,
+                source="indeed",
+                source_url=url,
+                source_id=source_id,
+                salary_min=salary_min,
+                salary_max=salary_max,
+                posted_date=email_date,
+            )
+        ]
 
     # Fallback: intro sentence without salary
     no_pay_match = _SINGLE_MATCH_INTRO_NO_PAY_RE.search(body)
@@ -758,15 +767,17 @@ def _parse_single_match(body: str, email_date: Optional[datetime]) -> list[Job]:
         company = no_pay_match.group(2).strip()
         location = no_pay_match.group(3).strip()
 
-        return [Job(
-            title=title,
-            company=company,
-            location=location,
-            source="indeed",
-            source_url=url,
-            source_id=source_id,
-            posted_date=email_date,
-        )]
+        return [
+            Job(
+                title=title,
+                company=company,
+                location=location,
+                source="indeed",
+                source_url=url,
+                source_id=source_id,
+                posted_date=email_date,
+            )
+        ]
 
     # Last resort: we have a URL but can't parse the intro
     logger.warning(
@@ -776,9 +787,7 @@ def _parse_single_match(body: str, email_date: Optional[datetime]) -> list[Job]:
     return []
 
 
-def parse_indeed_match_alert(
-    body: str, email_date: Optional[datetime] = None
-) -> list[Job]:
+def parse_indeed_match_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse an Indeed match/recommendation email into Job objects.
 
     Handles two formats from donotreply@match.indeed.com:

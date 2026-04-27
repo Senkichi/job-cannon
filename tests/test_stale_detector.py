@@ -8,11 +8,12 @@ to update_pipeline_status().
 import sqlite3
 from datetime import datetime, timedelta
 
-import pytest
-
 from job_finder.web.stale_detector import run_stale_detection
 
-def _insert_job(conn: sqlite3.Connection, dedup_key: str, pipeline_status: str, last_seen: str) -> None:
+
+def _insert_job(
+    conn: sqlite3.Connection, dedup_key: str, pipeline_status: str, last_seen: str
+) -> None:
     """Insert a minimal job row for testing."""
     conn.execute(
         """INSERT INTO jobs
@@ -23,9 +24,11 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, pipeline_status: str, 
     )
     conn.commit()
 
+
 def _days_ago(n: int) -> str:
     """Return ISO datetime string for n days ago."""
     return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
+
 
 class TestBatchArchive:
     """Test batch archive path in run_stale_detection()."""
@@ -40,9 +43,7 @@ class TestBatchArchive:
 
         assert result["archived"] == 3
 
-        rows = conn.execute(
-            "SELECT pipeline_status FROM jobs ORDER BY dedup_key"
-        ).fetchall()
+        rows = conn.execute("SELECT pipeline_status FROM jobs ORDER BY dedup_key").fetchall()
         assert all(r["pipeline_status"] == "archived" for r in rows)
 
     def test_batch_archive_pipeline_events(self, migrated_db):

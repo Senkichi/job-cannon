@@ -28,7 +28,6 @@ import requests
 from job_finder.web.model_provider import BaseProvider, ModelResult
 from job_finder.web.providers.ollama_provider import OllamaProvider
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -48,13 +47,17 @@ def _make_response(json_data: dict, status_code: int = 200) -> MagicMock:
     return mock_resp
 
 
-def _make_chat_response(content_dict: dict, prompt_eval_count: int = 100, eval_count: int = 50) -> MagicMock:
+def _make_chat_response(
+    content_dict: dict, prompt_eval_count: int = 100, eval_count: int = 50
+) -> MagicMock:
     """Create a mock /api/chat response."""
-    return _make_response({
-        "message": {"content": json.dumps(content_dict)},
-        "prompt_eval_count": prompt_eval_count,
-        "eval_count": eval_count,
-    })
+    return _make_response(
+        {
+            "message": {"content": json.dumps(content_dict)},
+            "prompt_eval_count": prompt_eval_count,
+            "eval_count": eval_count,
+        }
+    )
 
 
 def _make_provider(config: dict | None = None) -> OllamaProvider:
@@ -327,9 +330,11 @@ def test_call_handles_missing_token_counts():
     """When token count keys are absent, ModelResult should have input_tokens=0, output_tokens=0."""
     provider = _make_provider()
     # Response with no prompt_eval_count or eval_count
-    mock_resp = _make_response({
-        "message": {"content": json.dumps({"result": "ok"})},
-    })
+    mock_resp = _make_response(
+        {
+            "message": {"content": json.dumps({"result": "ok"})},
+        }
+    )
 
     with patch("requests.post", return_value=mock_resp):
         result = provider.call(
@@ -372,7 +377,11 @@ def test_init_strips_trailing_slash():
         OllamaProvider(config=config)
 
     # URL should NOT have double slashes
-    called_url = mock_get.call_args.args[0] if mock_get.call_args.args else mock_get.call_args.kwargs.get("url", "")
+    called_url = (
+        mock_get.call_args.args[0]
+        if mock_get.call_args.args
+        else mock_get.call_args.kwargs.get("url", "")
+    )
     # Use the first positional arg
     if mock_get.call_args.args:
         called_url = mock_get.call_args.args[0]

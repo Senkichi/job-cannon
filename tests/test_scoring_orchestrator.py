@@ -16,16 +16,14 @@ Covers behaviors 1-6 of the Plan 2 Task 1 test matrix:
 import json
 import sqlite3
 import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from job_finder.db import JobAssessment
+from job_finder.web import scoring_orchestrator as so
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.job_scorer import ScoringResult
-from job_finder.web import scoring_orchestrator as so
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,6 +35,7 @@ def db_conn():
     """Fully migrated DB connection (fresh schema including Migration 40)."""
     fd, path = tempfile.mkstemp(suffix=".db")
     import os
+
     os.close(fd)
     run_migrations(path)
     conn = sqlite3.connect(path)
@@ -75,9 +74,13 @@ def seeded_job(db_conn):
         ),
     )
     conn.commit()
-    return {"dedup_key": "job-abc", "title": "Senior Data Scientist",
-            "company": "Acme", "location": "Remote",
-            "jd_full": "Full JD body text."}
+    return {
+        "dedup_key": "job-abc",
+        "title": "Senior Data Scientist",
+        "company": "Acme",
+        "location": "Remote",
+        "jd_full": "Full JD body text.",
+    }
 
 
 @pytest.fixture
@@ -95,8 +98,12 @@ def base_config():
 def _make_assessment(sub_scores=None, rationale=None, provider="ollama"):
     if sub_scores is None:
         sub_scores = {
-            "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-            "domain_match": 3, "seniority_match": 3, "skills_match": 3,
+            "title_fit": 3,
+            "location_fit": 3,
+            "comp_fit": 3,
+            "domain_match": 3,
+            "seniority_match": 3,
+            "skills_match": 3,
         }
     if rationale is None:
         rationale = {
@@ -128,11 +135,13 @@ class TestScoreAndPersistJob:
         assessment = _make_assessment(provider="ollama")
 
         def stub_scorer(job, conn_arg, cfg, client=None):
-            return ScoringResult(status="ok", data=assessment,
-                                 provider="ollama")
+            return ScoringResult(status="ok", data=assessment, provider="ollama")
 
         so.score_and_persist_job(
-            seeded_job, conn, base_config, scorer_fn=stub_scorer,
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=stub_scorer,
         )
 
         row = conn.execute(
@@ -145,8 +154,12 @@ class TestScoreAndPersistJob:
         assert row["classification"] == "apply"  # all 3s -> apply
         parsed = json.loads(row["sub_scores_json"])
         assert parsed == {
-            "title_fit": 3, "location_fit": 3, "comp_fit": 3,
-            "domain_match": 3, "seniority_match": 3, "skills_match": 3,
+            "title_fit": 3,
+            "location_fit": 3,
+            "comp_fit": 3,
+            "domain_match": 3,
+            "seniority_match": 3,
+            "skills_match": 3,
         }
         rationale = json.loads(row["fit_analysis"])
         assert rationale["strengths"] == ["strong skills match"]
@@ -168,20 +181,29 @@ class TestScoreAndPersistJob:
         assert "haiku_summary" not in cols
 
     def test_scorer_fn_injection_override_called(
-        self, db_conn, seeded_job, base_config,
+        self,
+        db_conn,
+        seeded_job,
+        base_config,
     ):
         """Behavior 4: passing scorer_fn overrides the default score_job."""
         conn, _ = db_conn
-        mock_scorer = MagicMock(return_value=ScoringResult(
-            status="ok", data=_make_assessment(), provider="ollama",
-        ))
+        mock_scorer = MagicMock(
+            return_value=ScoringResult(
+                status="ok",
+                data=_make_assessment(),
+                provider="ollama",
+            )
+        )
         so.score_and_persist_job(
-            seeded_job, conn, base_config, scorer_fn=mock_scorer,
+            seeded_job,
+            conn,
+            base_config,
+            scorer_fn=mock_scorer,
         )
         assert mock_scorer.call_count == 1
 
-    def test_scorer_fn_default_is_score_job(self, monkeypatch, seeded_job,
-                                             base_config, db_conn):
+    def test_scorer_fn_default_is_score_job(self, monkeypatch, seeded_job, base_config, db_conn):
         """Behavior 4b: when scorer_fn is None, default is job_scorer.score_job."""
         conn, _ = db_conn
         called_args = {}
@@ -190,31 +212,39 @@ class TestScoreAndPersistJob:
             called_args["job"] = job
             called_args["config"] = cfg
             return ScoringResult(
-                status="ok", data=_make_assessment(), provider="ollama",
+                status="ok",
+                data=_make_assessment(),
+                provider="ollama",
             )
 
         # Patch in the job_scorer module namespace — our orchestrator does a
         # lazy import `from job_finder.web.job_scorer import score_job`.
         import job_finder.web.job_scorer as js
+
         monkeypatch.setattr(js, "score_job", fake_score_job)
 
         so.score_and_persist_job(seeded_job, conn, base_config)
         assert called_args["job"]["dedup_key"] == "job-abc"
 
     def test_skipped_status_is_passthrough(
-        self, db_conn, seeded_job, base_config,
+        self,
+        db_conn,
+        seeded_job,
+        base_config,
     ):
         """Behavior 5: ScoringResult(status='skipped') -> no UPDATE, no raise."""
         conn, _ = db_conn
         so.score_and_persist_job(
-            seeded_job, conn, base_config,
+            seeded_job,
+            conn,
+            base_config,
             scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="skipped", data=None,
+                status="skipped",
+                data=None,
             ),
         )
         row = conn.execute(
-            "SELECT classification, sub_scores_json, fit_analysis "
-            "FROM jobs WHERE dedup_key = ?",
+            "SELECT classification, sub_scores_json, fit_analysis FROM jobs WHERE dedup_key = ?",
             ("job-abc",),
         ).fetchone()
         # All v3 scoring columns still NULL — no write happened.
@@ -223,14 +253,22 @@ class TestScoreAndPersistJob:
         assert row["fit_analysis"] is None
 
     def test_error_status_is_passthrough(
-        self, db_conn, seeded_job, base_config, caplog,
+        self,
+        db_conn,
+        seeded_job,
+        base_config,
+        caplog,
     ):
         """Behavior 6: ScoringResult(status='error') -> no UPDATE, no raise."""
         conn, _ = db_conn
         result = so.score_and_persist_job(
-            seeded_job, conn, base_config,
+            seeded_job,
+            conn,
+            base_config,
             scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="error", data=None, error="synthetic failure",
+                status="error",
+                data=None,
+                error="synthetic failure",
             ),
         )
         assert result is not None
@@ -247,16 +285,23 @@ class TestScoreAndPersistJob:
         conn, _ = db_conn
         # Don't insert any row. Still returns the scorer result without raising.
         result = so.score_and_persist_job(
-            {"dedup_key": "nonexistent"}, conn, base_config,
+            {"dedup_key": "nonexistent"},
+            conn,
+            base_config,
             scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=_make_assessment(), provider="ollama",
+                status="ok",
+                data=_make_assessment(),
+                provider="ollama",
             ),
         )
         assert result is not None
         assert result.status == "ok"
 
     def test_reject_classification_from_legitimacy_note(
-        self, db_conn, seeded_job, base_config,
+        self,
+        db_conn,
+        seeded_job,
+        base_config,
     ):
         """legitimacy_note on the row coerces classification to 'reject' —
         D-07 says scorer does NOT emit legitimacy_note; it reads from the row
@@ -268,9 +313,13 @@ class TestScoreAndPersistJob:
         )
         conn.commit()
         so.score_and_persist_job(
-            seeded_job, conn, base_config,
+            seeded_job,
+            conn,
+            base_config,
             scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
-                status="ok", data=_make_assessment(), provider="ollama",
+                status="ok",
+                data=_make_assessment(),
+                provider="ollama",
             ),
         )
         row = conn.execute(
@@ -298,6 +347,10 @@ class TestResolveScoringModel:
         assert so._resolve_scoring_model({}, provider=None) is None
 
     def test_missing_scoring_block_returns_none(self):
-        assert so._resolve_scoring_model(
-            {"providers": {"haiku": {"model": "x"}}}, provider=None,
-        ) is None
+        assert (
+            so._resolve_scoring_model(
+                {"providers": {"haiku": {"model": "x"}}},
+                provider=None,
+            )
+            is None
+        )

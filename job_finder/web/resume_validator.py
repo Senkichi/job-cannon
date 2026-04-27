@@ -39,8 +39,7 @@ VALIDATION_SCHEMA = {
                     "category": {
                         "type": "string",
                         "description": (
-                            "content_integrity, structural, style, "
-                            "jd_alignment, or readability"
+                            "content_integrity, structural, style, jd_alignment, or readability"
                         ),
                     },
                     "description": {
@@ -72,9 +71,7 @@ VALIDATION_SCHEMA = {
 _AUDIT_SYSTEM = (
     "You are a professional resume quality auditor. Review the generated resume against "
     "the candidate's experience profile and job description, then report any violations.\n\n"
-
     "## Violation Categories and Severity\n\n"
-
     "### content_integrity (error — triggers auto-fix)\n"
     "These are factual errors that damage the candidate's credibility:\n"
     "- Fabricated skills: any skill, tool, or technology in the resume not present in the "
@@ -84,35 +81,29 @@ _AUDIT_SYSTEM = (
     "- Date mismatches: employment dates that differ from the profile data\n"
     "- Missing or broken sections: required sections (Summary, Skills, Experience, Education) "
     "that are absent, empty, or contain placeholder text like 'UNKNOWN'\n\n"
-
     "### structural (error if egregious, warning if minor)\n"
     "- Summary exceeds 5 sentences: error\n"
     "- Skills section exceeds 3 lines: error\n"
     "- Summary is 4-5 sentences or skills is 3 lines: warning\n"
     "- Bullet counts significantly deviate from seniority guidelines: warning\n\n"
-
     "### style (warning — reported but not auto-fixed)\n"
     "- Two or more consecutive bullets start with the same verb\n"
     "- A bullet exceeds 3 lines\n"
     "- Soft skills listed in the Skills section (e.g., 'Stakeholder Communication', "
     "'Cross-Functional Collaboration', 'Team Leadership')\n"
     "- Bold text used within bullet point content (bold is only for headers and titles)\n\n"
-
     "### ats_compatibility (error — triggers auto-fix)\n"
     "- Em dashes (\u2014) or en dashes (\u2013) used anywhere in the document\n"
-    "- Smart/curly quotes (\u201C \u201D \u2018 \u2019) used anywhere in the document\n"
+    "- Smart/curly quotes (\u201c \u201d \u2018 \u2019) used anywhere in the document\n"
     "- These characters break ATS keyword matching (Workday, Taleo, iCIMS). "
     "Replace with ASCII equivalents (hyphens, straight quotes).\n\n"
-
     "### jd_alignment (warning — reported but not auto-fixed)\n"
     "- Top 5 JD keywords are missing from the resume entirely\n"
     "- Verbatim JD phrases lifted directly into resume bullets\n\n"
-
     "### readability (warning — reported but not auto-fixed)\n"
     "- Bullets that fail the 'so what?' test: no quantified result or compelling business outcome\n"
     "- Vague language: 'helped with', 'assisted in', 'was involved in', 'was responsible for'\n"
     "- Passive voice used in bullet points\n\n"
-
     "## Rules\n\n"
     "- Return passed=true ONLY if there are ZERO error-severity violations. "
     "Warnings alone do NOT cause passed=false.\n"
@@ -135,6 +126,7 @@ _FIX_SYSTEM = (
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def validate_resume(
     resume_data: dict,
@@ -163,11 +155,7 @@ def validate_resume(
         On any exception, returns {"passed": True, "violations": []} (fail-open).
     """
     try:
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         # Build a compact profile summary for Sonnet to cross-reference
         profile_skills = profile.get("skills", [])
@@ -210,6 +198,7 @@ def validate_resume(
         logger.warning("validate_resume: audit failed, returning fail-open result: %s", e)
         return {"passed": True, "violations": []}
 
+
 def fix_resume_violations(
     resume_data: dict,
     violations: list[dict],
@@ -239,11 +228,7 @@ def fix_resume_violations(
         return resume_data
 
     try:
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         profile_skills = profile.get("skills", [])
 

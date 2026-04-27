@@ -19,7 +19,6 @@ import logging
 import re
 import sqlite3
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +27,16 @@ logger = logging.getLogger(__name__)
 # Assert guard: -O not used for this local app (see DEBT-04)
 # ---------------------------------------------------------------------------
 
-ALLOWED_FK_TABLES: frozenset = frozenset({
-    "pipeline_events",
-    "resume_generations",
-    "pipeline_detections",
-    "interview_preps",
-    "resume_preferences_detected",
-    "scoring_costs",
-})
+ALLOWED_FK_TABLES: frozenset = frozenset(
+    {
+        "pipeline_events",
+        "resume_generations",
+        "pipeline_detections",
+        "interview_preps",
+        "resume_preferences_detected",
+        "scoring_costs",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Company suffix stripping
@@ -139,6 +140,7 @@ _STATUS_PRECEDENCE = {
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
 
@@ -159,6 +161,7 @@ def normalize_company(company: str) -> str:
         prev = normalized
         normalized = _COMPANY_SUFFIXES.sub("", normalized).strip()
     return normalized
+
 
 def normalize_title(title: str) -> str:
     """Normalize a job title for dedup key generation.
@@ -185,6 +188,7 @@ def normalize_title(title: str) -> str:
     normalized = " ".join(normalized.split()).lower()
     return normalized
 
+
 def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
     """Backward-compat wrapper. Prefer Job.normalized_dedup_key().
 
@@ -197,7 +201,9 @@ def normalized_dedup_key(company: str, title: str, location: str = "") -> str:
         String in format "{normalized_company}|{normalized_title}"
     """
     from job_finder.models import Job
+
     return Job.normalized_dedup_key(company, title, location)
+
 
 def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     """Merge duplicate jobs in the database using normalized dedup_keys.
@@ -220,9 +226,7 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
         Number of duplicate rows merged (deleted).
     """
     # Step 1: Fetch all jobs, compute normalized key for each
-    rows = conn.execute(
-        "SELECT * FROM jobs ORDER BY first_seen ASC"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM jobs ORDER BY first_seen ASC").fetchall()
 
     # Group by normalized key
     # Key: normalized_dedup_key string
@@ -257,10 +261,13 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
             _update_fk_tables(conn, dup_key, norm_key)
 
             # Step 5: Insert merge_log entry
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at)
                 VALUES (?, ?, ?, ?)
-            """, (norm_key, dup_key, "migration", datetime.now().isoformat()))
+            """,
+                (norm_key, dup_key, "migration", datetime.now().isoformat()),
+            )
 
             # Step 6: Delete duplicate row
             conn.execute("DELETE FROM jobs WHERE dedup_key = ?", (dup_key,))
@@ -272,7 +279,8 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
         if old_canonical_key != norm_key:
             _update_fk_tables(conn, old_canonical_key, norm_key)
 
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE jobs SET
                 dedup_key = ?,
                 sources = ?,
@@ -288,30 +296,34 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 sub_scores_json = ?,
                 fit_analysis = ?
             WHERE dedup_key = ?
-        """, (
-            norm_key,
-            json.dumps(merged_data["sources"]),
-            json.dumps(merged_data["source_urls"]),
-            merged_data["location"],
-            json.dumps(merged_data["locations_raw"]),
-            merged_data["description"],
-            merged_data["notes"],
-            merged_data["salary_min"],
-            merged_data["salary_max"],
-            merged_data["pipeline_status"],
-            merged_data["classification"],
-            merged_data["sub_scores_json"],
-            merged_data["fit_analysis"],
-            old_canonical_key,
-        ))
+        """,
+            (
+                norm_key,
+                json.dumps(merged_data["sources"]),
+                json.dumps(merged_data["source_urls"]),
+                merged_data["location"],
+                json.dumps(merged_data["locations_raw"]),
+                merged_data["description"],
+                merged_data["notes"],
+                merged_data["salary_min"],
+                merged_data["salary_max"],
+                merged_data["pipeline_status"],
+                merged_data["classification"],
+                merged_data["sub_scores_json"],
+                merged_data["fit_analysis"],
+                old_canonical_key,
+            ),
+        )
 
         conn.commit()
 
     return merged_count
 
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     """Merge data from duplicate rows into canonical row data.
@@ -360,8 +372,12 @@ def _merge_job_data(canonical: dict, duplicates: list[dict]) -> dict:
     notes = _merge_notes(all_rows)
 
     # Merge salary: COALESCE — first non-null wins
-    salary_min = next((r.get("salary_min") for r in all_rows if r.get("salary_min") is not None), None)
-    salary_max = next((r.get("salary_max") for r in all_rows if r.get("salary_max") is not None), None)
+    salary_min = next(
+        (r.get("salary_min") for r in all_rows if r.get("salary_min") is not None), None
+    )
+    salary_max = next(
+        (r.get("salary_max") for r in all_rows if r.get("salary_max") is not None), None
+    )
 
     # Merge pipeline_status: keep highest precedence
     pipeline_status = _merge_pipeline_status(all_rows)
@@ -475,6 +491,7 @@ def _merge_v3_scoring(all_rows: list[dict]) -> tuple:
 
     return merged_class, fit_analysis, sub_scores_json
 
+
 def _merge_locations(rows: list[dict]) -> list[str]:
     """Collect unique locations from all rows, Remote/Hybrid first."""
     remote_hybrid: list[str] = []
@@ -503,11 +520,13 @@ def _merge_locations(rows: list[dict]) -> list[str]:
 
     return remote_hybrid + other
 
+
 def _build_location_string(locations_raw: list[str]) -> str:
     """Build a concatenated location string, deduplicating."""
     return ", ".join(dict.fromkeys(locations_raw))
 
-def _merge_descriptions(rows: list[dict]) -> Optional[str]:
+
+def _merge_descriptions(rows: list[dict]) -> str | None:
     """Merge descriptions from all rows.
 
     Delegates to db.merge_description for pairwise merge logic (single source
@@ -525,6 +544,7 @@ def _merge_descriptions(rows: list[dict]) -> Optional[str]:
 
     return merged
 
+
 def _merge_notes(rows: list[dict]) -> str:
     """Merge notes fields by concatenating non-empty unique lines."""
     all_lines: list[str] = []
@@ -537,6 +557,7 @@ def _merge_notes(rows: list[dict]) -> str:
                 all_lines.append(line)
                 seen_lines.add(line)
     return "\n".join(all_lines)
+
 
 def _merge_pipeline_status(rows: list[dict]) -> str:
     """Return the highest-precedence pipeline_status from all rows."""
@@ -551,6 +572,7 @@ def _merge_pipeline_status(rows: list[dict]) -> str:
             best_status = status
 
     return best_status
+
 
 def _update_fk_tables(
     conn: sqlite3.Connection,
@@ -587,6 +609,7 @@ def _update_fk_tables(
         except sqlite3.OperationalError:
             # Table may not exist in test DBs or older schemas — skip
             pass
+
 
 def _update_canonical_key(
     conn: sqlite3.Connection,

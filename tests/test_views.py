@@ -8,7 +8,10 @@ Tests cover:
 - Base template has dark mode class
 """
 
+from datetime import UTC
+
 import pytest
+
 
 class TestRootRedirect:
     def test_root_redirects_to_jobs(self, client):
@@ -16,6 +19,7 @@ class TestRootRedirect:
         response = client.get("/")
         assert response.status_code == 302
         assert "/jobs" in response.headers["Location"]
+
 
 class TestBlueprintRoutes:
     def test_jobs_returns_200(self, client):
@@ -44,6 +48,7 @@ class TestBlueprintRoutes:
         response = client.get("/settings")
         assert response.status_code == 200
 
+
 class TestBaseTemplate:
     def test_htmx_script_loaded(self, client):
         """Base template includes HTMX CDN script tag."""
@@ -65,9 +70,11 @@ class TestBaseTemplate:
         response = client.get("/jobs")
         assert b'class="dark"' in response.data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures for Job Board tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_jobs(tmp_db_path):
@@ -144,14 +151,17 @@ def app_with_jobs(tmp_db_path):
 
     return application
 
+
 @pytest.fixture
 def jobs_client(app_with_jobs):
     """Test client for the app that has sample jobs."""
     return app_with_jobs.test_client()
 
+
 # ---------------------------------------------------------------------------
 # Job Board route tests
 # ---------------------------------------------------------------------------
+
 
 class TestJobBoardRoutes:
     def test_jobs_index_returns_200_with_table(self, jobs_client):
@@ -192,7 +202,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_expand_returns_accordion(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion row HTML."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Accordion should show description and links
@@ -203,9 +215,7 @@ class TestJobBoardRoutes:
         response = jobs_client.get("/jobs/nonexistent-key/expand", headers={"HX-Request": "true"})
         assert response.status_code == 404
 
-    def test_jobs_status_update_changes_status_and_creates_event(
-        self, jobs_client, tmp_db_path
-    ):
+    def test_jobs_status_update_changes_status_and_creates_event(self, jobs_client, tmp_db_path):
         """POST /jobs/<key>/status updates pipeline_status and creates pipeline_event."""
         import sqlite3
 
@@ -256,7 +266,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_collapse_returns_hidden_placeholder(self, jobs_client):
         """GET /jobs/<key>/collapse returns hidden placeholder <tr>, not a full row."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/collapse", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/collapse", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Must contain the data-expand-slot placeholder attribute
@@ -269,7 +281,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_collapse_returns_404_for_unknown_key(self, jobs_client):
         """GET /jobs/<unknown>/collapse returns 404."""
-        response = jobs_client.get("/jobs/nonexistent-key/collapse", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/nonexistent-key/collapse", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 404
 
     def test_jobs_table_contains_expand_slot_placeholders(self, jobs_client):
@@ -283,7 +297,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_expand_contains_collapse_button_with_correct_htmx(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion with correctly wired collapse button."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Collapse button must have hx-target="closest tr" and hx-swap="outerHTML"
@@ -292,7 +308,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_detail_inline_returns_200_with_full_content(self, jobs_client):
         """GET /jobs/<key>/detail-inline returns 200 with full job content as inline partial."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Must contain full description content
@@ -305,17 +323,23 @@ class TestJobBoardRoutes:
 
     def test_jobs_detail_inline_returns_404_for_unknown_key(self, jobs_client):
         """GET /jobs/<unknown>/detail-inline returns 404."""
-        response = jobs_client.get("/jobs/nonexistent-key/detail-inline", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/nonexistent-key/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 404
 
     def test_jobs_detail_inline_contains_collapse_full_detail_button(self, jobs_client):
         """GET /jobs/<key>/detail-inline returns partial with Collapse Full Detail HTMX button."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Must contain the Collapse Full Detail button wired to /expand route
         assert "Collapse Full Detail" in data
-        assert "detail-inline" not in data.replace("/detail-inline", "ROUTE")  # button points to /expand not /detail-inline
+        assert "detail-inline" not in data.replace(
+            "/detail-inline", "ROUTE"
+        )  # button points to /expand not /detail-inline
         assert "/expand" in data
         # HTMX wiring on collapse button
         assert 'hx-target="closest tr"' in data
@@ -323,7 +347,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_detail_inline_contains_pipeline_timeline(self, jobs_client):
         """GET /jobs/<key>/detail-inline returns partial with pipeline timeline section."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Must contain pipeline timeline section
@@ -340,7 +366,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_expand_contains_prominent_collapse_button(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion with a prominent Collapse button (not a subtle link)."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Collapse button must use bg-slate-700 prominent styling (not text-slate-500 subtle link)
@@ -351,7 +379,9 @@ class TestJobBoardRoutes:
 
     def test_jobs_detail_inline_formats_description(self, jobs_client):
         """GET /jobs/<key>/detail-inline renders description as HTML list, not raw pipe-separated text."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Should contain HTML list elements (from format_description filter)
@@ -368,11 +398,13 @@ class TestJobBoardRoutes:
 
     def test_jobs_expand_contains_status_dropdown(self, jobs_client):
         """GET /jobs/<key>/expand returns accordion with a status dropdown."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Expanded accordion must include a status dropdown
-        assert '<select' in data
+        assert "<select" in data
         assert 'name="pipeline_status"' in data
 
     def test_jobs_status_cell_uses_htmx_event_stopping(self, jobs_client):
@@ -381,7 +413,7 @@ class TestJobBoardRoutes:
         assert response.status_code == 200
         data = response.data.decode()
         # Must use HTMX-native event stopping attribute
-        assert 'hx-on:click' in data
+        assert "hx-on:click" in data
         # Must NOT rely on plain inline onclick for event stopping
         assert 'onclick="event.stopPropagation()"' not in data
 
@@ -391,11 +423,13 @@ class TestJobBoardRoutes:
         assert response.status_code == 200
         data = response.data.decode()
         # Status dropdown must use visible bg-slate-700 (not near-invisible bg-slate-800)
-        assert 'bg-slate-700' in data
+        assert "bg-slate-700" in data
+
 
 # ---------------------------------------------------------------------------
 # HTMX Reactivity tests (Phase 35)
 # ---------------------------------------------------------------------------
+
 
 class TestJobBoardReactivity:
     """Tests for HTMX reactivity: HX-Trigger headers on scoring/archive routes."""
@@ -432,7 +466,7 @@ class TestJobBoardReactivity:
         )
         assert response.status_code == 200
         html = response.data.decode()
-        assert 'archived-count' not in html
+        assert "archived-count" not in html
 
     def test_update_status_non_archive_no_hx_trigger(self, jobs_client):
         """POST /jobs/{key}/status with non-archived status has no HX-Trigger header."""
@@ -448,7 +482,7 @@ class TestJobBoardReactivity:
         response = jobs_client.get("/jobs")
         assert response.status_code == 200
         html = response.data.decode()
-        assert 'jobs-updated from:body' in html
+        assert "jobs-updated from:body" in html
         assert 'hx-include="#filter-form"' in html
 
     def test_archive_button_has_hx_target(self, jobs_client):
@@ -462,9 +496,11 @@ class TestJobBoardReactivity:
         assert 'hx-target="#status-cell-' in html
         assert 'hx-disable-elt="this"' in html
 
+
 # ---------------------------------------------------------------------------
 # Archived Jobs Section tests (Phase 41)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_archived_job(tmp_db_path):
@@ -479,7 +515,15 @@ def app_with_archived_job(tmp_db_path):
     conn.execute(
         "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, pipeline_status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ("acme|data-scientist|remote", "Data Scientist", "Acme", "Remote", "2026-01-01", "2026-01-01", "discovered"),
+        (
+            "acme|data-scientist|remote",
+            "Data Scientist",
+            "Acme",
+            "Remote",
+            "2026-01-01",
+            "2026-01-01",
+            "discovered",
+        ),
     )
     conn.execute(
         "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, pipeline_status) "
@@ -492,12 +536,19 @@ def app_with_archived_job(tmp_db_path):
     test_config = {
         "db": {"path": tmp_db_path},
         "scoring": {"min_score_threshold": 40},
-        "profile": {"target_titles": [], "target_locations": [], "min_salary": 0,
-                    "industries": [], "exclusions": {"title_keywords": [], "companies": []}, "skills": []},
+        "profile": {
+            "target_titles": [],
+            "target_locations": [],
+            "min_salary": 0,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
         "sources": {},
         "output": {"default_format": "cli", "max_results": 50},
     }
     return create_app(config=test_config)
+
 
 class TestArchivedSection:
     """Tests for collapsible archived jobs section and /jobs/archived-table route."""
@@ -552,9 +603,11 @@ class TestArchivedSection:
         assert "toggleArchived" in html
         assert "dataset.loaded" in html
 
+
 # ---------------------------------------------------------------------------
 # Fixtures for batch score tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_migrations(tmp_db_path):
@@ -579,10 +632,12 @@ def app_with_migrations(tmp_db_path):
     application.config["TESTING"] = True
     return application
 
+
 @pytest.fixture
 def migrated_client(app_with_migrations):
     """Test client for the migrated app."""
     return app_with_migrations.test_client()
+
 
 @pytest.fixture
 def app_with_unscored_jobs(tmp_db_path):
@@ -626,13 +681,16 @@ def app_with_unscored_jobs(tmp_db_path):
                 '["linkedin"]',
                 '["https://linkedin.com/jobs/1"]',
                 "job-1",
-                150000, 200000,
+                150000,
+                200000,
                 "Build ML models",
                 "2026-03-01T10:00:00",
                 "2026-03-09T10:00:00",
-                8.5, '{"skills": 0.9}',
+                8.5,
+                '{"skills": 0.9}',
                 "discovered",
-                None, None,  # unscored (classification IS NULL)
+                None,
+                None,  # unscored (classification IS NULL)
             ),
             (
                 "beta|staff-ds|san-francisco",
@@ -642,15 +700,18 @@ def app_with_unscored_jobs(tmp_db_path):
                 '["greenhouse"]',
                 '["https://boards.greenhouse.io/beta/jobs/2"]',
                 "job-2",
-                200000, 280000,
+                200000,
+                280000,
                 "Lead data science.",
                 "2026-03-03T12:00:00",
                 "2026-03-09T12:00:00",
-                9.1, '{"skills": 0.95}',
+                9.1,
+                '{"skills": 0.95}',
                 "reviewing",
                 # v3 classification='apply' with sub_scores_json, replacing
                 # legacy (haiku_score=75, sonnet_score=None) pair
-                "apply", '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
+                "apply",
+                '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
             ),
         ],
     )
@@ -659,19 +720,20 @@ def app_with_unscored_jobs(tmp_db_path):
 
     return application
 
+
 @pytest.fixture
 def unscored_client(app_with_unscored_jobs):
     """Test client for the app with unscored jobs."""
     return app_with_unscored_jobs.test_client()
 
+
 # ---------------------------------------------------------------------------
 # Batch Score Route tests
 # ---------------------------------------------------------------------------
 
+
 class TestBatchScoreHaikuStart:
-    def test_haiku_start_returns_progress_fragment_when_unscored_exist(
-        self, unscored_client
-    ):
+    def test_haiku_start_returns_progress_fragment_when_unscored_exist(self, unscored_client):
         """POST /dashboard/batch-score/haiku/start returns progress fragment with session_id."""
         response = unscored_client.post("/dashboard/batch-score/haiku/start")
         assert response.status_code == 200
@@ -721,10 +783,9 @@ class TestBatchScoreHaikuStart:
         assert session["session_type"] == "scoring"
         assert session["status"] in ("running", "done", "cancelled")
 
+
 class TestBatchScoreSonnetStart:
-    def test_sonnet_start_returns_progress_when_qualifying_jobs_exist(
-        self, unscored_client
-    ):
+    def test_sonnet_start_returns_progress_when_qualifying_jobs_exist(self, unscored_client):
         """POST /dashboard/batch-score/sonnet/start returns progress fragment when qualifying jobs exist."""
         response = unscored_client.post("/dashboard/batch-score/sonnet/start")
         assert response.status_code == 200
@@ -750,16 +811,17 @@ class TestBatchScoreSonnetStart:
         data = response.data.decode()
         assert "Sonnet" in data
 
+
 class TestBatchScoreStatus:
     def test_status_returns_progress_when_running(self, app_with_unscored_jobs):
         """GET /dashboard/batch-score/status/<id> returns progress fragment (hx-trigger) when running."""
         import sqlite3
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         db_path = app_with_unscored_jobs.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
         # Use current time so the 30-min timeout does not trigger
-        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        now_iso = datetime.now(UTC).replace(tzinfo=None).isoformat()
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('haiku', 'running', 10, 3, ?)",
@@ -818,6 +880,7 @@ class TestBatchScoreStatus:
         assert "hx-trigger" not in data
         assert "batch-score-" in data  # correct fragment container
 
+
 class TestBatchScoreCancel:
     def test_cancel_sets_status_to_cancelling(self, app_with_unscored_jobs):
         """POST /dashboard/batch-score/cancel/<id> sets status='cancelling' in DB."""
@@ -867,9 +930,11 @@ class TestBatchScoreCancel:
         # Cancel response keeps polling until background thread sets status='cancelled'
         assert "batch-score-" in data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures and tests for source count badge in accordion expand
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_multi_source_job(tmp_db_path):
@@ -947,27 +1012,29 @@ def app_with_multi_source_job(tmp_db_path):
 
     return application
 
+
 @pytest.fixture
 def multi_source_client(app_with_multi_source_job):
     """Test client for the app with a multi-source job."""
     return app_with_multi_source_job.test_client()
 
+
 class TestSourceCountBadge:
-    def test_multi_source_job_shows_source_count_badge_in_accordion(
-        self, multi_source_client
-    ):
+    def test_multi_source_job_shows_source_count_badge_in_accordion(self, multi_source_client):
         """GET /jobs/<key>/expand shows '2 sources' badge for merged multi-source jobs."""
-        response = multi_source_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = multi_source_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Multi-source badge should appear in expanded view
         assert "2 sources" in data
 
-    def test_single_source_job_does_not_show_source_count_badge(
-        self, multi_source_client
-    ):
+    def test_single_source_job_does_not_show_source_count_badge(self, multi_source_client):
         """GET /jobs/<key>/expand does NOT show source count badge for single-source jobs."""
-        response = multi_source_client.get("/jobs/beta%7Cstaff-ds%7Csf/expand", headers={"HX-Request": "true"})
+        response = multi_source_client.get(
+            "/jobs/beta%7Cstaff-ds%7Csf/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Single-source badge should NOT appear
@@ -976,7 +1043,9 @@ class TestSourceCountBadge:
 
     def test_multi_source_job_shows_all_source_links(self, multi_source_client):
         """GET /jobs/<key>/expand shows all source URLs as clickable links for merged jobs."""
-        response = multi_source_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = multi_source_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Both source links should appear
@@ -985,15 +1054,19 @@ class TestSourceCountBadge:
 
     def test_multi_source_job_shows_enrichment_indicator(self, multi_source_client):
         """GET /jobs/<key>/expand shows subtle enrichment indicator for multi-source jobs."""
-        response = multi_source_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = multi_source_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Enrichment sparkle indicator should appear for multi-source jobs
         assert "&#10024;" in data or "sparkle" in data.lower() or "sources" in data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures and tests for Companies page
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_companies(tmp_db_path):
@@ -1039,13 +1112,14 @@ def app_with_companies(tmp_db_path):
 
     return application
 
+
 @pytest.fixture
 def companies_client(app_with_companies):
     """Test client for the app with sample companies."""
     return app_with_companies.test_client()
 
-class TestCompaniesPage:
 
+class TestCompaniesPage:
     def test_companies_index_returns_200(self, companies_client):
         """GET /companies returns 200 with Companies page."""
         response = companies_client.get("/companies")
@@ -1081,6 +1155,7 @@ class TestCompaniesPage:
     def test_companies_expand_returns_expanded_view(self, app_with_companies):
         """GET /companies/<id>/expand returns expanded view with jobs and scan history."""
         import sqlite3
+
         db_path = app_with_companies.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
         company_id = conn.execute("SELECT id FROM companies WHERE name = 'stripe'").fetchone()[0]
@@ -1096,6 +1171,7 @@ class TestCompaniesPage:
     def test_companies_add_creates_company(self, app_with_companies):
         """POST /companies/add creates company and redirects."""
         import sqlite3
+
         client = app_with_companies.test_client()
         response = client.post(
             "/companies/add",
@@ -1106,15 +1182,14 @@ class TestCompaniesPage:
         # Verify company was created
         db_path = app_with_companies.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
-        company = conn.execute(
-            "SELECT * FROM companies WHERE name_raw = 'Ramp'"
-        ).fetchone()
+        company = conn.execute("SELECT * FROM companies WHERE name_raw = 'Ramp'").fetchone()
         conn.close()
         assert company is not None
 
     def test_companies_toggle_switches_scan_enabled(self, app_with_companies):
         """POST /companies/<id>/toggle toggles scan_enabled and returns updated row."""
         import sqlite3
+
         db_path = app_with_companies.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
         company_id = conn.execute("SELECT id FROM companies WHERE name = 'stripe'").fetchone()[0]
@@ -1126,7 +1201,9 @@ class TestCompaniesPage:
 
         # Verify scan_enabled was toggled (was 1, should now be 0)
         conn = sqlite3.connect(db_path)
-        row = conn.execute("SELECT scan_enabled FROM companies WHERE id = ?", (company_id,)).fetchone()
+        row = conn.execute(
+            "SELECT scan_enabled FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
         conn.close()
         assert row[0] == 0  # toggled from 1 to 0
 
@@ -1138,12 +1215,13 @@ class TestCompaniesPage:
         assert "/companies" in data
         assert "Companies" in data
 
+
 # ---------------------------------------------------------------------------
 # Tests for Settings ATS section
 # ---------------------------------------------------------------------------
 
-class TestSettingsAtsScanSection:
 
+class TestSettingsAtsScanSection:
     def test_settings_page_renders_ats_scanning_section(self, client):
         """GET /settings renders ATS Scanning section with toggle."""
         response = client.get("/settings")
@@ -1163,6 +1241,7 @@ class TestSettingsAtsScanSection:
     def test_settings_save_includes_ats_config(self, app, tmp_path):
         """POST /settings/save with ats_scan_enabled saves ats config."""
         import yaml
+
         import job_finder.web.blueprints.settings as settings_mod
 
         # Redirect writes to a temp config file so tests don't clobber the real config.yaml
@@ -1222,12 +1301,13 @@ class TestSettingsAtsScanSection:
         finally:
             settings_mod._CONFIG_PATH = original_path
 
+
 # ---------------------------------------------------------------------------
 # Tests for Dashboard ATS stat card
 # ---------------------------------------------------------------------------
 
-class TestDashboardAtsStat:
 
+class TestDashboardAtsStat:
     def test_dashboard_shows_ats_stat_card(self, client):
         """GET /dashboard shows ATS Discovery stat card."""
         response = client.get("/dashboard")
@@ -1255,12 +1335,13 @@ class TestDashboardAtsStat:
         response = app.test_client().get("/dashboard")
         assert response.status_code == 200
 
+
 # ---------------------------------------------------------------------------
 # Tests for /dashboard/cost-detail HTMX route (SCORE-07)
 # ---------------------------------------------------------------------------
 
-class TestCostDetailRoute:
 
+class TestCostDetailRoute:
     def test_cost_detail_returns_200(self, client):
         """GET /dashboard/cost-detail returns 200."""
         response = client.get("/dashboard/cost-detail", headers={"HX-Request": "true"})
@@ -1276,9 +1357,11 @@ class TestCostDetailRoute:
         assert "This Week" in data
         assert "Projected/mo" in data
 
+
 # ---------------------------------------------------------------------------
 # Profile Editor with Learned Preferences tests (05-UI-01 / UI-05)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_preferences(tmp_db_path):
@@ -1352,6 +1435,7 @@ def app_with_preferences(tmp_db_path):
     conn.close()
 
     return application
+
 
 class TestProfileEditor:
     """GET /profile renders Learned Preferences section with accepted resume preferences.
@@ -1431,9 +1515,11 @@ class TestProfileEditor:
             f"got {response.status_code}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Drive status UI integration tests (Plan 09-02)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_sonnet_job(tmp_db_path):
@@ -1477,11 +1563,13 @@ def app_with_sonnet_job(tmp_db_path):
             '["linkedin"]',
             '["https://linkedin.com/jobs/1"]',
             "job-drive-1",
-            150000, 200000,
+            150000,
+            200000,
             "Build ML models",
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
-            8.5, '{"skills": 0.9}',
+            8.5,
+            '{"skills": 0.9}',
             "discovered",
             "apply",  # v3.0 classification
             '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -1492,6 +1580,7 @@ def app_with_sonnet_job(tmp_db_path):
     conn.close()
 
     return application
+
 
 class TestDriveStatusJobsRoutes:
     """Drive status is wired into expand/paste-jd/rescore routes and affects UI."""
@@ -1504,7 +1593,9 @@ class TestDriveStatusJobsRoutes:
         mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1520,7 +1611,9 @@ class TestDriveStatusJobsRoutes:
         mock_status = {"ok": True, "error": None, "error_code": None}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1537,7 +1630,9 @@ class TestDriveStatusJobsRoutes:
         mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1552,7 +1647,9 @@ class TestDriveStatusJobsRoutes:
         mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1567,7 +1664,9 @@ class TestDriveStatusJobsRoutes:
         mock_status = {"ok": True, "error": None, "error_code": None}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1586,7 +1685,9 @@ class TestDriveStatusJobsRoutes:
         }
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         data = response.data.decode()
@@ -1627,6 +1728,7 @@ class TestDriveStatusJobsRoutes:
         # Drive status must be visible in the response
         assert "python -m job_finder.gmail_auth" in data
 
+
 class TestDriveStatusSettingsRoute:
     """Drive status indicator on Settings page."""
 
@@ -1636,7 +1738,9 @@ class TestDriveStatusSettingsRoute:
 
         mock_status = {"ok": True, "error": None, "error_code": None}
 
-        with patch("job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status):
+        with patch(
+            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
+        ):
             response = client.get("/settings")
 
         assert response.status_code == 200
@@ -1654,7 +1758,9 @@ class TestDriveStatusSettingsRoute:
             "error_code": "no_token",
         }
 
-        with patch("job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status):
+        with patch(
+            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
+        ):
             response = client.get("/settings")
 
         assert response.status_code == 200
@@ -1672,16 +1778,20 @@ class TestDriveStatusSettingsRoute:
             "error_code": "no_token",
         }
 
-        with patch("job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status):
+        with patch(
+            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
+        ):
             response = client.get("/settings")
 
         assert response.status_code == 200
         data = response.data.decode()
         assert "python -m job_finder.gmail_auth" in data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures for UX Polish tests (Phase 15)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_jd_full_job(tmp_db_path):
@@ -1724,7 +1834,8 @@ def app_with_jd_full_job(tmp_db_path):
             '["linkedin"]',
             '["https://linkedin.com/jobs/99"]',
             "job-99",
-            160000, 220000,
+            160000,
+            220000,
             "Build ML infrastructure",
             "This is a full job description for testing.\nLine 2 of description.\nRequirements: Python, SQL",
             "2026-03-01T10:00:00",
@@ -1740,14 +1851,17 @@ def app_with_jd_full_job(tmp_db_path):
 
     return app
 
+
 @pytest.fixture
 def jd_full_client(app_with_jd_full_job):
     """Test client for the app with a jd_full job."""
     return app_with_jd_full_job.test_client()
 
+
 # ---------------------------------------------------------------------------
 # UX Polish tests (Phase 15)
 # ---------------------------------------------------------------------------
+
 
 class TestUXPolish:
     """Tests for Phase 15 UX polish: spinners, OOB score, jd_full display."""
@@ -1756,7 +1870,9 @@ class TestUXPolish:
 
     def test_expand_with_jd_full_shows_details(self, jd_full_client):
         """Expanded row shows <details> section when job has jd_full."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "<details" in data
@@ -1765,14 +1881,18 @@ class TestUXPolish:
 
     def test_expand_without_jd_full_no_details(self, jobs_client):
         """Expanded row has no <details> JD section when jd_full is absent."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "Job Description (full)" not in data
 
     def test_detail_inline_with_jd_full_shows_details(self, jd_full_client):
         """Detail-inline view shows <details> section when job has jd_full."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "<details" in data
@@ -1782,7 +1902,9 @@ class TestUXPolish:
 
     def test_rescore_button_has_indicator(self, jd_full_client):
         """Re-score button has spinner with htmx-indicator class and hx-disable-elt."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         data = response.data.decode()
         assert 'hx-disable-elt="this"' in data
         assert "htmx-indicator" in data
@@ -1791,7 +1913,9 @@ class TestUXPolish:
     def test_paste_jd_button_has_indicator(self, jobs_client):
         """Paste-JD submit button has spinner with htmx-indicator class."""
         # Use a job WITHOUT jd_full so paste-JD form is visible
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         data = response.data.decode()
         assert "Score with JD" in data
         assert "htmx-indicator" in data
@@ -1844,9 +1968,12 @@ class TestUXPolish:
 
     def test_expand_no_load_trigger(self, jd_full_client):
         """Regular expand does NOT include hx-trigger=load (no spurious score refresh)."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
+
 
 class TestDashboardUserActivity:
     """Tests for get_recent_activity() DB function and dashboard User Activity section."""
@@ -1886,8 +2013,9 @@ class TestDashboardUserActivity:
     def test_get_recent_activity_returns_rows(self, tmp_db_path):
         """get_recent_activity() returns dicts from user_activity table ordered DESC."""
         import sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
         from job_finder.db import get_recent_activity
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -1915,8 +2043,9 @@ class TestDashboardUserActivity:
     def test_get_recent_activity_empty_table(self, tmp_db_path):
         """get_recent_activity() returns empty list when user_activity has no rows."""
         import sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
         from job_finder.db import get_recent_activity
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -1930,8 +2059,9 @@ class TestDashboardUserActivity:
     def test_get_recent_activity_respects_limit(self, tmp_db_path):
         """get_recent_activity() respects the limit parameter."""
         import sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
         from job_finder.db import get_recent_activity
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -1941,7 +2071,7 @@ class TestDashboardUserActivity:
             conn.execute(
                 "INSERT INTO user_activity (action, entity_id, metadata, occurred_at) "
                 "VALUES (?, ?, ?, ?)",
-                ("sync", None, '{}', f"2026-03-10T0{i}:00:00"),
+                ("sync", None, "{}", f"2026-03-10T0{i}:00:00"),
             )
         conn.commit()
 
@@ -1956,14 +2086,17 @@ class TestDashboardUserActivity:
         assert response.status_code == 200
         assert b"User Activity" in response.data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures for Data Quality tests (Phase 34)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def app_with_entity_job(tmp_db_path):
     """Flask app with a job that has HTML entities in description and jd_full."""
     import sqlite3
+
     from job_finder.web import create_app
 
     test_config = {
@@ -2000,7 +2133,8 @@ def app_with_entity_job(tmp_db_path):
             '["linkedin"]',
             '["https://linkedin.com/jobs/100"]',
             "job-100",
-            160000, 220000,
+            160000,
+            220000,
             "Work at AT&amp;T on data systems.\nRequirements:\n- Python &amp; SQL\n- It&#39;s a great role",
             "Full JD for AT&amp;T role.\nWe&#39;re looking for someone who can:\n- Build data pipelines\n- Work with cross-functional teams",
             "2026-03-01T10:00:00",
@@ -2015,10 +2149,12 @@ def app_with_entity_job(tmp_db_path):
     conn.close()
     return app
 
+
 @pytest.fixture
 def entity_client(app_with_entity_job):
     """Test client for the app with HTML entity job."""
     return app_with_entity_job.test_client()
+
 
 @pytest.fixture
 def app_with_html_tag_job(tmp_db_path):
@@ -2029,6 +2165,7 @@ def app_with_html_tag_job(tmp_db_path):
     jd_full is None so the description section renders.
     """
     import sqlite3
+
     from job_finder.web import create_app
 
     test_config = {
@@ -2079,21 +2216,26 @@ def app_with_html_tag_job(tmp_db_path):
     conn.close()
     return app
 
+
 @pytest.fixture
 def html_tag_client(app_with_html_tag_job):
     """Test client for the app with entity-encoded HTML tag job."""
     return app_with_html_tag_job.test_client()
 
+
 # ---------------------------------------------------------------------------
 # Data Quality tests (Phase 34)
 # ---------------------------------------------------------------------------
+
 
 class TestDataQuality:
     """Tests for Phase 34 data quality: HTML entity handling and jd_full display."""
 
     def test_expand_description_decodes_entities(self, entity_client):
         """Expanded row description decodes HTML entities like &amp; and &#39;."""
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # &amp; should be decoded to & (then re-escaped by Jinja2 as &amp; in HTML)
@@ -2105,7 +2247,9 @@ class TestDataQuality:
 
     def test_expand_description_uses_format_filter(self, entity_client):
         """Expanded row renders description through format_description (has HTML structure)."""
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # format_description produces structured HTML (not raw text)
@@ -2114,7 +2258,9 @@ class TestDataQuality:
 
     def test_expand_jd_full_renders_formatted(self, entity_client):
         """Expanded row jd_full uses format_description, not whitespace-pre-wrap."""
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # jd_full section should exist
@@ -2127,7 +2273,9 @@ class TestDataQuality:
 
     def test_detail_inline_jd_full_renders_formatted(self, entity_client):
         """Detail-inline view jd_full uses format_description, not whitespace-pre-wrap."""
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "Full Job Description" in data
@@ -2137,7 +2285,9 @@ class TestDataQuality:
 
     def test_expand_shows_full_jd_content(self, entity_client):
         """Expanded row jd_full shows the actual content, not truncated or empty."""
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         assert "Build data pipelines" in data
@@ -2149,7 +2299,9 @@ class TestDataQuality:
         Descriptions stored with &lt;p&gt;, &lt;ul&gt;, &lt;li&gt; should have the text
         extracted cleanly. The tag strings themselves must not appear in the rendered output.
         """
-        response = html_tag_client.get("/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = html_tag_client.get(
+            "/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Text content is preserved
@@ -2166,7 +2318,9 @@ class TestDataQuality:
         When a job has both description and jd_full, the description section (max-w-4xl div)
         must be suppressed in the expanded row so users see only the full JD.
         """
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Description container class must not appear (jd_full is a superset)
@@ -2180,7 +2334,9 @@ class TestDataQuality:
         The detail-inline view must suppress the Description card when jd_full exists
         and show Full Job Description instead.
         """
-        response = entity_client.get("/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"})
+        response = entity_client.get(
+            "/jobs/test%7Centity-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Full JD section must be present
@@ -2197,7 +2353,9 @@ class TestDataQuality:
         Jobs without jd_full must show the description section. The full JD section
         must NOT appear since there is no jd_full to show.
         """
-        response = html_tag_client.get("/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = html_tag_client.get(
+            "/jobs/test%7Chtml-tag-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         data = response.data.decode()
         # Description text content is rendered
@@ -2205,14 +2363,17 @@ class TestDataQuality:
         # Full JD section must NOT appear (no jd_full)
         assert "Job Description (full)" not in data
 
+
 # ---------------------------------------------------------------------------
 # Fixtures for button disable/spinner tests (Phase 35, Plan 02)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def client_with_scored_job(tmp_db_path):
     """Flask app + client with a Sonnet-scored job that shows all action buttons."""
     import sqlite3
+
     from job_finder.web import create_app
 
     test_config = {
@@ -2250,7 +2411,8 @@ def client_with_scored_job(tmp_db_path):
             '["linkedin"]',
             '["https://linkedin.com/jobs/1"]',
             "job-1",
-            150000, 200000,
+            150000,
+            200000,
             "Build ML models for Acme Corp",
             "2026-03-01T10:00:00",
             "2026-03-09T10:00:00",
@@ -2266,57 +2428,70 @@ def client_with_scored_job(tmp_db_path):
 
     return application.test_client()
 
+
 # ---------------------------------------------------------------------------
 # Button disable and spinner tests (Phase 35, Plan 02)
 # ---------------------------------------------------------------------------
+
 
 class TestButtonDisableAndSpinner:
     """Every HTMX action button must have hx-disable-elt and spinner indicator."""
 
     def test_expanded_row_buttons_have_disable(self, client_with_scored_job):
         """All action buttons in expanded row have hx-disable-elt='this'."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         html = response.data.decode()
 
         # Count hx-disable-elt occurrences — expect at least 4
         # (Collapse, View Full Detail, Re-score, Archive)
         import re
+
         disable_count = len(re.findall(r'hx-disable-elt="this"', html))
         assert disable_count >= 4, f"Expected >= 4 hx-disable-elt, found {disable_count}"
 
     def test_expanded_row_buttons_have_spinners(self, client_with_scored_job):
         """All action buttons in expanded row have htmx-indicator spinners."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         html = response.data.decode()
 
         # Count spinner indicators — expect at least 4
         import re
-        spinner_count = len(re.findall(r'htmx-indicator', html))
+
+        spinner_count = len(re.findall(r"htmx-indicator", html))
         assert spinner_count >= 4, f"Expected >= 4 htmx-indicator, found {spinner_count}"
 
     def test_collapse_button_has_disable(self, client_with_scored_job):
         """Collapse button specifically has hx-disable-elt."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         html = response.data.decode()
         # Find the collapse button section
         collapse_idx = html.find("Collapse")
         assert collapse_idx > 0, "Collapse button not found"
         # Check backwards for hx-disable-elt within the button tag
         button_start = html.rfind("<button", 0, collapse_idx)
-        button_section = html[button_start:collapse_idx + 50]
+        button_section = html[button_start : collapse_idx + 50]
         assert 'hx-disable-elt="this"' in button_section, "Collapse button missing hx-disable-elt"
 
     def test_view_full_detail_has_disable(self, client_with_scored_job):
         """View Full Detail button has hx-disable-elt."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         html = response.data.decode()
         detail_idx = html.find("View Full Detail")
         assert detail_idx > 0, "View Full Detail button not found"
         button_start = html.rfind("<button", 0, detail_idx)
-        button_section = html[button_start:detail_idx + 50]
+        button_section = html[button_start : detail_idx + 50]
         assert 'hx-disable-elt="this"' in button_section, "View Full Detail missing hx-disable-elt"
+
 
 class TestSmoothScroll:
     """Smoke tests for smooth scroll JS on job board (UI-02)."""
@@ -2341,9 +2516,11 @@ class TestSmoothScroll:
         # Collapse branch also has scrollIntoView
         assert data.count("scrollIntoView") >= 2
 
+
 # ---------------------------------------------------------------------------
 # Save JD tests (Phase 36, Plan 01)
 # ---------------------------------------------------------------------------
+
 
 class TestSaveJD:
     """Tests for POST /jobs/<key>/save-jd route (UI-01)."""
@@ -2357,6 +2534,7 @@ class TestSaveJD:
 
     def test_save_jd_writes_jd_full_to_db(self, jobs_client, tmp_db_path):
         import sqlite3
+
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
             data={"jd_text": "Saved JD content here."},
@@ -2387,6 +2565,7 @@ class TestSaveJD:
         against a column that has since been dropped by Migration 41.
         """
         import sqlite3
+
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
             data={"jd_text": "Some JD text."},
@@ -2414,6 +2593,7 @@ class TestSaveJD:
 
     def test_save_jd_logs_activity(self, jobs_client, tmp_db_path):
         import sqlite3
+
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
             data={"jd_text": "JD text for activity test."},
@@ -2458,7 +2638,9 @@ class TestSaveJD:
 
     def test_save_jd_button_is_type_button(self, jobs_client):
         """Save JD button must be type=button to prevent native form submission."""
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         data = response.data.decode()
         # Find the save-jd button and verify it's type=button
         assert 'type="button"' in data
@@ -2466,26 +2648,32 @@ class TestSaveJD:
 
     def test_edit_button_has_prevent_default(self, jd_full_client):
         """Edit button inside summary must preventDefault to avoid details toggle."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         data = response.data.decode()
         assert "preventDefault" in data
+
 
 # ---------------------------------------------------------------------------
 # Gap closure tests (Phase 35, Plan 03)
 # ---------------------------------------------------------------------------
+
 
 class TestGapClosureFixes:
     """Tests for UAT gap fixes: event bubbling, CSS-safe selectors, resume wrapper."""
 
     def test_rescore_button_no_after_request_dispatch(self, client_with_scored_job):
         """Re-score button does NOT have hx-on::after-request (OOB score cell used instead)."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         html = response.data.decode()
         # Re-score button must NOT dispatch jobs-updated (causes full table reload)
         assert "Re-score" in html
         # The hx-on::after-request for jobs-updated should NOT be on any scoring button
-        import re
+
         rescore_idx = html.find("Re-score")
         button_start = html.rfind("<button", 0, rescore_idx)
         button_end = html.find("</button>", rescore_idx)
@@ -2494,11 +2682,14 @@ class TestGapClosureFixes:
 
     def test_archive_button_target_is_css_safe(self, client_with_scored_job):
         """Archive button hx-target does not contain % characters (CSS-safe selector)."""
-        response = client_with_scored_job.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = client_with_scored_job.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         html = response.data.decode()
         # Find the archive button target value and verify it has no % chars
         import re
+
         # Match hx-target="#status-cell-..." on the Archive button
         matches = re.findall(r'hx-target="#status-cell-([^"]*)"', html)
         assert len(matches) > 0, "Archive button hx-target not found"
@@ -2509,8 +2700,6 @@ class TestGapClosureFixes:
 
     def test_compact_row_status_cell_id_is_css_safe(self, client_with_scored_job):
         """Compact row status cell <td> id does not contain % characters."""
-        from job_finder.web import create_app
-        import sqlite3
 
         # The client_with_scored_job uses dedup_key "acme|data-scientist|remote"
         # which encodes to %7C -- verify the rendered id has no % chars
@@ -2518,22 +2707,23 @@ class TestGapClosureFixes:
         assert response.status_code == 200
         html = response.data.decode()
         import re
+
         matches = re.findall(r'id="status-cell-([^"]*)"', html)
         assert len(matches) > 0, "status-cell id not found in /jobs/table"
         for cell_id in matches:
-            assert "%" not in cell_id, (
-                f"status-cell id contains invalid CSS char '%': {cell_id}"
-            )
+            assert "%" not in cell_id, f"status-cell id contains invalid CSS char '%': {cell_id}"
 
     def test_score_with_jd_button_no_after_request_dispatch(self, jobs_client):
         """Score with JD button does NOT have hx-on::after-request (OOB score cell used instead)."""
         # Use a job without jd_full so the paste-JD form renders
-        response = jobs_client.get("/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
         assert response.status_code == 200
         html = response.data.decode()
         assert "Score with JD" in html
         # The Score with JD button must NOT dispatch jobs-updated
-        import re
+
         score_idx = html.find("Score with JD")
         button_start = html.rfind("<button", 0, score_idx)
         button_end = html.find("</button>", score_idx)
@@ -2548,7 +2738,9 @@ class TestGapClosureFixes:
         mock_status = {"ok": True, "error": None, "error_code": None}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         html = response.data.decode()
@@ -2556,6 +2748,7 @@ class TestGapClosureFixes:
         assert "resume-generate-wrapper" in html
         # Must NOT target resume-section directly from the Generate Resume button
         import re
+
         gen_button_matches = re.findall(
             r'hx-post="[^"]*resume/generate"[^>]*hx-target="([^"]*)"', html
         )
@@ -2576,13 +2769,16 @@ class TestGapClosureFixes:
         mock_status = {"ok": True, "error": None, "error_code": None}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         html = response.data.decode()
         # Quick Apply button must still target the full resume-section
         assert "Quick Apply" in html
         import re
+
         quick_apply_matches = re.findall(
             r'hx-post="[^"]*quick-apply"[^>]*hx-target="([^"]*)"', html
         )
@@ -2600,11 +2796,14 @@ class TestGapClosureFixes:
         mock_status = {"ok": True, "error": None, "error_code": None}
 
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get("/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"})
+            response = client.get(
+                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+            )
 
         assert response.status_code == 200
         html = response.data.decode()
         import re
+
         wrapper_matches = re.findall(r'id="resume-generate-wrapper-[^"]*"', html)
         assert len(wrapper_matches) > 0, "resume-generate-wrapper div not found in expanded row"
 
@@ -2654,9 +2853,11 @@ class TestGapClosureFixes:
             "conflicting with OOB score cell approach)"
         )
 
+
 # ---------------------------------------------------------------------------
 # Tests for ATS scan exception handler separation (QUAL-01)
 # ---------------------------------------------------------------------------
+
 
 class TestScanExceptionSeparation:
     """Verify that template rendering errors are distinct from scan logic errors."""
@@ -2666,12 +2867,15 @@ class TestScanExceptionSeparation:
         from unittest.mock import patch
 
         client = app_with_companies.test_client()
-        with patch(
-            "job_finder.web.blueprints.companies.run_ats_scan",
-            side_effect=RuntimeError("connection timeout"),
-        ), patch(
-            "job_finder.web.blueprints.companies.probe_ats_slugs",
-            return_value={"probed": 0},
+        with (
+            patch(
+                "job_finder.web.blueprints.companies.run_ats_scan",
+                side_effect=RuntimeError("connection timeout"),
+            ),
+            patch(
+                "job_finder.web.blueprints.companies.probe_ats_slugs",
+                return_value={"probed": 0},
+            ),
         ):
             response = client.post("/companies/scan")
 
@@ -2686,27 +2890,39 @@ class TestScanExceptionSeparation:
         returning 500. We verify the exception is a TemplateSyntaxError (not swallowed
         as a generic scan failure), which confirms render_template is outside the try block.
         """
-        import jinja2
         from unittest.mock import patch
 
+        import jinja2
+
         client = app_with_companies.test_client()
-        with patch(
-            "job_finder.web.blueprints.companies.run_ats_scan",
-            return_value={"jobs_found": 5, "companies_scanned": 2, "html_scraped": 0, "errors": []},
-        ), patch(
-            "job_finder.web.blueprints.companies.probe_ats_slugs",
-            return_value={"probed": 2},
-        ), patch(
-            "job_finder.web.blueprints.companies.render_template",
-            side_effect=jinja2.TemplateSyntaxError("unexpected char", 1, filename="test.html"),
+        with (
+            patch(
+                "job_finder.web.blueprints.companies.run_ats_scan",
+                return_value={
+                    "jobs_found": 5,
+                    "companies_scanned": 2,
+                    "html_scraped": 0,
+                    "errors": [],
+                },
+            ),
+            patch(
+                "job_finder.web.blueprints.companies.probe_ats_slugs",
+                return_value={"probed": 2},
+            ),
+            patch(
+                "job_finder.web.blueprints.companies.render_template",
+                side_effect=jinja2.TemplateSyntaxError("unexpected char", 1, filename="test.html"),
+            ),
         ):
             # Template error must propagate (not be swallowed as "ATS scan failed")
             with pytest.raises(jinja2.TemplateSyntaxError):
                 client.post("/companies/scan")
 
+
 # ---------------------------------------------------------------------------
 # Tests for date filter HTMX trigger (UI-01)
 # ---------------------------------------------------------------------------
+
 
 class TestDateFilterHtmxTrigger:
     """Verify date filter inputs have input event triggers for clearing."""

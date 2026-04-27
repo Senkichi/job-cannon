@@ -18,6 +18,7 @@ from job_finder.web.db_migrate import run_migrations
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def tmp_db_with_job():
     """Temp DB with migrations applied and one seed job in 'discovered' status."""
@@ -54,6 +55,7 @@ def tmp_db_with_job():
     if os.path.exists(path):
         os.remove(path)
 
+
 # intentional — local app/client fixtures use tmp_db_with_job (pre-seeded DB),
 # not the conftest app fixture which uses an empty tmp_db_path.
 @pytest.fixture
@@ -79,10 +81,12 @@ def app(tmp_db_with_job):
     application.config["TESTING"] = True
     return application
 
+
 @pytest.fixture
 def client(app):
     """Flask test client."""
     return app.test_client()
+
 
 @pytest.fixture
 def db_conn(tmp_db_with_job):
@@ -92,7 +96,9 @@ def db_conn(tmp_db_with_job):
     yield conn
     conn.close()
 
+
 # ── Tests ───────────────────────────────────────────────────────────────────
+
 
 class TestPipelineView:
     def test_pipeline_returns_200(self, client):
@@ -139,6 +145,7 @@ class TestPipelineView:
         response = client.get("/pipeline")
         assert b"Sortable" in response.data
         assert b"kanban-column-body" in response.data
+
 
 class TestPipelineMove:
     def test_move_valid_returns_200(self, client):

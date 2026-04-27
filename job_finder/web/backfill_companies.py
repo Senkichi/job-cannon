@@ -32,14 +32,14 @@ Exports:
 
 import logging
 import sqlite3
-from typing import Optional
 
 from thefuzz import fuzz
 
-from job_finder.config import load_config, COMPANY_DENYLIST, get_company_denylist
-from job_finder.web.db_helpers import standalone_connection
+from job_finder.config import COMPANY_DENYLIST, get_company_denylist, load_config
 from job_finder.web import company_resolver as _company_resolver
 from job_finder.web.ats_scanner import probe_ats_slugs
+from job_finder.web.db_helpers import standalone_connection
+
 # enrich_company_info accessed via _company_resolver to match test mock paths
 from job_finder.web.dedup_normalizer import normalize_company
 
@@ -55,11 +55,12 @@ _MIN_NAME_LEN = 4
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def fuzzy_match_company(
     raw_name: str,
     existing_companies: list[tuple[int, str]],
     threshold: int = _FUZZY_THRESHOLD,
-) -> tuple[Optional[int], int]:
+) -> tuple[int | None, int]:
     """Fuzzy-match a raw company name against existing company records.
 
     Normalizes raw_name via normalize_company(). If the normalized name is
@@ -84,7 +85,7 @@ def fuzzy_match_company(
     if len(normalized) < _MIN_NAME_LEN:
         return None, 0
 
-    best_id: Optional[int] = None
+    best_id: int | None = None
     best_score: int = 0
 
     for company_id, company_name in existing_companies:
@@ -97,6 +98,7 @@ def fuzzy_match_company(
         return best_id, best_score
 
     return None, 0
+
 
 def cleanup_denylist_companies(conn: sqlite3.Connection, config: dict | None = None) -> dict:
     """Remove denylist placeholder company records and unlink their jobs.
@@ -153,6 +155,7 @@ def cleanup_denylist_companies(conn: sqlite3.Connection, config: dict | None = N
 
     return {"companies_deleted": companies_deleted, "jobs_unlinked": jobs_unlinked}
 
+
 def find_duplicate_companies(
     conn: sqlite3.Connection,
 ) -> list[tuple[int, int, str]]:
@@ -184,6 +187,7 @@ def find_duplicate_companies(
                     duplicates.append((ids[i], ids[j], norm_name))
 
     return duplicates
+
 
 def find_fuzzy_false_positives(
     conn: sqlite3.Connection,
@@ -230,15 +234,18 @@ def find_fuzzy_false_positives(
 
             score = fuzz.token_set_ratio(norm_a, norm_b)
             if score >= threshold:
-                results.append({
-                    "id_a": id_a,
-                    "name_a": name_raw_a or name_a,
-                    "id_b": id_b,
-                    "name_b": name_raw_b or name_b,
-                    "score": score,
-                })
+                results.append(
+                    {
+                        "id_a": id_a,
+                        "name_a": name_raw_a or name_a,
+                        "id_b": id_b,
+                        "name_b": name_raw_b or name_b,
+                        "score": score,
+                    }
+                )
 
     return results
+
 
 def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
     """Check reachability of DDG-populated homepage URLs in the companies table.
@@ -276,12 +283,14 @@ def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
         if reachable:
             reachable_count += 1
 
-        results.append({
-            "id": company_id,
-            "name_raw": name_raw,
-            "homepage_url": homepage_url,
-            "reachable": reachable,
-        })
+        results.append(
+            {
+                "id": company_id,
+                "name_raw": name_raw,
+                "homepage_url": homepage_url,
+                "reachable": reachable,
+            }
+        )
 
     logger.info(
         "verify_homepage_urls: %d companies with URLs, %d reachable",
@@ -290,6 +299,7 @@ def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
     )
 
     return results
+
 
 def verify_all_linkable_jobs_linked(conn: sqlite3.Connection) -> dict:
     """Verify that all non-denylist jobs with a company name are linked to a company record.
@@ -328,17 +338,20 @@ def verify_all_linkable_jobs_linked(conn: sqlite3.Connection) -> dict:
         else:
             unlinked_non_denylist += 1
 
-        unlinked_details.append({
-            "dedup_key": dedup_key,
-            "company": company,
-            "is_denylist": is_denylist,
-        })
+        unlinked_details.append(
+            {
+                "dedup_key": dedup_key,
+                "company": company,
+                "is_denylist": is_denylist,
+            }
+        )
 
     return {
         "unlinked_non_denylist": unlinked_non_denylist,
         "unlinked_denylist": unlinked_denylist,
         "unlinked_details": unlinked_details,
     }
+
 
 def link_jobs_to_companies(
     conn: sqlite3.Connection,
@@ -365,9 +378,7 @@ def link_jobs_to_companies(
     """
     # Load all existing company records
     existing_rows = conn.execute("SELECT id, name FROM companies").fetchall()
-    existing_companies: list[tuple[int, str]] = [
-        (row["id"], row["name"]) for row in existing_rows
-    ]
+    existing_companies: list[tuple[int, str]] = [(row["id"], row["name"]) for row in existing_rows]
 
     # Get all distinct company names from unlinked jobs
     unlinked_rows = conn.execute(
@@ -437,6 +448,7 @@ def link_jobs_to_companies(
 
     return linked_count, new_company_ids, matched_count
 
+
 def run_ats_probing(db_path: str, config: dict) -> dict:
     """Run ATS probing on companies with pending probe status.
 
@@ -462,6 +474,7 @@ def run_ats_probing(db_path: str, config: dict) -> dict:
     )
 
     return result
+
 
 def run_ddg_enrichment(
     conn: sqlite3.Connection,
@@ -499,9 +512,7 @@ def run_ddg_enrichment(
     print(f"\n--- DDG Enrichment ({total} companies) ---")
 
     for idx, company_id in enumerate(new_company_ids, 1):
-        row = conn.execute(
-            "SELECT name_raw FROM companies WHERE id = ?", (company_id,)
-        ).fetchone()
+        row = conn.execute("SELECT name_raw FROM companies WHERE id = ?", (company_id,)).fetchone()
 
         if row is None:
             logger.warning("run_ddg_enrichment: company_id=%d not found", company_id)
@@ -546,13 +557,12 @@ def run_ddg_enrichment(
             enriched_count += 1
             logger.debug("DDG enrichment stored for '%s': %s", name_raw, updatable)
         except Exception as e:
-            logger.warning(
-                "Failed to store DDG enrichment for '%s': %s", name_raw, e
-            )
+            logger.warning("Failed to store DDG enrichment for '%s': %s", name_raw, e)
             error_count += 1
 
     print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
     return {"enriched": enriched_count, "empty_result": empty_count, "error": error_count}
+
 
 def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
     """Delete companies with no linked jobs and no scan history.
@@ -582,9 +592,9 @@ def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
     rows = conn.execute("SELECT id FROM companies").fetchall()
     for r in rows:
         cid = r[0]
-        actual = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)
-        ).fetchone()[0]
+        actual = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)).fetchone()[
+            0
+        ]
         conn.execute(
             "UPDATE companies SET jobs_found_total = ? WHERE id = ?",
             (actual, cid),
@@ -731,9 +741,9 @@ def main() -> None:
 
     with standalone_connection(db_path) as conn:
         # Print initial state
-        null_count = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
-        ).fetchone()[0]
+        null_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id IS NULL").fetchone()[
+            0
+        ]
         total_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         company_count = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
 
@@ -753,9 +763,9 @@ def main() -> None:
         ddg_result = run_ddg_enrichment(conn, new_company_ids)
 
         # Final summary
-        null_after = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
-        ).fetchone()[0]
+        null_after = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id IS NULL").fetchone()[
+            0
+        ]
         company_count_after = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
 
         print("\n=== Final Summary ===")
@@ -768,6 +778,7 @@ def main() -> None:
         print(f"ATS hits:                {ats_result.get('hits', 0)}")
         print(f"ATS misses:              {ats_result.get('misses', 0)}")
         print(f"DDG enriched:            {ddg_result.get('enriched', 0)}")
+
 
 if __name__ == "__main__":
     main()

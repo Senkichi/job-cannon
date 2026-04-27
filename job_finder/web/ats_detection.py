@@ -2,7 +2,6 @@
 
 import logging
 import re
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,8 @@ _SMARTRECRUITERS_API_URL = re.compile(
     re.IGNORECASE,
 )
 
-def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Optional[str]]:
+
+def extract_ats_from_urls(source_urls: list[str]) -> tuple[str | None, str | None]:
     """Extract ATS platform and slug from a list of job source URLs.
 
     Checks each URL against Lever, Greenhouse, and Ashby patterns.
@@ -120,6 +120,7 @@ def extract_ats_from_urls(source_urls: list[str]) -> tuple[Optional[str], Option
             return "smartrecruiters", m.group(1)
 
     return None, None
+
 
 def derive_slug_candidates(company_name: str) -> list[str]:
     """Generate ATS slug candidates from a company name.
