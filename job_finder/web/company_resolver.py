@@ -16,11 +16,10 @@ Exports:
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from typing import Optional
 
 from thefuzz import fuzz
 
-from job_finder.config import load_config, COMPANY_DENYLIST, get_company_denylist
+from job_finder.config import COMPANY_DENYLIST, get_company_denylist
 from job_finder.web.ats_company import upsert_company
 from job_finder.web.company_enricher import enrich_company_info
 from job_finder.web.dedup_normalizer import normalize_company
@@ -46,6 +45,7 @@ def _compute_enrichment_backoff(attempts: int) -> str:
         delta = timedelta(days=30)
     return (now + delta).isoformat()
 
+
 # Fuzzy match threshold (0–100). Score >= this means a match.
 _FUZZY_THRESHOLD = 85
 
@@ -57,7 +57,7 @@ def fuzzy_match_company(
     raw_name: str,
     existing_companies: list[tuple[int, str]],
     threshold: int = _FUZZY_THRESHOLD,
-) -> tuple[Optional[int], int]:
+) -> tuple[int | None, int]:
     """Fuzzy-match a raw company name against existing company records.
 
     Normalizes raw_name via normalize_company(). If the normalized name is
@@ -82,7 +82,7 @@ def fuzzy_match_company(
     if len(normalized) < _MIN_NAME_LEN:
         return None, 0
 
-    best_id: Optional[int] = None
+    best_id: int | None = None
     best_score: int = 0
 
     for company_id, company_name in existing_companies:
@@ -234,13 +234,15 @@ def find_fuzzy_false_positives(
 
             score = fuzz.token_set_ratio(norm_a, norm_b)
             if score >= threshold:
-                results.append({
-                    "id_a": id_a,
-                    "name_a": name_raw_a or name_a,
-                    "id_b": id_b,
-                    "name_b": name_raw_b or name_b,
-                    "score": score,
-                })
+                results.append(
+                    {
+                        "id_a": id_a,
+                        "name_a": name_raw_a or name_a,
+                        "id_b": id_b,
+                        "name_b": name_raw_b or name_b,
+                        "score": score,
+                    }
+                )
 
     return results
 
@@ -281,12 +283,14 @@ def verify_homepage_urls(conn: sqlite3.Connection) -> list[dict]:
         if reachable:
             reachable_count += 1
 
-        results.append({
-            "id": company_id,
-            "name_raw": name_raw,
-            "homepage_url": homepage_url,
-            "reachable": reachable,
-        })
+        results.append(
+            {
+                "id": company_id,
+                "name_raw": name_raw,
+                "homepage_url": homepage_url,
+                "reachable": reachable,
+            }
+        )
 
     logger.info(
         "verify_homepage_urls: %d companies with URLs, %d reachable",
@@ -334,11 +338,13 @@ def verify_all_linkable_jobs_linked(conn: sqlite3.Connection) -> dict:
         else:
             unlinked_non_denylist += 1
 
-        unlinked_details.append({
-            "dedup_key": dedup_key,
-            "company": company,
-            "is_denylist": is_denylist,
-        })
+        unlinked_details.append(
+            {
+                "dedup_key": dedup_key,
+                "company": company,
+                "is_denylist": is_denylist,
+            }
+        )
 
     return {
         "unlinked_non_denylist": unlinked_non_denylist,
@@ -372,9 +378,7 @@ def link_jobs_to_companies(
     """
     # Load all existing company records
     existing_rows = conn.execute("SELECT id, name FROM companies").fetchall()
-    existing_companies: list[tuple[int, str]] = [
-        (row["id"], row["name"]) for row in existing_rows
-    ]
+    existing_companies: list[tuple[int, str]] = [(row["id"], row["name"]) for row in existing_rows]
 
     # Get all distinct company names from unlinked jobs
     unlinked_rows = conn.execute(
@@ -548,7 +552,9 @@ def run_ddg_enrichment(
                     conn.commit()
                 except Exception:
                     pass
-            logger.debug("DDG enrichment: no signals found for '%s' (attempt %d)", name_raw, attempts)
+            logger.debug(
+                "DDG enrichment: no signals found for '%s' (attempt %d)", name_raw, attempts
+            )
             continue
 
         # Filter to only fields that exist as columns in the companies table
@@ -557,7 +563,8 @@ def run_ddg_enrichment(
         if not updatable:
             logger.debug(
                 "DDG enrichment for '%s': fields %s not in companies schema — skipping",
-                name_raw, list(result.keys()),
+                name_raw,
+                list(result.keys()),
             )
             continue
 
@@ -586,6 +593,9 @@ def run_ddg_enrichment(
 
     logger.info(
         "run_ddg_enrichment: enriched=%d, empty_result=%d, error=%d / %d total",
-        enriched_count, empty_count, error_count, total,
+        enriched_count,
+        empty_count,
+        error_count,
+        total,
     )
     return {"enriched": enriched_count, "empty_result": empty_count, "error": error_count}

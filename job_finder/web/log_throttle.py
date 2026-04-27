@@ -10,7 +10,9 @@ import threading
 import time
 
 _lock = threading.Lock()
-_seen: dict[tuple[str, str], tuple[float, int]] = {}  # (logger, msg) -> (last_logged_at, suppress_count)
+_seen: dict[
+    tuple[str, str], tuple[float, int]
+] = {}  # (logger, msg) -> (last_logged_at, suppress_count)
 
 DEFAULT_COOLDOWN_SECONDS = 3600  # 1 hour
 
@@ -46,7 +48,9 @@ def throttled_log(
                 _seen[key] = (now, 0)
                 logger.log(level, msg, *args, **kwargs)
                 if count > 0:
-                    logger.log(level, "[%d identical messages suppressed in last %ds]", count, cooldown)
+                    logger.log(
+                        level, "[%d identical messages suppressed in last %ds]", count, cooldown
+                    )
                 return
 
         # First occurrence

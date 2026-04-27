@@ -13,7 +13,7 @@ Routes:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 from flask import (
     Blueprint,
@@ -38,6 +38,7 @@ _SORT_ALLOWLIST = {"name", "ats_platform", "last_scanned_at", "jobs_found_total"
 _ATS_PLATFORM_FILTER_VALUES = {"lever", "greenhouse", "ashby", "none", ""}
 
 _PAGE_SIZE = 50
+
 
 @companies_bp.route("/", strict_slashes=False)
 def index():
@@ -73,9 +74,9 @@ def index():
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     # Total count for display
-    total_count = conn.execute(
-        f"SELECT COUNT(*) FROM companies c {where_sql}", params
-    ).fetchone()[0]
+    total_count = conn.execute(f"SELECT COUNT(*) FROM companies c {where_sql}", params).fetchone()[
+        0
+    ]
 
     # Paginated query
     offset = (page - 1) * _PAGE_SIZE
@@ -123,15 +124,14 @@ def index():
         health=health,
     )
 
+
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
 def expand(company_id):
     """HTMX: expand company row with jobs and scan history."""
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
@@ -184,6 +184,7 @@ def expand(company_id):
         research=research,
     )
 
+
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
@@ -204,6 +205,7 @@ def collapse(company_id):
 
     return render_template("companies/_row.html", company=company)
 
+
 @companies_bp.route("/add", methods=["POST"], strict_slashes=False)
 def add():
     """Create a new company record and trigger ATS probe."""
@@ -219,6 +221,7 @@ def add():
 
     try:
         from job_finder.web.ats_scanner import upsert_company
+
         company_id = upsert_company(
             conn,
             name=company_name,
@@ -238,15 +241,14 @@ def add():
 
     return redirect(url_for("companies.index"))
 
+
 @companies_bp.route("/<int:company_id>/toggle", methods=["POST"], strict_slashes=False)
 def toggle(company_id):
     """Toggle scan_enabled for a company. Returns updated _row.html fragment."""
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
@@ -271,15 +273,14 @@ def toggle(company_id):
 
     return render_template("companies/_row.html", company=updated_company)
 
+
 @companies_bp.route("/<int:company_id>/update-slug", methods=["POST"], strict_slashes=False)
 def update_slug(company_id):
     """Update ATS platform and slug manually. Returns updated expanded view."""
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
@@ -341,6 +342,7 @@ def update_slug(company_id):
         research=research,
     )
 
+
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)
 def scan():
     """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment.
@@ -366,6 +368,7 @@ def scan():
     # render_template is OUTSIDE the try block — TemplateErrors propagate as 500
     return render_template("companies/_scan_result.html", result=result, error=scan_error)
 
+
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)
 def retry(company_id):
     """Immediately re-probe a company in error or unreachable state.
@@ -380,21 +383,16 @@ def retry(company_id):
     config = current_app.config.get("JF_CONFIG", {})
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
 
     status = company["ats_probe_status"]
-    miss_reason = company["miss_reason"] if "miss_reason" in company.keys() else None
+    miss_reason = dict(company).get("miss_reason")
 
     # Only allow retry for error or unreachable companies
-    is_retryable = (
-        status == "error"
-        or (status == "miss" and miss_reason == "unreachable")
-    )
+    is_retryable = status == "error" or (status == "miss" and miss_reason == "unreachable")
     if not is_retryable:
         return "Company is not in error or unreachable state", 400
 
@@ -420,6 +418,7 @@ def retry(company_id):
 # Health metrics helper
 # ---------------------------------------------------------------------------
 
+
 def _compute_health_metrics(conn) -> dict:
     """Compute pipeline health metrics for the companies index page."""
     total = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
@@ -440,9 +439,9 @@ def _compute_health_metrics(conn) -> dict:
     enrichment_pct = round(100 * enriched_count / total) if total else 0
 
     # Unlinked jobs: jobs with no company_id
-    unlinked_jobs = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE company_id IS NULL"
-    ).fetchone()[0]
+    unlinked_jobs = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id IS NULL").fetchone()[
+        0
+    ]
 
     # Last scan age
     last_scan_row = conn.execute(
@@ -471,6 +470,7 @@ def _compute_health_metrics(conn) -> dict:
 # Company research routes
 # ---------------------------------------------------------------------------
 
+
 @companies_bp.route("/<int:company_id>/research", methods=["POST"], strict_slashes=False)
 def research(company_id):
     """Start or return cached company research.
@@ -483,9 +483,7 @@ def research(company_id):
     config = current_app.config.get("JF_CONFIG", {})
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
@@ -526,9 +524,7 @@ def research_status(company_id, research_id):
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
     if company is None:
         return "Company not found", 404
@@ -547,11 +543,9 @@ def research_status(company_id, research_id):
     if research["status"] == "generating":
         try:
             requested = datetime.fromisoformat(research["requested_at"])
-            age_minutes = (
-                datetime.now(timezone.utc) - requested.replace(tzinfo=timezone.utc)
-            ).total_seconds() / 60
+            age_minutes = (datetime.now(UTC) - requested.replace(tzinfo=UTC)).total_seconds() / 60
             if age_minutes > 10:
-                now = datetime.now(timezone.utc).isoformat()
+                now = datetime.now(UTC).isoformat()
                 conn.execute(
                     "UPDATE company_research SET status = 'error', error_msg = ?, completed_at = ? WHERE id = ?",
                     ("Research timed out", now, research_id),

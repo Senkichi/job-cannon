@@ -8,6 +8,7 @@ Per Phase 33 CONTEXT §D-03/D-04/D-19:
   - Determinism probe: 5× identical-input runs on 3 fixtures (low/mid/high
     baseline score), byte-identical comparison. Scoring sites only.
 """
+
 from __future__ import annotations
 
 import json
@@ -81,29 +82,29 @@ def reset_vram(
             text=True,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-        print(f"[vram] ollama stop {model} failed (non-fatal): {exc}",
-              file=sys.stderr)
+        print(f"[vram] ollama stop {model} failed (non-fatal): {exc}", file=sys.stderr)
 
     start = time.monotonic()
     while time.monotonic() - start < timeout_sec:
         try:
             r = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used",
-                 "--format=csv,noheader,nounits"],
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
                 capture_output=True,
                 text=True,
                 check=True,
                 timeout=10,
             )
-        except (subprocess.TimeoutExpired, FileNotFoundError,
-                subprocess.CalledProcessError) as exc:
+        except (
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+        ) as exc:
             print(f"[vram] nvidia-smi failed: {exc}", file=sys.stderr)
             return -1
         try:
             mb = int(r.stdout.strip().split("\n")[0])
         except (ValueError, IndexError):
-            print(f"[vram] unparseable nvidia-smi output: {r.stdout!r}",
-                  file=sys.stderr)
+            print(f"[vram] unparseable nvidia-smi output: {r.stdout!r}", file=sys.stderr)
             return -1
         print(f"[vram] model={model} mb={mb}", file=sys.stderr)
         if mb < threshold_mb:
@@ -111,8 +112,7 @@ def reset_vram(
         time.sleep(poll_interval)
 
     raise TimeoutError(
-        f"VRAM did not drop below {threshold_mb} MB after {timeout_sec}s "
-        f"(model={model})"
+        f"VRAM did not drop below {threshold_mb} MB after {timeout_sec}s (model={model})"
     )
 
 
@@ -138,19 +138,21 @@ def _format_fixture(fixture: dict, config: dict | None = None) -> str:
     else:
         salary_str = fixture.get("salary", "") or ""
 
-    return "\n".join([
-        "# Job",
-        f"Title: {fixture.get('title', '')}",
-        f"Company: {fixture.get('company', '')}",
-        f"Location: {fixture.get('location', '')}",
-        f"Salary: {salary_str}",
-        "",
-        "## Description",
-        (fixture.get("jd_full") or "")[:12000],
-        "",
-        "# Candidate profile",
-        profile_line,
-    ])
+    return "\n".join(
+        [
+            "# Job",
+            f"Title: {fixture.get('title', '')}",
+            f"Company: {fixture.get('company', '')}",
+            f"Location: {fixture.get('location', '')}",
+            f"Salary: {salary_str}",
+            "",
+            "## Description",
+            (fixture.get("jd_full") or "")[:12000],
+            "",
+            "# Candidate profile",
+            profile_line,
+        ]
+    )
 
 
 def determinism_probe(
@@ -200,11 +202,13 @@ def determinism_probe(
                 data = {"_error": str(exc)}
             outputs.append(json.dumps(data, sort_keys=True, default=str))
         identical = len(set(outputs)) == 1
-        per_fixture.append({
-            "dedup_key": fixture.get("dedup_key", ""),
-            "outputs": outputs,
-            "identical": identical,
-        })
+        per_fixture.append(
+            {
+                "dedup_key": fixture.get("dedup_key", ""),
+                "outputs": outputs,
+                "identical": identical,
+            }
+        )
 
     return {
         "byte_identical": all(pf["identical"] for pf in per_fixture),
@@ -218,9 +222,9 @@ def _select_determinism_fixtures(dev_rows) -> list[dict]:
     if len(sorted_rows) < 3:
         return list(sorted_rows)
     return [
-        sorted_rows[0],                    # low
+        sorted_rows[0],  # low
         sorted_rows[len(sorted_rows) // 2],  # mid
-        sorted_rows[-1],                   # high
+        sorted_rows[-1],  # high
     ]
 
 
@@ -262,6 +266,7 @@ def _run_site(
         run_enrich_job,
         run_enrich_job_sonnet,
     )
+
     from scripts.shootout_lib.non_scoring_sites import run_homepage_backfill
 
     cfg = force_ollama(config, "scoring", model)
@@ -278,11 +283,13 @@ def _run_site(
     try:
         if site == "haiku_score":
             # Direct scoring path via candidates module — uses V3_SCORING_PROMPT
-            result = _run_scoring_site(model, baseline, gold_results, cfg, conn,
-                                        purpose="shootout_haiku_score")
+            result = _run_scoring_site(
+                model, baseline, gold_results, cfg, conn, purpose="shootout_haiku_score"
+            )
         elif site == "sonnet_eval":
-            result = _run_scoring_site(model, baseline, gold_results, cfg, conn,
-                                        purpose="shootout_sonnet_eval")
+            result = _run_scoring_site(
+                model, baseline, gold_results, cfg, conn, purpose="shootout_sonnet_eval"
+            )
         elif site == "enrich_job":
             result = run_enrich_job(conn, merged, n=15)
         elif site == "enrich_job_sonnet":
@@ -298,12 +305,18 @@ def _run_site(
         elif site == "description_reformat":
             result = run_description_reformat(conn, merged, n=5)
         else:
-            return {"site": site, "verdict": "SKIP", "n": 0,
-                    "seconds": round(time.monotonic() - start, 2),
-                    "reason": f"unknown site {site}"}
+            return {
+                "site": site,
+                "verdict": "SKIP",
+                "n": 0,
+                "seconds": round(time.monotonic() - start, 2),
+                "reason": f"unknown site {site}",
+            }
     except Exception as exc:
         return {
-            "site": site, "verdict": "FAIL", "n": 0,
+            "site": site,
+            "verdict": "FAIL",
+            "n": 0,
             "error": f"{type(exc).__name__}: {exc}",
             "seconds": round(time.monotonic() - start, 2),
         }
@@ -380,8 +393,12 @@ def _run_scoring_site(
     per_dim: dict[str, dict] = {}
     all_deltas: list[float] = []
     for dim in (
-        "title_fit", "location_fit", "comp_fit",
-        "domain_match", "seniority_match", "skills_match",
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
     ):
         out = paired_mae(candidate_outputs, gold_results, dimension=dim)
         lo, hi = bca_bootstrap_ci(out["deltas"])
@@ -393,9 +410,7 @@ def _run_scoring_site(
         }
         all_deltas.extend(out["deltas"])
 
-    overall_mae = (
-        sum(abs(d) for d in all_deltas) / len(all_deltas) if all_deltas else None
-    )
+    overall_mae = sum(abs(d) for d in all_deltas) / len(all_deltas) if all_deltas else None
     overall_ci = bca_bootstrap_ci(all_deltas)
     gate_verdict, retry_rate = retry_rate_gate(retry_count, len(dev_rows))
 
@@ -486,8 +501,7 @@ def run_candidate(
         try:
             state["determinism"] = determinism_probe(model, fixtures, config, conn=conn)
         except Exception as exc:
-            state["determinism"] = {"byte_identical": False, "per_fixture": [],
-                                     "_error": str(exc)}
+            state["determinism"] = {"byte_identical": False, "per_fixture": [], "_error": str(exc)}
         _atomic_write(checkpoint_path, state)
 
     # Step 3: Per-site loop
@@ -499,7 +513,7 @@ def run_candidate(
         state["per_site"][site] = result
         state["completed_sites"].append(site)
         # Carry per-dim metrics up if available
-        if "per_dim" in result and result["per_dim"]:
+        if result.get("per_dim"):
             state["per_dim_mae"] = {d: m.get("mae") for d, m in result["per_dim"].items()}
         if "retry_rate" in result:
             state["retry_rate"] = result["retry_rate"]

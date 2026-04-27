@@ -10,8 +10,8 @@ or FIELD_REINFORCEMENT after Plan 2 begins. Any change invalidates all
 previously measured candidates (per Phase 33 CONTEXT §D-26 and
 PITFALLS §8 prompt-model co-tuning).
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 JOB_ASSESSMENT_SCHEMA: dict = {
     "type": "object",
@@ -27,12 +27,12 @@ JOB_ASSESSMENT_SCHEMA: dict = {
         "legitimacy_note",
     ],
     "properties": {
-        "title_fit":       {"type": "integer", "minimum": 1, "maximum": 5},
-        "location_fit":    {"type": "integer", "minimum": 1, "maximum": 5},
-        "comp_fit":        {"type": "integer", "minimum": 1, "maximum": 5},
-        "domain_match":    {"type": "integer", "minimum": 1, "maximum": 5},
+        "title_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "location_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "comp_fit": {"type": "integer", "minimum": 1, "maximum": 5},
+        "domain_match": {"type": "integer", "minimum": 1, "maximum": 5},
         "seniority_match": {"type": "integer", "minimum": 1, "maximum": 5},
-        "skills_match":    {"type": "integer", "minimum": 1, "maximum": 5},
+        "skills_match": {"type": "integer", "minimum": 1, "maximum": 5},
         "rationale": {
             "type": "object",
             "additionalProperties": False,
@@ -43,10 +43,14 @@ JOB_ASSESSMENT_SCHEMA: dict = {
                 "resume_priority_skills",
             ],
             "properties": {
-                "strengths":              {"type": "array", "items": {"type": "string"}, "maxItems": 4},
-                "gaps":                   {"type": "array", "items": {"type": "string"}, "maxItems": 4},
-                "talking_points":         {"type": "array", "items": {"type": "string"}, "maxItems": 4},
-                "resume_priority_skills": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+                "strengths": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                "gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                "talking_points": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                "resume_priority_skills": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 6,
+                },
             },
         },
         "legitimacy_note": {"type": ["string", "null"]},

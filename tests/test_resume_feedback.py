@@ -8,13 +8,11 @@ Covers:
 - TestBudgetGating: budget exceeded skips Sonnet calls
 """
 
-import io
-import json
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, call
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,6 +21,7 @@ from job_finder.web.db_migrate import run_migrations
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def db_with_migrations():
@@ -37,6 +36,7 @@ def db_with_migrations():
     if os.path.exists(path):
         os.remove(path)
 
+
 @pytest.fixture
 def db_with_resume_gen(db_with_migrations):
     """DB with a resume_generations row having doc_url and status='done'."""
@@ -46,8 +46,14 @@ def db_with_resume_gen(db_with_migrations):
         """INSERT INTO jobs
            (dedup_key, title, company, location, first_seen, last_seen)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        ("acme|data-scientist|remote", "Data Scientist", "Acme", "Remote",
-         "2026-03-01T10:00:00Z", "2026-03-01T10:00:00Z"),
+        (
+            "acme|data-scientist|remote",
+            "Data Scientist",
+            "Acme",
+            "Remote",
+            "2026-03-01T10:00:00Z",
+            "2026-03-01T10:00:00Z",
+        ),
     )
     conn.execute(
         """INSERT INTO resume_generations
@@ -63,6 +69,7 @@ def db_with_resume_gen(db_with_migrations):
     )
     conn.commit()
     yield path, conn
+
 
 @pytest.fixture
 def mock_drive_service():
@@ -87,6 +94,7 @@ def mock_drive_service():
         return None, True
 
     return service, text_content, mock_request
+
 
 @pytest.fixture
 def mock_anthropic_client_prefs():
@@ -119,9 +127,11 @@ def mock_anthropic_client_prefs():
     mock_client.messages.create.return_value = mock_response
     return mock_client, prefs_result
 
+
 # ---------------------------------------------------------------------------
 # TestDrivePoll
 # ---------------------------------------------------------------------------
+
 
 class TestDrivePoll:
     """Tests for poll_resume_for_changes() function."""
@@ -211,9 +221,11 @@ class TestDrivePoll:
             fileId="FILE_ID_123", fields="id,modifiedTime,mimeType"
         )
 
+
 # ---------------------------------------------------------------------------
 # TestSkipNonGoogleDocs
 # ---------------------------------------------------------------------------
+
 
 class TestSkipNonGoogleDocs:
     """Non-Google-Docs files (docx) should be skipped by poll_resume_for_changes."""
@@ -246,19 +258,21 @@ class TestSkipNonGoogleDocs:
             "mimeType": "application/pdf",
         }
 
-        text, modified_time = poll_resume_for_changes(service, "PDF_FILE_ID", "2026-03-01T00:00:00Z")
+        text, modified_time = poll_resume_for_changes(
+            service, "PDF_FILE_ID", "2026-03-01T00:00:00Z"
+        )
         assert text is None
+
 
 # ---------------------------------------------------------------------------
 # TestPreferenceExtraction
 # ---------------------------------------------------------------------------
 
+
 class TestPreferenceExtraction:
     """Tests for _extract_preferences() and _store_preferences()."""
 
-    def test_extract_preferences_calls_sonnet(
-        self, db_with_migrations
-    ):
+    def test_extract_preferences_calls_sonnet(self, db_with_migrations):
         """_extract_preferences calls Sonnet with diff text and returns prefs list."""
         from job_finder.web.resume_feedback import _extract_preferences
 
@@ -293,9 +307,7 @@ class TestPreferenceExtraction:
         # Should call Sonnet
         assert mock_call.called
 
-    def test_extract_preferences_skips_when_budget_exceeded(
-        self, db_with_migrations
-    ):
+    def test_extract_preferences_skips_when_budget_exceeded(self, db_with_migrations):
         """_extract_preferences returns empty list when budget gate blocks."""
         from job_finder.web.resume_feedback import _extract_preferences
 
@@ -326,7 +338,14 @@ class TestPreferenceExtraction:
             """INSERT INTO jobs
                (dedup_key, title, company, location, first_seen, last_seen)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            ("job1|title|loc", "DS", "Corp", "Remote", "2026-03-01T00:00:00Z", "2026-03-01T00:00:00Z"),
+            (
+                "job1|title|loc",
+                "DS",
+                "Corp",
+                "Remote",
+                "2026-03-01T00:00:00Z",
+                "2026-03-01T00:00:00Z",
+            ),
         )
         conn.commit()
 
@@ -380,9 +399,11 @@ class TestPreferenceExtraction:
         count = _store_preferences(conn, "job1", [])
         assert count == 0
 
+
 # ---------------------------------------------------------------------------
 # TestDriveFeedbackPoll (integration: run_drive_feedback_poll)
 # ---------------------------------------------------------------------------
+
 
 class TestDriveFeedbackPoll:
     """Integration tests for run_drive_feedback_poll()."""
@@ -569,9 +590,11 @@ class TestDriveFeedbackPoll:
 
         assert isinstance(result, dict)
 
+
 # ---------------------------------------------------------------------------
 # TestConsolidation
 # ---------------------------------------------------------------------------
+
 
 class TestConsolidation:
     """Tests for run_preference_consolidation()."""
@@ -608,9 +631,7 @@ class TestConsolidation:
         assert result["consolidated"] is False
         assert result["count"] == 5
 
-    def test_consolidation_triggered_when_count_exceeds_threshold(
-        self, db_with_migrations
-    ):
+    def test_consolidation_triggered_when_count_exceeds_threshold(self, db_with_migrations):
         """run_preference_consolidation consolidates when count > 10."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
@@ -640,15 +661,15 @@ class TestConsolidation:
 
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+        with patch(
+            "job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)
+        ):
             result = run_preference_consolidation(path, config)
 
         assert result["consolidated"] is True
         assert result["original_count"] == 12
 
-    def test_consolidation_marks_old_preferences_with_applied_at(
-        self, db_with_migrations
-    ):
+    def test_consolidation_marks_old_preferences_with_applied_at(self, db_with_migrations):
         """Consolidation sets applied_at on old preferences (marks them superseded)."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
@@ -676,7 +697,9 @@ class TestConsolidation:
 
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+        with patch(
+            "job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)
+        ):
             run_preference_consolidation(path, config)
 
         # Verify old preferences have applied_at set
@@ -692,9 +715,7 @@ class TestConsolidation:
                 f"Preference '{pref['preference_text']}' should have applied_at set"
             )
 
-    def test_consolidation_inserts_new_consolidated_preferences(
-        self, db_with_migrations
-    ):
+    def test_consolidation_inserts_new_consolidated_preferences(self, db_with_migrations):
         """Consolidation inserts new canonical preferences after merging."""
         from job_finder.web.resume_feedback import run_preference_consolidation
 
@@ -727,7 +748,9 @@ class TestConsolidation:
 
         config = {"scoring": {"daily_budget_usd": 25.0}}
 
-        with patch("job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)):
+        with patch(
+            "job_finder.web.resume_feedback.call_claude", return_value=(consolidated_result, 0.01)
+        ):
             result = run_preference_consolidation(path, config)
 
         # Verify new consolidated preferences were inserted
@@ -740,16 +763,17 @@ class TestConsolidation:
 
         assert len(new_prefs) > 0, "New consolidated preferences should be inserted"
         pref_texts = [p["preference_text"] for p in new_prefs]
-        assert any("action verbs" in t for t in pref_texts), "Should have consolidated phrasing pref"
+        assert any("action verbs" in t for t in pref_texts), (
+            "Should have consolidated phrasing pref"
+        )
 
     def test_consolidation_skips_when_budget_exceeded(self, db_with_migrations):
         """run_preference_consolidation skips Sonnet if budget exceeded."""
-        from datetime import datetime, timezone
         from job_finder.web.resume_feedback import run_preference_consolidation
 
         path, conn = db_with_migrations
         # Exceed budget — use current-month timestamp so cost_gate sees it
-        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+        now_ts = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -770,9 +794,11 @@ class TestConsolidation:
         assert result.get("consolidated") is False
         assert result.get("budget_exceeded") is True
 
+
 # ---------------------------------------------------------------------------
 # TestSchedulerJobs
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerJobs:
     """Test that Drive feedback poll and consolidation jobs are registered in scheduler."""
@@ -791,6 +817,7 @@ class TestSchedulerJobs:
         }
 
         import os
+
         with patch.dict(os.environ, {}, clear=False):
             # Remove WERKZEUG_RUN_MAIN if set
             env_backup = os.environ.pop("WERKZEUG_RUN_MAIN", None)
@@ -806,9 +833,7 @@ class TestSchedulerJobs:
                         call_args[1].get("id", "") or (call_args[0][0] if call_args[0] else "")
                         for call_args in mock_sched.add_job.call_args_list
                     ]
-                    all_kwargs = [
-                        kw for _, kw in mock_sched.add_job.call_args_list
-                    ]
+                    all_kwargs = [kw for _, kw in mock_sched.add_job.call_args_list]
                     job_id_list = [kw.get("id", "") for kw in all_kwargs]
                     assert "drive_feedback_poll" in job_id_list, (
                         f"Expected 'drive_feedback_poll' in scheduler jobs, got: {job_id_list}"

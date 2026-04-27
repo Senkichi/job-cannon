@@ -6,6 +6,7 @@ to the conventions relied upon by validation logic throughout the codebase.
 
 from job_finder.constants import PIPELINE_STATUSES, VALID_PIPELINE_STATUSES
 
+
 class TestPipelineStatuses:
     """Invariants for PIPELINE_STATUSES and VALID_PIPELINE_STATUSES."""
 
@@ -16,7 +17,7 @@ class TestPipelineStatuses:
 
     def test_valid_pipeline_statuses_matches_pipeline_statuses(self):
         """VALID_PIPELINE_STATUSES must be the frozenset of PIPELINE_STATUSES."""
-        assert VALID_PIPELINE_STATUSES == frozenset(PIPELINE_STATUSES)
+        assert frozenset(PIPELINE_STATUSES) == VALID_PIPELINE_STATUSES
 
     def test_no_duplicates_in_pipeline_statuses(self):
         """PIPELINE_STATUSES tuple must not contain duplicate values."""

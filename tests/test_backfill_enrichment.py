@@ -8,14 +8,12 @@ import json
 import sqlite3
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import job_finder.web.backfill_enrichment as be_module
-from job_finder.web.scoring_types import ScoringResult
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     """Insert a minimal job row into the test DB."""
@@ -63,9 +61,11 @@ def insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     )
     conn.commit()
 
+
 # ---------------------------------------------------------------------------
 # test_convergence
 # ---------------------------------------------------------------------------
+
 
 def test_convergence(migrated_db):
     """One pass converges when enrich_job returns exhausted tier on first call."""
@@ -86,8 +86,10 @@ def test_convergence(migrated_db):
             conn.commit()
         return {"jd_full": "Job description text"}
 
-    with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
-         patch.object(be_module, "estimate_and_confirm", return_value=True):
+    with (
+        patch.object(be_module, "enrich_job", side_effect=mock_enrich),
+        patch.object(be_module, "estimate_and_confirm", return_value=True),
+    ):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
             conn, serpapi_key=None, config={}
         )
@@ -100,9 +102,11 @@ def test_convergence(migrated_db):
     assert "job2" in tier_advanced_keys
     assert "job3" in tier_advanced_keys
 
+
 # ---------------------------------------------------------------------------
 # test_convergence_multiple_passes
 # ---------------------------------------------------------------------------
+
 
 def test_convergence_multiple_passes(migrated_db):
     """Multiple passes are needed when enrich_job advances tier one step at a time."""
@@ -139,8 +143,10 @@ def test_convergence_multiple_passes(migrated_db):
             conn.commit()
         return {"jd_full": "text"} if next_tier != "exhausted" else {}
 
-    with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
-         patch.object(be_module, "estimate_and_confirm", return_value=True):
+    with (
+        patch.object(be_module, "enrich_job", side_effect=mock_enrich),
+        patch.object(be_module, "estimate_and_confirm", return_value=True),
+    ):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
             conn, serpapi_key=None, config={}
         )
@@ -154,9 +160,11 @@ def test_convergence_multiple_passes(migrated_db):
     )
     assert len(tier_advanced_keys) == 5
 
+
 # ---------------------------------------------------------------------------
 # test_cost_estimate
 # ---------------------------------------------------------------------------
+
 
 def test_cost_estimate_yes(migrated_db, monkeypatch):
     """estimate_and_confirm prints tier breakdown and returns True on 'y'."""
@@ -174,6 +182,7 @@ def test_cost_estimate_yes(migrated_db, monkeypatch):
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is True
 
+
 def test_cost_estimate_no(migrated_db, monkeypatch):
     """estimate_and_confirm returns False on 'n'."""
     path, conn = migrated_db
@@ -184,6 +193,7 @@ def test_cost_estimate_no(migrated_db, monkeypatch):
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is False
 
+
 def test_cost_estimate_default_no(migrated_db, monkeypatch):
     """estimate_and_confirm returns False on empty Enter (default N)."""
     path, conn = migrated_db
@@ -193,6 +203,7 @@ def test_cost_estimate_default_no(migrated_db, monkeypatch):
 
     result = be_module.estimate_and_confirm(conn, config={})
     assert result is False
+
 
 def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     """estimate_and_confirm correctly counts jobs at each eligible tier."""
@@ -215,9 +226,11 @@ def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     assert "$" in captured.out, "Cost estimate must be printed"
     assert "Eligible jobs" in captured.out, "Eligible jobs header must appear"
 
+
 # ---------------------------------------------------------------------------
 # test_no_ai_calls_without_confirmation
 # ---------------------------------------------------------------------------
+
 
 def test_no_ai_calls_without_confirmation(migrated_db):
     """run_passes_to_convergence aborts without calling enrich_job if user declines."""
@@ -226,8 +239,10 @@ def test_no_ai_calls_without_confirmation(migrated_db):
 
     mock_enrich = MagicMock(return_value={})
 
-    with patch.object(be_module, "enrich_job", mock_enrich), \
-         patch.object(be_module, "estimate_and_confirm", return_value=False):
+    with (
+        patch.object(be_module, "enrich_job", mock_enrich),
+        patch.object(be_module, "estimate_and_confirm", return_value=False),
+    ):
         total_enriched, tier_advanced_keys = be_module.run_passes_to_convergence(
             conn, serpapi_key=None, config={}
         )
@@ -237,9 +252,11 @@ def test_no_ai_calls_without_confirmation(migrated_db):
     assert total_enriched == 0
     assert len(tier_advanced_keys) == 0
 
+
 # ---------------------------------------------------------------------------
 # test_sonnet_queue
 # ---------------------------------------------------------------------------
+
 
 def test_scoring_backfill_classifies_unscored_jobs(migrated_db):
     """run_scoring_backfill scores jobs with jd_full but no v3 classification."""
@@ -253,16 +270,30 @@ def test_scoring_backfill_classifies_unscored_jobs(migrated_db):
     insert_job(conn, "job3", jd_full="Full JD for job 3", sonnet_score=None)
 
     assessment = JobAssessment(
-        sub_scores={"title_fit": 4, "location_fit": 3, "comp_fit": 4,
-                    "domain_match": 5, "seniority_match": 4, "skills_match": 3},
+        sub_scores={
+            "title_fit": 4,
+            "location_fit": 3,
+            "comp_fit": 4,
+            "domain_match": 5,
+            "seniority_match": 4,
+            "skills_match": 3,
+        },
         classification="",
-        rationale={"strengths": [], "gaps": [],
-                   "talking_points": [], "resume_priority_skills": []},
+        rationale={
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
+        },
         provider="ollama",
     )
-    mock_score_job = MagicMock(return_value=JSResult(
-        status="ok", data=assessment, provider="ollama",
-    ))
+    mock_score_job = MagicMock(
+        return_value=JSResult(
+            status="ok",
+            data=assessment,
+            provider="ollama",
+        )
+    )
 
     with patch.object(be_module, "score_job", mock_score_job):
         count = be_module.run_scoring_backfill(conn, config={})
@@ -271,8 +302,7 @@ def test_scoring_backfill_classifies_unscored_jobs(migrated_db):
     assert mock_score_job.call_count == 3
 
     rows = conn.execute(
-        "SELECT dedup_key, classification FROM jobs "
-        "WHERE dedup_key IN ('job1','job2','job3')"
+        "SELECT dedup_key, classification FROM jobs WHERE dedup_key IN ('job1','job2','job3')"
     ).fetchall()
     for row in rows:
         assert dict(row)["classification"] in {"apply", "consider", "skip", "reject"}
@@ -286,23 +316,35 @@ def test_scoring_backfill_skips_already_classified(migrated_db):
     path, conn = migrated_db
 
     insert_job(conn, "already_scored", jd_full="Full JD", sonnet_score=None)
-    conn.execute(
-        "UPDATE jobs SET classification = 'apply' WHERE dedup_key = 'already_scored'"
-    )
+    conn.execute("UPDATE jobs SET classification = 'apply' WHERE dedup_key = 'already_scored'")
     conn.commit()
     insert_job(conn, "needs_scoring", jd_full="Full JD 2", sonnet_score=None)
 
     assessment = JobAssessment(
-        sub_scores={"title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                    "domain_match": 3, "seniority_match": 3, "skills_match": 3},
+        sub_scores={
+            "title_fit": 3,
+            "location_fit": 3,
+            "comp_fit": 3,
+            "domain_match": 3,
+            "seniority_match": 3,
+            "skills_match": 3,
+        },
         classification="",
-        rationale={"strengths": [], "gaps": [],
-                   "talking_points": [], "resume_priority_skills": []},
+        rationale={
+            "strengths": [],
+            "gaps": [],
+            "talking_points": [],
+            "resume_priority_skills": [],
+        },
         provider="ollama",
     )
-    mock_score_job = MagicMock(return_value=JSResult(
-        status="ok", data=assessment, provider="ollama",
-    ))
+    mock_score_job = MagicMock(
+        return_value=JSResult(
+            status="ok",
+            data=assessment,
+            provider="ollama",
+        )
+    )
 
     with patch.object(be_module, "score_job", mock_score_job):
         count = be_module.run_scoring_backfill(conn, config={})
@@ -314,9 +356,11 @@ def test_scoring_backfill_skips_already_classified(migrated_db):
     ).fetchone()
     assert dict(row)["classification"] == "apply"  # unchanged
 
+
 # ---------------------------------------------------------------------------
 # test_ordering_by_score_desc
 # ---------------------------------------------------------------------------
+
 
 def test_ordering_by_classification_rank(migrated_db):
     """Enrichment query orders by classification-rank (apply > consider > reject > NULL).
@@ -344,8 +388,10 @@ def test_ordering_by_classification_rank(migrated_db):
             conn.commit()
         return {}
 
-    with patch.object(be_module, "enrich_job", side_effect=mock_enrich), \
-         patch.object(be_module, "estimate_and_confirm", return_value=True):
+    with (
+        patch.object(be_module, "enrich_job", side_effect=mock_enrich),
+        patch.object(be_module, "estimate_and_confirm", return_value=True),
+    ):
         be_module.run_passes_to_convergence(conn, serpapi_key=None, config={})
 
     # apply (rank 4) should come before reject (rank 1) and no_score (NULL=0)
@@ -353,9 +399,11 @@ def test_ordering_by_classification_rank(migrated_db):
     assert call_order[1] == "low_priority"
     assert call_order[2] == "no_score"
 
+
 # ---------------------------------------------------------------------------
 # test_run_enrichment_pass_tracks_tier_advancement
 # ---------------------------------------------------------------------------
+
 
 def test_run_enrichment_pass_tracks_tier_advancement(migrated_db):
     """run_enrichment_pass returns set of dedup_keys whose enrichment_tier advanced."""
@@ -388,9 +436,11 @@ def test_run_enrichment_pass_tracks_tier_advancement(migrated_db):
     # enriched_count reflects how many got non-empty results
     assert enriched_count >= 1
 
+
 # ---------------------------------------------------------------------------
 # test_sonnet_backfill_writes_fit_analysis
 # ---------------------------------------------------------------------------
+
 
 def test_scoring_backfill_writes_fit_analysis(migrated_db):
     """run_scoring_backfill persists rationale JSON to fit_analysis column."""
@@ -407,15 +457,25 @@ def test_scoring_backfill_writes_fit_analysis(migrated_db):
         "resume_priority_skills": ["Python", "SQL"],
     }
     assessment = JobAssessment(
-        sub_scores={"title_fit": 4, "location_fit": 4, "comp_fit": 4,
-                    "domain_match": 4, "seniority_match": 4, "skills_match": 4},
+        sub_scores={
+            "title_fit": 4,
+            "location_fit": 4,
+            "comp_fit": 4,
+            "domain_match": 4,
+            "seniority_match": 4,
+            "skills_match": 4,
+        },
         classification="",
         rationale=rationale,
         provider="ollama",
     )
-    mock_score_job = MagicMock(return_value=JSResult(
-        status="ok", data=assessment, provider="ollama",
-    ))
+    mock_score_job = MagicMock(
+        return_value=JSResult(
+            status="ok",
+            data=assessment,
+            provider="ollama",
+        )
+    )
 
     with patch.object(be_module, "score_job", mock_score_job):
         be_module.run_scoring_backfill(conn, config={})
@@ -449,14 +509,14 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
 
     from job_finder.web.backfill_enrichment import _ELIGIBLE_TIERS_QUERY
 
-    rows = conn.execute(
-        f"SELECT dedup_key FROM jobs WHERE {_ELIGIBLE_TIERS_QUERY}"
-    ).fetchall()
+    rows = conn.execute(f"SELECT dedup_key FROM jobs WHERE {_ELIGIBLE_TIERS_QUERY}").fetchall()
     eligible_keys = {dict(r)["dedup_key"] for r in rows}
 
     # agentic and agentic_exhausted must NOT appear
     assert "job_agentic" not in eligible_keys, "'agentic' tier must be excluded from backfill"
-    assert "job_agentic_exhausted" not in eligible_keys, "'agentic_exhausted' tier must be excluded"
+    assert "job_agentic_exhausted" not in eligible_keys, (
+        "'agentic_exhausted' tier must be excluded"
+    )
     # exhausted, serpapi, sonnet must also be excluded
     assert "job_exhausted" not in eligible_keys
     assert "job_serpapi" not in eligible_keys
@@ -468,6 +528,7 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
 # ---------------------------------------------------------------------------
 # Offline-config plumbing tests
 # ---------------------------------------------------------------------------
+
 
 def test_run_enrichment_pass_wraps_config_through_offline_providers(migrated_db):
     """run_enrichment_pass must pass the cascade-enabled config to enrich_job.

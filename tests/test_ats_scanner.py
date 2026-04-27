@@ -12,11 +12,11 @@ Covers:
 - run_ats_scan: full scan orchestration with Haiku scoring and activity feed
 """
 
-import json
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch, call
+from datetime import UTC
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,6 +25,7 @@ from job_finder.web.db_migrate import run_migrations
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def migrated_db_path():
@@ -40,6 +41,7 @@ def migrated_db_path():
     if os.path.exists(path):
         os.remove(path)
 
+
 @pytest.fixture
 def db_conn(migrated_db_path):
     """Open a connection to the migrated DB, yield (path, conn), close after."""
@@ -48,9 +50,11 @@ def db_conn(migrated_db_path):
     yield migrated_db_path, conn
     conn.close()
 
+
 def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     """Helper: insert a company with ats_probe_status='hit' and scan_enabled=1."""
     from datetime import datetime
+
     now = datetime.now().isoformat()
     cursor = conn.execute(
         """INSERT INTO companies
@@ -62,9 +66,11 @@ def _insert_hit_company(conn, name, platform, slug, scan_enabled=1):
     conn.commit()
     return cursor.lastrowid
 
+
 # ---------------------------------------------------------------------------
 # Tests: extract_ats_from_urls
 # ---------------------------------------------------------------------------
+
 
 class TestExtractAtsFromUrls:
     """Tests for ATS URL pattern detection."""
@@ -72,6 +78,7 @@ class TestExtractAtsFromUrls:
     def test_lever_jobs_url_returns_lever_and_slug(self):
         """jobs.lever.co/{slug}/... returns ('lever', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.lever.co/acme/abc-123"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -80,6 +87,7 @@ class TestExtractAtsFromUrls:
     def test_lever_api_url_returns_lever_and_slug(self):
         """api.lever.co/v0/postings/{slug}/... returns ('lever', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://api.lever.co/v0/postings/stripe?mode=json"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -88,6 +96,7 @@ class TestExtractAtsFromUrls:
     def test_greenhouse_boards_url_returns_greenhouse_and_slug(self):
         """boards.greenhouse.io/{slug}/... returns ('greenhouse', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://boards.greenhouse.io/airbnb/jobs/12345"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -96,6 +105,7 @@ class TestExtractAtsFromUrls:
     def test_greenhouse_api_url_returns_greenhouse_and_slug(self):
         """boards-api.greenhouse.io/v1/boards/{slug}/... returns ('greenhouse', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://boards-api.greenhouse.io/v1/boards/waymo/jobs"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -104,6 +114,7 @@ class TestExtractAtsFromUrls:
     def test_ashby_url_returns_ashby_and_slug(self):
         """jobs.ashbyhq.com/{slug}/... returns ('ashby', slug)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.ashbyhq.com/OpenAI/abc-uuid"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -112,6 +123,7 @@ class TestExtractAtsFromUrls:
     def test_non_ats_url_returns_none_none(self):
         """LinkedIn URL returns (None, None)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://www.linkedin.com/jobs/view/1234567/"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
@@ -120,6 +132,7 @@ class TestExtractAtsFromUrls:
     def test_empty_list_returns_none_none(self):
         """Empty source_urls list returns (None, None)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         platform, slug = extract_ats_from_urls([])
         assert platform is None
         assert slug is None
@@ -127,6 +140,7 @@ class TestExtractAtsFromUrls:
     def test_ashby_slug_preserves_exact_casing(self):
         """Ashby slug preserves exact URL casing (case-sensitive per Research Pitfall 3)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.ashbyhq.com/Ramp/some-job-uuid"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -135,6 +149,7 @@ class TestExtractAtsFromUrls:
     def test_multiple_urls_returns_first_match(self):
         """First ATS URL in list wins."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = [
             "https://www.linkedin.com/jobs/view/999/",
             "https://jobs.lever.co/stripe/job-id",
@@ -143,9 +158,11 @@ class TestExtractAtsFromUrls:
         assert platform == "lever"
         assert slug == "stripe"
 
+
 # ---------------------------------------------------------------------------
 # Tests: _title_matches
 # ---------------------------------------------------------------------------
+
 
 class TestTitleMatches:
     """Tests for the shared keyword filtering utility."""
@@ -153,69 +170,99 @@ class TestTitleMatches:
     def test_returns_true_when_title_contains_target_keyword(self):
         """Returns True when title matches a target_title keyword (case-insensitive)."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Senior Data Scientist",
-            target_titles=["data scientist"],
-            exclusions=[],
-        ) is True
+
+        assert (
+            _title_matches(
+                "Senior Data Scientist",
+                target_titles=["data scientist"],
+                exclusions=[],
+            )
+            is True
+        )
 
     def test_returns_false_when_title_contains_exclusion(self):
         """Returns False when title contains an exclusion keyword."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Junior Data Scientist",
-            target_titles=["data scientist"],
-            exclusions=["junior"],
-        ) is False
+
+        assert (
+            _title_matches(
+                "Junior Data Scientist",
+                target_titles=["data scientist"],
+                exclusions=["junior"],
+            )
+            is False
+        )
 
     def test_returns_true_when_target_titles_is_empty(self):
         """Returns True when target_titles is empty (no filter = include all)."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Any Title Here",
-            target_titles=[],
-            exclusions=[],
-        ) is True
+
+        assert (
+            _title_matches(
+                "Any Title Here",
+                target_titles=[],
+                exclusions=[],
+            )
+            is True
+        )
 
     def test_returns_false_when_title_matches_no_target(self):
         """Returns False when title does not match any target keyword."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Product Manager",
-            target_titles=["data scientist", "machine learning"],
-            exclusions=[],
-        ) is False
+
+        assert (
+            _title_matches(
+                "Product Manager",
+                target_titles=["data scientist", "machine learning"],
+                exclusions=[],
+            )
+            is False
+        )
 
     def test_case_insensitive_matching(self):
         """Matching is case-insensitive for both targets and title."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "SENIOR DATA SCIENTIST",
-            target_titles=["Data Scientist"],
-            exclusions=[],
-        ) is True
+
+        assert (
+            _title_matches(
+                "SENIOR DATA SCIENTIST",
+                target_titles=["Data Scientist"],
+                exclusions=[],
+            )
+            is True
+        )
 
     def test_exclusion_case_insensitive(self):
         """Exclusion check is case-insensitive."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Data Scientist - Intern",
-            target_titles=["data scientist"],
-            exclusions=["INTERN"],
-        ) is False
+
+        assert (
+            _title_matches(
+                "Data Scientist - Intern",
+                target_titles=["data scientist"],
+                exclusions=["INTERN"],
+            )
+            is False
+        )
 
     def test_empty_exclusions_list_never_excludes(self):
         """Empty exclusions list means nothing is excluded."""
         from job_finder.web.ats_scanner import _title_matches
-        assert _title_matches(
-            "Staff Machine Learning Engineer",
-            target_titles=["machine learning"],
-            exclusions=[],
-        ) is True
+
+        assert (
+            _title_matches(
+                "Staff Machine Learning Engineer",
+                target_titles=["machine learning"],
+                exclusions=[],
+            )
+            is True
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: upsert_company
 # ---------------------------------------------------------------------------
+
 
 class TestUpsertCompany:
     """Tests for company record creation and update logic."""
@@ -223,6 +270,7 @@ class TestUpsertCompany:
     def test_creates_new_company_record_and_returns_id(self, db_conn):
         """upsert_company creates a new record and returns the company_id."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         company_id = upsert_company(conn, name="Stripe, Inc.")
         assert company_id is not None
@@ -232,6 +280,7 @@ class TestUpsertCompany:
     def test_creates_company_with_normalized_name(self, db_conn):
         """Normalized name is stored in the name column, raw name in name_raw."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         company_id = upsert_company(conn, name="Acme Corp.")
         row = conn.execute(
@@ -243,6 +292,7 @@ class TestUpsertCompany:
     def test_updates_existing_company_matched_by_normalized_name(self, db_conn):
         """Second call with same company (different raw spelling) updates, not inserts."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         id1 = upsert_company(conn, name="Stripe")
         id2 = upsert_company(conn, name="Stripe, Inc.")  # same normalized name
@@ -253,12 +303,14 @@ class TestUpsertCompany:
     def test_updates_ats_info_when_new_info_is_better(self, db_conn):
         """Updates ats_platform and ats_slug when upgrading from pending to hit."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         # First insert: pending (no ATS info)
         company_id = upsert_company(conn, name="OpenAI", ats_probe_status="pending")
         # Second call: hit (URL-derived slug)
         upsert_company(
-            conn, name="OpenAI",
+            conn,
+            name="OpenAI",
             ats_platform="ashby",
             ats_slug="OpenAI",
             ats_probe_status="hit",
@@ -274,10 +326,12 @@ class TestUpsertCompany:
     def test_does_not_downgrade_from_hit_to_pending(self, db_conn):
         """Once ats_probe_status is 'hit', a call with 'pending' does not downgrade."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         # Set up a confirmed hit
         company_id = upsert_company(
-            conn, name="Lever Co",
+            conn,
+            name="Lever Co",
             ats_platform="lever",
             ats_slug="leverco",
             ats_probe_status="hit",
@@ -292,14 +346,17 @@ class TestUpsertCompany:
     def test_returns_company_id_for_existing_company(self, db_conn):
         """Returns the existing company_id on second call for same company."""
         from job_finder.web.ats_scanner import upsert_company
+
         db_path, conn = db_conn
         id1 = upsert_company(conn, name="Ramp")
         id2 = upsert_company(conn, name="Ramp")
         assert id1 == id2
 
+
 # ---------------------------------------------------------------------------
 # Tests: derive_slug_candidates
 # ---------------------------------------------------------------------------
+
 
 class TestDeriveSlugCandidates:
     """Tests for slug candidate generation from company names."""
@@ -307,6 +364,7 @@ class TestDeriveSlugCandidates:
     def test_scale_ai_generates_hyphenated_and_concatenated(self):
         """'Scale AI' generates ['scale-ai', 'scaleai']."""
         from job_finder.web.ats_scanner import derive_slug_candidates
+
         candidates = derive_slug_candidates("Scale AI")
         assert "scale-ai" in candidates
         assert "scaleai" in candidates
@@ -314,12 +372,14 @@ class TestDeriveSlugCandidates:
     def test_simple_name_generates_single_candidate(self):
         """'Stripe' generates ['stripe'] (no duplicate)."""
         from job_finder.web.ats_scanner import derive_slug_candidates
+
         candidates = derive_slug_candidates("Stripe")
         assert "stripe" in candidates
 
     def test_strips_inc_suffix(self):
         """'Acme Inc.' strips suffix before generating slug."""
         from job_finder.web.ats_scanner import derive_slug_candidates
+
         candidates = derive_slug_candidates("Acme Inc.")
         assert "acme" in candidates
         assert not any("inc" in c for c in candidates)
@@ -327,19 +387,23 @@ class TestDeriveSlugCandidates:
     def test_openai_generates_single_candidate(self):
         """'OpenAI' generates ['openai'] (already concatenated)."""
         from job_finder.web.ats_scanner import derive_slug_candidates
+
         candidates = derive_slug_candidates("OpenAI")
         assert "openai" in candidates
 
     def test_returns_list(self):
         """derive_slug_candidates always returns a list."""
         from job_finder.web.ats_scanner import derive_slug_candidates
+
         result = derive_slug_candidates("AnyCompany")
         assert isinstance(result, list)
         assert len(result) >= 1
 
+
 # ---------------------------------------------------------------------------
 # Tests: probe_ats_slugs
 # ---------------------------------------------------------------------------
+
 
 class TestProbeAtsSlugs:
     """Tests for speculative ATS slug probing with cache logic."""
@@ -347,6 +411,7 @@ class TestProbeAtsSlugs:
     def _insert_pending_company(self, conn, name="TestCo"):
         """Insert a company with ats_probe_status='pending' for probe testing."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -418,6 +483,7 @@ class TestProbeAtsSlugs:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO companies
@@ -440,6 +506,7 @@ class TestProbeAtsSlugs:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO companies
@@ -499,6 +566,7 @@ class TestProbeAtsSlugs:
 
         conn = sqlite3.connect(migrated_db_path)
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO companies
@@ -513,9 +581,11 @@ class TestProbeAtsSlugs:
             probe_ats_slugs(migrated_db_path, config={"TESTING": True})
             mock_get.assert_not_called()
 
+
 # ---------------------------------------------------------------------------
 # Tests: scan_lever
 # ---------------------------------------------------------------------------
+
 
 class TestScanLever:
     """Tests for Lever API scanning, keyword filter, and salary extraction."""
@@ -530,6 +600,7 @@ class TestScanLever:
     def test_scan_lever_parses_matched_job_titles(self):
         """scan_lever returns jobs matching target_titles keyword filter."""
         from job_finder.web.ats_scanner import scan_lever
+
         lever_jobs = [
             {
                 "text": "Senior Data Scientist",
@@ -555,6 +626,7 @@ class TestScanLever:
     def test_scan_lever_applies_keyword_filter(self):
         """scan_lever filters out non-matching jobs using _title_matches."""
         from job_finder.web.ats_scanner import scan_lever
+
         lever_jobs = [
             {
                 "text": "Senior Data Scientist",
@@ -586,6 +658,7 @@ class TestScanLever:
     def test_scan_lever_extracts_salary_range_when_present(self):
         """scan_lever extracts salaryRange min/max when present."""
         from job_finder.web.ats_scanner import scan_lever
+
         lever_jobs = [
             {
                 "text": "Staff Data Scientist",
@@ -615,6 +688,7 @@ class TestScanLever:
     def test_scan_lever_returns_none_salary_when_absent(self):
         """scan_lever returns None salary_min/max when salaryRange is absent."""
         from job_finder.web.ats_scanner import scan_lever
+
         lever_jobs = [
             {
                 "text": "Data Scientist",
@@ -639,6 +713,7 @@ class TestScanLever:
     def test_scan_lever_returns_empty_list_on_non_200(self):
         """scan_lever returns empty list when API returns non-200 response."""
         from job_finder.web.ats_scanner import scan_lever
+
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
@@ -654,6 +729,7 @@ class TestScanLever:
     def test_scan_lever_job_dict_has_required_keys(self):
         """scan_lever job dicts contain title, company_source, location, source_url."""
         from job_finder.web.ats_scanner import scan_lever
+
         lever_jobs = [
             {
                 "text": "Machine Learning Engineer",
@@ -681,9 +757,11 @@ class TestScanLever:
         assert "source_url" in job
         assert "description" in job
 
+
 # ---------------------------------------------------------------------------
 # Tests: scan_greenhouse
 # ---------------------------------------------------------------------------
+
 
 class TestScanGreenhouse:
     """Tests for Greenhouse API scanning, keyword filter, cents-to-dollars."""
@@ -697,6 +775,7 @@ class TestScanGreenhouse:
     def test_scan_greenhouse_parses_matched_jobs(self):
         """scan_greenhouse returns matched jobs from Greenhouse JSON response."""
         from job_finder.web.ats_scanner import scan_greenhouse
+
         gh_jobs = [
             {
                 "title": "Senior Data Scientist",
@@ -721,6 +800,7 @@ class TestScanGreenhouse:
     def test_scan_greenhouse_converts_cents_to_dollars(self):
         """scan_greenhouse divides pay_input_ranges cents by 100 for dollar values."""
         from job_finder.web.ats_scanner import scan_greenhouse
+
         gh_jobs = [
             {
                 "title": "Staff Data Scientist",
@@ -748,6 +828,7 @@ class TestScanGreenhouse:
     def test_scan_greenhouse_returns_empty_list_on_non_200(self):
         """scan_greenhouse returns empty list on non-200 response."""
         from job_finder.web.ats_scanner import scan_greenhouse
+
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
@@ -763,6 +844,7 @@ class TestScanGreenhouse:
     def test_scan_greenhouse_filters_non_matching_titles(self):
         """scan_greenhouse applies _title_matches keyword filter."""
         from job_finder.web.ats_scanner import scan_greenhouse
+
         gh_jobs = [
             {
                 "title": "Data Scientist",
@@ -791,9 +873,11 @@ class TestScanGreenhouse:
         assert len(results) == 1
         assert results[0]["title"] == "Data Scientist"
 
+
 # ---------------------------------------------------------------------------
 # Tests: scan_ashby
 # ---------------------------------------------------------------------------
+
 
 class TestScanAshby:
     """Tests for Ashby API scanning, slug casing, compensation tiers."""
@@ -807,6 +891,7 @@ class TestScanAshby:
     def test_scan_ashby_parses_matched_jobs(self):
         """scan_ashby returns matched jobs from Ashby JSON response."""
         from job_finder.web.ats_scanner import scan_ashby
+
         ashby_jobs = [
             {
                 "title": "Senior Data Scientist",
@@ -850,6 +935,7 @@ class TestScanAshby:
     def test_scan_ashby_extracts_compensation_summary(self):
         """scan_ashby extracts salaryCompensationSummary for salary_min/salary_max."""
         from job_finder.web.ats_scanner import scan_ashby
+
         ashby_jobs = [
             {
                 "title": "Staff Machine Learning Engineer",
@@ -887,6 +973,7 @@ class TestScanAshby:
     def test_scan_ashby_stores_comp_json(self):
         """scan_ashby stores full compensation data as comp_json blob."""
         from job_finder.web.ats_scanner import scan_ashby
+
         ashby_jobs = [
             {
                 "title": "Research Engineer",
@@ -915,6 +1002,7 @@ class TestScanAshby:
     def test_scan_ashby_returns_empty_list_on_non_200(self):
         """scan_ashby returns empty list on non-200 response."""
         from job_finder.web.ats_scanner import scan_ashby
+
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
@@ -927,9 +1015,11 @@ class TestScanAshby:
 
         assert results == []
 
+
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan
 # ---------------------------------------------------------------------------
+
 
 class TestRunAtsScan:
     """Tests for the full ATS scan orchestration."""
@@ -937,6 +1027,7 @@ class TestRunAtsScan:
     def _insert_hit_company(self, conn, name, platform, slug, scan_enabled=1):
         """Insert a company with ats_probe_status='hit' and configurable scan_enabled."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -973,6 +1064,7 @@ class TestRunAtsScan:
         self._insert_hit_company(conn, "Acme", "lever", "acme", scan_enabled=0)
         # Pending (should NOT be scanned even if enabled)
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO companies (name, name_raw, ats_probe_status, scan_enabled, created_at, updated_at)
@@ -987,7 +1079,10 @@ class TestRunAtsScan:
         mock_resp.status_code = 200
         mock_resp.json.return_value = []
 
-        config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": [], "exclusions": {"title_keywords": []}},
+        }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             result = run_ats_scan(migrated_db_path, config=config)
@@ -1004,13 +1099,22 @@ class TestRunAtsScan:
         self._insert_hit_company(conn, "DisabledCo", "lever", "disabledco", scan_enabled=0)
         conn.close()
 
-        config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {"title_keywords": []}}}
+        config = {
+            "TESTING": False,
+            "profile": {"target_titles": [], "exclusions": {"title_keywords": []}},
+        }
 
         # Patch both requests.get and run_homepage_discovery to prevent network calls.
         # run_homepage_discovery now runs as a pre-step and would call requests.get internally.
-        with patch("job_finder.web.ats_scanner.requests.get") as mock_get, \
-             patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover:
-            mock_discover.return_value = {"companies_checked": 0, "homepages_found": 0, "errors": []}
+        with (
+            patch("job_finder.web.ats_scanner.requests.get") as mock_get,
+            patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover,
+        ):
+            mock_discover.return_value = {
+                "companies_checked": 0,
+                "homepages_found": 0,
+                "errors": [],
+            }
             result = run_ats_scan(migrated_db_path, config=config)
 
         mock_get.assert_not_called()
@@ -1094,7 +1198,9 @@ class TestRunAtsScan:
         }
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None) as mock_haiku:
+            with patch(
+                "job_finder.web.ats_scanner.score_and_persist_job", return_value=None
+            ) as mock_haiku:
                 result = run_ats_scan(migrated_db_path, config=config)
 
         # score_and_persist_haiku called once per new job (1 job discovered)
@@ -1136,7 +1242,9 @@ class TestRunAtsScan:
         scorer_result = {"classification": "apply", "sub_scores": {}, "rationale": {}}
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=scorer_result):
+            with patch(
+                "job_finder.web.ats_scanner.score_and_persist_job", return_value=scorer_result
+            ):
                 result = run_ats_scan(migrated_db_path, config=config)
 
         assert result["scored"] == 1
@@ -1170,9 +1278,7 @@ class TestRunAtsScan:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT * FROM runs WHERE source = 'ats_scan'"
-        ).fetchone()
+        row = conn.execute("SELECT * FROM runs WHERE source = 'ats_scan'").fetchone()
         conn.close()
 
         assert row is not None
@@ -1268,8 +1374,9 @@ class TestRunAtsScan:
 
     def test_run_ats_scan_salary_first_seen_wins(self, migrated_db_path):
         """ATS salary sets salary_min/salary_max only on new jobs (first-seen wins)."""
-        from job_finder.web.ats_scanner import run_ats_scan
         from datetime import datetime
+
+        from job_finder.web.ats_scanner import run_ats_scan
 
         # Pre-insert a job with existing salary data
         conn = sqlite3.connect(migrated_db_path)
@@ -1281,8 +1388,16 @@ class TestRunAtsScan:
                (dedup_key, title, company, location, sources, source_urls,
                 salary_min, salary_max, first_seen, last_seen)
                VALUES (?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?)""",
-            ("stripe|senior data scientist", "Senior Data Scientist", "Stripe",
-             "Remote", 180000, 240000, now, now),
+            (
+                "stripe|senior data scientist",
+                "Senior Data Scientist",
+                "Stripe",
+                "Remote",
+                180000,
+                240000,
+                now,
+                now,
+            ),
         )
         conn.commit()
         conn.close()
@@ -1324,9 +1439,11 @@ class TestRunAtsScan:
         assert row["salary_min"] == 180000
         assert row["salary_max"] == 240000
 
+
 # ---------------------------------------------------------------------------
 # Tests: run_ats_scan HTML fallback loop
 # ---------------------------------------------------------------------------
+
 
 class TestRunAtsScanHtmlFallback:
     """Tests for the HTML fallback loop in run_ats_scan for miss companies."""
@@ -1334,6 +1451,7 @@ class TestRunAtsScanHtmlFallback:
     def _insert_miss_company(self, conn, name, homepage_url=None, scan_enabled=1):
         """Insert a company with ats_probe_status='miss'."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -1351,7 +1469,9 @@ class TestRunAtsScanHtmlFallback:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        company_id = self._insert_miss_company(conn, "StartupCo", homepage_url="https://startup.co")
+        company_id = self._insert_miss_company(
+            conn, "StartupCo", homepage_url="https://startup.co"
+        )
         conn.close()
 
         config = {
@@ -1370,7 +1490,9 @@ class TestRunAtsScanHtmlFallback:
 
                 mock_scrape_resp = MagicMock()
                 mock_scrape_resp.url = "https://startup.co/careers"
-                mock_scrape_resp.text = '<html><body><a href="/jobs/1">Data Scientist</a></body></html>'
+                mock_scrape_resp.text = (
+                    '<html><body><a href="/jobs/1">Data Scientist</a></body></html>'
+                )
                 mock_scrape_resp.status_code = 200
 
                 mock_careers_get.side_effect = [mock_find_resp, mock_scrape_resp]
@@ -1396,11 +1518,18 @@ class TestRunAtsScanHtmlFallback:
             "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
         }
 
-        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers") as mock_find:
-            with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=[]) as mock_scrape:
-                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
-                    with patch("job_finder.web.ats_scanner.time.sleep"):
-                        run_ats_scan(migrated_db_path, config=config)
+        with (
+            patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://startup.co/careers",
+            ) as mock_find,
+            patch(
+                "job_finder.web.ats_scanner.scrape_careers_page", return_value=[]
+            ) as mock_scrape,
+        ):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
+                with patch("job_finder.web.ats_scanner.time.sleep"):
+                    run_ats_scan(migrated_db_path, config=config)
 
         # Check positional args — keyword args (client, conn, config) also present now
         assert mock_find.call_args[0][0] == "https://startup.co"
@@ -1426,23 +1555,27 @@ class TestRunAtsScanHtmlFallback:
             {"title": "Data Scientist", "url": "https://startup.co/jobs/1"},
         ]
 
-        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
-            with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs):
-                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
-                    with patch("job_finder.web.ats_scanner.time.sleep"):
-                        result = run_ats_scan(migrated_db_path, config=config)
+        with (
+            patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://startup.co/careers",
+            ),
+            patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs),
+            patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None),
+        ):
+            with patch("job_finder.web.ats_scanner.time.sleep"):
+                result = run_ats_scan(migrated_db_path, config=config)
 
         # Job should be created in DB
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        job = conn.execute(
-            "SELECT * FROM jobs WHERE title = 'Data Scientist'"
-        ).fetchone()
+        job = conn.execute("SELECT * FROM jobs WHERE title = 'Data Scientist'").fetchone()
         conn.close()
 
         assert job is not None
         # source is stored as JSON array in 'sources' column
         import json as _json
+
         sources = _json.loads(job["sources"] or "[]")
         assert "careers_page" in sources
         assert result["html_scraped"] >= 1
@@ -1473,6 +1606,7 @@ class TestRunAtsScanHtmlFallback:
     def _insert_error_company(self, conn, name, homepage_url=None, scan_enabled=1):
         """Insert a company with ats_probe_status='error'."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -1498,11 +1632,18 @@ class TestRunAtsScanHtmlFallback:
             "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
         }
 
-        with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://error.co/careers") as mock_find:
-            with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=[]) as mock_scrape:
-                with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
-                    with patch("job_finder.web.ats_scanner.time.sleep"):
-                        result = run_ats_scan(migrated_db_path, config=config)
+        with (
+            patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://error.co/careers",
+            ) as mock_find,
+            patch(
+                "job_finder.web.ats_scanner.scrape_careers_page", return_value=[]
+            ) as mock_scrape,
+        ):
+            with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=None):
+                with patch("job_finder.web.ats_scanner.time.sleep"):
+                    result = run_ats_scan(migrated_db_path, config=config)
 
         # find_careers_url should be called for the error company
         mock_find.assert_called_once()
@@ -1540,9 +1681,11 @@ class TestRunAtsScanHtmlFallback:
         # scrape_careers_page should NOT be called when find_careers_url returns None
         mock_scrape.assert_not_called()
 
+
 # ---------------------------------------------------------------------------
 # Tests: HTML-scraped jobs included in Haiku scoring (Phase 08 Plan 01)
 # ---------------------------------------------------------------------------
+
 
 class TestHTMLJobsScoring:
     """Tests that HTML-scraped jobs are included in the Haiku scoring pass.
@@ -1554,6 +1697,7 @@ class TestHTMLJobsScoring:
     def _insert_hit_company(self, conn, name, platform, slug, scan_enabled=1):
         """Insert a company with ats_probe_status='hit'."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -1568,6 +1712,7 @@ class TestHTMLJobsScoring:
     def _insert_miss_company(self, conn, name, homepage_url=None, scan_enabled=1):
         """Insert a company with ats_probe_status='miss'."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -1623,9 +1768,17 @@ class TestHTMLJobsScoring:
             return None
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
-                with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs):
-                    with patch("job_finder.web.ats_scanner.score_and_persist_job", side_effect=capture_haiku_scoring):
+            with patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://startup.co/careers",
+            ):
+                with patch(
+                    "job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs
+                ):
+                    with patch(
+                        "job_finder.web.ats_scanner.score_and_persist_job",
+                        side_effect=capture_haiku_scoring,
+                    ):
                         with patch("job_finder.web.ats_scanner.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1671,9 +1824,17 @@ class TestHTMLJobsScoring:
         scorer_result = {"classification": "skip", "sub_scores": {}, "rationale": {}}
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://startup.co/careers"):
-                with patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs):
-                    with patch("job_finder.web.ats_scanner.score_and_persist_job", return_value=scorer_result):
+            with patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://startup.co/careers",
+            ):
+                with patch(
+                    "job_finder.web.ats_scanner.scrape_careers_page", return_value=html_jobs
+                ):
+                    with patch(
+                        "job_finder.web.ats_scanner.score_and_persist_job",
+                        return_value=scorer_result,
+                    ):
                         with patch("job_finder.web.ats_scanner.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1681,9 +1842,11 @@ class TestHTMLJobsScoring:
             f"Expected scored=2 (ATS + HTML jobs), got: {result['scored']}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Tests: /companies/scan route — probe before scan
 # ---------------------------------------------------------------------------
+
 
 class TestScanRouteProbeBeforeScan:
     """Tests for /companies/scan route calling probe_ats_slugs before run_ats_scan.
@@ -1698,10 +1861,12 @@ class TestScanRouteProbeBeforeScan:
         """Create Flask test app wired to the migrated temp DB."""
         from job_finder.web import create_app
 
-        app = create_app(config={
-            "db": {"path": migrated_db_path},
-            "TESTING": True,
-        })
+        app = create_app(
+            config={
+                "db": {"path": migrated_db_path},
+                "TESTING": True,
+            }
+        )
         app.config["TESTING"] = True
         return app
 
@@ -1729,10 +1894,12 @@ class TestScanRouteProbeBeforeScan:
                 "probe": {},
             }
 
-        with app_with_db.test_client() as client:
-            with patch("job_finder.web.blueprints.companies.probe_ats_slugs", side_effect=mock_probe):
-                with patch("job_finder.web.blueprints.companies.run_ats_scan", side_effect=mock_scan):
-                    response = client.post("/companies/scan")
+        with (
+            app_with_db.test_client() as client,
+            patch("job_finder.web.blueprints.companies.probe_ats_slugs", side_effect=mock_probe),
+            patch("job_finder.web.blueprints.companies.run_ats_scan", side_effect=mock_scan),
+        ):
+            response = client.post("/companies/scan")
 
         assert response.status_code == 200
         assert call_order == ["probe", "scan"], (
@@ -1756,11 +1923,15 @@ class TestScanRouteProbeBeforeScan:
             "probe": probe_result,
         }
 
-        with app_with_db.test_client() as client:
-            with patch("job_finder.web.blueprints.companies.probe_ats_slugs", return_value=probe_result):
-                with patch("job_finder.web.blueprints.companies.run_ats_scan", return_value=scan_result):
-                    with patch("job_finder.web.blueprints.companies.logger") as mock_logger:
-                        response = client.post("/companies/scan")
+        with (
+            app_with_db.test_client() as client,
+            patch(
+                "job_finder.web.blueprints.companies.probe_ats_slugs", return_value=probe_result
+            ),
+            patch("job_finder.web.blueprints.companies.run_ats_scan", return_value=scan_result),
+            patch("job_finder.web.blueprints.companies.logger") as mock_logger,
+        ):
+            response = client.post("/companies/scan")
 
         assert response.status_code == 200
         # Verify logger.info was called with probe result
@@ -1769,14 +1940,18 @@ class TestScanRouteProbeBeforeScan:
             f"Expected logger.info called with probe result, got: {info_calls}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Tests: ATS Retry Logic (Phase 14, DEBT-01)
 # ---------------------------------------------------------------------------
 
-def _insert_company_with_status(conn, name, status, platform=None, slug=None,
-                                  retry_count=0, retry_after=None, miss_reason=None):
+
+def _insert_company_with_status(
+    conn, name, status, platform=None, slug=None, retry_count=0, retry_after=None, miss_reason=None
+):
     """Helper: insert a company with given probe status and retry fields."""
     from datetime import datetime
+
     now = datetime.now().isoformat()
     cursor = conn.execute(
         """INSERT INTO companies
@@ -1784,22 +1959,35 @@ def _insert_company_with_status(conn, name, status, platform=None, slug=None,
             retry_count, retry_after, miss_reason,
             scan_enabled, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-        (name.lower(), name, platform, slug, status,
-         retry_count, retry_after, miss_reason, now, now),
+        (
+            name.lower(),
+            name,
+            platform,
+            slug,
+            status,
+            retry_count,
+            retry_after,
+            miss_reason,
+            now,
+            now,
+        ),
     )
     conn.commit()
     return cursor.lastrowid
+
 
 class TestAtsRetryLogic:
     """Tests for ATS transient error retry state machine (DEBT-01)."""
 
     def test_compute_retry_after_hour_1(self):
         """_compute_retry_after(0) returns timestamp ~1 hour from now (naive UTC)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         from job_finder.web.ats_scanner import _compute_retry_after
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        before = datetime.now(UTC).replace(tzinfo=None)
         result = _compute_retry_after(0)
-        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        after = datetime.now(UTC).replace(tzinfo=None)
         parsed = datetime.fromisoformat(result)
         expected_min = before + timedelta(hours=1) - timedelta(seconds=5)
         expected_max = after + timedelta(hours=1) + timedelta(seconds=5)
@@ -1809,11 +1997,13 @@ class TestAtsRetryLogic:
 
     def test_compute_retry_after_hour_4(self):
         """_compute_retry_after(1) returns timestamp ~4 hours from now (naive UTC)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         from job_finder.web.ats_scanner import _compute_retry_after
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        before = datetime.now(UTC).replace(tzinfo=None)
         result = _compute_retry_after(1)
-        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        after = datetime.now(UTC).replace(tzinfo=None)
         parsed = datetime.fromisoformat(result)
         expected_min = before + timedelta(hours=4) - timedelta(seconds=5)
         expected_max = after + timedelta(hours=4) + timedelta(seconds=5)
@@ -1823,11 +2013,13 @@ class TestAtsRetryLogic:
 
     def test_compute_retry_after_hour_24(self):
         """_compute_retry_after(2) returns timestamp ~24 hours from now (naive UTC)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         from job_finder.web.ats_scanner import _compute_retry_after
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        before = datetime.now(UTC).replace(tzinfo=None)
         result = _compute_retry_after(2)
-        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        after = datetime.now(UTC).replace(tzinfo=None)
         parsed = datetime.fromisoformat(result)
         expected_min = before + timedelta(hours=24) - timedelta(seconds=5)
         expected_max = after + timedelta(hours=24) + timedelta(seconds=5)
@@ -1838,7 +2030,9 @@ class TestAtsRetryLogic:
     def test_transient_error_sets_error_status(self, migrated_db_path):
         """First transient error sets ats_probe_status='error', retry_count=1."""
         from datetime import datetime
+
         from job_finder.web.ats_scanner import _handle_scan_error
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(conn, "TestCo", "pending")
@@ -1857,17 +2051,17 @@ class TestAtsRetryLogic:
 
     def test_retry_count_increments_with_backoff(self, migrated_db_path):
         """Second transient error increments retry_count to 2 and sets ~4hr retry_after."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         from job_finder.web.ats_scanner import _handle_scan_error
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        company_id = _insert_company_with_status(
-            conn, "BackoffCo", "error", retry_count=1
-        )
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        company_id = _insert_company_with_status(conn, "BackoffCo", "error", retry_count=1)
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+        before = datetime.now(UTC).replace(tzinfo=None)
         _handle_scan_error(conn, company_id, "BackoffCo", "502 Bad Gateway", now)
-        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        after = datetime.now(UTC).replace(tzinfo=None)
         row = conn.execute(
             "SELECT retry_count, retry_after FROM companies WHERE id = ?",
             (company_id,),
@@ -1884,12 +2078,12 @@ class TestAtsRetryLogic:
     def test_third_failure_promotes_to_unreachable(self, migrated_db_path):
         """Third failure (retry_count already at max) promotes to miss/unreachable."""
         from datetime import datetime
+
         from job_finder.web.ats_scanner import _handle_scan_error
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        company_id = _insert_company_with_status(
-            conn, "UnreachableCo", "error", retry_count=2
-        )
+        company_id = _insert_company_with_status(conn, "UnreachableCo", "error", retry_count=2)
         now = datetime.now().isoformat()
         _handle_scan_error(conn, company_id, "UnreachableCo", "504 Gateway Timeout", now)
         row = conn.execute(
@@ -1908,12 +2102,13 @@ class TestAtsRetryLogic:
     def test_successful_retry_resets_to_hit(self, migrated_db_path):
         """Successful probe on error company resets to hit, clears retry state."""
         from datetime import datetime
+
         from job_finder.web.ats_scanner import _reset_retry_state
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "RecoverCo", "error", retry_count=2,
-            retry_after="2099-01-01 00:00:00"
+            conn, "RecoverCo", "error", retry_count=2, retry_after="2099-01-01 00:00:00"
         )
         # Update ats_probe_status to hit + reset retry state
         now = datetime.now().isoformat()
@@ -1927,24 +2122,29 @@ class TestAtsRetryLogic:
             (company_id,),
         ).fetchone()
         conn.close()
-        assert row["ats_probe_status"] == "hit", (
-            f"Expected 'hit', got: {row['ats_probe_status']}"
-        )
+        assert row["ats_probe_status"] == "hit", f"Expected 'hit', got: {row['ats_probe_status']}"
         assert row["retry_count"] == 0, f"Expected retry_count=0, got: {row['retry_count']}"
         assert row["retry_after"] is None, f"Expected retry_after=None, got: {row['retry_after']}"
         assert row["miss_reason"] is None, f"Expected miss_reason=None, got: {row['miss_reason']}"
 
     def test_error_company_included_in_scan_query(self, migrated_db_path):
         """Error company with past retry_after appears in run_ats_scan company query."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         # Use SQLite-compatible format (no timezone offset) so comparisons with datetime('now') work
-        past_retry = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        past_retry = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         _insert_company_with_status(
-            conn, "EligibleCo", "error",
-            platform="lever", slug="eligible-co",
-            retry_count=1, retry_after=past_retry,
+            conn,
+            "EligibleCo",
+            "error",
+            platform="lever",
+            slug="eligible-co",
+            retry_count=1,
+            retry_after=past_retry,
         )
         rows = conn.execute(
             """SELECT id, name_raw FROM companies
@@ -1957,21 +2157,26 @@ class TestAtsRetryLogic:
         ).fetchall()
         conn.close()
         names = [r["name_raw"] for r in rows]
-        assert "EligibleCo" in names, (
-            f"Expected EligibleCo in scan results, got: {names}"
-        )
+        assert "EligibleCo" in names, f"Expected EligibleCo in scan results, got: {names}"
 
     def test_error_company_with_future_retry_skipped(self, migrated_db_path):
         """Error company with future retry_after is not included in scan query."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         # Use SQLite-compatible format (no timezone offset)
-        future_retry = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+        future_retry = (datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=3)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         _insert_company_with_status(
-            conn, "SkippedCo", "error",
-            platform="lever", slug="skipped-co",
-            retry_count=1, retry_after=future_retry,
+            conn,
+            "SkippedCo",
+            "error",
+            platform="lever",
+            slug="skipped-co",
+            retry_count=1,
+            retry_after=future_retry,
         )
         rows = conn.execute(
             """SELECT id, name_raw FROM companies
@@ -1991,12 +2196,14 @@ class TestAtsRetryLogic:
     def test_permanent_miss_on_404(self, migrated_db_path):
         """404 response causes ats_probe_status='miss' without miss_reason='unreachable'."""
         from job_finder.web.ats_scanner import _PERMANENT_MISS_CODES
+
         assert 404 in _PERMANENT_MISS_CODES, "404 should be in _PERMANENT_MISS_CODES"
         assert 410 in _PERMANENT_MISS_CODES, "410 should be in _PERMANENT_MISS_CODES"
 
     def test_transient_codes_set(self):
         """_TRANSIENT_CODES contains expected HTTP status codes."""
         from job_finder.web.ats_scanner import _TRANSIENT_CODES
+
         expected = {429, 500, 502, 503, 504}
         assert expected.issubset(_TRANSIENT_CODES), (
             f"Missing transient codes: {expected - _TRANSIENT_CODES}"
@@ -2005,17 +2212,28 @@ class TestAtsRetryLogic:
     def test_probe_single_company_success(self, migrated_db_path):
         """probe_single_company returns hit status on successful API response."""
         from job_finder.web.ats_scanner import probe_single_company
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "SuccessCo", "error",
-            platform="lever", slug="success-co",
+            conn,
+            "SuccessCo",
+            "error",
+            platform="lever",
+            slug="success-co",
             retry_count=1,
         )
 
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = [{"text": "Software Engineer", "hostedUrl": "https://jobs.lever.co/success-co/1", "categories": {}, "salaryRange": None}]
+        mock_resp.json.return_value = [
+            {
+                "text": "Software Engineer",
+                "hostedUrl": "https://jobs.lever.co/success-co/1",
+                "categories": {},
+                "salaryRange": None,
+            }
+        ]
 
         with patch("requests.get", return_value=mock_resp):
             result = probe_single_company(company_id, conn, {"TESTING": False})
@@ -2029,17 +2247,24 @@ class TestAtsRetryLogic:
         assert row["ats_probe_status"] == "hit", (
             f"Expected company updated to 'hit', got: {row['ats_probe_status']}"
         )
-        assert row["retry_count"] == 0, f"Expected retry_count reset to 0, got: {row['retry_count']}"
+        assert row["retry_count"] == 0, (
+            f"Expected retry_count reset to 0, got: {row['retry_count']}"
+        )
 
     def test_probe_single_company_transient_error(self, migrated_db_path):
         """probe_single_company on timeout returns error dict and increments retry_count."""
         import requests as req_module
+
         from job_finder.web.ats_scanner import probe_single_company
+
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "TimeoutCo", "pending",
-            platform="lever", slug="timeout-co",
+            conn,
+            "TimeoutCo",
+            "pending",
+            platform="lever",
+            slug="timeout-co",
             retry_count=0,
         )
 
@@ -2066,9 +2291,11 @@ class TestAtsRetryLogic:
         assert "retry_after" in cols, "retry_after missing from companies"
         assert "miss_reason" in cols, "miss_reason missing from companies"
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/retry route
 # ---------------------------------------------------------------------------
+
 
 class TestRetryRoute:
     """Tests for POST /companies/<id>/retry route."""
@@ -2078,10 +2305,12 @@ class TestRetryRoute:
         """Create Flask test app wired to the migrated temp DB."""
         from job_finder.web import create_app
 
-        app = create_app(config={
-            "db": {"path": migrated_db_path},
-            "TESTING": True,
-        })
+        app = create_app(
+            config={
+                "db": {"path": migrated_db_path},
+                "TESTING": True,
+            }
+        )
         app.config["TESTING"] = True
         return app
 
@@ -2090,16 +2319,24 @@ class TestRetryRoute:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "RetrySuccessCo", "error",
-            platform="lever", slug="retry-success",
+            conn,
+            "RetrySuccessCo",
+            "error",
+            platform="lever",
+            slug="retry-success",
             retry_count=1,
         )
         conn.close()
 
         mock_result = {"status": "hit", "jobs_found": 3}
-        with app_with_db.test_client() as client:
-            with patch("job_finder.web.blueprints.companies.probe_single_company", return_value=mock_result):
-                response = client.post(f"/companies/{company_id}/retry")
+        with (
+            app_with_db.test_client() as client,
+            patch(
+                "job_finder.web.blueprints.companies.probe_single_company",
+                return_value=mock_result,
+            ),
+        ):
+            response = client.post(f"/companies/{company_id}/retry")
 
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         data = response.get_data(as_text=True)
@@ -2112,31 +2349,45 @@ class TestRetryRoute:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "HitCo", "hit",
-            platform="lever", slug="hit-co",
+            conn,
+            "HitCo",
+            "hit",
+            platform="lever",
+            slug="hit-co",
         )
         conn.close()
 
         with app_with_db.test_client() as client:
             response = client.post(f"/companies/{company_id}/retry")
 
-        assert response.status_code == 400, f"Expected 400 for hit company, got {response.status_code}"
+        assert response.status_code == 400, (
+            f"Expected 400 for hit company, got {response.status_code}"
+        )
 
     def test_retry_route_unreachable_allowed(self, app_with_db, migrated_db_path):
         """POST /companies/{id}/retry for unreachable company returns 200."""
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "UnreachableCo2", "miss",
-            platform="lever", slug="unreachable-co",
-            retry_count=3, miss_reason="unreachable",
+            conn,
+            "UnreachableCo2",
+            "miss",
+            platform="lever",
+            slug="unreachable-co",
+            retry_count=3,
+            miss_reason="unreachable",
         )
         conn.close()
 
         mock_result = {"status": "hit", "jobs_found": 0}
-        with app_with_db.test_client() as client:
-            with patch("job_finder.web.blueprints.companies.probe_single_company", return_value=mock_result):
-                response = client.post(f"/companies/{company_id}/retry")
+        with (
+            app_with_db.test_client() as client,
+            patch(
+                "job_finder.web.blueprints.companies.probe_single_company",
+                return_value=mock_result,
+            ),
+        ):
+            response = client.post(f"/companies/{company_id}/retry")
 
         assert response.status_code == 200, (
             f"Expected 200 for unreachable company retry, got {response.status_code}"
@@ -2147,8 +2398,11 @@ class TestRetryRoute:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         company_id = _insert_company_with_status(
-            conn, "MissCo", "miss",
-            platform=None, slug=None,
+            conn,
+            "MissCo",
+            "miss",
+            platform=None,
+            slug=None,
         )
         conn.close()
 
@@ -2159,9 +2413,11 @@ class TestRetryRoute:
             f"Expected 400 for regular miss company, got {response.status_code}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Tests: URL pattern audit (real-world format verification)
 # ---------------------------------------------------------------------------
+
 
 class TestAtsUrlPatternAudit:
     # AUDIT 2026-03-15: URL patterns verified against current Lever, Greenhouse, Ashby job posting formats.
@@ -2172,6 +2428,7 @@ class TestAtsUrlPatternAudit:
     def test_lever_jobs_url_with_uuid_job_id(self):
         """Lever jobs.lever.co/{slug}/{uuid} format extracts correct slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.lever.co/stripe/abc123-def456-789"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2180,6 +2437,7 @@ class TestAtsUrlPatternAudit:
     def test_lever_jobs_url_with_query_params(self):
         """Lever URL with query params (?lever-origin=applied) still extracts slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.lever.co/openai/12345678-abcd-efgh?lever-origin=applied"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2188,6 +2446,7 @@ class TestAtsUrlPatternAudit:
     def test_lever_api_url_with_pagination_params(self):
         """Lever api.lever.co/v0/postings/{slug}?mode=json&skip=0&limit=100 extracts slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://api.lever.co/v0/postings/figma?mode=json&skip=0&limit=100"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "lever"
@@ -2205,6 +2464,7 @@ class TestAtsUrlPatternAudit:
     def test_greenhouse_boards_url_with_job_id(self):
         """Greenhouse boards.greenhouse.io/{slug}/jobs/{id} extracts correct slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://boards.greenhouse.io/airbnb/jobs/6082884"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -2218,6 +2478,7 @@ class TestAtsUrlPatternAudit:
         # /company/jobs/ID format.
         """
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         # boards.greenhouse.io/embed/job_board/js?for=waymo is an embed URL, not a direct job URL.
         # The regex matches /embed as the slug — this is a known pattern limitation.
         urls = ["https://boards.greenhouse.io/embed/job_board/js?for=waymo"]
@@ -2228,6 +2489,7 @@ class TestAtsUrlPatternAudit:
     def test_greenhouse_api_url_with_query_params(self):
         """Greenhouse boards-api URL with ?content=true extracts correct slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://boards-api.greenhouse.io/v1/boards/databricks/jobs?content=true"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "greenhouse"
@@ -2245,6 +2507,7 @@ class TestAtsUrlPatternAudit:
     def test_ashby_url_with_job_id_preserves_case(self):
         """Ashby URL with job UUID preserves exact slug casing (case-sensitive)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.ashbyhq.com/OpenAI/12345-abcde-fghij"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2253,6 +2516,7 @@ class TestAtsUrlPatternAudit:
     def test_ashby_url_company_page_no_job_id(self):
         """Ashby URL with just company slug (no job ID) extracts slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.ashbyhq.com/Ramp"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2261,6 +2525,7 @@ class TestAtsUrlPatternAudit:
     def test_ashby_url_with_query_params(self):
         """Ashby URL with ?departmentId query param extracts slug."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://jobs.ashbyhq.com/notion/abcdef?departmentId=engineering"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform == "ashby"
@@ -2278,6 +2543,7 @@ class TestAtsUrlPatternAudit:
     def test_lever_wins_over_linkedin_in_mixed_url_list(self):
         """URL list with LinkedIn first and Lever second — Lever (first ATS match) wins."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = [
             "https://www.linkedin.com/jobs/view/987654321/",
             "https://jobs.lever.co/stripe/some-uuid",
@@ -2289,14 +2555,17 @@ class TestAtsUrlPatternAudit:
     def test_non_ats_greenhouse_domain_returns_none(self):
         """Greenhouse marketing URL (not a job board) returns (None, None)."""
         from job_finder.web.ats_detection import extract_ats_from_urls
+
         urls = ["https://www.greenhouse.io/blog/hiring"]
         platform, slug = extract_ats_from_urls(urls)
         assert platform is None
         assert slug is None
 
+
 # ---------------------------------------------------------------------------
 # ATS jd_full storage tests (Phase 40 Plan 01 — NEW)
 # ---------------------------------------------------------------------------
+
 
 class TestAtsJdFullStorage:
     """Verify run_ats_scan writes jd_full after job upsert using COALESCE guard.
@@ -2309,6 +2578,7 @@ class TestAtsJdFullStorage:
     def _insert_hit_company(self, conn, name, platform, slug, scan_enabled=1):
         """Helper: insert company with ats_probe_status='hit'."""
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -2369,8 +2639,8 @@ class TestAtsJdFullStorage:
 
     def test_ats_scan_does_not_overwrite_existing_jd_full(self, migrated_db_path):
         """If a job already has jd_full in DB, COALESCE guard does not overwrite it."""
-        from job_finder.web.ats_scanner import run_ats_scan
         from job_finder.models import Job
+        from job_finder.web.ats_scanner import run_ats_scan
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
@@ -2383,9 +2653,20 @@ class TestAtsJdFullStorage:
             """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
                first_seen, last_seen, score, score_breakdown, user_interest, jd_full)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (dedup_key, "Staff Engineer", "Acme", "Remote",
-             '["lever"]', '["https://jobs.lever.co/acme/xyz"]',
-             "2026-01-01", "2026-01-01", 0, '{}', "unreviewed", existing_jd),
+            (
+                dedup_key,
+                "Staff Engineer",
+                "Acme",
+                "Remote",
+                '["lever"]',
+                '["https://jobs.lever.co/acme/xyz"]',
+                "2026-01-01",
+                "2026-01-01",
+                0,
+                "{}",
+                "unreviewed",
+                existing_jd,
+            ),
         )
         conn.commit()
         conn.close()
@@ -2418,9 +2699,7 @@ class TestAtsJdFullStorage:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT jd_full FROM jobs WHERE dedup_key = ?", (dedup_key,)
-        ).fetchone()
+        row = conn.execute("SELECT jd_full FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
         conn.close()
 
         assert row is not None, "Job row not found after ATS scan"
@@ -2466,9 +2745,7 @@ class TestAtsJdFullStorage:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT jd_full FROM jobs WHERE title = 'Junior Analyst'"
-        ).fetchone()
+        row = conn.execute("SELECT jd_full FROM jobs WHERE title = 'Junior Analyst'").fetchone()
         conn.close()
 
         assert row is not None, "Job row not found after ATS scan"
@@ -2476,9 +2753,11 @@ class TestAtsJdFullStorage:
             f"Short description should NOT set jd_full. Got: {row['jd_full']!r}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Homepage discovery integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestHomepageDiscoveryIntegration:
     """Tests for homepage discovery pre-step in run_ats_scan."""
@@ -2490,7 +2769,11 @@ class TestHomepageDiscoveryIntegration:
         config = {"TESTING": False, "profile": {"target_titles": [], "exclusions": {}}}
 
         with patch("job_finder.web.ats_scanner.run_homepage_discovery") as mock_discover:
-            mock_discover.return_value = {"companies_checked": 5, "homepages_found": 2, "errors": []}
+            mock_discover.return_value = {
+                "companies_checked": 5,
+                "homepages_found": 2,
+                "errors": [],
+            }
             result = run_ats_scan(migrated_db_path, config)
 
         mock_discover.assert_called_once_with(migrated_db_path, config)
@@ -2518,17 +2801,20 @@ class TestHomepageDiscoveryIntegration:
         result = run_ats_scan(migrated_db_path, config)
         assert result["homepages_discovered"] == 0
 
+
 # ---------------------------------------------------------------------------
 # HTML fallback description passthrough tests
 # ---------------------------------------------------------------------------
+
 
 class TestHtmlFallbackDescriptionPassthrough:
     """Tests for description passthrough in HTML fallback loop."""
 
     def test_scraped_description_passed_to_job_object(self, migrated_db_path):
         """HTML fallback loop passes scraped description to Job, not empty string."""
-        from job_finder.web.ats_scanner import run_ats_scan
         from datetime import datetime
+
+        from job_finder.web.ats_scanner import run_ats_scan
 
         config = {"TESTING": False, "profile": {"target_titles": ["Engineer"], "exclusions": {}}}
 
@@ -2546,11 +2832,25 @@ class TestHtmlFallbackDescriptionPassthrough:
         conn.commit()
         conn.close()
 
-        scraped_jobs = [{"title": "Software Engineer", "url": "https://acme.com/jobs/1", "description": "Full JD text here"}]
+        scraped_jobs = [
+            {
+                "title": "Software Engineer",
+                "url": "https://acme.com/jobs/1",
+                "description": "Full JD text here",
+            }
+        ]
 
-        with patch("job_finder.web.ats_scanner.run_homepage_discovery", return_value={"companies_checked": 0, "homepages_found": 0, "errors": []}), \
-             patch("job_finder.web.ats_scanner.find_careers_url", return_value="https://acme.com/careers"), \
-             patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs):
+        with (
+            patch(
+                "job_finder.web.ats_scanner.run_homepage_discovery",
+                return_value={"companies_checked": 0, "homepages_found": 0, "errors": []},
+            ),
+            patch(
+                "job_finder.web.ats_scanner.find_careers_url",
+                return_value="https://acme.com/careers",
+            ),
+            patch("job_finder.web.ats_scanner.scrape_careers_page", return_value=scraped_jobs),
+        ):
             result = run_ats_scan(migrated_db_path, config)
 
         # Verify the job was created with the scraped description
@@ -2568,6 +2868,7 @@ class TestPromoteAtsFromSourceUrls:
 
     def _insert_company(self, conn, name, probe_status="miss"):
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies
@@ -2595,8 +2896,9 @@ class TestPromoteAtsFromSourceUrls:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         cid = self._insert_company(conn, "TestCorp", "miss")
-        self._insert_job(conn, cid, "Data Scientist",
-                         '["https://job-boards.greenhouse.io/testcorp/jobs/123"]')
+        self._insert_job(
+            conn, cid, "Data Scientist", '["https://job-boards.greenhouse.io/testcorp/jobs/123"]'
+        )
         conn.close()
 
         mock_resp = MagicMock()
@@ -2610,7 +2912,9 @@ class TestPromoteAtsFromSourceUrls:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT ats_probe_status, ats_platform, ats_slug FROM companies WHERE id = ?", (cid,)).fetchone()
+        row = conn.execute(
+            "SELECT ats_probe_status, ats_platform, ats_slug FROM companies WHERE id = ?", (cid,)
+        ).fetchone()
         conn.close()
 
         assert row["ats_probe_status"] == "hit"
@@ -2624,8 +2928,9 @@ class TestPromoteAtsFromSourceUrls:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         cid = self._insert_company(conn, "NoAtsCo", "miss")
-        self._insert_job(conn, cid, "Analyst",
-                         '["https://www.glassdoor.com/job-listing/j?jl=123"]')
+        self._insert_job(
+            conn, cid, "Analyst", '["https://www.glassdoor.com/job-listing/j?jl=123"]'
+        )
         conn.close()
 
         result = promote_ats_from_source_urls(migrated_db_path, config={})
@@ -2634,7 +2939,9 @@ class TestPromoteAtsFromSourceUrls:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)).fetchone()
+        row = conn.execute(
+            "SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)
+        ).fetchone()
         conn.close()
 
         assert row["ats_probe_status"] == "miss"
@@ -2646,8 +2953,9 @@ class TestPromoteAtsFromSourceUrls:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         cid = self._insert_company(conn, "AlreadyHit", "hit")
-        self._insert_job(conn, cid, "Engineer",
-                         '["https://job-boards.greenhouse.io/alreadyhit/jobs/1"]')
+        self._insert_job(
+            conn, cid, "Engineer", '["https://job-boards.greenhouse.io/alreadyhit/jobs/1"]'
+        )
         conn.close()
 
         result = promote_ats_from_source_urls(migrated_db_path, config={})
@@ -2661,8 +2969,7 @@ class TestPromoteAtsFromSourceUrls:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         cid = self._insert_company(conn, "DeadSlug", "miss")
-        self._insert_job(conn, cid, "Analyst",
-                         '["https://jobs.lever.co/deadslug/abc-123"]')
+        self._insert_job(conn, cid, "Analyst", '["https://jobs.lever.co/deadslug/abc-123"]')
         conn.close()
 
         mock_resp = MagicMock()
@@ -2675,7 +2982,9 @@ class TestPromoteAtsFromSourceUrls:
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)).fetchone()
+        row = conn.execute(
+            "SELECT ats_probe_status FROM companies WHERE id = ?", (cid,)
+        ).fetchone()
         conn.close()
 
         assert row["ats_probe_status"] == "miss"

@@ -10,10 +10,11 @@ Covers:
 """
 
 import io
-import sqlite3
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 
 class TestDocxFormatter:
     """build_resume_docx produces a valid .docx BytesIO."""
@@ -66,9 +67,7 @@ class TestDocxFormatter:
         result = build_resume_docx(sample_resume_data)
         doc = Document(result)
         full_text = "\n".join(p.text for p in doc.paragraphs)
-        assert sample_resume_data["summary"] in full_text, (
-            "Summary text not found in document"
-        )
+        assert sample_resume_data["summary"] in full_text, "Summary text not found in document"
 
     def test_contains_skills(self, sample_resume_data):
         """Document contains at least one skill from the skills list."""
@@ -110,10 +109,13 @@ class TestDocxFormatter:
             f"Institution '{edu['institution']}' not found in document"
         )
 
+
 class TestDriveUpload:
     """upload_to_drive handles .docx and Google Doc conversion modes."""
 
-    def _make_mock_service(self, file_id="abc123", web_view_link="https://docs.google.com/doc/abc123"):
+    def _make_mock_service(
+        self, file_id="abc123", web_view_link="https://docs.google.com/doc/abc123"
+    ):
         """Build a mock Drive service that returns a file create response."""
         mock_service = MagicMock()
         mock_service.files.return_value.create.return_value.execute.return_value = {
@@ -207,9 +209,8 @@ class TestDriveUpload:
 
         result = upload_to_drive(service, "Test Resume", buffer, folder_id="folder1")
 
-        assert "fileid123" in result, (
-            f"Expected fallback URL containing file ID, got: {result}"
-        )
+        assert "fileid123" in result, f"Expected fallback URL containing file ID, got: {result}"
+
 
 class TestDriveServiceScopeCheck:
     """get_drive_service detects missing drive.file scope and raises ValueError."""
@@ -225,7 +226,7 @@ class TestDriveServiceScopeCheck:
         mock_creds.valid = True
 
         with patch("job_finder.gmail_auth.get_credentials", return_value=mock_creds):
-            with pytest.raises(ValueError, match="drive.file"):
+            with pytest.raises(ValueError, match=r"drive\.file"):
                 get_drive_service(token_path=str(tmp_path / "token.json"))
 
     def test_raises_value_error_message_contains_gmail_auth_command(self, tmp_path):
@@ -241,12 +242,14 @@ class TestDriveServiceScopeCheck:
         with open(token_path, "w") as f:
             f.write('{"token": "fake"}')
 
-        with patch(
-            "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
+        with (
+            patch(
+                "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
+                return_value=mock_creds,
+            ),
+            pytest.raises(ValueError) as exc_info,
         ):
-            with pytest.raises(ValueError) as exc_info:
-                get_drive_service(token_path=token_path)
+            get_drive_service(token_path=token_path)
 
         assert "python -m job_finder.gmail_auth" in str(exc_info.value), (
             f"Error message should contain 'python -m job_finder.gmail_auth', got: {exc_info.value}"
@@ -279,12 +282,15 @@ class TestDriveServiceScopeCheck:
             f.write('{"token": "fake"}')
 
         mock_service = MagicMock()
-        with patch(
-            "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
-        ), patch(
-            "job_finder.web.drive_uploader.build",
-            return_value=mock_service,
+        with (
+            patch(
+                "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
+                return_value=mock_creds,
+            ),
+            patch(
+                "job_finder.web.drive_uploader.build",
+                return_value=mock_service,
+            ),
         ):
             result = get_drive_service(token_path=token_path)
 
@@ -302,8 +308,10 @@ class TestDriveServiceScopeCheck:
         mock_creds.valid = True
 
         mock_service = MagicMock()
-        with patch("job_finder.gmail_auth.get_credentials", return_value=mock_creds), \
-             patch("job_finder.web.drive_uploader.build", return_value=mock_service):
+        with (
+            patch("job_finder.gmail_auth.get_credentials", return_value=mock_creds),
+            patch("job_finder.web.drive_uploader.build", return_value=mock_service),
+        ):
             result = get_drive_service(token_path=str(tmp_path / "token.json"))
 
         assert result is mock_service
@@ -311,6 +319,7 @@ class TestDriveServiceScopeCheck:
     def test_raises_value_error_with_actionable_message_when_refresh_fails(self, tmp_path):
         """get_drive_service raises ValueError with actionable message when refresh fails."""
         from google.auth.exceptions import TransportError
+
         from job_finder.web.drive_uploader import get_drive_service
 
         mock_creds = MagicMock()
@@ -327,22 +336,27 @@ class TestDriveServiceScopeCheck:
         with open(token_path, "w") as f:
             f.write('{"token": "fake"}')
 
-        with patch(
-            "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
-            return_value=mock_creds,
-        ), patch(
-            "job_finder.web.drive_uploader.Request",
+        with (
+            patch(
+                "job_finder.web.drive_uploader.Credentials.from_authorized_user_file",
+                return_value=mock_creds,
+            ),
+            patch(
+                "job_finder.web.drive_uploader.Request",
+            ),
+            pytest.raises(ValueError) as exc_info,
         ):
-            with pytest.raises(ValueError) as exc_info:
-                get_drive_service(token_path=token_path)
+            get_drive_service(token_path=token_path)
 
         assert "python -m job_finder.gmail_auth" in str(exc_info.value), (
             f"Error should contain re-auth command, got: {exc_info.value}"
         )
 
+
 # =============================================================================
 # Task 1 Tests: drive_status.py -- get_drive_status helper
 # =============================================================================
+
 
 class TestDriveStatus:
     """get_drive_status returns structured dict for all failure modes + happy path."""
@@ -350,6 +364,7 @@ class TestDriveStatus:
     def _make_app(self):
         """Create minimal Flask app for request context."""
         from flask import Flask
+
         app = Flask(__name__)
         app.config["TESTING"] = True
         return app
@@ -383,12 +398,14 @@ class TestDriveStatus:
         mock_creds.expired = False
 
         app = self._make_app()
-        with app.test_request_context():
-            with patch(
+        with (
+            app.test_request_context(),
+            patch(
                 "google.oauth2.credentials.Credentials.from_authorized_user_file",
                 return_value=mock_creds,
-            ):
-                result = get_drive_status(config, token_path=token_path)
+            ),
+        ):
+            result = get_drive_status(config, token_path=token_path)
 
         assert result["ok"] is False
         assert result["error_code"] == "missing_scope"
@@ -401,12 +418,14 @@ class TestDriveStatus:
         config = {"drive": {"folder_id": "some-folder"}}
 
         app = self._make_app()
-        with app.test_request_context():
-            with patch(
+        with (
+            app.test_request_context(),
+            patch(
                 "job_finder.gmail_auth.get_credentials",
                 side_effect=AuthenticationError("Token refresh failed: network error"),
-            ):
-                result = get_drive_status(config, token_path=str(tmp_path / "token.json"))
+            ),
+        ):
+            result = get_drive_status(config, token_path=str(tmp_path / "token.json"))
 
         assert result["ok"] is False
         assert result["error_code"] == "refresh_failed"
@@ -429,12 +448,14 @@ class TestDriveStatus:
         mock_creds.expired = False
 
         app = self._make_app()
-        with app.test_request_context():
-            with patch(
+        with (
+            app.test_request_context(),
+            patch(
                 "google.oauth2.credentials.Credentials.from_authorized_user_file",
                 return_value=mock_creds,
-            ):
-                result = get_drive_status(config, token_path=token_path)
+            ),
+        ):
+            result = get_drive_status(config, token_path=token_path)
 
         assert result["ok"] is False
         assert result["error_code"] == "no_folder_id"
@@ -457,12 +478,14 @@ class TestDriveStatus:
         mock_creds.expired = False
 
         app = self._make_app()
-        with app.test_request_context():
-            with patch(
+        with (
+            app.test_request_context(),
+            patch(
                 "google.oauth2.credentials.Credentials.from_authorized_user_file",
                 return_value=mock_creds,
-            ):
-                result = get_drive_status(config, token_path=token_path)
+            ),
+        ):
+            result = get_drive_status(config, token_path=token_path)
 
         assert result["ok"] is True
         assert result.get("error_code") is None
@@ -497,9 +520,11 @@ class TestDriveStatus:
             assert mock_load.call_count == 1
             assert result1 is result2
 
+
 # =============================================================================
 # Task 1 Tests: resume_generator.py -- generate_resume_single + background
 # =============================================================================
+
 
 class TestSinglePassGeneration:
     """generate_resume_single returns structured resume dict via Sonnet."""
@@ -525,7 +550,9 @@ class TestSinglePassGeneration:
                     "achievements": ["Led A/B testing platform"],
                 }
             ],
-            "education": [{"degree": "M.S. Statistics", "institution": "Stanford", "year": "2018"}],
+            "education": [
+                {"degree": "M.S. Statistics", "institution": "Stanford", "year": "2018"}
+            ],
         }
 
         job_row = {
@@ -539,7 +566,9 @@ class TestSinglePassGeneration:
             "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}, "daily_budget_usd": 25.0},
         }
 
-        with patch("job_finder.web.resume_generator.call_claude", return_value=(canned_resume, 0.05)):
+        with patch(
+            "job_finder.web.resume_generator.call_claude", return_value=(canned_resume, 0.05)
+        ):
             result = generate_resume_single(job_row, sample_resume_data, conn, config)
         conn.close()
 
@@ -551,7 +580,8 @@ class TestSinglePassGeneration:
 
     def test_returns_none_when_budget_exceeded(self, tmp_db_path, sample_resume_data):
         """generate_resume_single returns None when cost_gate returns False."""
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import generate_resume_single
 
@@ -559,7 +589,7 @@ class TestSinglePassGeneration:
         conn = __import__("sqlite3").connect(tmp_db_path)
 
         # Exhaust the budget by inserting costs exceeding cap (current-month timestamp)
-        now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+        now_ts = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z")
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -583,7 +613,9 @@ class TestSinglePassGeneration:
 
         assert result is None, "Expected None when budget exceeded"
 
-    def test_calls_call_claude_with_resume_generation_purpose(self, tmp_db_path, sample_resume_data):
+    def test_calls_call_claude_with_resume_generation_purpose(
+        self, tmp_db_path, sample_resume_data
+    ):
         """generate_resume_single calls call_claude with purpose='resume_generation'."""
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import generate_resume_single
@@ -626,13 +658,16 @@ class TestSinglePassGeneration:
         assert mock_call.called, "call_claude was not called"
         call_kwargs = mock_call.call_args
         # purpose should be 'resume_generation'
-        actual_purpose = call_kwargs[1].get("purpose") or call_kwargs[0][7] if call_kwargs[0] else None
+        actual_purpose = (
+            call_kwargs[1].get("purpose") or call_kwargs[0][7] if call_kwargs[0] else None
+        )
         if actual_purpose is None:
             # Try keyword access
             actual_purpose = call_kwargs.kwargs.get("purpose")
         assert actual_purpose == "resume_generation", (
             f"Expected purpose='resume_generation', got: {actual_purpose}"
         )
+
 
 class TestClosedWorldConstraint:
     """System prompt includes closed-world constraint."""
@@ -659,14 +694,17 @@ class TestClosedWorldConstraint:
 
         captured_system = {}
         with patch("job_finder.web.resume_generator.call_claude") as mock_call:
-            mock_call.return_value = ({
-                "name": "Jane",
-                "contact_line": "",
-                "summary": "test",
-                "skills": [],
-                "positions": [],
-                "education": [],
-            }, 0.01)
+            mock_call.return_value = (
+                {
+                    "name": "Jane",
+                    "contact_line": "",
+                    "summary": "test",
+                    "skills": [],
+                    "positions": [],
+                    "education": [],
+                },
+                0.01,
+            )
             generate_resume_single(job_row, sample_resume_data, conn, config)
             if mock_call.called:
                 captured_system["system"] = mock_call.call_args.kwargs.get("system") or (
@@ -691,12 +729,14 @@ class TestClosedWorldConstraint:
         for key in ["name", "summary", "skills", "positions"]:
             assert key in required, f"RESUME_SCHEMA missing required key: {key}"
 
+
 class TestGenerationHistoryTracking:
     """_generate_resume_background updates resume_generations status transitions."""
 
     def test_background_updates_status_to_done(self, tmp_db_path, sample_resume_data):
         """_generate_resume_background sets status='done' and doc_url on success."""
         import sqlite3 as _sqlite3
+
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
 
@@ -707,7 +747,13 @@ class TestGenerationHistoryTracking:
         conn.execute(
             "INSERT INTO resume_generations (job_id, generated_at, model, status, generation_type) "
             "VALUES (?, ?, ?, ?, ?)",
-            ("acme|senior-ds|remote", "2026-03-11T00:00:00", "claude-sonnet-4-6", "pending", "single"),
+            (
+                "acme|senior-ds|remote",
+                "2026-03-11T00:00:00",
+                "claude-sonnet-4-6",
+                "pending",
+                "single",
+            ),
         )
         conn.commit()
         gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -734,12 +780,22 @@ class TestGenerationHistoryTracking:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume_data):
-            with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
-                mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                with patch("job_finder.web.resume_generator.get_drive_service") as mock_svc:
-                    with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/doc/xyz"):
-                        _generate_resume_background(tmp_db_path, gen_id, job_row, sample_resume_data, config)
+        with (
+            patch(
+                "job_finder.web.resume_generator.generate_resume_single",
+                return_value=mock_resume_data,
+            ),
+            patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx,
+        ):
+            mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+            with patch("job_finder.web.resume_generator.get_drive_service") as mock_svc:
+                with patch(
+                    "job_finder.web.resume_generator.upload_to_drive",
+                    return_value="https://docs.google.com/doc/xyz",
+                ):
+                    _generate_resume_background(
+                        tmp_db_path, gen_id, job_row, sample_resume_data, config
+                    )
 
         verify_conn = _sqlite3.connect(tmp_db_path)
         row = verify_conn.execute(
@@ -753,6 +809,7 @@ class TestGenerationHistoryTracking:
     def test_background_sets_status_error_on_exception(self, tmp_db_path, sample_resume_data):
         """_generate_resume_background sets status='error' and error_msg on exception."""
         import sqlite3 as _sqlite3
+
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
 
@@ -762,7 +819,13 @@ class TestGenerationHistoryTracking:
         conn.execute(
             "INSERT INTO resume_generations (job_id, generated_at, model, status, generation_type) "
             "VALUES (?, ?, ?, ?, ?)",
-            ("acme|senior-ds|remote", "2026-03-11T00:00:00", "claude-sonnet-4-6", "pending", "single"),
+            (
+                "acme|senior-ds|remote",
+                "2026-03-11T00:00:00",
+                "claude-sonnet-4-6",
+                "pending",
+                "single",
+            ),
         )
         conn.commit()
         gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -780,7 +843,10 @@ class TestGenerationHistoryTracking:
             "drive": {"folder_id": "test-folder"},
         }
 
-        with patch("job_finder.web.resume_generator.generate_resume_single", side_effect=RuntimeError("Simulated failure")):
+        with patch(
+            "job_finder.web.resume_generator.generate_resume_single",
+            side_effect=RuntimeError("Simulated failure"),
+        ):
             _generate_resume_background(tmp_db_path, gen_id, job_row, sample_resume_data, config)
 
         verify_conn = _sqlite3.connect(tmp_db_path)
@@ -790,11 +856,14 @@ class TestGenerationHistoryTracking:
         verify_conn.close()
 
         assert row[0] == "error", f"Expected status='error', got: {row[0]}"
-        assert "Simulated failure" in row[1], f"Expected error_msg to contain error text, got: {row[1]}"
+        assert "Simulated failure" in row[1], (
+            f"Expected error_msg to contain error text, got: {row[1]}"
+        )
 
     def test_background_sets_error_when_budget_exceeded(self, tmp_db_path, sample_resume_data):
         """_generate_resume_background sets status='error' with budget msg when generate_resume_single returns None."""
         import sqlite3 as _sqlite3
+
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
 
@@ -804,7 +873,13 @@ class TestGenerationHistoryTracking:
         conn.execute(
             "INSERT INTO resume_generations (job_id, generated_at, model, status, generation_type) "
             "VALUES (?, ?, ?, ?, ?)",
-            ("acme|senior-ds|remote", "2026-03-11T00:00:00", "claude-sonnet-4-6", "pending", "single"),
+            (
+                "acme|senior-ds|remote",
+                "2026-03-11T00:00:00",
+                "claude-sonnet-4-6",
+                "pending",
+                "single",
+            ),
         )
         conn.commit()
         gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -834,9 +909,11 @@ class TestGenerationHistoryTracking:
         assert row[0] == "error", f"Expected status='error', got: {row[0]}"
         assert row[1] is not None, "Expected error_msg to be set"
 
+
 # =============================================================================
 # Task 2 Tests: resume blueprint routes (POST /generate, GET /status)
 # =============================================================================
+
 
 class TestResumeRoutes:
     """Resume blueprint: generate and status polling routes."""
@@ -846,8 +923,8 @@ class TestResumeRoutes:
         """Create test app with resume blueprint registered and a Sonnet-scored job."""
         import sqlite3 as _sqlite3
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -924,8 +1001,8 @@ class TestResumeRoutes:
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -983,7 +1060,13 @@ class TestResumeRoutes:
         conn.execute(
             "INSERT INTO resume_generations (job_id, generated_at, model, status, doc_url) "
             "VALUES (?, ?, ?, ?, ?)",
-            (dedup_key, "2026-03-11T00:00:00", "claude-sonnet-4-6", "done", "https://docs.google.com/doc/xyz"),
+            (
+                dedup_key,
+                "2026-03-11T00:00:00",
+                "claude-sonnet-4-6",
+                "done",
+                "https://docs.google.com/doc/xyz",
+            ),
         )
         conn.commit()
         gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -1000,15 +1083,17 @@ class TestResumeRoutes:
         )
         assert "hx-trigger" not in body, "Done template must NOT have hx-trigger (stops polling)"
 
-    def test_status_returns_generating_template_with_polling(self, app_with_resume_bp, tmp_db_path):
+    def test_status_returns_generating_template_with_polling(
+        self, app_with_resume_bp, tmp_db_path
+    ):
         """GET status returns generating template with hx-trigger when status='generating'."""
         import sqlite3 as _sqlite3
-        from datetime import datetime, timezone
+        from datetime import datetime
         from urllib.parse import quote
 
         app = app_with_resume_bp
         dedup_key = "acme|senior-ds|remote"
-        recent_ts = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        recent_ts = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
         conn = _sqlite3.connect(tmp_db_path)
         conn.execute(
@@ -1055,9 +1140,11 @@ class TestResumeRoutes:
         )
         assert "hx-trigger" not in body, "Error template must NOT have hx-trigger (stops polling)"
 
+
 # =============================================================================
 # Plan 03 Tests: Multi-version synthesis
 # =============================================================================
+
 
 class TestMultiVersionStrategySelection:
     """STRATEGY_POOL and _haiku_select_strategies behavior."""
@@ -1107,7 +1194,10 @@ class TestMultiVersionStrategySelection:
         }
 
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = ({"strategies": strategies_returned, "reasoning": "test"}, 0.001)
+            mock_call.return_value = (
+                {"strategies": strategies_returned, "reasoning": "test"},
+                0.001,
+            )
             result = _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
@@ -1140,7 +1230,10 @@ class TestMultiVersionStrategySelection:
         }
 
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-            mock_call.return_value = ({"strategies": STRATEGY_POOL[:3], "reasoning": "test"}, 0.001)
+            mock_call.return_value = (
+                {"strategies": STRATEGY_POOL[:3], "reasoning": "test"},
+                0.001,
+            )
             _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
@@ -1177,13 +1270,16 @@ class TestMultiVersionStrategySelection:
             "jd_full": "Looking for a data scientist.",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=Exception("API failure")):
+        with patch(
+            "job_finder.web.resume_multi_version.call_claude", side_effect=Exception("API failure")
+        ):
             result = _haiku_select_strategies(job_row, conn, config)
 
         conn.close()
         assert result == STRATEGY_POOL[:3], (
             f"Expected fallback to first 3 STRATEGY_POOL items, got: {result}"
         )
+
 
 class TestParallelVariantGeneration:
     """generate_resume_multi parallel ThreadPoolExecutor behavior."""
@@ -1205,10 +1301,11 @@ class TestParallelVariantGeneration:
             "education": [],
         }
 
-    def test_generate_resume_multi_calls_call_claude_multiple_times(self, tmp_db_path, sample_resume_data):
+    def test_generate_resume_multi_calls_call_claude_multiple_times(
+        self, tmp_db_path, sample_resume_data
+    ):
         """generate_resume_multi invokes call_claude for strategy + 3 variants + synthesis (5+ calls)."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import STRATEGY_POOL
@@ -1242,17 +1339,18 @@ class TestParallelVariantGeneration:
                 0.01,
             )
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+                generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Should be called: 1 (strategy) + 3 (variants) + 1 (synthesis) = 5 times
         assert mock_call.call_count >= 5, (
             f"Expected at least 5 call_claude invocations, got: {mock_call.call_count}"
         )
 
-    def test_generate_resume_multi_uses_different_strategies(self, tmp_db_path, sample_resume_data):
+    def test_generate_resume_multi_uses_different_strategies(
+        self, tmp_db_path, sample_resume_data
+    ):
         """Each parallel variant receives a different strategy directive in the system prompt."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, call, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import STRATEGY_POOL
@@ -1290,9 +1388,14 @@ class TestParallelVariantGeneration:
                 return ({"strategies": STRATEGY_POOL[:3], "reasoning": "ok"}, 0.001)
             return (sample_resume, 0.01)
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.call_claude",
+                side_effect=capturing_call_claude,
+            ),
+            patch("job_finder.web.resume_multi_version.cost_gate", return_value=True),
+        ):
+            generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # Filter out strategy-selection and synthesis system prompts; keep variant generation prompts
         variant_prompts = [p for p in system_prompts if "STRATEGY EMPHASIS" in p]
@@ -1304,13 +1407,16 @@ class TestParallelVariantGeneration:
             "Each variant should use a different strategy (duplicate system prompts found)"
         )
 
+
 class TestThreadSafety:
     """_generate_single_variant opens its own SQLite connection."""
 
-    def test_each_variant_thread_opens_own_sqlite_connection(self, tmp_db_path, sample_resume_data):
+    def test_each_variant_thread_opens_own_sqlite_connection(
+        self, tmp_db_path, sample_resume_data
+    ):
         """_generate_single_variant opens its own sqlite3.connect() (not shared conn)."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_multi_version import _generate_single_variant
@@ -1347,17 +1453,21 @@ class TestThreadSafety:
             connect_calls.append(path)
             return original_connect(path, **kwargs)
 
-        with patch("job_finder.web.resume_multi_version.sqlite3.connect", side_effect=tracking_connect):
-            with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
-                mock_call.return_value = (sample_resume, 0.01)
-                with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                    _generate_single_variant(
-                        tmp_db_path,
-                        job_row,
-                        sample_resume_data,
-                        "impact_focused",
-                        config,
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.sqlite3.connect", side_effect=tracking_connect
+            ),
+            patch("job_finder.web.resume_multi_version.call_claude") as mock_call,
+        ):
+            mock_call.return_value = (sample_resume, 0.01)
+            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
+                _generate_single_variant(
+                    tmp_db_path,
+                    job_row,
+                    sample_resume_data,
+                    "impact_focused",
+                    config,
+                )
 
         assert len(connect_calls) >= 1, (
             "_generate_single_variant must open its own sqlite3 connection"
@@ -1365,6 +1475,7 @@ class TestThreadSafety:
         assert tmp_db_path in connect_calls, (
             f"Expected connection to {tmp_db_path}, got connections to: {connect_calls}"
         )
+
 
 class TestPartialFailure:
     """Partial failure: 1 variant fails, synthesis uses remaining 2."""
@@ -1379,10 +1490,11 @@ class TestPartialFailure:
             "education": [],
         }
 
-    def test_partial_failure_still_synthesizes_remaining_variants(self, tmp_db_path, sample_resume_data):
+    def test_partial_failure_still_synthesizes_remaining_variants(
+        self, tmp_db_path, sample_resume_data
+    ):
         """When 1 of 3 variants fails, synthesis runs with the 2 remaining variants."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import STRATEGY_POOL
@@ -1417,18 +1529,25 @@ class TestPartialFailure:
                 raise RuntimeError("Variant 1 failed")
             return self._make_sample_resume(suffix=f"_{strategy}")
 
-        with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=mock_generate_variant):
-            with patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat:
-                mock_strat.return_value = STRATEGY_POOL[:3]
-                with patch("job_finder.web.resume_multi_version._synthesize_variants") as mock_synth:
-                    mock_synth.return_value = sample_resume
-                    result = generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+        with (
+            patch(
+                "job_finder.web.resume_multi_version._generate_single_variant",
+                side_effect=mock_generate_variant,
+            ),
+            patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat,
+        ):
+            mock_strat.return_value = STRATEGY_POOL[:3]
+            with patch("job_finder.web.resume_multi_version._synthesize_variants") as mock_synth:
+                mock_synth.return_value = sample_resume
+                result = generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
 
         # _synthesize_variants should have been called with 2 variants (not 3)
         assert mock_synth.called, "_synthesize_variants must be called even with partial failure"
         synth_call_args = mock_synth.call_args
         # First positional arg after db_path is variants list
-        variants_arg = synth_call_args[0][1] if synth_call_args[0] else synth_call_args.kwargs.get("variants")
+        variants_arg = (
+            synth_call_args[0][1] if synth_call_args[0] else synth_call_args.kwargs.get("variants")
+        )
         assert variants_arg is not None, "variants argument not passed to _synthesize_variants"
         assert len(variants_arg) == 2, (
             f"Expected 2 variants passed to synthesis (1 failed), got: {len(variants_arg)}"
@@ -1437,7 +1556,7 @@ class TestPartialFailure:
 
     def test_total_failure_raises_runtime_error(self, tmp_db_path, sample_resume_data):
         """When all 3 variants fail, generate_resume_multi raises RuntimeError."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import STRATEGY_POOL
@@ -1463,19 +1582,24 @@ class TestPartialFailure:
             "classification": "apply",
         }
 
-        with patch("job_finder.web.resume_multi_version._generate_single_variant", side_effect=RuntimeError("all fail")):
-            with patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat:
-                mock_strat.return_value = STRATEGY_POOL[:3]
-                with pytest.raises(RuntimeError, match="All resume variants failed"):
-                    generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+        with (
+            patch(
+                "job_finder.web.resume_multi_version._generate_single_variant",
+                side_effect=RuntimeError("all fail"),
+            ),
+            patch("job_finder.web.resume_multi_version._haiku_select_strategies") as mock_strat,
+        ):
+            mock_strat.return_value = STRATEGY_POOL[:3]
+            with pytest.raises(RuntimeError, match="All resume variants failed"):
+                generate_resume_multi(tmp_db_path, job_row, sample_resume_data, config)
+
 
 class TestSynthesisPass:
     """_synthesize_variants merges variants into a RESUME_SCHEMA-conforming dict."""
 
     def test_synthesize_variants_returns_resume_schema_dict(self, tmp_db_path):
         """_synthesize_variants returns a dict with all RESUME_SCHEMA required keys."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import RESUME_SCHEMA
@@ -1527,16 +1651,17 @@ class TestSynthesisPass:
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (expected_result, 0.05)
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                                    result = _synthesize_variants(tmp_db_path, variants, job_row, config)
+                result = _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         required_keys = RESUME_SCHEMA.get("required", [])
         for key in required_keys:
             assert key in result, f"Synthesized resume missing required RESUME_SCHEMA key: {key}"
 
-    def test_synthesize_variants_calls_call_claude_with_resume_synthesis_purpose(self, tmp_db_path):
+    def test_synthesize_variants_calls_call_claude_with_resume_synthesis_purpose(
+        self, tmp_db_path
+    ):
         """_synthesize_variants calls call_claude with purpose='resume_synthesis'."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_multi_version import _synthesize_variants
@@ -1579,7 +1704,7 @@ class TestSynthesisPass:
         with patch("job_finder.web.resume_multi_version.call_claude") as mock_call:
             mock_call.return_value = (synth_result, 0.05)
             with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+                _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         assert mock_call.called, "call_claude not called in _synthesize_variants"
         purpose = mock_call.call_args.kwargs.get("purpose") or mock_call.call_args[0][7]
@@ -1589,8 +1714,7 @@ class TestSynthesisPass:
 
     def test_synthesize_variants_passes_all_variants_to_call_claude(self, tmp_db_path):
         """_synthesize_variants includes all variant content in the user message."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_multi_version import _synthesize_variants
@@ -1645,9 +1769,14 @@ class TestSynthesisPass:
             captured_messages["messages"] = kwargs.get("messages", [])
             return (synth_result, 0.05)
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                                    _synthesize_variants(tmp_db_path, variants, job_row, config)
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.call_claude",
+                side_effect=capturing_call_claude,
+            ),
+            patch("job_finder.web.resume_multi_version.cost_gate", return_value=True),
+        ):
+            _synthesize_variants(tmp_db_path, variants, job_row, config)
 
         messages = captured_messages.get("messages", [])
         assert messages, "No messages passed to call_claude from _synthesize_variants"
@@ -1658,6 +1787,7 @@ class TestSynthesisPass:
         assert "UNIQUE_VARIANT_2_SUMMARY" in user_content, (
             "Variant 2 content not included in synthesis prompt"
         )
+
 
 class TestScoreThresholdDispatch:
     """_generate_resume_background dispatches single vs multi based on classification.
@@ -1670,7 +1800,7 @@ class TestScoreThresholdDispatch:
     def test_dispatches_multi_when_classification_apply(self, tmp_db_path, sample_resume_data):
         """_generate_resume_background calls generate_resume_multi when classification='apply'."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
@@ -1711,21 +1841,32 @@ class TestScoreThresholdDispatch:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_multi_version.generate_resume_multi", return_value=mock_resume) as mock_multi:
+        with patch(
+            "job_finder.web.resume_multi_version.generate_resume_multi", return_value=mock_resume
+        ) as mock_multi:
             with patch("job_finder.web.resume_generator.generate_resume_single") as mock_single:
                 with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                     mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
                     with patch("job_finder.web.resume_generator.get_drive_service"):
-                        with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/xyz"):
-                            _generate_resume_background(tmp_db_path, gen_id, job_row, sample_resume_data, config)
+                        with patch(
+                            "job_finder.web.resume_generator.upload_to_drive",
+                            return_value="https://docs.google.com/xyz",
+                        ):
+                            _generate_resume_background(
+                                tmp_db_path, gen_id, job_row, sample_resume_data, config
+                            )
 
-        assert mock_multi.called, "generate_resume_multi should be called for classification='apply'"
-        assert not mock_single.called, "generate_resume_single should NOT be called for apply-classified job"
+        assert mock_multi.called, (
+            "generate_resume_multi should be called for classification='apply'"
+        )
+        assert not mock_single.called, (
+            "generate_resume_single should NOT be called for apply-classified job"
+        )
 
     def test_dispatches_single_when_classification_consider(self, tmp_db_path, sample_resume_data):
         """_generate_resume_background calls generate_resume_single when classification != 'apply'."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
@@ -1767,20 +1908,33 @@ class TestScoreThresholdDispatch:
         }
 
         with patch("job_finder.web.resume_multi_version.generate_resume_multi") as mock_multi:
-            with patch("job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume) as mock_single:
+            with patch(
+                "job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume
+            ) as mock_single:
                 with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
                     mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
                     with patch("job_finder.web.resume_generator.get_drive_service"):
-                        with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/xyz"):
-                            _generate_resume_background(tmp_db_path, gen_id, job_row, sample_resume_data, config)
+                        with patch(
+                            "job_finder.web.resume_generator.upload_to_drive",
+                            return_value="https://docs.google.com/xyz",
+                        ):
+                            _generate_resume_background(
+                                tmp_db_path, gen_id, job_row, sample_resume_data, config
+                            )
 
-        assert mock_single.called, "generate_resume_single should be called for classification='consider'"
-        assert not mock_multi.called, "generate_resume_multi should NOT be called for consider-classified job"
+        assert mock_single.called, (
+            "generate_resume_single should be called for classification='consider'"
+        )
+        assert not mock_multi.called, (
+            "generate_resume_multi should NOT be called for consider-classified job"
+        )
 
-    def test_generation_type_set_to_multi_when_above_threshold(self, tmp_db_path, sample_resume_data):
+    def test_generation_type_set_to_multi_when_above_threshold(
+        self, tmp_db_path, sample_resume_data
+    ):
         """_generate_resume_background sets generation_type='multi' in DB for high-score job."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.db_migrate import run_migrations
         from job_finder.web.resume_generator import _generate_resume_background
@@ -1821,12 +1975,24 @@ class TestScoreThresholdDispatch:
             "education": [],
         }
 
-        with patch("job_finder.web.resume_multi_version.generate_resume_multi", return_value=mock_resume):
-            with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
-                mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                with patch("job_finder.web.resume_generator.get_drive_service"):
-                    with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/xyz"):
-                        _generate_resume_background(tmp_db_path, gen_id, job_row, sample_resume_data, config)
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.generate_resume_multi",
+                return_value=mock_resume,
+            ),
+            patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx,
+        ):
+            mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+            with (
+                patch("job_finder.web.resume_generator.get_drive_service"),
+                patch(
+                    "job_finder.web.resume_generator.upload_to_drive",
+                    return_value="https://docs.google.com/xyz",
+                ),
+            ):
+                _generate_resume_background(
+                    tmp_db_path, gen_id, job_row, sample_resume_data, config
+                )
 
         verify_conn = _sqlite3.connect(tmp_db_path)
         row = verify_conn.execute(
@@ -1836,9 +2002,11 @@ class TestScoreThresholdDispatch:
 
         assert row[0] == "multi", f"Expected generation_type='multi', got: {row[0]}"
 
+
 # =============================================================================
 # Plan 04 Tests: Quick Apply route
 # =============================================================================
+
 
 class TestQuickApply:
     """POST /jobs/<key>/quick-apply -- generate resume, open tabs, set status applied."""
@@ -1848,8 +2016,8 @@ class TestQuickApply:
         """Create test app with a job that already has a done resume."""
         import sqlite3 as _sqlite3
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -1933,7 +2101,9 @@ class TestQuickApply:
             "Response should contain the existing doc URL"
         )
 
-    def test_quick_apply_with_existing_resume_sets_status_applied(self, app_with_existing_resume, tmp_db_path):
+    def test_quick_apply_with_existing_resume_sets_status_applied(
+        self, app_with_existing_resume, tmp_db_path
+    ):
         """POST /quick-apply sets pipeline_status to 'applied'."""
         import sqlite3 as _sqlite3
         from urllib.parse import quote
@@ -1958,8 +2128,8 @@ class TestQuickApply:
         from unittest.mock import patch
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
         conn = _sqlite3.connect(tmp_db_path)
@@ -2009,14 +2179,23 @@ class TestQuickApply:
             "education": [],
         }
 
-        with patch("job_finder.web.blueprints.resume.generate_resume_single", return_value=mock_resume):
-            with patch("job_finder.web.blueprints.resume.build_resume_docx") as mock_docx:
-                mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                with patch("job_finder.web.blueprints.resume.get_drive_service"):
-                    with patch("job_finder.web.blueprints.resume.upload_to_drive", return_value="https://docs.google.com/doc/new456"):
-                        with patch("job_finder.web.blueprints.resume.load_profile", return_value={}):
-                            with app.test_client() as client:
-                                resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
+        with (
+            patch(
+                "job_finder.web.blueprints.resume.generate_resume_single", return_value=mock_resume
+            ),
+            patch("job_finder.web.blueprints.resume.build_resume_docx") as mock_docx,
+        ):
+            mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+            with (
+                patch("job_finder.web.blueprints.resume.get_drive_service"),
+                patch(
+                    "job_finder.web.blueprints.resume.upload_to_drive",
+                    return_value="https://docs.google.com/doc/new456",
+                ),
+                patch("job_finder.web.blueprints.resume.load_profile", return_value={}),
+                app.test_client() as client,
+            ):
+                resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
 
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
         body = resp.data.decode()
@@ -2034,8 +2213,8 @@ class TestQuickApply:
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -2082,8 +2261,8 @@ class TestQuickApply:
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -2100,8 +2279,8 @@ class TestQuickApply:
                 "Staff Analyst",
                 "NoURLs Corp",
                 "Remote",
-                '[]',
-                '[]',
+                "[]",
+                "[]",
                 "",
                 "2026-03-01T00:00:00",
                 "2026-03-11T00:00:00",
@@ -2142,9 +2321,8 @@ class TestQuickApply:
             resp = client.post(f"/jobs/{quote('nourls|job|remote', safe='')}/quick-apply")
 
         body = resp.data.decode()
-        assert "google.com/search" in body, (
-            "Response should contain Google search fallback URL"
-        )
+        assert "google.com/search" in body, "Response should contain Google search fallback URL"
+
 
 class TestQuickApplyResponse:
     """_quick_apply_response.html contains expected JS tab-opening and confirmation links."""
@@ -2154,8 +2332,8 @@ class TestQuickApplyResponse:
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -2221,8 +2399,8 @@ class TestQuickApplyResponse:
         import sqlite3 as _sqlite3
         from urllib.parse import quote
 
-        from job_finder.web.db_migrate import run_migrations
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -2283,16 +2461,19 @@ class TestQuickApplyResponse:
         assert "window.open" in body, "Response must contain window.open for tab opening"
         assert "linkedin.com/jobs/9999" in body, "Response must contain app_url in window.open"
 
+
 # =============================================================================
 # Phase 08 Plan 01 Tests: Interview prep trigger helper and Quick Apply wiring
 # =============================================================================
+
 
 class TestInterviewPrepTrigger:
     """Tests for trigger_interview_prep_if_applied shared helper and Quick Apply wiring."""
 
     def test_helper_spawns_thread_when_applied_and_not_testing(self):
         """trigger_interview_prep_if_applied spawns a daemon thread when new_status='applied' and testing=False."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from job_finder.web.blueprints import trigger_interview_prep_if_applied
 
         with patch("job_finder.web.blueprints.threading") as mock_threading:
@@ -2313,6 +2494,7 @@ class TestInterviewPrepTrigger:
     def test_helper_is_noop_when_status_not_applied(self):
         """trigger_interview_prep_if_applied does not spawn thread when new_status != 'applied'."""
         from unittest.mock import patch
+
         from job_finder.web.blueprints import trigger_interview_prep_if_applied
 
         with patch("job_finder.web.blueprints.threading") as mock_threading:
@@ -2329,6 +2511,7 @@ class TestInterviewPrepTrigger:
     def test_helper_is_noop_when_testing_is_true(self):
         """trigger_interview_prep_if_applied does not spawn thread when testing=True."""
         from unittest.mock import patch
+
         from job_finder.web.blueprints import trigger_interview_prep_if_applied
 
         with patch("job_finder.web.blueprints.threading") as mock_threading:
@@ -2347,6 +2530,7 @@ class TestInterviewPrepTrigger:
         import sqlite3 as _sqlite3
         from unittest.mock import patch
         from urllib.parse import quote
+
         from job_finder.web import create_app
         from job_finder.web.db_migrate import run_migrations
 
@@ -2370,7 +2554,10 @@ class TestInterviewPrepTrigger:
                 "1234",
                 "2026-03-01T00:00:00",
                 "2026-03-11T00:00:00",
-                8.5, "{}", "reviewing", "reviewing",
+                8.5,
+                "{}",
+                "reviewing",
+                "reviewing",
                 "Full job description text here.",
                 "apply",
                 '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
@@ -2380,9 +2567,12 @@ class TestInterviewPrepTrigger:
             "INSERT INTO resume_generations (job_id, generated_at, model, status, doc_url, generation_type) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                "acme|senior-ds|remote", "2026-03-10T00:00:00Z",
-                "claude-sonnet-4-6", "done",
-                "https://docs.google.com/doc/existing123", "single",
+                "acme|senior-ds|remote",
+                "2026-03-10T00:00:00Z",
+                "claude-sonnet-4-6",
+                "done",
+                "https://docs.google.com/doc/existing123",
+                "single",
             ),
         )
         conn.commit()
@@ -2396,22 +2586,29 @@ class TestInterviewPrepTrigger:
         app = create_app(config=cfg)
         app.config["TESTING"] = True
 
-        with patch(
-            "job_finder.web.blueprints.resume.trigger_interview_prep_if_applied"
-        ) as mock_trigger:
-            with app.test_client() as client:
-                resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
+        with (
+            patch(
+                "job_finder.web.blueprints.resume.trigger_interview_prep_if_applied"
+            ) as mock_trigger,
+            app.test_client() as client,
+        ):
+            resp = client.post(f"/jobs/{quote('acme|senior-ds|remote', safe='')}/quick-apply")
 
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
         mock_trigger.assert_called_once()
         call_kwargs = mock_trigger.call_args
         # Verify dedup_key and new_status="applied" were passed
         args, kwargs = call_kwargs
-        assert args[0] == "acme|senior-ds|remote" or kwargs.get("dedup_key") == "acme|senior-ds|remote"
+        assert (
+            args[0] == "acme|senior-ds|remote"
+            or kwargs.get("dedup_key") == "acme|senior-ds|remote"
+        )
+
 
 # =============================================================================
 # Plan 04 Tests: Settings Resume & Drive section
 # =============================================================================
+
 
 class TestSettingsResumeFormat:
     """Settings page: Resume & Drive section saves and displays correctly."""
@@ -2420,6 +2617,7 @@ class TestSettingsResumeFormat:
     def settings_app(self, tmp_db_path, tmp_path):
         """Create test app with a real config.yaml that settings can read/write."""
         import yaml
+
         from job_finder.web import create_app
 
         config_path = str(tmp_path / "config.yaml")
@@ -2476,6 +2674,7 @@ class TestSettingsResumeFormat:
 
         # Override config path to point to our temp file
         import job_finder.web.blueprints.settings as settings_mod
+
         original_path = settings_mod._CONFIG_PATH
         settings_mod._CONFIG_PATH = config_path
 
@@ -2593,9 +2792,11 @@ class TestSettingsResumeFormat:
             "Settings page must have Resume & Drive section"
         )
 
+
 # =============================================================================
 # Task 1 (Phase 08-02) Tests: Preference injection into resume generation paths
 # =============================================================================
+
 
 class TestPreferenceInjection:
     """Accepted resume preferences from Drive feedback loop injected into Sonnet prompts."""
@@ -2675,14 +2876,23 @@ class TestPreferenceInjection:
     def test_single_pass_includes_preferences_when_accepted_prefs_exist(self, tmp_db_path):
         """generate_resume_single appends 'Candidate Writing Preferences' when accepted prefs exist."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
-        self._make_db_with_preferences(tmp_db_path, [
-            {"preference_text": "Use active voice in bullet points", "preference_type": "phrasing"},
-            {"preference_text": "Start bullets with strong action verbs", "preference_type": "phrasing"},
-        ])
+        self._make_db_with_preferences(
+            tmp_db_path,
+            [
+                {
+                    "preference_text": "Use active voice in bullet points",
+                    "preference_type": "phrasing",
+                },
+                {
+                    "preference_text": "Start bullets with strong action verbs",
+                    "preference_type": "phrasing",
+                },
+            ],
+        )
 
         conn = _sqlite3.connect(tmp_db_path)
         conn.row_factory = _sqlite3.Row
@@ -2703,14 +2913,18 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                generate_resume_single(
-                    self._make_job_row(),
-                    self._make_profile(),
-                    conn,
-                    self._make_config(),
-                )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+        ):
+            generate_resume_single(
+                self._make_job_row(),
+                self._make_profile(),
+                conn,
+                self._make_config(),
+            )
 
         conn.close()
 
@@ -2726,16 +2940,24 @@ class TestPreferenceInjection:
             "Expected second preference text in user_message"
         )
 
-    def test_single_pass_preferences_formatted_as_bullet_list_with_soft_guidelines(self, tmp_db_path):
+    def test_single_pass_preferences_formatted_as_bullet_list_with_soft_guidelines(
+        self, tmp_db_path
+    ):
         """Preferences are formatted as bullet list with 'soft guidelines' framing."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
-        self._make_db_with_preferences(tmp_db_path, [
-            {"preference_text": "Quantify all achievements with numbers", "preference_type": "content_addition"},
-        ])
+        self._make_db_with_preferences(
+            tmp_db_path,
+            [
+                {
+                    "preference_text": "Quantify all achievements with numbers",
+                    "preference_type": "content_addition",
+                },
+            ],
+        )
 
         conn = _sqlite3.connect(tmp_db_path)
         conn.row_factory = _sqlite3.Row
@@ -2756,14 +2978,18 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                generate_resume_single(
-                    self._make_job_row(),
-                    self._make_profile(),
-                    conn,
-                    self._make_config(),
-                )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+        ):
+            generate_resume_single(
+                self._make_job_row(),
+                self._make_profile(),
+                conn,
+                self._make_config(),
+            )
 
         conn.close()
 
@@ -2779,7 +3005,7 @@ class TestPreferenceInjection:
     def test_single_pass_no_preferences_section_when_table_empty(self, tmp_db_path):
         """generate_resume_single does NOT include preferences section when table is empty."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
@@ -2804,15 +3030,19 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    generate_resume_single(
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+        ):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                generate_resume_single(
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
@@ -2825,17 +3055,20 @@ class TestPreferenceInjection:
     def test_single_pass_excludes_preferences_with_applied_at_set(self, tmp_db_path):
         """Preferences with applied_at set are excluded from the prompt."""
         import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
-        self._make_db_with_preferences(tmp_db_path, [
-            {
-                "preference_text": "Already consumed preference",
-                "preference_type": "phrasing",
-                "applied_at": "2026-02-01T00:00:00",
-            },
-        ])
+        self._make_db_with_preferences(
+            tmp_db_path,
+            [
+                {
+                    "preference_text": "Already consumed preference",
+                    "preference_type": "phrasing",
+                    "applied_at": "2026-02-01T00:00:00",
+                },
+            ],
+        )
 
         conn = _sqlite3.connect(tmp_db_path)
         conn.row_factory = _sqlite3.Row
@@ -2856,15 +3089,19 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    generate_resume_single(
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+        ):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                generate_resume_single(
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
@@ -2879,15 +3116,20 @@ class TestPreferenceInjection:
 
     def test_variant_path_includes_preferences_when_accepted_prefs_exist(self, tmp_db_path):
         """_generate_single_variant appends 'Formatting Preferences' when accepted prefs exist."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import STRATEGY_POOL
         from job_finder.web.resume_multi_version import _generate_single_variant
 
-        self._make_db_with_preferences(tmp_db_path, [
-            {"preference_text": "Use metrics in every bullet", "preference_type": "content_addition"},
-        ])
+        self._make_db_with_preferences(
+            tmp_db_path,
+            [
+                {
+                    "preference_text": "Use metrics in every bullet",
+                    "preference_type": "content_addition",
+                },
+            ],
+        )
 
         captured_messages = []
 
@@ -2905,15 +3147,20 @@ class TestPreferenceInjection:
                 0.01,
             )
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                _generate_single_variant(
-                    tmp_db_path,
-                    self._make_job_row(),
-                    self._make_profile(),
-                    STRATEGY_POOL[0],
-                    self._make_config(),
-                )
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.call_claude",
+                side_effect=capturing_call_claude,
+            ),
+            patch("job_finder.web.resume_multi_version.cost_gate", return_value=True),
+        ):
+            _generate_single_variant(
+                tmp_db_path,
+                self._make_job_row(),
+                self._make_profile(),
+                STRATEGY_POOL[0],
+                self._make_config(),
+            )
 
         assert captured_messages, "call_claude was not called"
         user_message = captured_messages[0]["content"]
@@ -2924,15 +3171,18 @@ class TestPreferenceInjection:
             "Expected preference text in variant path user_message"
         )
 
+
 # ---------------------------------------------------------------------------
 # Style Guide injection tests (Phase 17-03)
 # ---------------------------------------------------------------------------
+
 
 class TestStyleGuideInjection:
     """Tests that style guide directives are injected into resume prompts."""
 
     def _make_job_row(self):
         from unittest.mock import MagicMock
+
         row = MagicMock()
         row.__getitem__ = lambda self, k: {
             "job_id": 1,
@@ -2942,7 +3192,7 @@ class TestStyleGuideInjection:
             "jd_full": "We need a data scientist with Python skills.",
             "platform": "linkedin",
             "url": "https://example.com/job/1",
-        }.get(k, None)
+        }.get(k)
         return row
 
     def _make_profile(self):
@@ -2966,7 +3216,9 @@ class TestStyleGuideInjection:
     def _make_db(self, tmp_db_path):
         """Set up DB with required tables but no preferences."""
         import sqlite3 as _sqlite3
+
         from job_finder.web.db_migrate import run_migrations
+
         run_migrations(tmp_db_path)
         conn = _sqlite3.connect(tmp_db_path)
         conn.row_factory = _sqlite3.Row
@@ -2987,8 +3239,7 @@ class TestStyleGuideInjection:
 
     def test_style_guide_directives_appear_in_generate_resume_single(self, tmp_db_path):
         """generate_resume_single includes style guide directives in Formatting Preferences."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
@@ -3007,15 +3258,19 @@ class TestStyleGuideInjection:
             "date_format": "MMM YYYY",
         }
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    generate_resume_single(
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+            patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide),
+        ):
+            generate_resume_single(
+                self._make_job_row(),
+                self._make_profile(),
+                conn,
+                self._make_config(),
+            )
 
         conn.close()
 
@@ -3028,8 +3283,7 @@ class TestStyleGuideInjection:
 
     def test_style_guide_absent_no_formatting_section_in_generate_resume_single(self, tmp_db_path):
         """generate_resume_single omits Formatting Preferences when style guide is empty and no accepted prefs."""
-        import sqlite3 as _sqlite3
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import generate_resume_single
 
@@ -3040,15 +3294,19 @@ class TestStyleGuideInjection:
             captured_messages.extend(kwargs.get("messages", []))
             return self._canned_resume_response()
 
-        with patch("job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
-                    generate_resume_single(
-                        self._make_job_row(),
-                        self._make_profile(),
-                        conn,
-                        self._make_config(),
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_generator.call_claude", side_effect=capturing_call_claude
+            ),
+            patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+        ):
+            with patch("job_finder.web.resume_style_guide.load_style_guide", return_value={}):
+                generate_resume_single(
+                    self._make_job_row(),
+                    self._make_profile(),
+                    conn,
+                    self._make_config(),
+                )
 
         conn.close()
 
@@ -3060,7 +3318,7 @@ class TestStyleGuideInjection:
 
     def test_style_guide_directives_appear_in_generate_single_variant(self, tmp_db_path):
         """_generate_single_variant includes style guide directives in Formatting Preferences."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from job_finder.web.resume_generator import STRATEGY_POOL
         from job_finder.web.resume_multi_version import _generate_single_variant
@@ -3079,16 +3337,21 @@ class TestStyleGuideInjection:
             "tone": "professional",
         }
 
-        with patch("job_finder.web.resume_multi_version.call_claude", side_effect=capturing_call_claude):
-            with patch("job_finder.web.resume_multi_version.cost_gate", return_value=True):
-                with patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide):
-                    _generate_single_variant(
-                        tmp_db_path,
-                        self._make_job_row(),
-                        self._make_profile(),
-                        STRATEGY_POOL[0],
-                        self._make_config(),
-                    )
+        with (
+            patch(
+                "job_finder.web.resume_multi_version.call_claude",
+                side_effect=capturing_call_claude,
+            ),
+            patch("job_finder.web.resume_multi_version.cost_gate", return_value=True),
+            patch("job_finder.web.resume_style_guide.load_style_guide", return_value=guide),
+        ):
+            _generate_single_variant(
+                tmp_db_path,
+                self._make_job_row(),
+                self._make_profile(),
+                STRATEGY_POOL[0],
+                self._make_config(),
+            )
 
         assert captured_messages, "call_claude was not called"
         user_message = captured_messages[0]["content"]
@@ -3097,6 +3360,7 @@ class TestStyleGuideInjection:
         )
         assert "bullets" in user_message, "Expected bullet_style value in variant prompt"
 
+
 class TestResumeGuidelines:
     """_RESUME_GUIDELINES constant exists and is integrated into _SYSTEM_PROMPT."""
 
@@ -3104,9 +3368,7 @@ class TestResumeGuidelines:
         """_RESUME_GUIDELINES is importable from resume_generator and is a string."""
         from job_finder.web.resume_generator import _RESUME_GUIDELINES
 
-        assert isinstance(_RESUME_GUIDELINES, str), (
-            "_RESUME_GUIDELINES must be a string"
-        )
+        assert isinstance(_RESUME_GUIDELINES, str), "_RESUME_GUIDELINES must be a string"
 
     def test_guidelines_constant_min_length(self):
         """_RESUME_GUIDELINES is at least 500 characters (substantive content)."""
@@ -3129,7 +3391,9 @@ class TestResumeGuidelines:
         """_RESUME_GUIDELINES contains bullet writing formula (action verb)."""
         from job_finder.web.resume_generator import _RESUME_GUIDELINES
 
-        assert "action verb" in _RESUME_GUIDELINES.lower() or "Action Verb" in _RESUME_GUIDELINES, (
+        assert (
+            "action verb" in _RESUME_GUIDELINES.lower() or "Action Verb" in _RESUME_GUIDELINES
+        ), (
             "Expected bullet formula language ('action verb' or 'Action Verb') in _RESUME_GUIDELINES"
         )
 
@@ -3146,9 +3410,7 @@ class TestResumeGuidelines:
         from job_finder.web.resume_generator import _RESUME_GUIDELINES
 
         lower = _RESUME_GUIDELINES.lower()
-        assert "em dash" in lower, (
-            "Expected typography rule ('em dash') in _RESUME_GUIDELINES"
-        )
+        assert "em dash" in lower, "Expected typography rule ('em dash') in _RESUME_GUIDELINES"
 
     def test_guidelines_contains_jd_mirroring_language(self):
         """_RESUME_GUIDELINES contains JD mirroring language."""
@@ -3193,9 +3455,11 @@ class TestResumeGuidelines:
             "Original 'CRITICAL CONSTRAINT' language must be retained in _SYSTEM_PROMPT"
         )
 
+
 # =============================================================================
 # Phase 33 Plan 01 Tests: Validation badge display in resume history
 # =============================================================================
+
 
 class TestValidationBadge:
     """Resume history entries show colored validation badge from validation_report JSON."""
@@ -3204,8 +3468,9 @@ class TestValidationBadge:
     def badge_app(self, tmp_db_path):
         """Create test app with a Sonnet-scored job and resume_generations fixture data."""
         import sqlite3 as _sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -3247,10 +3512,16 @@ class TestValidationBadge:
         app.config["TESTING"] = True
         return app, tmp_db_path
 
-    def _insert_resume_gen(self, db_path, validation_report=None, status="done",
-                           doc_url="https://docs.google.com/doc/test"):
+    def _insert_resume_gen(
+        self,
+        db_path,
+        validation_report=None,
+        status="done",
+        doc_url="https://docs.google.com/doc/test",
+    ):
         """Insert a resume_generations row for badge|test|job."""
         import sqlite3 as _sqlite3
+
         conn = _sqlite3.connect(db_path)
         conn.execute(
             "INSERT INTO resume_generations "
@@ -3271,8 +3542,9 @@ class TestValidationBadge:
 
     def _get_expand_response(self, app, dedup_key="badge|test|job"):
         """GET the expand fragment for a job key."""
-        from urllib.parse import quote
         from unittest.mock import patch
+        from urllib.parse import quote
+
         with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value={"ok": True}):
             with app.test_client() as client:
                 resp = client.get(
@@ -3341,7 +3613,9 @@ class TestValidationBadge:
         # Should NOT contain any badge color classes from validation
         assert "&#10003;" not in body, "Should not render checkmark when validation_report is null"
         assert "&#10007;" not in body, "Should not render cross when validation_report is null"
-        assert "&#9888;" not in body, "Should not render warning triangle when validation_report is null"
+        assert "&#9888;" not in body, (
+            "Should not render warning triangle when validation_report is null"
+        )
 
     def test_violation_list_renders(self, badge_app):
         """Expand renders violation list with category:description format and correct color."""
@@ -3360,9 +3634,11 @@ class TestValidationBadge:
         )
         assert "text-amber-400" in body, "Expected amber color for warning violation"
 
+
 # =============================================================================
 # Phase 33 Plan 04 Tests: Validation badge in status polling done fragment
 # =============================================================================
+
 
 class TestStatusPollingBadge:
     """Status polling done fragment shows colored validation badge from validation_report JSON."""
@@ -3371,8 +3647,9 @@ class TestStatusPollingBadge:
     def polling_app(self, tmp_db_path):
         """Create test app with a Sonnet-scored job and resume_generations fixture data."""
         import sqlite3 as _sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
         from job_finder.web import create_app
+        from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
 
@@ -3414,10 +3691,16 @@ class TestStatusPollingBadge:
         app.config["TESTING"] = True
         return app, tmp_db_path
 
-    def _insert_resume_gen(self, db_path, validation_report=None, status="done",
-                           doc_url="https://docs.google.com/doc/test"):
+    def _insert_resume_gen(
+        self,
+        db_path,
+        validation_report=None,
+        status="done",
+        doc_url="https://docs.google.com/doc/test",
+    ):
         """Insert a resume_generations row for polling|test|job and return gen_id."""
         import sqlite3 as _sqlite3
+
         conn = _sqlite3.connect(db_path)
         cursor = conn.execute(
             "INSERT INTO resume_generations "
@@ -3441,6 +3724,7 @@ class TestStatusPollingBadge:
     def _get_status_response(self, app, db_path, validation_report=None):
         """Insert done resume_gen and GET the status polling fragment."""
         from urllib.parse import quote
+
         gen_id = self._insert_resume_gen(db_path, validation_report=validation_report)
         dedup_key = "polling|test|job"
         with app.test_client() as client:
@@ -3451,7 +3735,8 @@ class TestStatusPollingBadge:
         """Status polling done fragment shows emerald-400 Passed badge when validation passes."""
         app, db_path = polling_app
         resp = self._get_status_response(
-            app, db_path,
+            app,
+            db_path,
             validation_report='{"passed": true, "violations": [], "fix_summary": ""}',
         )
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
@@ -3464,7 +3749,8 @@ class TestStatusPollingBadge:
         """Status polling done fragment shows amber-400 warnings badge when warnings present."""
         app, db_path = polling_app
         resp = self._get_status_response(
-            app, db_path,
+            app,
+            db_path,
             validation_report='{"passed": true, "violations": [{"severity": "warning", "category": "style", "description": "test warning"}], "fix_summary": ""}',
         )
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
@@ -3476,7 +3762,8 @@ class TestStatusPollingBadge:
         """Status polling done fragment shows red-400 Failed badge when errors present."""
         app, db_path = polling_app
         resp = self._get_status_response(
-            app, db_path,
+            app,
+            db_path,
             validation_report='{"passed": false, "violations": [{"severity": "error", "category": "content", "description": "test error"}], "fix_summary": ""}',
         )
         assert resp.status_code == 200, f"Expected 200, got: {resp.status_code}"
@@ -3492,4 +3779,6 @@ class TestStatusPollingBadge:
         body = resp.data.decode()
         assert "&#10003;" not in body, "Should not render checkmark when validation_report is null"
         assert "&#10007;" not in body, "Should not render cross when validation_report is null"
-        assert "&#9888;" not in body, "Should not render warning triangle when validation_report is null"
+        assert "&#9888;" not in body, (
+            "Should not render warning triangle when validation_report is null"
+        )

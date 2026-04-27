@@ -10,7 +10,7 @@ Design constraints:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from job_finder.web.db_helpers import standalone_connection
 
@@ -51,6 +51,7 @@ ACTION_SCHEDULED_STALENESS = "scheduled_staleness"
 # Core helper
 # ---------------------------------------------------------------------------
 
+
 def log_activity(
     db_path: str,
     action: str,
@@ -70,7 +71,7 @@ def log_activity(
         metadata: Optional dict with additional context. Stored as JSON.
     """
     try:
-        occurred_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        occurred_at = datetime.now(UTC).replace(tzinfo=None).isoformat()
         metadata_json = json.dumps(metadata or {})
 
         with standalone_connection(db_path) as conn:

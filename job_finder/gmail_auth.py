@@ -126,8 +126,8 @@ def _ensure_drive_folder(creds, config_path: str = "config.yaml") -> None:
     if config is None:
         # config.yaml not found — instruct user to add manually
         print(f"Could not find {config_path}. Add this to your config.yaml manually:")
-        print(f"  drive:")
-        print(f"    folder_id: \"{folder_id}\"")
+        print("  drive:")
+        print(f'    folder_id: "{folder_id}"')
         return
 
     # Save folder_id back to config.yaml
@@ -153,8 +153,7 @@ def get_credentials(token_path: str = TOKEN_PATH) -> Credentials:
     """
     if not Path(token_path).exists():
         raise AuthenticationError(
-            f"Token file not found: {token_path}. "
-            "Run: python -m job_finder.gmail_auth"
+            f"Token file not found: {token_path}. Run: python -m job_finder.gmail_auth"
         )
 
     creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
@@ -170,13 +169,11 @@ def get_credentials(token_path: str = TOKEN_PATH) -> Credentials:
             return creds
         except Exception as exc:
             raise AuthenticationError(
-                f"Token refresh failed: {exc}. "
-                "Run: python -m job_finder.gmail_auth"
+                f"Token refresh failed: {exc}. Run: python -m job_finder.gmail_auth"
             ) from exc
 
     raise AuthenticationError(
-        "Token is invalid and cannot be refreshed. "
-        "Run: python -m job_finder.gmail_auth"
+        "Token is invalid and cannot be refreshed. Run: python -m job_finder.gmail_auth"
     )
 
 
@@ -223,6 +220,7 @@ def authenticate():
 
             print("Opening browser for authentication...")
             from google_auth_oauthlib.flow import InstalledAppFlow
+
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
 

@@ -6,7 +6,6 @@ Google Jobs aggregates from LinkedIn, Indeed, Glassdoor, ZipRecruiter, etc.
 
 import logging
 import time
-from typing import Optional
 
 import requests
 
@@ -71,7 +70,10 @@ class SerpAPISource:
                 data = resp.json()
             except Exception as e:
                 logger.warning(
-                    "SerpAPI search failed for '%s' (page %d): %s", query, page, e,
+                    "SerpAPI search failed for '%s' (page %d): %s",
+                    query,
+                    page,
+                    e,
                 )
                 break
 
@@ -94,11 +96,14 @@ class SerpAPISource:
 
         logger.info(
             "%s '%s': %d jobs across %d page(s)",
-            self.source_name, query, len(all_jobs), min(page + 1, self.max_pages),
+            self.source_name,
+            query,
+            len(all_jobs),
+            min(page + 1, self.max_pages),
         )
         return all_jobs
 
-    def _parse_result(self, result: dict) -> Optional[Job]:
+    def _parse_result(self, result: dict) -> Job | None:
         """Parse a single SerpAPI Google Jobs result into a Job."""
         from job_finder.web.ats_company import classify_company_name
 
@@ -113,7 +118,9 @@ class SerpAPISource:
         if decision.action == "reject":
             logger.info(
                 "SerpAPI: skipping '%s' — company '%s' rejected (%s)",
-                title, company[:60], decision.reason,
+                title,
+                company[:60],
+                decision.reason,
             )
             return None
         # Keep the original company name — jobs.company is the raw source-of-truth.
@@ -128,10 +135,6 @@ class SerpAPISource:
             items = highlight.get("items", [])
             description_parts.extend(items)
         description = "\n".join(description_parts) if description_parts else None
-
-        # Parse detected extensions for posting date
-        extensions = result.get("detected_extensions", {})
-        posted_at = extensions.get("posted_at", "")
 
         # Try to get a direct apply link
         apply_links = result.get("apply_options", [])
@@ -151,7 +154,7 @@ class SerpAPISource:
             description=description,
         )
 
-    def _extract_salary(self, result: dict) -> tuple[Optional[int], Optional[int]]:
+    def _extract_salary(self, result: dict) -> tuple[int | None, int | None]:
         """Extract salary from SerpAPI result extensions."""
         ext = result.get("detected_extensions", {})
         salary = ext.get("salary", "")

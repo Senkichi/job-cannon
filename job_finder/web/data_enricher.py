@@ -33,15 +33,24 @@ Exports:
 
 import json
 import logging
-from typing import Optional, Any
+from typing import Any
 
 from job_finder.web.claude_client import cost_gate
-from job_finder.web.enrichment_tiers import (
-    fetch_direct_jd, query_ats_api, scrape_careers,
-    extract_with_sonnet, search_serpapi, search_duckduckgo, extract_with_haiku,
-    search_ddg_web, fetch_ddg_jds,
+from job_finder.web.company_enricher import (
+    enrich_company_info,  # noqa: F401 (re-exported for callers)
 )
-from job_finder.web.company_enricher import enrich_company_info  # noqa: F401 (re-exported for callers)
+from job_finder.web.enrichment_sources import merge_apply_urls
+from job_finder.web.enrichment_tiers import (
+    extract_with_haiku,
+    extract_with_sonnet,
+    fetch_ddg_jds,
+    fetch_direct_jd,
+    query_ats_api,
+    scrape_careers,
+    search_ddg_web,
+    search_duckduckgo,
+    search_serpapi,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +68,8 @@ _ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max", "locatio
 # Per-field cost ceilings: highest tier allowed to search for this field.
 # After this tier fails for a field, it is abandoned (not escalated further).
 FIELD_TIER_CEILINGS = {
-    "jd_full": "sonnet",      # worth escalating all the way (critical for scoring)
-    "salary_min": "haiku",    # cap at Haiku — not worth SerpAPI/Sonnet for salary alone
+    "jd_full": "sonnet",  # worth escalating all the way (critical for scoring)
+    "salary_min": "haiku",  # cap at Haiku — not worth SerpAPI/Sonnet for salary alone
     "salary_max": "haiku",
 }
 
@@ -68,11 +77,12 @@ FIELD_TIER_CEILINGS = {
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def enrich_job(
     job_row: dict,
-    serpapi_key: Optional[str] = None,
+    serpapi_key: str | None = None,
     conn: Any = None,
-    config: Optional[dict] = None,
+    config: dict | None = None,
 ) -> dict:
     """Enrich a sparse job record using the cost-ordered tier pipeline.
 
@@ -104,7 +114,11 @@ def enrich_job(
             return {}
 
         # Auto-promote long descriptions to jd_full (DQ-02)
-        if not job_row.get("jd_full") and job_row.get("description") and len(job_row["description"]) > 200:
+        if (
+            not job_row.get("jd_full")
+            and job_row.get("description")
+            and len(job_row["description"]) > 200
+        ):
             job_row["jd_full"] = job_row["description"]
             if conn is not None and job_row.get("dedup_key"):
                 try:
@@ -171,7 +185,9 @@ def enrich_job(
         # Tier 1: ddg — DuckDuckGo Instant Answer API
         # ---------------------------------------------------------------
         # Check if remaining missing fields are all below DDG (nothing to do)
-        remaining = _find_missing_fields({**job_row, **_resolve_from_fragments(fragments, missing, job_row)})
+        remaining = _find_missing_fields(
+            {**job_row, **_resolve_from_fragments(fragments, missing, job_row)}
+        )
         if not remaining:
             enriched = _resolve_from_fragments(fragments, missing, job_row)
             _persist(conn, job_row, enriched, "free")
@@ -192,8 +208,8 @@ def enrich_job(
                 if ddg_parts:
                     fragments["ddg"] = "\n\n".join(ddg_parts)
 
-                if ddg_source_url:
-                    _merge_apply_urls(conn, job_row, [ddg_source_url])
+                if ddg_source_url and conn and job_row.get("dedup_key"):
+                    merge_apply_urls(conn, job_row["dedup_key"], [ddg_source_url])
 
                 # Resolve what DDG tier found (via Haiku extraction later if needed)
                 # DDG doesn't directly provide structured data; it feeds the Haiku tier.
@@ -209,9 +225,7 @@ def enrich_job(
             try:
                 # Compose search text from all fragments collected so far
                 search_input = _compose_fragment_text(fragments, title, company)
-                haiku_result = extract_with_haiku(
-                    search_input, job_row, conn, config
-                )
+                haiku_result = extract_with_haiku(search_input, job_row, conn, config)
                 if haiku_result:
                     for k, v in haiku_result.items():
                         fragments[k] = v
@@ -219,9 +233,7 @@ def enrich_job(
                 # Check what is still missing after Haiku
                 salary_fields = {"salary_min", "salary_max"}
                 enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
-                still_missing_after_haiku = [
-                    f for f in missing if f not in enriched_so_far
-                ]
+                still_missing_after_haiku = [f for f in missing if f not in enriched_so_far]
 
                 if not still_missing_after_haiku:
                     # All fields satisfied — return now
@@ -247,9 +259,7 @@ def enrich_job(
         # ---------------------------------------------------------------
         # SerpAPI only runs if JD is still missing (salary ceiling is Haiku)
         jd_still_missing = not (
-            job_row.get("jd_full")
-            or fragments.get("url_jd")
-            or fragments.get("jd_full")
+            job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
 
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
@@ -276,23 +286,15 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Sonnet only runs if JD is still missing
         jd_still_missing = not (
-            job_row.get("jd_full")
-            or fragments.get("url_jd")
-            or fragments.get("jd_full")
+            job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
 
-        if (
-            start_idx <= TIER_ORDER.index("sonnet")
-           
-            and jd_still_missing
-        ):
+        if start_idx <= TIER_ORDER.index("sonnet") and jd_still_missing:
             try:
                 # Check cost gate before calling Sonnet
                 gate_ok = cost_gate(conn, config, "sonnet")
                 if gate_ok:
-                    sonnet_result = extract_with_sonnet(
-                        fragments, job_row, conn, config
-                    )
+                    sonnet_result = extract_with_sonnet(fragments, job_row, conn, config)
                     if sonnet_result:
                         enriched = _filter_non_none(sonnet_result)
                         if enriched:
@@ -310,10 +312,11 @@ def enrich_job(
         logger.warning("enrich_job failed for '%s': %s", job_row.get("title"), e)
         return {}
 
+
 def run_enrichment_backfill(
     db_path: str,
-    serpapi_key: Optional[str] = None,
-    config: Optional[dict] = None,
+    serpapi_key: str | None = None,
+    config: dict | None = None,
     limit: int = 100,
 ) -> int:
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
@@ -368,9 +371,11 @@ def run_enrichment_backfill(
 
         return enriched_count
 
+
 # ---------------------------------------------------------------------------
 # Private helpers: tier logic utilities
 # ---------------------------------------------------------------------------
+
 
 def _find_missing_fields(job_row: dict) -> list:
     """Return list of missing scoring-relevant field names.
@@ -388,11 +393,13 @@ def _find_missing_fields(job_row: dict) -> list:
         missing.append("salary_min")
     return missing
 
+
 def _filter_non_none(d: dict) -> dict:
     """Return a new dict with None values removed."""
     return {k: v for k, v in d.items() if v is not None}
 
-def _start_tier_index(current_tier: Optional[str]) -> int:
+
+def _start_tier_index(current_tier: str | None) -> int:
     """Return the index in TIER_ORDER to start from based on current_tier.
 
     If current_tier is None or 'free', start from 0 (beginning).
@@ -412,7 +419,8 @@ def _start_tier_index(current_tier: Optional[str]) -> int:
     except ValueError:
         return 0
 
-def _parse_source_urls(source_urls_json: Optional[str]) -> list:
+
+def _parse_source_urls(source_urls_json: str | None) -> list:
     """Parse source_urls JSON field into a list of URL strings.
 
     Args:
@@ -429,6 +437,7 @@ def _parse_source_urls(source_urls_json: Optional[str]) -> list:
     except (json.JSONDecodeError, TypeError):
         return []
 
+
 def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
     """Compose a single text string from all accumulated fragments.
 
@@ -441,13 +450,14 @@ def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
         Aggregated text string for use in Haiku/Sonnet extraction.
     """
     parts = []
-    for key, text in fragments.items():
+    for _key, text in fragments.items():
         if text and isinstance(text, str):
             parts.append(str(text)[:1000])
 
     if parts:
         return "\n\n".join(parts)
     return f"Job posting: {title} at {company}"
+
 
 def _resolve_from_fragments(
     fragments: dict,
@@ -477,6 +487,7 @@ def _resolve_from_fragments(
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)
+
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
     """Persist enriched fields + enrichment_tier atomically in a single UPDATE.

@@ -12,13 +12,14 @@ Covers:
 import os
 import sqlite3
 import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 # ---------------------------------------------------------------------------
 # Helpers: build mock response objects
 # ---------------------------------------------------------------------------
+
 
 def _mock_response(url, text, status_code=200, content_type="text/html; charset=utf-8"):
     """Create a mock requests.Response."""
@@ -31,6 +32,7 @@ def _mock_response(url, text, status_code=200, content_type="text/html; charset=
     resp.iter_content.return_value = iter([text.encode("utf-8") if text else b""])
     return resp
 
+
 def _mock_head_response(url, status_code=200, content_type="text/html; charset=utf-8"):
     """Create a mock requests.Response for HEAD requests."""
     resp = MagicMock()
@@ -39,6 +41,7 @@ def _mock_head_response(url, status_code=200, content_type="text/html; charset=u
     resp.headers = {"Content-Type": content_type}
     resp.raise_for_status = MagicMock()
     return resp
+
 
 def _serpapi_response(organic_results=None, error=None):
     """Create a mock requests.Response for SerpAPI JSON."""
@@ -53,55 +56,68 @@ def _serpapi_response(organic_results=None, error=None):
     resp.raise_for_status = MagicMock()
     return resp
 
+
 # ---------------------------------------------------------------------------
 # Tests: name normalization helpers
 # ---------------------------------------------------------------------------
 
-class TestNameNormalization:
 
+class TestNameNormalization:
     def test_strip_suffix_inc(self):
         from job_finder.web.homepage_discoverer import _strip_company_suffixes
+
         assert _strip_company_suffixes("Stripe Inc") == "stripe"
 
     def test_strip_suffix_llc(self):
         from job_finder.web.homepage_discoverer import _strip_company_suffixes
+
         assert _strip_company_suffixes("Acme Corp LLC") == "acme"
 
     def test_strip_no_suffix(self):
         from job_finder.web.homepage_discoverer import _strip_company_suffixes
+
         assert _strip_company_suffixes("Hinge Health") == "hinge health"
 
     def test_strip_multiword_no_suffix(self):
         from job_finder.web.homepage_discoverer import _strip_company_suffixes
+
         assert _strip_company_suffixes("Stripe") == "stripe"
 
     def test_name_to_slug_multiword(self):
         from job_finder.web.homepage_discoverer import _name_to_slug
+
         assert _name_to_slug("Hinge Health") == "hinge-health"
 
     def test_name_to_slug_with_suffix(self):
         from job_finder.web.homepage_discoverer import _name_to_slug
+
         assert _name_to_slug("Acme Corp LLC") == "acme"
 
     def test_name_to_slug_special_chars(self):
         from job_finder.web.homepage_discoverer import _name_to_slug
+
         assert _name_to_slug("O'Reilly Media") == "o-reilly-media"
+
 
 # ---------------------------------------------------------------------------
 # Tests: discover_homepage (three-tier)
 # ---------------------------------------------------------------------------
 
-class TestDiscoverHomepage:
 
+class TestDiscoverHomepage:
     def test_domain_guess_single_word_success(self):
         """DISC-01: Single-token 'Stripe' resolves via domain guess at zero API cost."""
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://stripe.com", 200, "text/html; charset=utf-8")
-        get_resp = _mock_response("https://stripe.com", "<html><body>Stripe corporate card</body></html>")
+        get_resp = _mock_response(
+            "https://stripe.com", "<html><body>Stripe corporate card</body></html>"
+        )
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+        ):
             result = discover_homepage("Stripe", None, None, [])
 
         assert result == "https://stripe.com"
@@ -112,8 +128,13 @@ class TestDiscoverHomepage:
 
         head_resp = _mock_head_response("https://hinge-health.com", 404)
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", side_effect=Exception("no SerpAPI")):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch(
+                "job_finder.web.homepage_discoverer.requests.get",
+                side_effect=Exception("no SerpAPI"),
+            ),
+        ):
             result = discover_homepage("Hinge Health", None, None, [], api_key=None)
 
         # Tier 1 is skipped for multi-word; Tier 2 name slug tried, fails; Tier 3 skipped (no api_key)
@@ -126,8 +147,10 @@ class TestDiscoverHomepage:
         head_resp = _mock_head_response("https://stripe.com", 200, "text/html")
         get_resp = _mock_response("https://stripe.com", "<html><body>Stripe payment</body></html>")
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+        ):
             result = discover_homepage("Stripe Inc", None, None, [])
 
         assert result == "https://stripe.com"
@@ -137,10 +160,14 @@ class TestDiscoverHomepage:
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://acme.com", 200, "text/html")
-        get_resp = _mock_response("https://acme.com", "<html><body>This domain is for sale!</body></html>")
+        get_resp = _mock_response(
+            "https://acme.com", "<html><body>This domain is for sale!</body></html>"
+        )
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+        ):
             result = discover_homepage("Acme", None, None, [], api_key=None)
 
         assert result is None
@@ -150,10 +177,14 @@ class TestDiscoverHomepage:
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://ramp.com", 200, "text/html; charset=utf-8")
-        get_resp = _mock_response("https://ramp.com", "<html><body>Ramp corporate card</body></html>")
+        get_resp = _mock_response(
+            "https://ramp.com", "<html><body>Ramp corporate card</body></html>"
+        )
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+        ):
             result = discover_homepage("Ramp", "ashby", "ramp", [])
 
         assert result == "https://ramp.com"
@@ -164,10 +195,14 @@ class TestDiscoverHomepage:
 
         # HEAD will be called for hinge-health.com slug
         head_resp = _mock_head_response("https://hinge-health.com", 200, "text/html")
-        get_resp = _mock_response("https://hinge-health.com", "<html><body>Hinge Health site</body></html>")
+        get_resp = _mock_response(
+            "https://hinge-health.com", "<html><body>Hinge Health site</body></html>"
+        )
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+        ):
             result = discover_homepage("Hinge Health", None, None, [])
 
         assert result == "https://hinge-health.com"
@@ -181,12 +216,16 @@ class TestDiscoverHomepage:
         validate_head = _mock_head_response("https://acme.com", 200, "text/html")
 
         def head_side_effect(url, **kwargs):
-            if "acme.com" == url.replace("https://", "").rstrip("/"):
+            if url.replace("https://", "").rstrip("/") == "acme.com":
                 return validate_head
             return head_resp
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", side_effect=head_side_effect), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=serpapi_resp):
+        with (
+            patch(
+                "job_finder.web.homepage_discoverer.requests.head", side_effect=head_side_effect
+            ),
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=serpapi_resp),
+        ):
             result = discover_homepage("Acme Corp", None, "acme-corp", [], api_key="test_key")
 
         assert result == "https://acme.com"
@@ -195,21 +234,25 @@ class TestDiscoverHomepage:
         """DISC-03: SerpAPI returns glassdoor.com first, then acme.com — glassdoor skipped."""
         from job_finder.web.homepage_discoverer import _search_serpapi
 
-        serpapi_resp = _serpapi_response(organic_results=[
-            {"link": "https://www.glassdoor.com/Overview/Acme"},
-            {"link": "https://acme.com"},
-        ])
+        serpapi_resp = _serpapi_response(
+            organic_results=[
+                {"link": "https://www.glassdoor.com/Overview/Acme"},
+                {"link": "https://acme.com"},
+            ]
+        )
         validate_head = _mock_head_response("https://acme.com", 200, "text/html")
 
-        with patch("job_finder.web.homepage_discoverer.requests.get", return_value=serpapi_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.head", return_value=validate_head):
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.get", return_value=serpapi_resp),
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=validate_head),
+        ):
             result = _search_serpapi("Acme", "test_key")
 
         assert result == "https://acme.com"
 
     def test_serpapi_quota_error_raises(self):
         """DISC-03: SerpAPI error key raises SerpAPIQuotaError."""
-        from job_finder.web.homepage_discoverer import _search_serpapi, SerpAPIQuotaError
+        from job_finder.web.homepage_discoverer import SerpAPIQuotaError, _search_serpapi
 
         serpapi_resp = _serpapi_response(error="Your account has run out of searches.")
 
@@ -232,9 +275,13 @@ class TestDiscoverHomepage:
                 return serpapi_resp
             return domain_get_resp
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", side_effect=get_side_effect):
-            result = discover_homepage("Unknown Company", None, "unknown-company", [], api_key="key")
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch("job_finder.web.homepage_discoverer.requests.get", side_effect=get_side_effect),
+        ):
+            result = discover_homepage(
+                "Unknown Company", None, "unknown-company", [], api_key="key"
+            )
 
         assert result is None
 
@@ -246,8 +293,12 @@ class TestDiscoverHomepage:
         # Slug heuristic now also does GET (fallback from HEAD). Return 404.
         domain_get_resp = _mock_response("https://acme-corp.com", "", status_code=404)
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp), \
-             patch("job_finder.web.homepage_discoverer.requests.get", return_value=domain_get_resp) as mock_get:
+        with (
+            patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
+            patch(
+                "job_finder.web.homepage_discoverer.requests.get", return_value=domain_get_resp
+            ) as mock_get,
+        ):
             result = discover_homepage("Acme Corp", None, "acme-corp", [], api_key=None)
 
         assert result is None
@@ -259,18 +310,26 @@ class TestDiscoverHomepage:
         """Network error in all tiers returns None gracefully."""
         from job_finder.web.homepage_discoverer import discover_homepage
 
-        with patch("job_finder.web.homepage_discoverer.requests.head", side_effect=Exception("timeout")), \
-             patch("job_finder.web.homepage_discoverer.requests.get", side_effect=Exception("timeout")):
+        with (
+            patch(
+                "job_finder.web.homepage_discoverer.requests.head",
+                side_effect=Exception("timeout"),
+            ),
+            patch(
+                "job_finder.web.homepage_discoverer.requests.get", side_effect=Exception("timeout")
+            ),
+        ):
             result = discover_homepage("Acme", "greenhouse", "acme", [])
 
         assert result is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: run_homepage_discovery
 # ---------------------------------------------------------------------------
 
-class TestDiscoverHomepagesBatch:
 
+class TestDiscoverHomepagesBatch:
     def _make_db_with_companies(
         self,
         count: int,
@@ -312,7 +371,7 @@ class TestDiscoverHomepagesBatch:
             probe_ts = "2026-01-01T00:00:00" if i < with_probe_attempted else None
             conn.execute(
                 "INSERT INTO companies (name, name_raw, homepage_url, homepage_probe_attempted_at, ats_platform, ats_slug) VALUES (?, ?, ?, ?, ?, ?)",
-                (f"Company {i}", f"company-{i}", homepage, probe_ts, "greenhouse", f"co{i}")
+                (f"Company {i}", f"company-{i}", homepage, probe_ts, "greenhouse", f"co{i}"),
             )
 
         conn.commit()
@@ -415,7 +474,7 @@ class TestDiscoverHomepagesBatch:
 
     def test_batch_quota_error_breaks(self):
         """SerpAPIQuotaError on second company stops batch; first stamped, third not processed."""
-        from job_finder.web.homepage_discoverer import run_homepage_discovery, SerpAPIQuotaError
+        from job_finder.web.homepage_discoverer import SerpAPIQuotaError, run_homepage_discovery
 
         path = self._make_db_with_companies(3)
 
@@ -486,6 +545,7 @@ class TestDiscoverHomepagesBatch:
 # Tests: Homepage discovery throughput (Fix 5)
 # ---------------------------------------------------------------------------
 
+
 class TestRunHomepageDiscoveryThroughput:
     """Tests that run_homepage_discovery processes more than 10 companies in Phase A."""
 
@@ -493,7 +553,9 @@ class TestRunHomepageDiscoveryThroughput:
         """Phase A free-tier batch handles up to _BATCH_CAP companies."""
         db_path, conn = migrated_db
         from datetime import datetime
+
         from job_finder.web.homepage_discoverer import _BATCH_CAP
+
         now = datetime.now().isoformat()
 
         # Insert more companies than _BATCH_CAP
@@ -508,6 +570,7 @@ class TestRunHomepageDiscoveryThroughput:
 
         with patch("job_finder.web.homepage_discoverer.discover_homepage", return_value=None):
             from job_finder.web.homepage_discoverer import run_homepage_discovery
+
             result = run_homepage_discovery(db_path, None)
 
         # Phase A should process up to _BATCH_CAP (no api_key so Phase B is skipped)
@@ -520,6 +583,7 @@ class TestTryDomainGuessTwoWord:
     def test_two_word_name_returns_none(self):
         """Two-word name after suffix strip -> None (single-token only)."""
         from job_finder.web.homepage_discoverer import _try_domain_guess
+
         # "Palo Alto Inc" -> strip "inc" -> "palo alto" (2 tokens) -> None
         result = _try_domain_guess("Palo Alto Inc")
         assert result is None
@@ -528,6 +592,7 @@ class TestTryDomainGuessTwoWord:
         """Three-token name after suffix strip returns None."""
         with patch("job_finder.web.homepage_discoverer._try_slug_heuristic") as mock_slug:
             from job_finder.web.homepage_discoverer import _try_domain_guess
+
             # "Acme Widget Factory Inc" -> strip "inc" -> "acme widget factory" (3 tokens) -> None
             result = _try_domain_guess("Acme Widget Factory Inc")
         mock_slug.assert_not_called()
@@ -538,6 +603,7 @@ class TestTryDomainGuessTwoWord:
 # Tests: source_urls FK join fix (Fix 7)
 # ---------------------------------------------------------------------------
 
+
 class TestRunHomepageDiscoveryFKJoin:
     """Tests that source_urls are fetched by company_id, not by text name."""
 
@@ -545,6 +611,7 @@ class TestRunHomepageDiscoveryFKJoin:
         """Job linked by company_id (not matching company text) still provides source_urls."""
         db_path, conn = migrated_db
         from datetime import datetime
+
         now = datetime.now().isoformat()
 
         # Insert company
@@ -572,8 +639,11 @@ class TestRunHomepageDiscoveryFKJoin:
             discovered_source_urls.extend(source_urls)
             return None  # No homepage found
 
-        with patch("job_finder.web.homepage_discoverer.discover_homepage", side_effect=fake_discover):
+        with patch(
+            "job_finder.web.homepage_discoverer.discover_homepage", side_effect=fake_discover
+        ):
             from job_finder.web.homepage_discoverer import run_homepage_discovery
+
             run_homepage_discovery(db_path, None)
 
         # The source_url from the FK-linked job should have been passed

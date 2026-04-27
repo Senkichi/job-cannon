@@ -13,12 +13,8 @@ threading is imported lazily (inside each function body), so we patch
 startup_backfills module level.
 """
 
-import os
 import sqlite3
-import tempfile
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from job_finder.web.startup_backfills import (
     run_data_backfills_once,
@@ -28,6 +24,7 @@ from job_finder.web.startup_backfills import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
     """Insert a minimal job row. Keyword args override defaults."""
@@ -46,6 +43,7 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
         [dedup_key] + list(defaults.values()),
     )
     conn.commit()
+
 
 def _run_backfill_synchronously(db_path: str, config: dict) -> None:
     """Run run_data_backfills_once with threading.Thread replaced by a synchronous runner.
@@ -66,9 +64,11 @@ def _run_backfill_synchronously(db_path: str, config: dict) -> None:
     with patch("threading.Thread", _SyncThread):
         run_data_backfills_once(db_path, config)
 
+
 # ---------------------------------------------------------------------------
 # run_description_reformat_once — TESTING guard
 # ---------------------------------------------------------------------------
+
 
 def test_description_reformat_skipped_in_testing():
     """run_description_reformat_once returns immediately when TESTING=True."""
@@ -86,9 +86,11 @@ def test_description_reformat_skipped_in_testing():
 
     assert started == [], "No thread should start in TESTING mode"
 
+
 # ---------------------------------------------------------------------------
 # run_description_reformat_once — missing API key
 # ---------------------------------------------------------------------------
+
 
 def test_description_reformat_skipped_without_anthropic():
     """run_description_reformat_once does not spawn a thread when anthropic is not installed."""
@@ -108,9 +110,11 @@ def test_description_reformat_skipped_without_anthropic():
 
     assert started == [True], "Thread should start (CLI handles auth independently)"
 
+
 # ---------------------------------------------------------------------------
 # run_description_reformat_once — thread launched (key via telemetry)
 # ---------------------------------------------------------------------------
+
 
 def test_description_reformat_spawns_thread():
     """run_description_reformat_once spawns a daemon thread (key from telemetry)."""
@@ -131,9 +135,11 @@ def test_description_reformat_spawns_thread():
     assert started == [True], "Thread should be started"
     assert daemon_flags == [True], "Thread should be daemon=True"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — TESTING guard
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_skipped_in_testing():
     """run_data_backfills_once returns immediately when TESTING=True."""
@@ -151,9 +157,11 @@ def test_data_backfills_skipped_in_testing():
 
     assert started == [], "No thread should start in TESTING mode"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — sentinel idempotency
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_sentinel_prevents_rerun(migrated_db):
     """When the backfill_v1 sentinel already exists, no UPDATE statements are issued."""
@@ -182,9 +190,11 @@ def test_data_backfills_sentinel_prevents_rerun(migrated_db):
     verify.close()
     assert row[0] is None, "locations_raw should remain NULL when sentinel prevents re-run"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — locations_raw backfill
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_populates_locations_raw(migrated_db):
     """run_data_backfills_once copies location into locations_raw for NULL rows."""
@@ -193,7 +203,9 @@ def test_data_backfills_populates_locations_raw(migrated_db):
     _insert_job(conn, "needs-backfill", location="San Francisco, CA")
     conn.execute("UPDATE jobs SET locations_raw = NULL WHERE dedup_key = 'needs-backfill'")
     _insert_job(conn, "already-filled", location="Remote")
-    conn.execute("UPDATE jobs SET locations_raw = '[\"Remote\"]' WHERE dedup_key = 'already-filled'")
+    conn.execute(
+        "UPDATE jobs SET locations_raw = '[\"Remote\"]' WHERE dedup_key = 'already-filled'"
+    )
     conn.commit()
     conn.close()
 
@@ -212,9 +224,11 @@ def test_data_backfills_populates_locations_raw(migrated_db):
     assert "San Francisco" in row[0]
     assert row2[0] == '["Remote"]', "Pre-filled row should not be overwritten"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — posted_date backfill
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_populates_posted_date(migrated_db):
     """run_data_backfills_once copies first_seen into posted_date for NULL rows."""
@@ -235,9 +249,11 @@ def test_data_backfills_populates_posted_date(migrated_db):
 
     assert row[0] == "2026-02-01T00:00:00", "posted_date should be set from first_seen"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — sentinel is inserted after completion
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_inserts_sentinel(migrated_db):
     """run_data_backfills_once inserts backfill_v1 sentinel in merge_log on first run."""
@@ -254,9 +270,11 @@ def test_data_backfills_inserts_sentinel(migrated_db):
 
     assert row is not None, "backfill_v1 sentinel should exist after first run"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — idempotency: second run does not duplicate sentinel
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_idempotent(migrated_db):
     """Running run_data_backfills_once twice leaves exactly one sentinel row."""
@@ -274,9 +292,11 @@ def test_data_backfills_idempotent(migrated_db):
 
     assert count == 1, f"Expected exactly 1 sentinel but found {count}"
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — SerpAPI enrichment skipped without key
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_skips_serpapi_enrichment_without_key(migrated_db):
     """run_data_backfills_once skips SerpAPI enrichment when no serpapi api_key is configured."""
@@ -288,9 +308,11 @@ def test_data_backfills_skips_serpapi_enrichment_without_key(migrated_db):
 
     mock_enrich.assert_not_called()
 
+
 # ---------------------------------------------------------------------------
 # run_data_backfills_once — SerpAPI enrichment called when key present
 # ---------------------------------------------------------------------------
+
 
 def test_data_backfills_calls_serpapi_enrichment_when_key_present(migrated_db):
     """run_data_backfills_once calls run_enrichment_backfill when serpapi api_key is set."""
@@ -301,7 +323,9 @@ def test_data_backfills_calls_serpapi_enrichment_when_key_present(migrated_db):
 
     # Patch at the import point inside startup_backfills._run()
     # The function does: from job_finder.web.data_enricher import run_enrichment_backfill
-    with patch("job_finder.web.data_enricher.run_enrichment_backfill", return_value=0) as mock_enrich:
+    with patch(
+        "job_finder.web.data_enricher.run_enrichment_backfill", return_value=0
+    ) as mock_enrich:
         _run_backfill_synchronously(path, config)
 
     mock_enrich.assert_called_once()

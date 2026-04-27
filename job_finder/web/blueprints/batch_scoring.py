@@ -9,18 +9,17 @@ templates keep working until Commit D migrates them; Plan 4 removes the
 wrappers entirely.
 """
 
+import json
 import logging
 import threading
-from datetime import datetime, timezone
-
-import json
+from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, make_response, render_template
 
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.exclusion_filter import count_scorable, should_exclude
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.exclusion_filter import count_scorable, should_exclude
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +31,13 @@ batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
 _SESSION_TYPE_SCORING = "scoring"
 
 
-def _render_scoring_done(scored: int = 0, skipped: int = 0, status: str = "done",
-                         message: str | None = None, error_msg: str | None = None):
+def _render_scoring_done(
+    scored: int = 0,
+    skipped: int = 0,
+    status: str = "done",
+    message: str | None = None,
+    error_msg: str | None = None,
+):
     """Render the batch-score done fragment with the v3 'Scoring' label."""
     return render_template(
         "dashboard/_batch_score_done.html",
@@ -163,9 +167,13 @@ def batch_score_status(session_id):
     if status in ("running", "cancelling") and session["started_at"]:
         try:
             started = datetime.fromisoformat(session["started_at"])
-            elapsed_minutes = (datetime.now(timezone.utc).replace(tzinfo=None) - started).total_seconds() / 60
+            elapsed_minutes = (
+                datetime.now(UTC).replace(tzinfo=None) - started
+            ).total_seconds() / 60
             if elapsed_minutes > 30:
-                logger.warning("Batch session %s timed out after %.1f minutes", session_id, elapsed_minutes)
+                logger.warning(
+                    "Batch session %s timed out after %.1f minutes", session_id, elapsed_minutes
+                )
                 with standalone_connection(db_path) as timeout_conn:
                     timeout_conn.execute(
                         "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? "
@@ -173,15 +181,17 @@ def batch_score_status(session_id):
                         ("Session timed out (>30 min)", utc_now_iso(), session_id),
                     )
                     timeout_conn.commit()
-                resp = make_response(render_template(
-                    "dashboard/_batch_score_done.html",
-                    label=label,
-                    scored=session["scored"],
-                    skipped=session["skipped"],
-                    status="error",
-                    message=None,
-                    error_msg="Session timed out (>30 min)",
-                ))
+                resp = make_response(
+                    render_template(
+                        "dashboard/_batch_score_done.html",
+                        label=label,
+                        scored=session["scored"],
+                        skipped=session["skipped"],
+                        status="error",
+                        message=None,
+                        error_msg="Session timed out (>30 min)",
+                    )
+                )
                 resp.headers["HX-Trigger-After-Settle"] = json.dumps(
                     {"dashboard-refresh": None, "jobs-updated": None}
                 )
@@ -191,15 +201,17 @@ def batch_score_status(session_id):
 
     # Terminal states: done, error, cancelled — return done fragment (NO hx-trigger)
     if status in ("done", "error", "cancelled"):
-        resp = make_response(render_template(
-            "dashboard/_batch_score_done.html",
-            label=label,
-            scored=session["scored"],
-            skipped=session["skipped"],
-            status=status,
-            message=None,
-            error_msg=session["error_msg"] if status == "error" else None,
-        ))
+        resp = make_response(
+            render_template(
+                "dashboard/_batch_score_done.html",
+                label=label,
+                scored=session["scored"],
+                skipped=session["skipped"],
+                status=status,
+                message=None,
+                error_msg=session["error_msg"] if status == "error" else None,
+            )
+        )
         # Trigger dashboard stats refresh + jobs table refresh (if on jobs page)
         resp.headers["HX-Trigger-After-Settle"] = json.dumps(
             {"dashboard-refresh": None, "jobs-updated": None}
@@ -217,7 +229,10 @@ def batch_score_status(session_id):
         cancelling=(status == "cancelling"),
     )
 
-@batch_scoring_bp.route("/batch-score/cancel/<int:session_id>", methods=["POST"], strict_slashes=False)
+
+@batch_scoring_bp.route(
+    "/batch-score/cancel/<int:session_id>", methods=["POST"], strict_slashes=False
+)
 def batch_score_cancel(session_id):
     """Cancel a running batch score session.
 
@@ -302,7 +317,7 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
             score_and_persist_job,
         )
 
-        profile = load_scoring_profile(config)
+        load_scoring_profile(config)
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
@@ -344,13 +359,17 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                 if excluded:
                     logger.info(
                         "Batch scoring: excluded '%s': %s",
-                        job_row.get("dedup_key"), reason,
+                        job_row.get("dedup_key"),
+                        reason,
                     )
                     dedup_key = job_row.get("dedup_key")
                     if dedup_key and job_row.get("pipeline_status") == "discovered":
                         update_pipeline_status(
-                            conn, dedup_key, "dismissed",
-                            source="exclusion_filter", evidence=reason,
+                            conn,
+                            dedup_key,
+                            "dismissed",
+                            source="exclusion_filter",
+                            evidence=reason,
                         )
                     continue
 
@@ -363,7 +382,8 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                 except Exception as e:
                     logger.warning(
                         "Batch scoring: error scoring job '%s': %s -- continuing",
-                        job_row.get("dedup_key"), e,
+                        job_row.get("dedup_key"),
+                        e,
                     )
                     skipped_count += 1
 
@@ -405,6 +425,7 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
             ACTION_BATCH_SCORE_SONNET,
             log_activity,
         )
+
         # v3.0 keeps the existing activity constants for continuity with
         # dashboard Recent Activity records; Plan 4 consolidates them into
         # a single ACTION_BATCH_SCORE. For now the unified session_type
@@ -431,6 +452,7 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
     except Exception:
         pass
 
+
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
     """Mark a batch session as errored. Used for background thread import failures."""
     try:
@@ -441,4 +463,6 @@ def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
             )
             conn.commit()
     except Exception:
-        logger.warning("Failed to mark session %s as error: %s", session_id, error_msg, exc_info=True)
+        logger.warning(
+            "Failed to mark session %s as error: %s", session_id, error_msg, exc_info=True
+        )

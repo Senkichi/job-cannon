@@ -8,6 +8,7 @@ import pytest
 
 from job_finder.web.exclusion_filter import should_exclude
 
+
 class TestExclusionFilter:
     """Tests for should_exclude() pure string-matching function."""
 
@@ -55,18 +56,14 @@ class TestExclusionFilter:
     def test_excludes_matching_company(self):
         """Company exactly matching an excluded company returns (True, reason)."""
         job = {"title": "Data Scientist", "company": "Mercor", "salary_max": None}
-        excluded, reason = should_exclude(
-            job, {"title_keywords": [], "companies": ["Mercor"]}
-        )
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": ["Mercor"]})
         assert excluded is True
         assert "Mercor" in reason
 
     def test_company_matching_is_case_insensitive(self):
         """'mercor' in job matches 'Mercor' in exclusion list."""
         job = {"title": "Data Scientist", "company": "mercor", "salary_max": None}
-        excluded, reason = should_exclude(
-            job, {"title_keywords": [], "companies": ["Mercor"]}
-        )
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": ["Mercor"]})
         assert excluded is True
 
     def test_no_exclusion_when_company_clean(self):
@@ -149,9 +146,7 @@ class TestExclusionFilter:
     def test_company_with_leading_trailing_whitespace(self):
         """Company matching strips whitespace for comparison."""
         job = {"title": "Data Scientist", "company": "  Mercor  ", "salary_max": None}
-        excluded, reason = should_exclude(
-            job, {"title_keywords": [], "companies": ["Mercor"]}
-        )
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": ["Mercor"]})
         assert excluded is True
 
     def test_first_match_wins_title_before_company(self):
@@ -182,9 +177,7 @@ class TestExclusionFilter:
     def test_config_exclusion_still_works_alongside_denylist(self):
         """Company in exclusions.companies (but not denylist) is still excluded."""
         job = {"title": "Data Scientist", "company": "Staffmark", "salary_max": None}
-        excluded, reason = should_exclude(
-            job, {"title_keywords": [], "companies": ["Staffmark"]}
-        )
+        excluded, reason = should_exclude(job, {"title_keywords": [], "companies": ["Staffmark"]})
         assert excluded is True
         assert "Staffmark" in reason
 

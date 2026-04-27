@@ -19,7 +19,7 @@ import io
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
@@ -87,6 +87,7 @@ _original_text_cache: dict[int, str] = {}
 # Drive polling
 # ---------------------------------------------------------------------------
 
+
 def _extract_file_id_from_url(doc_url: str) -> str | None:
     """Extract Google Drive/Docs file ID from a URL.
 
@@ -104,6 +105,7 @@ def _extract_file_id_from_url(doc_url: str) -> str | None:
         return match.group(1)
     return None
 
+
 def poll_resume_for_changes(
     service, file_id: str, last_polled_at: str | None
 ) -> tuple[str | None, str]:
@@ -119,9 +121,7 @@ def poll_resume_for_changes(
         modifiedTime is always returned for updating last_drive_polled_at.
     """
     try:
-        meta = service.files().get(
-            fileId=file_id, fields="id,modifiedTime,mimeType"
-        ).execute()
+        meta = service.files().get(fileId=file_id, fields="id,modifiedTime,mimeType").execute()
     except HttpError as e:
         logger.error("Drive API error fetching metadata for file %s: %s", file_id, e)
         raise
@@ -158,9 +158,11 @@ def poll_resume_for_changes(
 
     return buf.getvalue().decode("utf-8"), modified_time
 
+
 # ---------------------------------------------------------------------------
 # Preference extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_preferences(
     diff_text: str,
@@ -226,32 +228,39 @@ def _extract_preferences(
     preferences = []
 
     for pref in result.get("phrasing_preferences", []):
-        preferences.append({
-            "preference_type": "phrasing",
-            "preference_text": pref.get("preference", ""),
-            "example_before": pref.get("example_before"),
-            "example_after": pref.get("example_after"),
-        })
+        preferences.append(
+            {
+                "preference_type": "phrasing",
+                "preference_text": pref.get("preference", ""),
+                "example_before": pref.get("example_before"),
+                "example_after": pref.get("example_after"),
+            }
+        )
 
     for change in result.get("content_changes", []):
         change_type = change.get("change_type", "addition")
         pref_type = "content_addition" if change_type == "addition" else "content_removal"
-        preferences.append({
-            "preference_type": pref_type,
-            "preference_text": change.get("description", ""),
-            "example_before": None,
-            "example_after": None,
-        })
+        preferences.append(
+            {
+                "preference_type": pref_type,
+                "preference_text": change.get("description", ""),
+                "example_before": None,
+                "example_after": None,
+            }
+        )
 
     for struct in result.get("structural_preferences", []):
-        preferences.append({
-            "preference_type": "structural",
-            "preference_text": struct,
-            "example_before": None,
-            "example_after": None,
-        })
+        preferences.append(
+            {
+                "preference_type": "structural",
+                "preference_text": struct,
+                "example_before": None,
+                "example_after": None,
+            }
+        )
 
     return preferences
+
 
 def _store_preferences(
     conn: sqlite3.Connection,
@@ -271,7 +280,7 @@ def _store_preferences(
     if not preferences:
         return 0
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     count = 0
     for pref in preferences:
         conn.execute(
@@ -294,9 +303,11 @@ def _store_preferences(
     conn.commit()
     return count
 
+
 # ---------------------------------------------------------------------------
 # Main poll runner
 # ---------------------------------------------------------------------------
+
 
 def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
     """Poll Google Drive for resume edits and extract preferences.
@@ -332,7 +343,10 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
             service = get_drive_service()
         except Exception as e:
             from job_finder.web.log_throttle import throttled_log
-            throttled_log(logger, logging.ERROR, "Drive service unavailable for feedback poll: %s", e)
+
+            throttled_log(
+                logger, logging.ERROR, "Drive service unavailable for feedback poll: %s", e
+            )
             return {
                 "resumes_polled": 0,
                 "changes_detected": 0,
@@ -374,17 +388,21 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
                         continue
 
                     # Generate unified diff
-                    diff_lines = list(difflib.unified_diff(
-                        original_text.splitlines(keepends=True),
-                        current_text.splitlines(keepends=True),
-                        fromfile="original",
-                        tofile="edited",
-                    ))
+                    diff_lines = list(
+                        difflib.unified_diff(
+                            original_text.splitlines(keepends=True),
+                            current_text.splitlines(keepends=True),
+                            fromfile="original",
+                            tofile="edited",
+                        )
+                    )
 
                     # Only process non-trivial diffs (more than whitespace changes)
                     meaningful_diff = [
-                        line for line in diff_lines
-                        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+                        line
+                        for line in diff_lines
+                        if line.startswith(("+", "-"))
+                        and not line.startswith(("+++", "---"))
                         and line.strip() not in ("+", "-", "")
                     ]
 
@@ -406,9 +424,7 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
                     conn.commit()
 
             except Exception as e:
-                logger.error(
-                    "Drive poll error for generation %s (job=%s): %s", gen_id, job_id, e
-                )
+                logger.error("Drive poll error for generation %s (job=%s): %s", gen_id, job_id, e)
 
         result = {
             "resumes_polled": resumes_polled,
@@ -418,9 +434,11 @@ def run_drive_feedback_poll(db_path: str, config: dict) -> dict:
         logger.info("Drive feedback poll: %s", result)
         return result
 
+
 # ---------------------------------------------------------------------------
 # Preference consolidation
 # ---------------------------------------------------------------------------
+
 
 def run_preference_consolidation(db_path: str, config: dict) -> dict:
     """Consolidate similar accepted preferences into canonical rules.
@@ -496,7 +514,7 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
             return {"consolidated": False, "count": count, "error": str(e)}
 
         # Mark old preferences as superseded
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         old_ids = [row["id"] for row in rows]
         for old_id in old_ids:
             conn.execute(
@@ -510,28 +528,34 @@ def run_preference_consolidation(db_path: str, config: dict) -> dict:
         # Insert new consolidated preferences
         new_preferences = []
         for pref in result.get("phrasing_preferences", []):
-            new_preferences.append({
-                "preference_type": "phrasing",
-                "preference_text": pref.get("preference", ""),
-                "example_before": pref.get("example_before"),
-                "example_after": pref.get("example_after"),
-            })
+            new_preferences.append(
+                {
+                    "preference_type": "phrasing",
+                    "preference_text": pref.get("preference", ""),
+                    "example_before": pref.get("example_before"),
+                    "example_after": pref.get("example_after"),
+                }
+            )
         for change in result.get("content_changes", []):
             change_type = change.get("change_type", "addition")
             pref_type = "content_addition" if change_type == "addition" else "content_removal"
-            new_preferences.append({
-                "preference_type": pref_type,
-                "preference_text": change.get("description", ""),
-                "example_before": None,
-                "example_after": None,
-            })
+            new_preferences.append(
+                {
+                    "preference_type": pref_type,
+                    "preference_text": change.get("description", ""),
+                    "example_before": None,
+                    "example_after": None,
+                }
+            )
         for struct in result.get("structural_preferences", []):
-            new_preferences.append({
-                "preference_type": "structural",
-                "preference_text": struct,
-                "example_before": None,
-                "example_after": None,
-            })
+            new_preferences.append(
+                {
+                    "preference_type": "structural",
+                    "preference_text": struct,
+                    "example_before": None,
+                    "example_after": None,
+                }
+            )
 
         if first_job_id:
             new_count = _store_preferences(conn, first_job_id, new_preferences)

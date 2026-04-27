@@ -19,6 +19,7 @@ Honors all D-01 through D-27 locked decisions from 33-CONTEXT.md.
 
 Exit codes: 0 = all tasks complete, 2 = bad usage, 1 = runtime failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Ensure project root is on sys.path so job_finder imports resolve when
@@ -40,7 +40,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from job_finder.config import load_config
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_prompts.v3_scoring_prompt import V3_SCORING_PROMPT
-
 from scripts.shootout_lib.baseline import (
     BaselineSample,
     ShootoutInsufficientBaselineError,
@@ -71,9 +70,7 @@ logger = logging.getLogger("v3_shootout")
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_CANDIDATES = (
-    "phi4:14b,qwen2.5:14b,qwen2.5:32b,qwen3:14b,gemma3:27b"
-)
+DEFAULT_CANDIDATES = "phi4:14b,qwen2.5:14b,qwen2.5:32b,qwen3:14b,gemma3:27b"
 DEFAULT_SITES = (
     "haiku_score,sonnet_eval,enrich_job,enrich_job_sonnet,"
     "homepage_backfill,careers_scrape_url,careers_scrape_jobs,"
@@ -81,18 +78,26 @@ DEFAULT_SITES = (
 )
 
 EXCLUDED_CANDIDATES: list[dict] = [
-    {"model": "qwen3.5:27b",
-     "reason": "Broken Ollama package — community port (family=qwen35, not in "
-               "official Ollama library), 13-char chat template, returns "
-               "empty response body with eval_count>0 across all prompts. "
-               "Confirmed via raw /api/generate on a clean GPU."},
-    {"model": "qwen3.5:14b",
-     "reason": "Same broken qwen35 community-port lineage as 27b — excluded "
-               "by inference; not retested."},
-    {"model": "gemma4:26b-moe",
-     "reason": "Ollama structured-output bug (issue #15260) blocks JSON schema path"},
-    {"model": "deepseek-r1:14b",
-     "reason": "Reasoning model — latency + unreliable schema adherence per STACK.md"},
+    {
+        "model": "qwen3.5:27b",
+        "reason": "Broken Ollama package — community port (family=qwen35, not in "
+        "official Ollama library), 13-char chat template, returns "
+        "empty response body with eval_count>0 across all prompts. "
+        "Confirmed via raw /api/generate on a clean GPU.",
+    },
+    {
+        "model": "qwen3.5:14b",
+        "reason": "Same broken qwen35 community-port lineage as 27b — excluded "
+        "by inference; not retested.",
+    },
+    {
+        "model": "gemma4:26b-moe",
+        "reason": "Ollama structured-output bug (issue #15260) blocks JSON schema path",
+    },
+    {
+        "model": "deepseek-r1:14b",
+        "reason": "Reasoning model — latency + unreliable schema adherence per STACK.md",
+    },
 ]
 
 CHECKPOINT_DIR = Path(".planning/research/shootout")
@@ -106,9 +111,7 @@ MATRIX_PATH = Path(".planning/research/v3.0-shootout-results.md")
 
 def _sanitize_model_filename(model: str) -> str:
     """Map 'qwen3.5:27b' → 'qwen3_5_27b' for safe filename use."""
-    return (
-        model.replace(":", "_").replace("/", "_").replace(".", "_")
-    )
+    return model.replace(":", "_").replace("/", "_").replace(".", "_")
 
 
 def _load_baseline_from_disk(path: Path) -> BaselineSample:
@@ -149,9 +152,18 @@ def _git_commit_for_prompt() -> str:
     """Short SHA of the commit that introduced the frozen prompt (Plan 1)."""
     try:
         r = subprocess.run(
-            ["git", "log", "-1", "--format=%h", "--",
-             "job_finder/web/scoring_prompts/v3_scoring_prompt.py"],
-            capture_output=True, text=True, check=False, timeout=10,
+            [
+                "git",
+                "log",
+                "-1",
+                "--format=%h",
+                "--",
+                "job_finder/web/scoring_prompts/v3_scoring_prompt.py",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
         )
         return r.stdout.strip() or "unknown"
     except Exception:
@@ -160,9 +172,7 @@ def _git_commit_for_prompt() -> str:
 
 def _preflight_check(config: dict) -> None:
     """Verify preconditions BEFORE any candidate run. Raise on failure."""
-    expected_sha = (
-        "255c690e06ee58c87d32dc19ef4abd8ca25e9339eae009a327762f6de2d0c9da"
-    )
+    expected_sha = "255c690e06ee58c87d32dc19ef4abd8ca25e9339eae009a327762f6de2d0c9da"
     actual_sha = _prompt_sha256()
     if actual_sha != expected_sha:
         raise RuntimeError(
@@ -178,44 +188,51 @@ def _preflight_check(config: dict) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="v3.0 local-LLM site-fitness shootout driver"
+    parser = argparse.ArgumentParser(description="v3.0 local-LLM site-fitness shootout driver")
+    parser.add_argument(
+        "--candidates",
+        default=DEFAULT_CANDIDATES,
+        help=(f"Comma-separated candidate models. Default: {DEFAULT_CANDIDATES}"),
     )
     parser.add_argument(
-        "--candidates", default=DEFAULT_CANDIDATES,
-        help=(f"Comma-separated candidate models. "
-              f"Default: {DEFAULT_CANDIDATES}"),
-    )
-    parser.add_argument(
-        "--sites", default=DEFAULT_SITES,
+        "--sites",
+        default=DEFAULT_SITES,
         help="Comma-separated sites to run. Default: all 9 sites.",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Build baseline + show plan; do not call LLMs.",
     )
     parser.add_argument(
-        "--resume", action="store_true",
+        "--resume",
+        action="store_true",
         help="Resume from existing checkpoints.",
     )
     parser.add_argument(
-        "--holdout", action="store_true",
+        "--holdout",
+        action="store_true",
         help="After dev-set ranking, run holdout set on top 3 finalists.",
     )
     parser.add_argument(
-        "--opus-budget", type=float, default=OPUS_BUDGET_USD,
+        "--opus-budget",
+        type=float,
+        default=OPUS_BUDGET_USD,
         help=f"Override OPUS_BUDGET_USD hard cap (default {OPUS_BUDGET_USD} per D-14).",
     )
     parser.add_argument(
-        "--skip-gold", action="store_true",
+        "--skip-gold",
+        action="store_true",
         help="Skip Opus gold generation entirely (use for testing with an "
-             "empty gold dict — MAE will be SKIP everywhere).",
+        "empty gold dict — MAE will be SKIP everywhere).",
     )
     parser.add_argument(
-        "--vram-threshold-mb", type=int, default=1000,
+        "--vram-threshold-mb",
+        type=int,
+        default=1000,
         help="VRAM baseline threshold (MB) below which a candidate is "
-             "considered unloaded. Consumer GPUs with display may need "
-             "10000+ (default 1000 per D-03; consumer-GPU users: raise).",
+        "considered unloaded. Consumer GPUs with display may need "
+        "10000+ (default 1000 per D-03; consumer-GPU users: raise).",
     )
     return parser
 
@@ -224,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    start_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     start_mono = time.monotonic()
 
     try:
@@ -234,11 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # Discover db_path (config schema varies — support both db.path and db_path)
-    db_path = (
-        config.get("db", {}).get("path")
-        or config.get("db_path")
-        or "jobs.db"
-    )
+    db_path = config.get("db", {}).get("path") or config.get("db_path") or "jobs.db"
 
     _preflight_check(config)
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -251,12 +264,14 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("[baseline] loading from %s (resume)", sample_path)
         sample = _load_baseline_from_disk(sample_path)
     else:
-        logger.info("[baseline] building fresh stratified sample (n=100, "
-                    "80 dev + 20 holdout)")
+        logger.info("[baseline] building fresh stratified sample (n=100, 80 dev + 20 holdout)")
         with standalone_connection(db_path) as conn:
             try:
                 sample = build_baseline_sample(
-                    conn, n=100, holdout_fraction=0.2, random_state=42,
+                    conn,
+                    n=100,
+                    holdout_fraction=0.2,
+                    random_state=42,
                 )
             except ShootoutInsufficientBaselineError as exc:
                 print(f"[fatal-baseline] {exc}", file=sys.stderr)
@@ -264,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
         _save_baseline(sample_path, sample)
         logger.info(
             "[baseline] wrote %s (dev=%d holdout=%d pool=%d)",
-            sample_path, len(sample.dev), len(sample.holdout),
+            sample_path,
+            len(sample.dev),
+            len(sample.holdout),
             sample.total_eligible_pool,
         )
 
@@ -276,8 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.skip_gold:
         logger.warning("[gold] --skip-gold enabled; gold baseline empty")
         gold: dict = {}
-        gold_path.write_text(json.dumps({"_meta": {"skipped": True}}, indent=2),
-                             encoding="utf-8")
+        gold_path.write_text(json.dumps({"_meta": {"skipped": True}}, indent=2), encoding="utf-8")
     elif args.resume and gold_path.exists():
         raw = json.loads(gold_path.read_text(encoding="utf-8"))
         # Strip any _meta key before returning; _meta stores Opus cumulative
@@ -286,13 +302,15 @@ def main(argv: list[str] | None = None) -> int:
         opus_spend_usd = float(meta.get("cumulative_usd", 0.0))
         logger.info("[gold] loaded %d entries from %s (resume)", len(gold), gold_path)
     else:
-        logger.info("[gold] generating Opus 4.6 baseline (budget=$%.2f)",
-                    args.opus_budget)
+        logger.info("[gold] generating Opus 4.6 baseline (budget=$%.2f)", args.opus_budget)
         with standalone_connection(db_path) as conn:
             try:
                 gold = generate_gold_baseline(
-                    sample, config, conn=conn,
-                    dry_run=args.dry_run, budget_usd=args.opus_budget,
+                    sample,
+                    config,
+                    conn=conn,
+                    dry_run=args.dry_run,
+                    budget_usd=args.opus_budget,
                 )
             except OpusBudgetExceededError as exc:
                 print(f"[fatal-opus-budget] {exc}", file=sys.stderr)
@@ -300,18 +318,21 @@ def main(argv: list[str] | None = None) -> int:
         # Persist gold results + metadata — skip in dry-run to preserve any
         # existing on-disk gold file from a prior real run.
         if args.dry_run:
-            logger.info("[gold] dry-run: skipped writing gold file "
-                        "(existing file preserved)")
+            logger.info("[gold] dry-run: skipped writing gold file (existing file preserved)")
         else:
             gold_path.write_text(
                 json.dumps(
-                    {**gold, "_meta": {
-                        "model": "claude-opus-4-6",
-                        "budget_cap_usd": args.opus_budget,
-                        "prompt_sha256": _prompt_sha256(),
-                        "generated_at": start_iso,
-                    }},
-                    indent=2, default=str,
+                    {
+                        **gold,
+                        "_meta": {
+                            "model": "claude-opus-4-6",
+                            "budget_cap_usd": args.opus_budget,
+                            "prompt_sha256": _prompt_sha256(),
+                            "generated_at": start_iso,
+                        },
+                    },
+                    indent=2,
+                    default=str,
                 ),
                 encoding="utf-8",
             )
@@ -340,19 +361,28 @@ def main(argv: list[str] | None = None) -> int:
         with standalone_connection(db_path) as conn:
             try:
                 result = run_candidate(
-                    model, sample, gold, sites_list, config,
-                    cp_path, conn=conn,
+                    model,
+                    sample,
+                    gold,
+                    sites_list,
+                    config,
+                    cp_path,
+                    conn=conn,
                     vram_threshold_mb=args.vram_threshold_mb,
                 )
             except Exception as exc:
                 logger.exception("[candidate] %s CRASHED: %s", model, exc)
                 result = {
-                    "model": model, "completed_sites": [], "per_site": {},
-                    "determinism": None, "_crash": str(exc),
+                    "model": model,
+                    "completed_sites": [],
+                    "per_site": {},
+                    "determinism": None,
+                    "_crash": str(exc),
                 }
         all_results[model] = result
-        logger.info("[candidate] finished %s (sites=%d)",
-                    model, len(result.get("completed_sites", [])))
+        logger.info(
+            "[candidate] finished %s (sites=%d)", model, len(result.get("completed_sites", []))
+        )
 
     # -----------------------------------------------------------------------
     # Step 4 — Holdout on top 3 (optional)
@@ -366,17 +396,22 @@ def main(argv: list[str] | None = None) -> int:
             top3 = ranked[:3]
             logger.info("[holdout] running top 3 on holdout set: %s", top3)
             holdout_baseline = BaselineSample(
-                dev=sample.holdout, holdout=(),
+                dev=sample.holdout,
+                holdout=(),
                 quartile_counts=sample.quartile_counts,
                 total_eligible_pool=sample.total_eligible_pool,
             )
             for model in top3:
-                cp_path = (CHECKPOINT_DIR /
-                           f"{_sanitize_model_filename(model)}_holdout.json")
+                cp_path = CHECKPOINT_DIR / f"{_sanitize_model_filename(model)}_holdout.json"
                 with standalone_connection(db_path) as conn:
                     holdout_result = run_candidate(
-                        model, holdout_baseline, gold, sites_list, config,
-                        cp_path, conn=conn,
+                        model,
+                        holdout_baseline,
+                        gold,
+                        sites_list,
+                        config,
+                        cp_path,
+                        conn=conn,
                         vram_threshold_mb=args.vram_threshold_mb,
                     )
                 all_results[model]["holdout"] = holdout_result
@@ -386,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     # -----------------------------------------------------------------------
     # Step 5 — Render matrix
     # -----------------------------------------------------------------------
-    end_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     duration_sec = time.monotonic() - start_mono
 
     methodology = {

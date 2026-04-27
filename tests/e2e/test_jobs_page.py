@@ -12,6 +12,7 @@ BASE_TIMEOUT = 5000  # 5s for HTMX swaps
 # Accordion expand / collapse
 # ---------------------------------------------------------------------------
 
+
 class TestAccordionExpandCollapse:
     def test_expand_shows_detail_inline(self, page: Page, live_server: str):
         """Clicking a compact row loads detail inline without page reload."""
@@ -56,6 +57,7 @@ class TestAccordionExpandCollapse:
 # Filter bar interactions
 # ---------------------------------------------------------------------------
 
+
 class TestFilterBar:
     def test_status_pills_filter_table(self, page: Page, live_server: str):
         """Clicking a status pill filters the table to that status only."""
@@ -95,7 +97,9 @@ class TestFilterBar:
 
         # Button should appear active (indigo background)
         btn_classes = biz3_btn.get_attribute("class")
-        assert "bg-indigo-600" in btn_classes, "Active freshness button should have indigo background"
+        assert "bg-indigo-600" in btn_classes, (
+            "Active freshness button should have indigo background"
+        )
 
     def test_freshness_toggle_deactivates_on_second_click(self, page: Page, live_server: str):
         """Clicking the active freshness button again clears the filter."""
@@ -111,9 +115,13 @@ class TestFilterBar:
         page.wait_for_load_state("networkidle")
 
         btn_classes = biz3_btn.get_attribute("class")
-        assert "bg-indigo-600" not in btn_classes, "Deactivated button should not have indigo background"
+        assert "bg-indigo-600" not in btn_classes, (
+            "Deactivated button should not have indigo background"
+        )
 
-    def test_freshness_and_posted_within_are_mutually_exclusive(self, page: Page, live_server: str):
+    def test_freshness_and_posted_within_are_mutually_exclusive(
+        self, page: Page, live_server: str
+    ):
         """Selecting 'posted within' while freshness is active clears freshness."""
         page.goto(f"{live_server}/jobs")
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
@@ -128,7 +136,9 @@ class TestFilterBar:
 
         # Freshness button should be deactivated
         btn_classes = biz3_btn.get_attribute("class")
-        assert "bg-indigo-600" not in btn_classes, "Freshness toggle should clear when posted_within changes"
+        assert "bg-indigo-600" not in btn_classes, (
+            "Freshness toggle should clear when posted_within changes"
+        )
 
         # Freshness hidden input should be empty
         freshness_val = page.locator("#filter-freshness").input_value()
@@ -149,9 +159,7 @@ class TestFilterBar:
         assert "Data Science Intern" not in default_content, (
             "Dismissed intern job should not appear in default view"
         )
-        assert "OldCo" not in default_content, (
-            "Rejected job should not appear in default view"
-        )
+        assert "OldCo" not in default_content, "Rejected job should not appear in default view"
 
         # Enable show_hidden and wait for the HTMX /jobs/table response
         show_hidden_cb = page.locator("input[name='show_hidden']")
@@ -172,6 +180,7 @@ class TestFilterBar:
 # ---------------------------------------------------------------------------
 # DOM integrity
 # ---------------------------------------------------------------------------
+
 
 class TestDOMIntegrity:
     def test_no_duplicate_rows_after_expand_collapse(self, page: Page, live_server: str):

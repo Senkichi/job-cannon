@@ -16,10 +16,10 @@ import pytest
 
 from job_finder.sources.thordata_source import ThordataSource
 
-
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def source():
@@ -48,6 +48,7 @@ def _result(
 # ---------------------------------------------------------------------------
 # Test: _parse_result field mapping
 # ---------------------------------------------------------------------------
+
 
 class TestParseResult:
     def test_extracts_title(self, source):
@@ -118,6 +119,7 @@ class TestParseResult:
 # Test: Recency filter
 # ---------------------------------------------------------------------------
 
+
 class TestRecencyFilter:
     def test_rejects_job_older_than_max_age_days(self, source):
         """Jobs with age > max_age_days are excluded."""
@@ -162,6 +164,7 @@ class TestRecencyFilter:
 # ---------------------------------------------------------------------------
 # Test: Posting age parsing
 # ---------------------------------------------------------------------------
+
 
 class TestPostingAgeParsing:
     def test_just_posted_returns_zero(self, source):
@@ -209,6 +212,7 @@ class TestPostingAgeParsing:
 # Test: docid extraction from URL fragment
 # ---------------------------------------------------------------------------
 
+
 class TestExtractDocid:
     def test_extracts_from_standard_link(self, source):
         link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer"
@@ -233,6 +237,7 @@ class TestExtractDocid:
 # ---------------------------------------------------------------------------
 # Test: Salary extraction from extensions
 # ---------------------------------------------------------------------------
+
 
 class TestSalaryExtraction:
     def test_k_range_with_en_dash(self, source):
@@ -289,6 +294,7 @@ class TestSalaryExtraction:
 # Test: fetch_jobs iterates queries and combines results
 # ---------------------------------------------------------------------------
 
+
 class TestFetchJobs:
     def test_calls_search_per_query(self, source):
         """fetch_jobs calls _search once for each query in the list."""
@@ -307,19 +313,26 @@ class TestFetchJobs:
         from job_finder.models import Job
 
         def make_job(title):
-            return Job(title=title, company="Co", location="Remote",
-                       source="thordata", source_url="https://example.com")
+            return Job(
+                title=title,
+                company="Co",
+                location="Remote",
+                source="thordata",
+                source_url="https://example.com",
+            )
 
         query_results = [
             [make_job("Job A"), make_job("Job B")],
             [make_job("Job C")],
         ]
         calls = iter(query_results)
-        with patch.object(source, "_search", side_effect=lambda q, l: next(calls)):
-            jobs = source.fetch_jobs([
-                {"query": "DS", "location": "SF"},
-                {"query": "AM", "location": "NY"},
-            ])
+        with patch.object(source, "_search", side_effect=lambda q, loc: next(calls)):
+            jobs = source.fetch_jobs(
+                [
+                    {"query": "DS", "location": "SF"},
+                    {"query": "AM", "location": "NY"},
+                ]
+            )
         assert len(jobs) == 3
 
     def test_empty_queries_returns_empty_list(self, source):
@@ -337,6 +350,7 @@ class TestFetchJobs:
 # Test: _search — HTTP behavior
 # ---------------------------------------------------------------------------
 
+
 class TestSearch:
     def test_posts_with_bearer_auth(self, source):
         """_search sends Authorization: Bearer header."""
@@ -344,8 +358,9 @@ class TestSearch:
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {"job_results": {"jobs": []}}
 
-        with patch("job_finder.sources.thordata_source.requests.post",
-                   return_value=mock_resp) as mock_post:
+        with patch(
+            "job_finder.sources.thordata_source.requests.post", return_value=mock_resp
+        ) as mock_post:
             source._search("Data Scientist", "Remote")
 
         call_kwargs = mock_post.call_args
@@ -354,8 +369,10 @@ class TestSearch:
 
     def test_returns_empty_list_on_http_error(self, source):
         """HTTP errors are caught and return []."""
-        with patch("job_finder.sources.thordata_source.requests.post",
-                   side_effect=Exception("Connection refused")):
+        with patch(
+            "job_finder.sources.thordata_source.requests.post",
+            side_effect=Exception("Connection refused"),
+        ):
             jobs = source._search("Data Scientist", "Remote")
         assert jobs == []
 
@@ -366,8 +383,7 @@ class TestSearch:
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = req.HTTPError("403 Forbidden")
 
-        with patch("job_finder.sources.thordata_source.requests.post",
-                   return_value=mock_resp):
+        with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
             jobs = source._search("Data Scientist", "Remote")
         assert jobs == []
 
@@ -381,8 +397,7 @@ class TestSearch:
             }
         }
 
-        with patch("job_finder.sources.thordata_source.requests.post",
-                   return_value=mock_resp):
+        with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
             jobs = source._search("Data Scientist", "Remote")
 
         assert len(jobs) == 1
@@ -401,8 +416,7 @@ class TestSearch:
             }
         }
 
-        with patch("job_finder.sources.thordata_source.requests.post",
-                   return_value=mock_resp):
+        with patch("job_finder.sources.thordata_source.requests.post", return_value=mock_resp):
             jobs = source._search("Data Scientist", "Remote")
 
         assert len(jobs) == 1

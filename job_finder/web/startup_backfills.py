@@ -11,7 +11,10 @@ Both modules are called from the app factory (web/__init__.py) in sequence:
 first schema migrations, then startup backfills.
 """
 
+from datetime import UTC
+
 from job_finder.web.db_helpers import standalone_connection
+
 
 def run_description_reformat_once(db_path: str, config: dict) -> None:
     """Start a daemon thread to reformat all job descriptions once (TESTING-guarded).
@@ -26,6 +29,7 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
         config: Application config dict (reads TESTING and anthropic API key).
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     # Skip in test mode
@@ -34,6 +38,7 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
 
     try:
         import threading
+
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         def _run():
@@ -51,6 +56,7 @@ def run_description_reformat_once(db_path: str, config: dict) -> None:
     except Exception as e:
         logger.warning("Failed to start description reformat pass: %s", e)
 
+
 def run_data_backfills_once(db_path: str, config: dict) -> None:
     """Run one-time data backfills in a background thread.
 
@@ -64,6 +70,7 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
         config: Application config dict.
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     if config.get("TESTING"):
@@ -102,13 +109,14 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
                     logger.info("Backfill posted_date: %d jobs updated", updated)
 
                 # 3. SerpAPI enrichment for jobs missing jd_full
-                serpapi_key = (
-                    config.get("sources", {}).get("serpapi", {}).get("api_key")
-                )
+                serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
                 if serpapi_key:
                     try:
                         from job_finder.web.data_enricher import run_enrichment_backfill
-                        count = run_enrichment_backfill(db_path, serpapi_key, config=config, limit=100)
+
+                        count = run_enrichment_backfill(
+                            db_path, serpapi_key, config=config, limit=100
+                        )
                         if count:
                             logger.info("Enrichment backfill: %d jobs enriched", count)
                     except Exception as e:
@@ -117,11 +125,12 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
                     logger.debug("No SerpAPI key — skipping enrichment backfill")
 
                 # Insert sentinel
-                from datetime import datetime, timezone
+                from datetime import datetime
+
                 conn.execute(
                     "INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at) "
                     "VALUES ('__sentinel__', '__sentinel__', 'backfill_v1', ?)",
-                    (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),),
+                    (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
                 )
                 conn.commit()
                 logger.info("Data backfills complete.")

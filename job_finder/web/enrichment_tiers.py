@@ -7,19 +7,18 @@ and Sonnet deep extraction.
 These are called by data_enricher.enrich_job() in cost order.
 """
 
-import json
 import logging
 import re
 import time
-from typing import Optional, Any
+from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
+from ddgs import DDGS
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude, cost_gate
-from ddgs import DDGS
-from job_finder.web.domain_policy import is_blocked_domain, domain_priority
+from job_finder.web.claude_client import call_claude
+from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
@@ -74,9 +73,7 @@ _SERPAPI_URL = "https://serpapi.com/search.json"
 
 # HTTP headers for external requests
 _HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (compatible; JobFinder/1.0; +https://github.com/job-finder)"
-    )
+    "User-Agent": ("Mozilla/5.0 (compatible; JobFinder/1.0; +https://github.com/job-finder)")
 }
 
 # Tags to strip from HTML before extracting text
@@ -101,6 +98,7 @@ _TIMEOUT = 10
 # Tier implementations
 # ---------------------------------------------------------------------------
 
+
 def is_short_auth_page(text: str) -> bool:
     """Return True if text looks like a short auth-wall or CAPTCHA page.
 
@@ -111,13 +109,19 @@ def is_short_auth_page(text: str) -> bool:
         return False
     prefix = text[:500].lower()
     signals = [
-        "sign in", "log in", "login", "captcha", "just a moment",
-        "access denied", "verify you are human", "verify you are a human",
+        "sign in",
+        "log in",
+        "login",
+        "captcha",
+        "just a moment",
+        "access denied",
+        "verify you are human",
+        "verify you are a human",
     ]
     return any(s in prefix for s in signals)
 
 
-def fetch_direct_jd(url: str) -> Optional[str]:
+def fetch_direct_jd(url: str) -> str | None:
     """Attempt a direct HTTP GET and return cleaned job description text.
 
     Strips noisy HTML tags and returns cleaned text capped at 8000 chars.
@@ -151,6 +155,7 @@ def fetch_direct_jd(url: str) -> Optional[str]:
     except Exception as e:
         logger.debug("Direct fetch failed for '%s': %s", url, e)
         return None
+
 
 def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
     """Query ATS API (Lever/Greenhouse/Ashby) for job data if company has a slug.
@@ -196,7 +201,7 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
 
         # Lazy import with ImportError guard
         try:
-            from job_finder.web.ats_scanner import scan_lever, scan_greenhouse, scan_ashby
+            from job_finder.web.ats_scanner import scan_ashby, scan_greenhouse, scan_lever
         except ImportError:
             return {}
 
@@ -226,6 +231,7 @@ def query_ats_api(job_row: dict, conn: Any, config: dict) -> dict:
     except Exception as e:
         logger.debug("ATS API query failed: %s", e)
         return {}
+
 
 def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
     """Scrape company careers page for matching job listing.
@@ -296,6 +302,7 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         logger.debug("Careers scrape failed: %s", e)
         return {}
 
+
 def extract_with_sonnet(
     fragments: dict,
     job_row: dict,
@@ -351,11 +358,7 @@ def extract_with_sonnet(
             f"Extract job details as JSON. Include only fields that are explicitly mentioned."
         )
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         job_id = job_row.get("dedup_key")
 
@@ -421,7 +424,8 @@ def extract_with_sonnet(
         logger.debug("Sonnet extraction failed: %s", e)
         return {}
 
-def search_serpapi(query: str, api_key: str) -> tuple[Optional[dict], list[str]]:
+
+def search_serpapi(query: str, api_key: str) -> tuple[dict | None, list[str]]:
     """Search Google Jobs via SerpAPI for job details.
 
     Args:
@@ -472,7 +476,8 @@ def search_serpapi(query: str, api_key: str) -> tuple[Optional[dict], list[str]]
         # Extract, filter, and sort apply_options URLs
         apply_options = job.get("apply_options", [])
         apply_urls = [
-            opt["link"] for opt in apply_options
+            opt["link"]
+            for opt in apply_options
             if opt.get("link") and not is_blocked_domain(opt["link"])
         ]
         apply_urls.sort(key=domain_priority)
@@ -493,7 +498,8 @@ def search_serpapi(query: str, api_key: str) -> tuple[Optional[dict], list[str]]
         logger.debug("SerpAPI search failed for '%s': %s", query, e)
         return None, []
 
-def search_duckduckgo(query: str) -> Optional[str]:
+
+def search_duckduckgo(query: str) -> str | None:
     """Query DuckDuckGo Instant Answer API for job/company info.
 
     Args:
@@ -531,6 +537,7 @@ def search_duckduckgo(query: str) -> Optional[str]:
     except Exception as e:
         logger.debug("DuckDuckGo search failed for '%s': %s", query, e)
         return None
+
 
 def extract_with_haiku(
     search_text: str,
@@ -572,11 +579,7 @@ def extract_with_haiku(
             f"Extract job details as JSON. Include only fields that are explicitly mentioned."
         )
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
         job_id = job_row.get("dedup_key")
 
@@ -630,7 +633,12 @@ def extract_with_haiku(
             # Remove None values and ensure salary fields are integers
             enriched = {}
             for key, value in result.items():
-                if value is not None and key in ("jd_full", "salary_min", "salary_max", "location"):
+                if value is not None and key in (
+                    "jd_full",
+                    "salary_min",
+                    "salary_max",
+                    "location",
+                ):
                     if key in ("salary_min", "salary_max") and isinstance(value, (int, float)):
                         enriched[key] = int(value)
                     elif isinstance(value, str) and value.strip():
@@ -643,11 +651,13 @@ def extract_with_haiku(
         logger.debug("Haiku extraction failed: %s", e)
         return {}
 
+
 # ---------------------------------------------------------------------------
 # Private helper
 # ---------------------------------------------------------------------------
 
-def _parse_salary_string(salary_str: str) -> Optional[dict]:
+
+def _parse_salary_string(salary_str: str) -> dict | None:
     """Parse a salary string like '$140K-$180K/yr' into min/max integers.
 
     Args:
@@ -661,7 +671,7 @@ def _parse_salary_string(salary_str: str) -> Optional[dict]:
         cleaned = salary_str.upper().replace("$", "").replace(",", "").strip()
 
         # Handle K (thousands) and M (millions)
-        def parse_amount(s: str) -> Optional[int]:
+        def parse_amount(s: str) -> int | None:
             s = s.strip()
             if s.endswith("K"):
                 return int(float(s[:-1]) * 1000)
@@ -737,10 +747,23 @@ _LOGIN_PAGE_SIGNALS = [
 _DDG_SEARCH_DELAY_S = 1.0
 
 
-_COMPANY_STOP_WORDS = frozenset({
-    "inc", "llc", "ltd", "corp", "co", "the", "and", "group",
-    "holdings", "international", "services", "solutions", "technologies",
-})
+_COMPANY_STOP_WORDS = frozenset(
+    {
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "co",
+        "the",
+        "and",
+        "group",
+        "holdings",
+        "international",
+        "services",
+        "solutions",
+        "technologies",
+    }
+)
 
 
 def company_tokens(company_name: str) -> list[str]:
@@ -763,7 +786,7 @@ def company_name_in_text(company_name: str, text: str) -> bool:
     return any(t in text_lower for t in tokens)
 
 
-def extract_content_from_html(html: str) -> Optional[str]:
+def extract_content_from_html(html: str) -> str | None:
     """Extract cleaned text content from raw HTML.
 
     Strips noise tags (script, style, nav, etc.) and returns cleaned text.
@@ -803,16 +826,15 @@ def is_chrome_or_login_page(text: str) -> bool:
     text_lower = text[:2000].lower()
     if any(sig in text_lower for sig in _CHROME_SIGNALS):
         return True
-    if any(sig in text_lower for sig in _LOGIN_PAGE_SIGNALS):
-        return True
-    return False
+    return bool(any(sig in text_lower for sig in _LOGIN_PAGE_SIGNALS))
 
 
 # ---------------------------------------------------------------------------
 # LinkedIn JD extraction
 # ---------------------------------------------------------------------------
 
-def fetch_linkedin_jd(url: str) -> Optional[str]:
+
+def fetch_linkedin_jd(url: str) -> str | None:
     """Extract job description from a LinkedIn guest job page.
 
     LinkedIn guest pages serve full JD content inside a specific container
@@ -853,6 +875,7 @@ def fetch_linkedin_jd(url: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # DDG web search tier
 # ---------------------------------------------------------------------------
+
 
 def search_ddg_web(title: str, company: str) -> dict:
     """Search DuckDuckGo web search for job description URLs and snippets.
@@ -917,7 +940,7 @@ def search_ddg_web(title: str, company: str) -> dict:
     }
 
 
-def fetch_ddg_jds(urls: list[str]) -> tuple[Optional[str], Optional[str]]:
+def fetch_ddg_jds(urls: list[str]) -> tuple[str | None, str | None]:
     """Fetch job descriptions from DDG search result URLs.
 
     Tries each URL (up to 4 attempts), routing LinkedIn URLs through the

@@ -10,11 +10,8 @@ Covers:
 """
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # _extract_posting_id
@@ -24,25 +21,31 @@ import pytest
 class TestExtractPostingId:
     def test_lever_url(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
-        assert _extract_posting_id(
-            "https://jobs.lever.co/acme/abc-123-def", "lever"
-        ) == "abc-123-def"
+
+        assert (
+            _extract_posting_id("https://jobs.lever.co/acme/abc-123-def", "lever") == "abc-123-def"
+        )
 
     def test_greenhouse_url(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
-        assert _extract_posting_id(
-            "https://boards.greenhouse.io/airbnb/jobs/12345", "greenhouse"
-        ) == "12345"
+
+        assert (
+            _extract_posting_id("https://boards.greenhouse.io/airbnb/jobs/12345", "greenhouse")
+            == "12345"
+        )
 
     def test_ashby_url_case_sensitive(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         # Ashby slugs are case-sensitive — pattern preserves case
-        assert _extract_posting_id(
-            "https://jobs.ashbyhq.com/OpenAI/abc-123-def", "ashby"
-        ) == "abc-123-def"
+        assert (
+            _extract_posting_id("https://jobs.ashbyhq.com/OpenAI/abc-123-def", "ashby")
+            == "abc-123-def"
+        )
 
     def test_workday_url_extracts_tail(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Software-Engineer_R-123456"
         assert _extract_posting_id(url, "workday") == "Software-Engineer_R-123456"
 
@@ -51,6 +54,7 @@ class TestExtractPostingId:
         '.../job/Remote-United-States/Senior-Data-Scientist_JR101664'.
         The regex must capture only the final (role-slug) segment."""
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         url = "https://stord.wd503.myworkdayjobs.com/Stord_External_Career/job/Remote-United-States/Senior-Data-Scientist_JR101664"
         assert _extract_posting_id(url, "workday") == "Senior-Data-Scientist_JR101664"
 
@@ -60,6 +64,7 @@ class TestExtractPostingId:
         still land on the final (role-slug) segment so scan and stored URLs
         normalize to the same ID."""
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         url = "https://stord.wd503.myworkdayjobs.com/en-US/Stord_External_Career/job//job/Remote-United-States/Data-Analyst_JR101972"
         assert _extract_posting_id(url, "workday") == "Data-Analyst_JR101972"
 
@@ -69,39 +74,55 @@ class TestExtractPostingId:
         postings. They must return None so they can't pollute live_id_set
         or a tracked job's job_ids set."""
         from job_finder.web.ats_reconciler import _extract_posting_id
-        assert _extract_posting_id(
-            "https://www.google.com/search?source=sh/x/job/li/m1/1", "workday"
-        ) is None
-        assert _extract_posting_id(
-            "https://www.ziprecruiter.com/c/Walmart/Job/Manager,-Advanced-Analytics/-in-Oakland,CA",
-            "workday",
-        ) is None
-        assert _extract_posting_id(
-            "https://www.linkedin.com/jobs/view/4379178105/", "workday"
-        ) is None
+
+        assert (
+            _extract_posting_id("https://www.google.com/search?source=sh/x/job/li/m1/1", "workday")
+            is None
+        )
+        assert (
+            _extract_posting_id(
+                "https://www.ziprecruiter.com/c/Walmart/Job/Manager,-Advanced-Analytics/-in-Oakland,CA",
+                "workday",
+            )
+            is None
+        )
+        assert (
+            _extract_posting_id("https://www.linkedin.com/jobs/view/4379178105/", "workday")
+            is None
+        )
 
     def test_smartrecruiters_url(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
-        assert _extract_posting_id(
-            "https://jobs.smartrecruiters.com/AbbVie/744000123456789", "smartrecruiters"
-        ) == "744000123456789"
+
+        assert (
+            _extract_posting_id(
+                "https://jobs.smartrecruiters.com/AbbVie/744000123456789", "smartrecruiters"
+            )
+            == "744000123456789"
+        )
 
     def test_smartrecruiters_url_strips_slug_suffix(self):
         """Stored URLs often keep the '-<slug-text>' SEO suffix that
         scan_smartrecruiters' constructed URLs omit. The regex must stop
         at the first dash so both forms normalize to the same ID."""
         from job_finder.web.ats_reconciler import _extract_posting_id
-        assert _extract_posting_id(
-            "https://jobs.smartrecruiters.com/WNSGlobalServices144/744000118077858-assistant-manager-analytics",
-            "smartrecruiters",
-        ) == "744000118077858"
+
+        assert (
+            _extract_posting_id(
+                "https://jobs.smartrecruiters.com/WNSGlobalServices144/744000118077858-assistant-manager-analytics",
+                "smartrecruiters",
+            )
+            == "744000118077858"
+        )
 
     def test_unknown_platform_returns_none(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         assert _extract_posting_id("https://jobs.lever.co/acme/abc", "icims") is None
 
     def test_non_matching_url_returns_none(self):
         from job_finder.web.ats_reconciler import _extract_posting_id
+
         assert _extract_posting_id("https://random.com/jobs/x", "lever") is None
 
 
@@ -130,20 +151,20 @@ def _setup_company_and_jobs(
     Returns: (company_id, [dedup_keys])
     """
     from job_finder.web.db_migrate import run_migrations
+
     run_migrations(path)
 
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     old_iso = "2026-01-01T00:00:00" if old_last_seen else now_iso
 
     conn.execute(
         "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, ats_slug, "
         "ats_probe_status, scan_enabled, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
-        ("acme", "Acme Corp", "https://acme.com", platform, slug,
-         "hit", now_iso, now_iso),
+        ("acme", "Acme Corp", "https://acme.com", platform, slug, "hit", now_iso, now_iso),
     )
     company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
@@ -154,9 +175,17 @@ def _setup_company_and_jobs(
             "INSERT INTO jobs (dedup_key, title, company, location, first_seen, "
             "last_seen, pipeline_status, company_id, source_urls) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (dk, f"Job {i}", "Acme Corp", "Remote",
-             old_iso, old_iso, "discovered", company_id,
-             f'["{url}"]'),
+            (
+                dk,
+                f"Job {i}",
+                "Acme Corp",
+                "Remote",
+                old_iso,
+                old_iso,
+                "discovered",
+                company_id,
+                f'["{url}"]',
+            ),
         )
         dedup_keys.append(dk)
 
@@ -173,7 +202,9 @@ def _setup_company_and_jobs(
 class TestReconcileCompany:
     @patch("job_finder.web.ats_reconciler.scan_lever")
     def test_live_job_refreshes_last_seen_and_clears_is_stale(
-        self, mock_scan, tmp_db_path,
+        self,
+        mock_scan,
+        tmp_db_path,
     ):
         """A tracked job whose URL posting-ID matches the live board is
         marked live, last_seen is refreshed to ~now, and is_stale is cleared."""
@@ -182,7 +213,9 @@ class TestReconcileCompany:
 
         url = "https://jobs.lever.co/acme/abc-123-def"
         _, dedup_keys = _setup_company_and_jobs(
-            tmp_db_path, job_urls=[url], old_last_seen=True,
+            tmp_db_path,
+            job_urls=[url],
+            old_last_seen=True,
         )
         # Artificially mark job as stale to verify Phase B clears it
         conn = sqlite3.connect(tmp_db_path)
@@ -195,9 +228,9 @@ class TestReconcileCompany:
         ]
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["live"] == 1
@@ -224,7 +257,8 @@ class TestReconcileCompany:
         from job_finder.web.db_helpers import standalone_connection
 
         _, dedup_keys = _setup_company_and_jobs(
-            tmp_db_path, job_urls=["https://jobs.lever.co/acme/111-222-aaa"],
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/111-222-aaa"],
         )
         mock_scan.return_value = [
             # Different hex-only ID — tracked job is NOT on the live board
@@ -232,9 +266,9 @@ class TestReconcileCompany:
         ]
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["expired"] == 1
@@ -257,14 +291,15 @@ class TestReconcileCompany:
         from job_finder.web.db_helpers import standalone_connection
 
         _setup_company_and_jobs(
-            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/abc-123"],
         )
         mock_scan.return_value = []
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
@@ -278,14 +313,15 @@ class TestReconcileCompany:
         from job_finder.web.db_helpers import standalone_connection
 
         _setup_company_and_jobs(
-            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/abc-123"],
         )
         mock_scan.side_effect = RuntimeError("network blew up")
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
@@ -298,14 +334,16 @@ class TestReconcileCompany:
         from job_finder.web.db_helpers import standalone_connection
 
         _setup_company_and_jobs(
-            tmp_db_path, platform="icims", slug="acme_icims",
+            tmp_db_path,
+            platform="icims",
+            slug="acme_icims",
             job_urls=["https://acme.icims.com/jobs/1234"],
         )
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
@@ -324,14 +362,16 @@ class TestReconcileCompany:
 
         url = "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/R-1"
         _setup_company_and_jobs(
-            tmp_db_path, platform="workday", slug="walmart.wd5/WalmartExternal",
+            tmp_db_path,
+            platform="workday",
+            slug="walmart.wd5/WalmartExternal",
             job_urls=[url],
         )
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
@@ -340,7 +380,9 @@ class TestReconcileCompany:
 
     @patch("job_finder.web.ats_reconciler.scan_lever")
     def test_scan_returns_postings_but_no_parseable_ids_skips(
-        self, mock_scan, tmp_db_path,
+        self,
+        mock_scan,
+        tmp_db_path,
     ):
         """If scan output has no source_urls matching the platform's ID
         pattern (URL format drift), skip rather than falsely expire."""
@@ -348,7 +390,8 @@ class TestReconcileCompany:
         from job_finder.web.db_helpers import standalone_connection
 
         _setup_company_and_jobs(
-            tmp_db_path, job_urls=["https://jobs.lever.co/acme/abc-123"],
+            tmp_db_path,
+            job_urls=["https://jobs.lever.co/acme/abc-123"],
         )
         mock_scan.return_value = [
             # Malformed source_url that doesn't match _LEVER_POSTING_RE
@@ -356,9 +399,9 @@ class TestReconcileCompany:
         ]
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["skipped"] is True
@@ -381,9 +424,9 @@ class TestReconcileCompany:
         ]
 
         with standalone_connection(tmp_db_path) as conn:
-            company_row = dict(conn.execute(
-                "SELECT id, ats_platform, ats_slug FROM companies"
-            ).fetchone())
+            company_row = dict(
+                conn.execute("SELECT id, ats_platform, ats_slug FROM companies").fetchone()
+            )
             result = reconcile_company(conn, company_row)
 
         assert result["unparseable"] == 1
@@ -416,28 +459,47 @@ class TestReconcileAllCompanies:
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
 
         # Two Lever companies, each with one discovered job.
         # Hex-only posting IDs (Lever UUID format).
-        for i, (slug, url) in enumerate([
-            ("acme", "https://jobs.lever.co/acme/aaa-bbb-111"),
-            ("beta", "https://jobs.lever.co/beta/ccc-ddd-222"),
-        ]):
+        for _i, (slug, url) in enumerate(
+            [
+                ("acme", "https://jobs.lever.co/acme/aaa-bbb-111"),
+                ("beta", "https://jobs.lever.co/beta/ccc-ddd-222"),
+            ]
+        ):
             conn.execute(
                 "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, "
                 "ats_slug, ats_probe_status, scan_enabled, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
-                (slug, slug.title(), f"https://{slug}.com", "lever", slug,
-                 "hit", now_iso, now_iso),
+                (
+                    slug,
+                    slug.title(),
+                    f"https://{slug}.com",
+                    "lever",
+                    slug,
+                    "hit",
+                    now_iso,
+                    now_iso,
+                ),
             )
             company_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute(
                 "INSERT INTO jobs (dedup_key, title, company, location, first_seen, "
                 "last_seen, pipeline_status, company_id, source_urls) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (f"{slug}|job", f"Job at {slug}", slug.title(), "Remote",
-                 now_iso, now_iso, "discovered", company_id, f'["{url}"]'),
+                (
+                    f"{slug}|job",
+                    f"Job at {slug}",
+                    slug.title(),
+                    "Remote",
+                    now_iso,
+                    now_iso,
+                    "discovered",
+                    company_id,
+                    f'["{url}"]',
+                ),
             )
         conn.commit()
         conn.close()
@@ -465,13 +527,12 @@ class TestReconcileAllCompanies:
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO companies (name, name_raw, homepage_url, ats_platform, "
             "ats_slug, ats_probe_status, scan_enabled, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            ("no_ats", "No ATS", "https://no-ats.com", None, None,
-             "miss", now_iso, now_iso),
+            ("no_ats", "No ATS", "https://no-ats.com", None, None, "miss", now_iso, now_iso),
         )
         conn.commit()
         conn.close()

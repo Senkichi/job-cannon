@@ -12,13 +12,13 @@ Exports:
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
 
 from job_finder.config import DEFAULT_MODEL_OPUS
-from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.claude_client import BudgetExceededError, call_claude, cost_gate
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.scoring_orchestrator import load_scoring_profile
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,7 @@ INTERVIEW_PREP_SCHEMA = {
 
 SERPAPI_BASE_URL = "https://serpapi.com/search.json"
 
+
 def _fetch_company_info(company_name: str, config: dict) -> str:
     """Fetch company info from SerpAPI for interview prep context.
 
@@ -118,9 +119,11 @@ def _fetch_company_info(company_name: str, config: dict) -> str:
         logger.warning("_fetch_company_info failed for '%s': %s", company_name, e)
         return ""
 
+
 # ---------------------------------------------------------------------------
 # Background interview prep generation
 # ---------------------------------------------------------------------------
+
 
 def generate_interview_prep_background(
     dedup_key: str,
@@ -145,6 +148,7 @@ def generate_interview_prep_background(
     with standalone_connection(db_path) as conn:
         _run_prep_generation(conn, dedup_key, config)
 
+
 def _run_prep_generation(
     conn: sqlite3.Connection,
     dedup_key: str,
@@ -165,23 +169,20 @@ def _run_prep_generation(
         return
 
     # --- Insert initial 'generating' row ---
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     cursor = conn.execute(
         "INSERT INTO interview_preps (job_id, status, generated_at) VALUES (?, ?, ?)",
         (dedup_key, "generating", now),
     )
     prep_id = cursor.lastrowid
     if prep_id is None:
-        raise RuntimeError(
-            f"Failed to insert interview_prep row for dedup_key: {dedup_key}"
-        )
+        raise RuntimeError(f"Failed to insert interview_prep row for dedup_key: {dedup_key}")
     conn.commit()
 
     try:
         # --- Load job row ---
         job = conn.execute(
-            "SELECT title, company, jd_full, fit_analysis "
-            "FROM jobs WHERE dedup_key = ?",
+            "SELECT title, company, jd_full, fit_analysis FROM jobs WHERE dedup_key = ?",
             (dedup_key,),
         ).fetchone()
 
@@ -207,9 +208,7 @@ def _run_prep_generation(
         # --- Budget gate ---
         if not cost_gate(conn, config, "sonnet"):  # "sonnet" tier covers Opus too
             error_msg = "Monthly budget cap reached. Interview prep skipped."
-            logger.info(
-                "generate_interview_prep_background: budget exceeded for %s", dedup_key
-            )
+            logger.info("generate_interview_prep_background: budget exceeded for %s", dedup_key)
             conn.execute(
                 "UPDATE interview_preps SET status = 'error', error_msg = ? WHERE id = ?",
                 (error_msg, prep_id),
@@ -218,16 +217,19 @@ def _run_prep_generation(
             return
 
         # --- Build system prompt ---
-        system_prompt = _build_system_prompt(title, company, jd_full, profile, fit_analysis, company_info)
+        system_prompt = _build_system_prompt(
+            title, company, jd_full, profile, fit_analysis, company_info
+        )
 
         # --- Determine Opus model ---
-        opus_model = (
-            config.get("scoring", {}).get("models", {}).get("opus", DEFAULT_MODEL_OPUS)
-        )
+        opus_model = config.get("scoring", {}).get("models", {}).get("opus", DEFAULT_MODEL_OPUS)
 
         # --- Call Opus ---
         messages = [
-            {"role": "user", "content": "Generate the interview preparation for this job application."}
+            {
+                "role": "user",
+                "content": "Generate the interview preparation for this job application.",
+            }
         ]
 
         result, cost_usd = call_claude(
@@ -257,7 +259,14 @@ def _run_prep_generation(
                    questions_to_ask = ?,
                    cost_usd = ?
                WHERE id = ?""",
-            (company_brief, predicted_questions, gap_mitigation, questions_to_ask, cost_usd, prep_id),
+            (
+                company_brief,
+                predicted_questions,
+                gap_mitigation,
+                questions_to_ask,
+                cost_usd,
+                prep_id,
+            ),
         )
         conn.commit()
         logger.info(
@@ -268,9 +277,7 @@ def _run_prep_generation(
 
     except BudgetExceededError as e:
         error_msg = str(e)
-        logger.info(
-            "generate_interview_prep_background: budget exceeded for %s: %s", dedup_key, e
-        )
+        logger.info("generate_interview_prep_background: budget exceeded for %s: %s", dedup_key, e)
         conn.execute(
             "UPDATE interview_preps SET status = 'error', error_msg = ? WHERE id = ?",
             (error_msg, prep_id),
@@ -279,14 +286,13 @@ def _run_prep_generation(
 
     except Exception as e:
         error_msg = str(e)[:500]  # Truncate long error messages
-        logger.exception(
-            "generate_interview_prep_background: failed for %s: %s", dedup_key, e
-        )
+        logger.exception("generate_interview_prep_background: failed for %s: %s", dedup_key, e)
         conn.execute(
             "UPDATE interview_preps SET status = 'error', error_msg = ? WHERE id = ?",
             (error_msg, prep_id),
         )
         conn.commit()
+
 
 def _build_system_prompt(
     title: str,
@@ -335,6 +341,7 @@ Generate comprehensive interview preparation with all four required sections:
 
 Be specific, practical, and tailored to both the role and the candidate's actual experience."""
 
+
 def _format_profile_for_prompt(profile: dict) -> str:
     """Format experience profile for inclusion in Opus prompt."""
     if not profile:
@@ -377,6 +384,7 @@ def _format_profile_for_prompt(profile: dict) -> str:
                 lines.append(f"    Thesis: {ed['thesis']}")
 
     return "\n".join(lines) if lines else "(No profile data)"
+
 
 def _format_fit_analysis(fit_analysis: dict) -> str:
     """Format AI fit analysis for inclusion in Opus prompt."""

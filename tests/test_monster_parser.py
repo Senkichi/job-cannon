@@ -9,14 +9,12 @@ Each job card is a <table class="width-100"> containing:
 
 from datetime import datetime
 
-import pytest
-
 from job_finder.parsers.monster_parser import parse_monster_alert
-
 
 # ---------------------------------------------------------------------------
 # Minimal HTML helpers
 # ---------------------------------------------------------------------------
+
 
 def _job_card(
     title: str,
@@ -165,6 +163,7 @@ NESTED_TITLE_HTML = _email_body(
 # Tests: single job
 # ---------------------------------------------------------------------------
 
+
 class TestMonsterSingleJob:
     def test_parses_one_job(self):
         jobs = parse_monster_alert(SINGLE_JOB_HTML)
@@ -211,6 +210,7 @@ class TestMonsterSingleJob:
 # Tests: multiple jobs
 # ---------------------------------------------------------------------------
 
+
 class TestMonsterMultiJob:
     def test_parses_three_jobs(self):
         jobs = parse_monster_alert(MULTI_JOB_HTML)
@@ -243,6 +243,7 @@ class TestMonsterMultiJob:
 # ---------------------------------------------------------------------------
 # Tests: HTML formatting edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestMonsterEdgeCases:
     def test_whitespace_in_state_span(self):

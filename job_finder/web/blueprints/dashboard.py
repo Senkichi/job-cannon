@@ -5,6 +5,7 @@ import time
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import (
     get_dashboard_stats,
     get_pending_detections,
@@ -13,7 +14,6 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
-from job_finder.config import DEFAULT_DAILY_BUDGET_USD, DEFAULT_HAIKU_THRESHOLD
 from job_finder.web.claude_client import get_cost_stats
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_scorable
@@ -22,6 +22,7 @@ from job_finder.web.model_provider import tier_has_configured_provider
 logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
+
 
 def _get_ats_context(conn):
     """Query ATS scan stat card data for the Dashboard.
@@ -54,6 +55,7 @@ def _get_ats_context(conn):
         "company_count": (counts["total"] or 0) if counts else 0,
         "ats_tracked_count": (counts["ats_tracked"] or 0) if counts else 0,
     }
+
 
 def _get_rejection_context(conn):
     """Query rejection insights context for the Dashboard.
@@ -133,6 +135,7 @@ def _cached_tier_available(tier: str, config: dict, client) -> bool:
     # Fast path: Anthropic client exists and is in the chain → available
     if client is not None:
         from job_finder.web.model_provider import resolve_provider_config
+
         resolved = resolve_provider_config(tier, config)
         providers = [resolved["provider"]] + [e["provider"] for e in resolved["fallback_chain"]]
         if "anthropic" in providers:
@@ -263,6 +266,7 @@ def quick_actions_fragment():
     ctx = _get_quick_actions_context(conn, config)
     return render_template("dashboard/_quick_actions.html", **ctx)
 
+
 @dashboard_bp.route("/cost-detail", strict_slashes=False)
 def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
@@ -279,6 +283,7 @@ def cost_detail():
         cost_stats=cost_stats,
         budget_cap=budget_cap,
     )
+
 
 @dashboard_bp.route("/rejection-analysis", methods=["POST"], strict_slashes=False)
 def rejection_analysis():

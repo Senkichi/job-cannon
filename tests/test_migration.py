@@ -8,7 +8,8 @@ import sqlite3
 
 import pytest
 
-from job_finder.web.db_migrate import run_migrations, MIGRATIONS
+from job_finder.web.db_migrate import MIGRATIONS, run_migrations
+
 
 class TestMigrationOnEmptyDB:
     """Tests for migration on a fresh empty database."""
@@ -21,13 +22,25 @@ class TestMigrationOnEmptyDB:
         conn.close()
 
         original_columns = {
-            "dedup_key", "title", "company", "location",
-            "sources", "source_urls", "source_id",
-            "salary_min", "salary_max", "description",
-            "first_seen", "last_seen", "score", "score_breakdown",
+            "dedup_key",
+            "title",
+            "company",
+            "location",
+            "sources",
+            "source_urls",
+            "source_id",
+            "salary_min",
+            "salary_max",
+            "description",
+            "first_seen",
+            "last_seen",
+            "score",
+            "score_breakdown",
             "user_interest",
         }
-        assert original_columns.issubset(cols), f"Missing original columns: {original_columns - cols}"
+        assert original_columns.issubset(cols), (
+            f"Missing original columns: {original_columns - cols}"
+        )
 
     def test_creates_jobs_table_with_new_columns(self, tmp_db_path):
         """Migration adds new columns: pipeline_status, posted_date, notes."""
@@ -45,9 +58,7 @@ class TestMigrationOnEmptyDB:
         conn = sqlite3.connect(tmp_db_path)
         tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         conn.close()
 
@@ -84,9 +95,7 @@ class TestMigrationOnEmptyDB:
             "idx_pipeline_events_job_id",
             "idx_email_parse_log_message_id",
         }
-        assert expected_indexes.issubset(indexes), (
-            f"Missing indexes: {expected_indexes - indexes}"
-        )
+        assert expected_indexes.issubset(indexes), f"Missing indexes: {expected_indexes - indexes}"
 
     def test_score_and_last_seen_indexes_exist(self, tmp_db_path):
         """Indexes on score and last_seen exist (may be from original schema or migration)."""
@@ -139,6 +148,7 @@ class TestMigrationOnEmptyDB:
         assert version_after == len(MIGRATIONS), (
             f"Expected version {len(MIGRATIONS)} after migration, got: {version_after}"
         )
+
 
 class TestMigrationPreservesData:
     """Tests for migration on a DB with existing job rows."""
@@ -194,9 +204,7 @@ class TestMigrationPreservesData:
         run_migrations(sample_db_with_jobs)
         conn = sqlite3.connect(sample_db_with_jobs)
 
-        rows = conn.execute(
-            "SELECT pipeline_status, notes FROM jobs"
-        ).fetchall()
+        rows = conn.execute("SELECT pipeline_status, notes FROM jobs").fetchall()
         conn.close()
 
         for pipeline_status, notes in rows:
@@ -205,14 +213,13 @@ class TestMigrationPreservesData:
             )
             assert notes == "", f"Expected '', got: {notes}"
 
+
 class TestMigration5:
     """Tests for Migration 5 (Phase 5 Intelligence tables)."""
 
     def test_migrations_count_includes_migration5(self):
         """MIGRATIONS list includes at least 5 entries (Phase 5 added the 5th)."""
-        assert len(MIGRATIONS) >= 5, (
-            f"Expected at least 5 migrations, got {len(MIGRATIONS)}"
-        )
+        assert len(MIGRATIONS) >= 5, f"Expected at least 5 migrations, got {len(MIGRATIONS)}"
 
     def test_migration5_creates_phase5_tables(self, tmp_db_path):
         """Migration 5 creates all Phase 5 tables: interview_preps, resume_preferences_detected, rejection_reports."""
@@ -220,9 +227,7 @@ class TestMigration5:
         conn = sqlite3.connect(tmp_db_path)
         tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         conn.close()
 
@@ -237,9 +242,16 @@ class TestMigration5:
         conn.close()
 
         expected = {
-            "id", "job_id", "status", "company_brief",
-            "predicted_questions", "gap_mitigation", "questions_to_ask",
-            "error_msg", "generated_at", "cost_usd",
+            "id",
+            "job_id",
+            "status",
+            "company_brief",
+            "predicted_questions",
+            "gap_mitigation",
+            "questions_to_ask",
+            "error_msg",
+            "generated_at",
+            "cost_usd",
         }
         assert expected.issubset(cols), f"Missing interview_preps columns: {expected - cols}"
 
@@ -255,11 +267,12 @@ class TestMigration5:
         """Migration 5 adds last_drive_polled_at column to resume_generations table."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(resume_generations)"
-        ).fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(resume_generations)").fetchall()}
         conn.close()
-        assert "last_drive_polled_at" in cols, "last_drive_polled_at missing from resume_generations"
+        assert "last_drive_polled_at" in cols, (
+            "last_drive_polled_at missing from resume_generations"
+        )
+
 
 class TestMigrationIdempotency:
     """Tests for idempotent migration behavior."""
@@ -285,45 +298,45 @@ class TestMigrationIdempotency:
         conn.close()
         assert count == 3, f"Expected 3 rows after double migration, got: {count}"
 
+
 class TestMigration6:
     """Tests for Migration 6 (Phase 6 Data Quality schema additions)."""
 
     def test_migrations_count_includes_migration6(self):
         """MIGRATIONS list has at least 6 entries after Phase 6."""
-        assert len(MIGRATIONS) >= 6, (
-            f"Expected at least 6 migrations, got {len(MIGRATIONS)}"
-        )
+        assert len(MIGRATIONS) >= 6, f"Expected at least 6 migrations, got {len(MIGRATIONS)}"
 
     def test_migration6_creates_batch_score_sessions_table(self, tmp_db_path):
         """Migration 6 creates batch_score_sessions table with all required columns."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(batch_score_sessions)"
-        ).fetchall()}
+        cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(batch_score_sessions)").fetchall()
+        }
         conn.close()
 
         expected = {
-            "id", "session_type", "status", "total", "scored",
-            "skipped", "started_at", "finished_at", "error_msg",
+            "id",
+            "session_type",
+            "status",
+            "total",
+            "scored",
+            "skipped",
+            "started_at",
+            "finished_at",
+            "error_msg",
         }
-        assert expected.issubset(cols), (
-            f"Missing batch_score_sessions columns: {expected - cols}"
-        )
+        assert expected.issubset(cols), f"Missing batch_score_sessions columns: {expected - cols}"
 
     def test_migration6_creates_merge_log_table(self, tmp_db_path):
         """Migration 6 creates merge_log table with all required columns."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(merge_log)"
-        ).fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(merge_log)").fetchall()}
         conn.close()
 
         expected = {"id", "canonical_key", "merged_key", "merge_source", "merged_at"}
-        assert expected.issubset(cols), (
-            f"Missing merge_log columns: {expected - cols}"
-        )
+        assert expected.issubset(cols), f"Missing merge_log columns: {expected - cols}"
 
     def test_migration6_adds_locations_raw_column(self, tmp_db_path):
         """Migration 6 adds locations_raw column to jobs table."""
@@ -339,10 +352,7 @@ class TestMigration6:
         conn = sqlite3.connect(tmp_db_path)
 
         # Check column exists
-        col_info = {
-            row[1]: row
-            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
-        }
+        col_info = {row[1]: row for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
 
         assert "description_reformatted" in col_info, (
@@ -377,9 +387,7 @@ class TestMigration6:
             ).fetchall()
         }
         conn.close()
-        assert "idx_merge_log_canonical" in indexes, (
-            "idx_merge_log_canonical index missing"
-        )
+        assert "idx_merge_log_canonical" in indexes, "idx_merge_log_canonical index missing"
 
     def test_migration6_creates_batch_score_sessions_index(self, tmp_db_path):
         """Migration 6 creates idx_batch_score_sessions_status index."""
@@ -395,6 +403,7 @@ class TestMigration6:
         assert "idx_batch_score_sessions_status" in indexes, (
             "idx_batch_score_sessions_status index missing"
         )
+
 
 def test_migration_count_is_thirteen():
     """v1.1 adds 4 migrations (9-12), Phase 19 cleanup adds Migration 13.
@@ -420,6 +429,7 @@ def test_migration_count_is_thirteen():
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
+
     assert len(MIGRATIONS) == 41
 
 
@@ -456,7 +466,9 @@ class TestMigration27:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(interview_preps)").fetchall()}
         conn.close()
-        assert "reusable_stories_json" in cols, "reusable_stories_json column missing from interview_preps"
+        assert "reusable_stories_json" in cols, (
+            "reusable_stories_json column missing from interview_preps"
+        )
 
     def test_migration27_expiry_status_default_null(self, tmp_db_path):
         """expiry_status defaults to NULL for existing rows."""
@@ -476,6 +488,7 @@ class TestMigration27:
         assert row[0] is None, f"Expected expiry_status=NULL, got: {row[0]}"
         assert row[1] is None, f"Expected eval_blocks=NULL, got: {row[1]}"
         assert row[2] is None, f"Expected job_archetype=NULL, got: {row[2]}"
+
 
 class TestMigration13:
     """Tests for Migration 13 (drop dead ATS retry columns from jobs table).
@@ -519,6 +532,7 @@ class TestMigration13:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version >= 13, f"Expected user_version >= 13 (Migration 13 applied), got: {version}"
 
+
 class TestMigration12:
     """Tests for Migration 12 (ATS retry columns on companies table)."""
 
@@ -528,7 +542,10 @@ class TestMigration12:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)").fetchall()}
         conn.close()
-        assert "retry_count" in cols, "retry_count column missing from companies after Migration 12"
+        assert "retry_count" in cols, (
+            "retry_count column missing from companies after Migration 12"
+        )
+
 
 class TestMigration14:
     """Tests for Migration 14 (expiry_checked_at on jobs, validation_report on resume_generations).
@@ -577,7 +594,9 @@ class TestMigration14:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)").fetchall()}
         conn.close()
-        assert "retry_after" in cols, "retry_after column missing from companies after Migration 12"
+        assert "retry_after" in cols, (
+            "retry_after column missing from companies after Migration 12"
+        )
 
     def test_migration12_adds_miss_reason_to_companies(self, tmp_db_path):
         """Migration 12 adds miss_reason column to companies table."""
@@ -585,12 +604,15 @@ class TestMigration14:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(companies)").fetchall()}
         conn.close()
-        assert "miss_reason" in cols, "miss_reason column missing from companies after Migration 12"
+        assert "miss_reason" in cols, (
+            "miss_reason column missing from companies after Migration 12"
+        )
 
     def test_migration12_retry_count_defaults_to_zero(self, tmp_db_path):
         """Migration 12 retry_count defaults to 0 for new company rows."""
         run_migrations(tmp_db_path)
         from datetime import datetime
+
         conn = sqlite3.connect(tmp_db_path)
         now = datetime.now().isoformat()
         conn.execute(
@@ -607,14 +629,13 @@ class TestMigration14:
         assert row[1] is None, f"Expected retry_after=None, got: {row[1]}"
         assert row[2] is None, f"Expected miss_reason=None, got: {row[2]}"
 
+
 class TestMigration7:
     """Tests for Migration 7 (Phase 7 Company Tracking schema additions)."""
 
     def test_migrations_count_includes_migration7(self):
         """MIGRATIONS list has at least 7 entries after Phase 7."""
-        assert len(MIGRATIONS) >= 7, (
-            f"Expected at least 7 migrations, got {len(MIGRATIONS)}"
-        )
+        assert len(MIGRATIONS) >= 7, f"Expected at least 7 migrations, got {len(MIGRATIONS)}"
 
     def test_migration7_creates_companies_table(self, tmp_db_path):
         """Migration 7 creates companies table."""
@@ -622,9 +643,7 @@ class TestMigration7:
         conn = sqlite3.connect(tmp_db_path)
         tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         conn.close()
         assert "companies" in tables, "companies table missing after Migration 7"
@@ -637,10 +656,19 @@ class TestMigration7:
         conn.close()
 
         expected = {
-            "id", "name", "name_raw", "homepage_url",
-            "ats_platform", "ats_slug", "ats_probe_status",
-            "ats_probe_attempted_at", "scan_enabled", "last_scanned_at",
-            "jobs_found_total", "created_at", "updated_at",
+            "id",
+            "name",
+            "name_raw",
+            "homepage_url",
+            "ats_platform",
+            "ats_slug",
+            "ats_probe_status",
+            "ats_probe_attempted_at",
+            "scan_enabled",
+            "last_scanned_at",
+            "jobs_found_total",
+            "created_at",
+            "updated_at",
         }
         assert expected.issubset(cols), f"Missing companies columns: {expected - cols}"
 
@@ -650,9 +678,7 @@ class TestMigration7:
         conn = sqlite3.connect(tmp_db_path)
         tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         conn.close()
         assert "company_scan_log" in tables, "company_scan_log table missing after Migration 7"
@@ -681,7 +707,9 @@ class TestMigration7:
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
-        assert "comp_data_json" in cols, "comp_data_json column missing from jobs after Migration 7"
+        assert "comp_data_json" in cols, (
+            "comp_data_json column missing from jobs after Migration 7"
+        )
 
     def test_migration7_fixup_adds_comp_data_json_on_rerun(self, tmp_db_path):
         """Re-running migrations on DB where user_version=7 but comp_data_json missing still adds column."""
@@ -726,6 +754,7 @@ class TestMigration7:
         """companies.ats_probe_status defaults to 'pending' for new rows."""
         run_migrations(tmp_db_path)
         from datetime import datetime
+
         conn = sqlite3.connect(tmp_db_path)
         now = datetime.now().isoformat()
         conn.execute(
@@ -741,9 +770,11 @@ class TestMigration7:
         assert row[0] == "pending", f"Expected 'pending', got: {row[0]}"
         assert row[1] == 1, f"Expected scan_enabled=1, got: {row[1]}"
 
+
 # ---------------------------------------------------------------------------
 # Consolidated migration tests (relocated from domain test files, Phase 24)
 # ---------------------------------------------------------------------------
+
 
 class TestMigration2:
     """Verify Migration 2 added AI-scoring scaffolding that *persists* through
@@ -787,9 +818,7 @@ class TestMigration2:
         path, conn = migrated_db_class
         indexes = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
         }
         assert "idx_jobs_haiku_score" not in indexes
 
@@ -797,9 +826,7 @@ class TestMigration2:
         path, conn = migrated_db_class
         indexes = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
         }
         assert "idx_jobs_is_stale" in indexes
 
@@ -817,9 +844,11 @@ class TestMigration2:
 
     def test_migration2_user_version_is_current(self, migrated_db_class):
         from job_finder.web.db_migrate import MIGRATIONS
+
         path, conn = migrated_db_class
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version == len(MIGRATIONS)
+
 
 class TestMigration3:
     """Integration tests for Migration 3 (pipeline_detections table).
@@ -842,15 +871,25 @@ class TestMigration3:
         cols_rows = conn.execute("PRAGMA table_info(pipeline_detections)").fetchall()
         col_names = {row[1] for row in cols_rows}
         expected = {
-            "id", "gmail_message_id", "detection_type", "job_id",
-            "confidence_score", "matched_signals", "snippet",
-            "email_subject", "email_from", "email_date",
-            "status", "created_at", "resolved_at",
+            "id",
+            "gmail_message_id",
+            "detection_type",
+            "job_id",
+            "confidence_score",
+            "matched_signals",
+            "snippet",
+            "email_subject",
+            "email_from",
+            "email_date",
+            "status",
+            "created_at",
+            "resolved_at",
         }
         assert expected.issubset(col_names), f"Missing columns: {expected - col_names}"
 
     def test_pipeline_detections_gmail_message_id_unique(self, migrated_db_class):
         from datetime import datetime
+
         path, conn = migrated_db_class
         now = datetime.now().isoformat()
         # Insert with unique key for this class (msg_mig3_unique)
@@ -879,6 +918,7 @@ class TestMigration3:
         assert "idx_pipeline_detections_status" in index_names
         assert "idx_pipeline_detections_job_id" in index_names
         assert "idx_pipeline_detections_message_id" in index_names
+
 
 class TestMigration4:
     """Migration 4 adds status tracking columns to resume_generations."""
@@ -989,6 +1029,7 @@ class TestMigration4:
         # Second run must not raise
         run_migrations(tmp_db_path)
 
+
 class TestMigration5InterviewPrep:
     """Verify Migration 5 creates all Phase 5 tables and columns (from test_interview_prep.py)."""
 
@@ -1007,9 +1048,16 @@ class TestMigration5InterviewPrep:
         conn.close()
 
         expected = {
-            "id", "job_id", "status", "company_brief",
-            "predicted_questions", "gap_mitigation", "questions_to_ask",
-            "error_msg", "generated_at", "cost_usd",
+            "id",
+            "job_id",
+            "status",
+            "company_brief",
+            "predicted_questions",
+            "gap_mitigation",
+            "questions_to_ask",
+            "error_msg",
+            "generated_at",
+            "cost_usd",
         }
         assert expected.issubset(cols), f"Missing columns in interview_preps: {expected - cols}"
 
@@ -1017,14 +1065,22 @@ class TestMigration5InterviewPrep:
         """Migration 5 creates resume_preferences_detected table with all required columns."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(resume_preferences_detected)"
-        ).fetchall()}
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(resume_preferences_detected)").fetchall()
+        }
         conn.close()
 
         expected = {
-            "id", "job_id", "preference_type", "preference_text",
-            "example_before", "example_after", "accepted", "detected_at", "applied_at",
+            "id",
+            "job_id",
+            "preference_type",
+            "preference_text",
+            "example_before",
+            "example_after",
+            "accepted",
+            "detected_at",
+            "applied_at",
         }
         assert expected.issubset(cols), (
             f"Missing columns in resume_preferences_detected: {expected - cols}"
@@ -1034,15 +1090,11 @@ class TestMigration5InterviewPrep:
         """Migration 5 creates rejection_reports table with all required columns."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(rejection_reports)"
-        ).fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(rejection_reports)").fetchall()}
         conn.close()
 
         expected = {"id", "report_text", "rejections_analyzed", "generated_at", "cost_usd"}
-        assert expected.issubset(cols), (
-            f"Missing columns in rejection_reports: {expected - cols}"
-        )
+        assert expected.issubset(cols), f"Missing columns in rejection_reports: {expected - cols}"
 
     def test_migration5_adds_rejection_reviewed_to_jobs(self, tmp_db_path):
         """Migration 5 adds rejection_reviewed column to jobs table."""
@@ -1056,9 +1108,7 @@ class TestMigration5InterviewPrep:
         """Migration 5 adds last_drive_polled_at column to resume_generations table."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute(
-            "PRAGMA table_info(resume_generations)"
-        ).fetchall()}
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(resume_generations)").fetchall()}
         conn.close()
         assert "last_drive_polled_at" in cols, (
             "last_drive_polled_at column missing from resume_generations table"
@@ -1069,12 +1119,14 @@ class TestMigration5InterviewPrep:
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         indexes = {
-            row[1] for row in conn.execute(
+            row[1]
+            for row in conn.execute(
                 "SELECT type, name FROM sqlite_master WHERE type='index'"
             ).fetchall()
         }
         conn.close()
         assert "idx_interview_preps_job_id" in indexes, "Missing idx_interview_preps_job_id"
+
 
 class TestMigration5Reporting:
     """Verify Migration 5 creates required tables and columns for Phase 5 (from test_rejection_analyzer.py)."""
@@ -1085,9 +1137,7 @@ class TestMigration5Reporting:
         conn = sqlite3.connect(tmp_db_path)
         tables = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         conn.close()
         assert "rejection_reports" in tables, "rejection_reports table missing after Migration 5"
@@ -1096,10 +1146,7 @@ class TestMigration5Reporting:
         """rejection_reports table has required columns."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(rejection_reports)").fetchall()
-        }
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(rejection_reports)").fetchall()}
         conn.close()
 
         expected = {"id", "report_text", "rejections_analyzed", "generated_at", "cost_usd"}
@@ -1109,10 +1156,7 @@ class TestMigration5Reporting:
         """Migration 5 adds rejection_reviewed column to jobs table."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        cols = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
-        }
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
         assert "rejection_reviewed" in cols, "rejection_reviewed column missing from jobs"
 
@@ -1154,7 +1198,9 @@ class TestMigration18:
             "VALUES ('test-job', 'haiku_score', 'claude-haiku-4-5', 100, 50, 0.01, '2026-01-01T00:00:00Z')"
         )
         conn.commit()
-        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'test-job'").fetchone()
+        row = conn.execute(
+            "SELECT provider FROM scoring_costs WHERE job_id = 'test-job'"
+        ).fetchone()
         conn.close()
         assert row[0] == "anthropic"
 
@@ -1166,10 +1212,20 @@ class TestMigration18:
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("test-job-2", "sonnet_eval", "claude-sonnet-4-6", 500, 200, 0.05, "2026-01-01T00:00:00Z"),
+            (
+                "test-job-2",
+                "sonnet_eval",
+                "claude-sonnet-4-6",
+                500,
+                200,
+                0.05,
+                "2026-01-01T00:00:00Z",
+            ),
         )
         conn.commit()
-        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'test-job-2'").fetchone()
+        row = conn.execute(
+            "SELECT provider FROM scoring_costs WHERE job_id = 'test-job-2'"
+        ).fetchone()
         conn.close()
         assert row[0] == "anthropic"
 
@@ -1189,10 +1245,7 @@ class TestMigration40:
         """Migration 40 adds classification, sub_scores_json, scoring_model columns to jobs."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        col_info = {
-            row[1]: row
-            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
-        }
+        col_info = {row[1]: row for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
 
         # All three new columns exist with TEXT type and default NULL
@@ -1262,9 +1315,7 @@ class TestMigration40:
         for col in ("classification", "sub_scores_json", "scoring_model"):
             assert col in cols, f"Migration 40 idempotency: {col} missing after double-run"
         # After Plan 5 lands, user_version advances to 41 (Mig 41 follows Mig 40).
-        assert version >= 40, (
-            f"Migration 40 idempotency: user_version={version}, expected >=40"
-        )
+        assert version >= 40, f"Migration 40 idempotency: user_version={version}, expected >=40"
 
     def test_migration_40_fit_analysis_preserved_by_mig41(self, tmp_db_path):
         """Migration 41 preserves fit_analysis (holds the v3.0 rationale payload).
@@ -1319,9 +1370,7 @@ class TestMigration41DestructiveShape:
         conn = sqlite3.connect(tmp_db_path)
         indexes = {
             row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-            ).fetchall()
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
         }
         conn.close()
         assert "idx_jobs_haiku_score" not in indexes
@@ -1353,7 +1402,9 @@ class TestMigration41DestructiveShape:
         import tempfile
 
         from job_finder.web.db_migrate import (
-            MIGRATIONS, _apply_migration, _migration_41_drop_legacy_scores,
+            MIGRATIONS,
+            _apply_migration,
+            _migration_41_drop_legacy_scores,
         )
 
         # Run all migrations EXCEPT Migration 41 so we can populate legacy
@@ -1370,8 +1421,12 @@ class TestMigration41DestructiveShape:
 
             # Seed a row with both legacy columns AND v3 columns populated.
             sub_scores = {
-                "title_fit": 4, "location_fit": 4, "comp_fit": 3,
-                "domain_match": 4, "seniority_match": 4, "skills_match": 3,
+                "title_fit": 4,
+                "location_fit": 4,
+                "comp_fit": 3,
+                "domain_match": 4,
+                "seniority_match": 4,
+                "skills_match": 3,
             }
             conn.execute(
                 """INSERT INTO jobs
@@ -1381,11 +1436,20 @@ class TestMigration41DestructiveShape:
                      scoring_provider, scoring_model)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    "preserve-me", "Engineer", "Acme", "Remote",
-                    "2026-04-23", "2026-04-23",
-                    65.0, 78.0, "summary-text",
-                    "apply", json.dumps(sub_scores), json.dumps({"strengths": ["ML"]}),
-                    "ollama", "qwen2.5:14b",
+                    "preserve-me",
+                    "Engineer",
+                    "Acme",
+                    "Remote",
+                    "2026-04-23",
+                    "2026-04-23",
+                    65.0,
+                    78.0,
+                    "summary-text",
+                    "apply",
+                    json.dumps(sub_scores),
+                    json.dumps({"strengths": ["ML"]}),
+                    "ollama",
+                    "qwen2.5:14b",
                 ),
             )
             conn.commit()
@@ -1438,11 +1502,11 @@ class TestMigration41BackupGate:
     """
 
     def test_gate_raises_with_no_backup_and_no_override(self, monkeypatch, tmp_path):
-        import os
-
         from job_finder.web.db_migrate import (
-            MigrationBlockedError, _check_backup_recent,
+            MigrationBlockedError,
+            _check_backup_recent,
         )
+
         monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
         monkeypatch.chdir(tmp_path)  # empty directory -- no backup tarballs
         with pytest.raises(MigrationBlockedError, match=r"no backup_userdata_\*\.tar\.gz"):
@@ -1453,8 +1517,10 @@ class TestMigration41BackupGate:
         import time
 
         from job_finder.web.db_migrate import (
-            MigrationBlockedError, _check_backup_recent,
+            MigrationBlockedError,
+            _check_backup_recent,
         )
+
         monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
         monkeypatch.chdir(tmp_path)
         # Create a backup tarball with mtime 48h in the past
@@ -1486,8 +1552,10 @@ class TestMigration41BackupGate:
     def test_gate_env_override_any_other_value_does_not_bypass(self, monkeypatch, tmp_path):
         """GSD_BACKUP_CONFIRMED only bypasses the gate when literally '1'."""
         from job_finder.web.db_migrate import (
-            MigrationBlockedError, _check_backup_recent,
+            MigrationBlockedError,
+            _check_backup_recent,
         )
+
         monkeypatch.setenv("GSD_BACKUP_CONFIRMED", "yes")  # not '1'
         monkeypatch.chdir(tmp_path)
         with pytest.raises(MigrationBlockedError):

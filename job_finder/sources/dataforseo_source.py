@@ -13,8 +13,7 @@ Docs: https://docs.dataforseo.com/v3/serp/google/jobs/overview/
 import logging
 import re
 import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import requests
 
@@ -42,7 +41,7 @@ _SALARY_RE = re.compile(
 
 # Poll timing constants — used by _collect_results when poll_interval > 0.
 # Tests set poll_interval_seconds=0 which bypasses sleeping entirely.
-_POLL_INITIAL_DELAY_SECONDS = 45   # wait before first poll (tasks need 60-90s)
+_POLL_INITIAL_DELAY_SECONDS = 45  # wait before first poll (tasks need 60-90s)
 
 
 class DataForSEOSource:
@@ -319,7 +318,7 @@ class DataForSEOSource:
 
         return jobs
 
-    def _parse_item(self, item: dict) -> Optional[Job]:
+    def _parse_item(self, item: dict) -> Job | None:
         """Parse a single google_jobs_item dict into a Job. Returns None if filtered."""
         from job_finder.web.ats_company import classify_company_name
 
@@ -333,7 +332,9 @@ class DataForSEOSource:
         if decision.action == "reject":
             logger.info(
                 "DataForSEO: skipping '%s' — company '%s' rejected (%s)",
-                title, company[:60], decision.reason,
+                title,
+                company[:60],
+                decision.reason,
             )
             return None
         # Keep the original company name — jobs.company is the raw source-of-truth.
@@ -345,7 +346,7 @@ class DataForSEOSource:
         posted_date = self._parse_timestamp(item.get("timestamp", ""))
 
         if posted_date is not None:
-            age_days = (datetime.now(timezone.utc) - posted_date).days
+            age_days = (datetime.now(UTC) - posted_date).days
             if age_days > self.max_age_days:
                 logger.info(
                     "Skipping '%s' @ '%s' — %d days old (max %d)",
@@ -371,7 +372,7 @@ class DataForSEOSource:
             posted_date=posted_date,
         )
 
-    def _parse_timestamp(self, ts: str) -> Optional[datetime]:
+    def _parse_timestamp(self, ts: str) -> datetime | None:
         """Parse DataForSEO timestamp string to UTC-aware datetime.
 
         DataForSEO format: "2026-03-23 23:06:53 +00:00"
@@ -384,9 +385,7 @@ class DataForSEOSource:
         except (ValueError, TypeError):
             return None
 
-    def _extract_salary(
-        self, salary_str: Optional[str]
-    ) -> tuple[Optional[int], Optional[int]]:
+    def _extract_salary(self, salary_str: str | None) -> tuple[int | None, int | None]:
         """Parse salary string into (min, max) USD integers.
 
         Handles formats like:
@@ -406,7 +405,7 @@ class DataForSEOSource:
         try:
             low = int(m.group(1).replace(",", ""))
             high = int(m.group(3).replace(",", ""))
-            if m.group(2) and low < 1000:   # K suffix on low group
+            if m.group(2) and low < 1000:  # K suffix on low group
                 low *= 1000
             if m.group(4) and high < 1000:  # K suffix on high group
                 high *= 1000

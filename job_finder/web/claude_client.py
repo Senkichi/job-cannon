@@ -27,7 +27,7 @@ import sqlite3
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
@@ -58,9 +58,13 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # free/subscription spend from budget calculations, and by record_cost()
 # to record $0 for these providers.
 # "claude_cli" = calls routed through the Claude Code CLI (subscription-based).
-FREE_PROVIDERS: frozenset[str] = frozenset({
-    "gemini", "ollama", "claude_cli",
-})
+FREE_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "gemini",
+        "ollama",
+        "claude_cli",
+    }
+)
 
 
 class BudgetExceededError(Exception):
@@ -85,6 +89,7 @@ class ClaudeContext:
 # Cost computation
 # ---------------------------------------------------------------------------
 
+
 def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Return cost in USD for a Claude API call.
 
@@ -103,16 +108,16 @@ def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
             "Unknown model '%s' in compute_cost — using highest known pricing as fallback",
             model,
         )
-        pricing = max(
-            MODEL_PRICING.values(), key=lambda p: p["input"] + p["output"]
-        )
-    return (input_tokens / 1_000_000) * pricing["input"] + \
-           (output_tokens / 1_000_000) * pricing["output"]
+        pricing = max(MODEL_PRICING.values(), key=lambda p: p["input"] + p["output"])
+    return (input_tokens / 1_000_000) * pricing["input"] + (output_tokens / 1_000_000) * pricing[
+        "output"
+    ]
 
 
 # ---------------------------------------------------------------------------
 # Cost recording
 # ---------------------------------------------------------------------------
+
 
 def record_cost(
     conn: sqlite3.Connection,
@@ -137,7 +142,9 @@ def record_cost(
     Returns:
         Computed cost in USD (0.0 for free/subscription providers).
     """
-    cost_usd = 0.0 if provider in FREE_PROVIDERS else compute_cost(model, input_tokens, output_tokens)
+    cost_usd = (
+        0.0 if provider in FREE_PROVIDERS else compute_cost(model, input_tokens, output_tokens)
+    )
     timestamp = utc_now_iso()
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
@@ -163,7 +170,7 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
         List of dicts with keys: provider (str), calls (int), spend (float).
         Sorted descending by spend.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
     rows = conn.execute(
@@ -175,15 +182,13 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
         (month_start,),
     ).fetchall()
 
-    return [
-        {"provider": row[0], "calls": int(row[1]), "spend": float(row[2])}
-        for row in rows
-    ]
+    return [{"provider": row[0], "calls": int(row[1]), "spend": float(row[2])} for row in rows]
 
 
 # ---------------------------------------------------------------------------
 # Budget gating
 # ---------------------------------------------------------------------------
+
 
 def cost_gate(
     conn: sqlite3.Connection,
@@ -209,7 +214,7 @@ def cost_gate(
     scoring_cfg = config.get("scoring", {})
     daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Only count spend from per-call billed providers (exclude free/subscription)
     free = tuple(FREE_PROVIDERS)
@@ -223,15 +228,13 @@ def cost_gate(
         f"AND provider NOT IN ({free_placeholders})",
         (day_start, *free),
     ).fetchone()
-    if (row[0] if row else 0.0) >= daily_cap:
-        return False
-
-    return True
+    return not (row[0] if row else 0.0) >= daily_cap
 
 
 # ---------------------------------------------------------------------------
 # Cost statistics
 # ---------------------------------------------------------------------------
+
 
 def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) -> dict:
     """Return aggregated cost statistics.
@@ -254,11 +257,12 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
     """
     if budget_cap is None:
         budget_cap = DEFAULT_DAILY_BUDGET_USD
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     today_start = now.strftime("%Y-%m-%dT00:00:00Z")
-    week_start = (now.replace(hour=0, minute=0, second=0, microsecond=0) -
-                  timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    week_start = (
+        now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
     # Single query computes all three time-window sums in one index scan
@@ -285,10 +289,7 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         "GROUP BY purpose "
         "ORDER BY spend DESC",
     ).fetchall()
-    by_feature = [
-        {"purpose": row[0], "calls": row[1], "spend": float(row[2])}
-        for row in rows
-    ]
+    by_feature = [{"purpose": row[0], "calls": row[1], "spend": float(row[2])} for row in rows]
 
     return {
         "today": today_spend,
@@ -304,6 +305,7 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
 # Historical cost breakdown queries
 # ---------------------------------------------------------------------------
 
+
 def get_daily_cost_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[dict]:
     """Return per-day, per-purpose cost breakdown for the last N days.
 
@@ -315,7 +317,7 @@ def get_daily_cost_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[d
         List of dicts with keys: date (str YYYY-MM-DD), purpose (str), spend (float).
         Sorted ascending by date, then purpose.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start_date = (now - timedelta(days=days - 1)).strftime("%Y-%m-%dT00:00:00Z")
 
     rows = conn.execute(
@@ -327,10 +329,7 @@ def get_daily_cost_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[d
         (start_date,),
     ).fetchall()
 
-    return [
-        {"date": row[0], "purpose": row[1], "spend": float(row[2])}
-        for row in rows
-    ]
+    return [{"date": row[0], "purpose": row[1], "spend": float(row[2])} for row in rows]
 
 
 def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
@@ -343,7 +342,7 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
         List of dicts with keys: purpose (str), calls (int), spend (float).
         Sorted descending by spend.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
     rows = conn.execute(
@@ -355,10 +354,7 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
         (month_start,),
     ).fetchall()
 
-    return [
-        {"purpose": row[0], "calls": int(row[1]), "spend": float(row[2])}
-        for row in rows
-    ]
+    return [{"purpose": row[0], "calls": int(row[1]), "spend": float(row[2])} for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -372,14 +368,18 @@ _CLI_MODEL_ALIASES: dict[str, str] = {
 }
 
 _CREDIT_PATTERNS: tuple[str, ...] = (
-    "credit balance", "spending limit", "insufficient credits",
-    "credit balance too low", "out of credits",
+    "credit balance",
+    "spending limit",
+    "insufficient credits",
+    "credit balance too low",
+    "out of credits",
 )
 
 
 # ---------------------------------------------------------------------------
 # CLI oneshot executor
 # ---------------------------------------------------------------------------
+
 
 def _run_oneshot(
     model: str,
@@ -414,14 +414,19 @@ def _run_oneshot(
     cli_model = _CLI_MODEL_ALIASES.get(model, model)
 
     cmd: list[str] = [
-        "claude", "-p",
-        "--model", cli_model,
-        "--output-format", "json",
+        "claude",
+        "-p",
+        "--model",
+        cli_model,
+        "--output-format",
+        "json",
         "--no-session-persistence",
-        "--tools", "",
+        "--tools",
+        "",
         "--strict-mcp-config",
         "--disable-slash-commands",
-        "--system-prompt", system,
+        "--system-prompt",
+        system,
     ]
 
     if json_schema is not None:
@@ -448,15 +453,12 @@ def _run_oneshot(
                 cwd=tmpdir,
                 env=cli_env,
             )
-    except subprocess.TimeoutExpired:
-        raise TimeoutError(
-            f"Claude CLI timed out after {timeout}s (model={cli_model})"
-        )
-    except FileNotFoundError:
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"Claude CLI timed out after {timeout}s (model={cli_model})") from exc
+    except FileNotFoundError as exc:
         raise FileNotFoundError(
-            "claude CLI not found on PATH. "
-            "Install: npm install -g @anthropic-ai/claude-code"
-        )
+            "claude CLI not found on PATH. Install: npm install -g @anthropic-ai/claude-code"
+        ) from exc
 
     if result.returncode != 0:
         stderr = result.stderr.strip()[:300] if result.stderr else "unknown error"
@@ -464,10 +466,8 @@ def _run_oneshot(
 
     try:
         envelope = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(
-            f"Invalid JSON from Claude CLI: {result.stdout[:300]}"
-        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid JSON from Claude CLI: {result.stdout[:300]}") from exc
 
     if envelope.get("is_error"):
         error_msg = str(envelope.get("result", "unknown error"))[:300]
@@ -481,6 +481,7 @@ def _run_oneshot(
 # ---------------------------------------------------------------------------
 # Main call wrapper
 # ---------------------------------------------------------------------------
+
 
 def call_claude(
     client: Any | None = None,
@@ -535,9 +536,7 @@ def call_claude(
         config = {}
 
     # Determine model tier for budget gating
-    matching_pricing_key = next(
-        (k for k in MODEL_PRICING if model.startswith(k)), None
-    )
+    matching_pricing_key = next((k for k in MODEL_PRICING if model.startswith(k)), None)
     if matching_pricing_key:
         tier = "haiku" if "haiku" in matching_pricing_key else "sonnet"
     else:
@@ -548,7 +547,10 @@ def call_claude(
 
     logger.info(
         "call_claude START: purpose=%s model=%s job_id=%s tier=%s",
-        purpose, model, job_id, tier,
+        purpose,
+        model,
+        job_id,
+        tier,
     )
 
     if not cost_gate(conn, config, tier):
@@ -576,7 +578,9 @@ def call_claude(
     usage = envelope.get("usage", {})
     input_tokens: int = usage.get("input_tokens", 0)
     output_tokens: int = usage.get("output_tokens", 0)
-    cost_usd = record_cost(conn, job_id, purpose, model, input_tokens, output_tokens, provider="claude_cli")
+    cost_usd = record_cost(
+        conn, job_id, purpose, model, input_tokens, output_tokens, provider="claude_cli"
+    )
 
     # Parse result — structured_output when schema was provided,
     # otherwise parse the text result as JSON with fallback.
@@ -586,10 +590,10 @@ def call_claude(
             raw = envelope.get("result", "")
             try:
                 result = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as exc:
                 raise ValueError(
                     "Structured output expected but not found in CLI response"
-                )
+                ) from exc
     else:
         raw = envelope.get("result", "")
         try:
@@ -598,17 +602,15 @@ def call_claude(
             result = {"text": str(raw)}
 
     # --- Post-parse schema validation with one retry ---
-    if (
-        output_schema is not None
-        and _jsonschema_validate is not None
-        and isinstance(result, dict)
-    ):
+    if output_schema is not None and _jsonschema_validate is not None and isinstance(result, dict):
         try:
             _jsonschema_validate(instance=result, schema=output_schema)
         except _ValidationError as _val_err:
             logger.warning(
                 "call_claude schema validation failed: purpose=%s model=%s error=%s — retrying once",
-                purpose, model, _val_err.message,
+                purpose,
+                model,
+                _val_err.message,
             )
             retry_user_message = (
                 user_message
@@ -631,7 +633,10 @@ def call_claude(
             # Record cost for the retry call
             retry_usage = retry_envelope.get("usage", {})
             record_cost(
-                conn, job_id, purpose, model,
+                conn,
+                job_id,
+                purpose,
+                model,
                 retry_usage.get("input_tokens", 0),
                 retry_usage.get("output_tokens", 0),
                 provider="claude_cli",
@@ -644,8 +649,10 @@ def call_claude(
                     raw = retry_envelope.get("result", "")
                     try:
                         result = json.loads(raw)
-                    except (json.JSONDecodeError, TypeError):
-                        raise ValueError("Schema validation retry returned unparseable response")
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        raise ValueError(
+                            "Schema validation retry returned unparseable response"
+                        ) from exc
             else:
                 raw = retry_envelope.get("result", "")
                 try:

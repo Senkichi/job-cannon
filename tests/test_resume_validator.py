@@ -8,18 +8,14 @@ Covers:
 - Integration with generate_resume_single quick-apply path (TestValidatorQuickApplyIntegration)
 """
 
-import io
 import json
 import sqlite3
-import tempfile
-import os
-from unittest.mock import MagicMock, patch, call
-
-import pytest
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_conn():
     """Return an in-memory SQLite connection with scoring_costs table."""
@@ -40,6 +36,7 @@ def _make_conn():
     conn.commit()
     return conn
 
+
 def _test_config():
     """Return a minimal config dict for tests."""
     return {
@@ -51,9 +48,11 @@ def _test_config():
         },
     }
 
+
 def _mock_call_claude_clean(*args, **kwargs):
     """Mock call_claude returning a clean audit (no violations)."""
     return {"passed": True, "violations": []}, 0.01
+
 
 def _mock_call_claude_violations(*args, **kwargs):
     """Mock call_claude returning one error violation."""
@@ -69,6 +68,7 @@ def _mock_call_claude_violations(*args, **kwargs):
         ],
     }, 0.01
 
+
 def _mock_call_claude_fixed(*args, **kwargs):
     """Mock call_claude returning a fixed resume dict."""
     return {
@@ -79,9 +79,11 @@ def _mock_call_claude_fixed(*args, **kwargs):
         "positions": [],
     }, 0.01
 
+
 # ---------------------------------------------------------------------------
 # TestValidationSchema
 # ---------------------------------------------------------------------------
+
 
 class TestValidationSchema:
     """Verify VALIDATION_SCHEMA has the required structure."""
@@ -126,9 +128,11 @@ class TestValidationSchema:
         assert "passed" in required
         assert "violations" in required
 
+
 # ---------------------------------------------------------------------------
 # TestValidateResume
 # ---------------------------------------------------------------------------
+
 
 class TestValidateResume:
     """Tests for validate_resume() function."""
@@ -148,7 +152,9 @@ class TestValidateResume:
         profile = {"skills": ["Python", "SQL"], "positions": []}
         jd_text = "We need a data scientist with Python and SQL."
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_clean):
+        with patch(
+            "job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_clean
+        ):
             result = validate_resume(resume_data, jd_text, profile, conn, config)
 
         assert result["passed"] is True
@@ -169,7 +175,9 @@ class TestValidateResume:
         profile = {"skills": ["Python", "SQL"], "positions": []}
         jd_text = "Looking for dbt experience."
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_violations):
+        with patch(
+            "job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_violations
+        ):
             result = validate_resume(resume_data, jd_text, profile, conn, config)
 
         assert result["passed"] is False
@@ -199,8 +207,8 @@ class TestValidateResume:
 
     def test_budget_exceeded_returns_fail_open(self):
         """validate_resume returns passed=True on BudgetExceededError (fail-open)."""
-        from job_finder.web.resume_validator import validate_resume
         from job_finder.web.claude_client import BudgetExceededError
+        from job_finder.web.resume_validator import validate_resume
 
         conn = _make_conn()
         config = _test_config()
@@ -216,9 +224,11 @@ class TestValidateResume:
         assert result["passed"] is True
         assert result["violations"] == []
 
+
 # ---------------------------------------------------------------------------
 # TestFixResumeViolations
 # ---------------------------------------------------------------------------
+
 
 class TestFixResumeViolations:
     """Tests for fix_resume_violations() function."""
@@ -244,7 +254,9 @@ class TestFixResumeViolations:
             }
         ]
 
-        with patch("job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_fixed):
+        with patch(
+            "job_finder.web.resume_validator.call_claude", side_effect=_mock_call_claude_fixed
+        ):
             result = fix_resume_violations(resume_data, violations, profile, conn, config)
 
         # Should return the fixed resume (without dbt in skills)
@@ -370,9 +382,11 @@ class TestFixResumeViolations:
         assert result is resume_data
         assert len(call_count) == 0, "Claude should not be called when only warnings present"
 
+
 # ---------------------------------------------------------------------------
 # TestAuditSystemPrompt
 # ---------------------------------------------------------------------------
+
 
 class TestAuditSystemPrompt:
     """Verify _AUDIT_SYSTEM contains the required category names."""
@@ -380,31 +394,38 @@ class TestAuditSystemPrompt:
     def test_audit_system_has_content_integrity(self):
         """_AUDIT_SYSTEM mentions content_integrity."""
         from job_finder.web.resume_validator import _AUDIT_SYSTEM
+
         assert "content_integrity" in _AUDIT_SYSTEM
 
     def test_audit_system_has_structural(self):
         """_AUDIT_SYSTEM mentions structural."""
         from job_finder.web.resume_validator import _AUDIT_SYSTEM
+
         assert "structural" in _AUDIT_SYSTEM
 
     def test_audit_system_has_style(self):
         """_AUDIT_SYSTEM mentions style."""
         from job_finder.web.resume_validator import _AUDIT_SYSTEM
+
         assert "style" in _AUDIT_SYSTEM
 
     def test_audit_system_has_jd_alignment(self):
         """_AUDIT_SYSTEM mentions jd_alignment."""
         from job_finder.web.resume_validator import _AUDIT_SYSTEM
+
         assert "jd_alignment" in _AUDIT_SYSTEM
 
     def test_audit_system_has_readability(self):
         """_AUDIT_SYSTEM mentions readability."""
         from job_finder.web.resume_validator import _AUDIT_SYSTEM
+
         assert "readability" in _AUDIT_SYSTEM
+
 
 # ---------------------------------------------------------------------------
 # Helpers for integration tests
 # ---------------------------------------------------------------------------
+
 
 def _setup_resume_gen_db(db_path):
     """Run migrations and insert a pending resume_generations row. Returns gen_id."""
@@ -421,6 +442,7 @@ def _setup_resume_gen_db(db_path):
     gen_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.close()
     return gen_id
+
 
 _MOCK_RESUME = {
     "name": "Jane Doe",
@@ -464,6 +486,7 @@ _BACKGROUND_CONFIG = {
 # TestValidatorBackgroundIntegration
 # ---------------------------------------------------------------------------
 
+
 class TestValidatorBackgroundIntegration:
     """Integration tests for validator in _generate_resume_background."""
 
@@ -476,16 +499,27 @@ class TestValidatorBackgroundIntegration:
 
         mock_validation = {"passed": True, "violations": []}
 
-        with patch("job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME):
-            with patch("job_finder.web.resume_validator.call_claude") as mock_cc:
-                mock_cc.return_value = (mock_validation, 0.01)
-                with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
-                    mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                    with patch("job_finder.web.resume_generator.get_drive_service"):
-                        with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/doc/xyz"):
-                            _generate_resume_background(
-                                db_path, gen_id, _MOCK_JOB_ROW, sample_resume_data, _BACKGROUND_CONFIG
-                            )
+        with (
+            patch(
+                "job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME
+            ),
+            patch("job_finder.web.resume_validator.call_claude") as mock_cc,
+        ):
+            mock_cc.return_value = (mock_validation, 0.01)
+            with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
+                mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+                with patch("job_finder.web.resume_generator.get_drive_service"):
+                    with patch(
+                        "job_finder.web.resume_generator.upload_to_drive",
+                        return_value="https://docs.google.com/doc/xyz",
+                    ):
+                        _generate_resume_background(
+                            db_path,
+                            gen_id,
+                            _MOCK_JOB_ROW,
+                            sample_resume_data,
+                            _BACKGROUND_CONFIG,
+                        )
 
         # Validator was called
         assert mock_cc.called, "validate_resume should have called call_claude"
@@ -534,15 +568,27 @@ class TestValidatorBackgroundIntegration:
             else:
                 return (mock_fixed_resume, 0.01)
 
-        with patch("job_finder.web.resume_generator.generate_resume_single", return_value=mock_resume_with_error):
-            with patch("job_finder.web.resume_validator.call_claude", side_effect=multi_return):
-                with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
-                    mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                    with patch("job_finder.web.resume_generator.get_drive_service"):
-                        with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/doc/xyz"):
-                            _generate_resume_background(
-                                db_path, gen_id, _MOCK_JOB_ROW, sample_resume_data, _BACKGROUND_CONFIG
-                            )
+        with (
+            patch(
+                "job_finder.web.resume_generator.generate_resume_single",
+                return_value=mock_resume_with_error,
+            ),
+            patch("job_finder.web.resume_validator.call_claude", side_effect=multi_return),
+        ):
+            with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
+                mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+                with patch("job_finder.web.resume_generator.get_drive_service"):
+                    with patch(
+                        "job_finder.web.resume_generator.upload_to_drive",
+                        return_value="https://docs.google.com/doc/xyz",
+                    ):
+                        _generate_resume_background(
+                            db_path,
+                            gen_id,
+                            _MOCK_JOB_ROW,
+                            sample_resume_data,
+                            _BACKGROUND_CONFIG,
+                        )
 
         # Both audit and fix calls were made
         assert call_count[0] == 2, f"Expected 2 Claude calls (audit + fix), got: {call_count[0]}"
@@ -571,15 +617,31 @@ class TestValidatorBackgroundIntegration:
         db_path = str(tmp_path / "test.db")
         gen_id = _setup_resume_gen_db(db_path)
 
-        with patch("job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME):
-            with patch("job_finder.web.resume_validator.call_claude", side_effect=RuntimeError("Sonnet down")):
-                with patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx:
-                    mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
-                    with patch("job_finder.web.resume_generator.get_drive_service"):
-                        with patch("job_finder.web.resume_generator.upload_to_drive", return_value="https://docs.google.com/doc/xyz"):
-                            _generate_resume_background(
-                                db_path, gen_id, _MOCK_JOB_ROW, sample_resume_data, _BACKGROUND_CONFIG
-                            )
+        with (
+            patch(
+                "job_finder.web.resume_generator.generate_resume_single", return_value=_MOCK_RESUME
+            ),
+            patch(
+                "job_finder.web.resume_validator.call_claude",
+                side_effect=RuntimeError("Sonnet down"),
+            ),
+            patch("job_finder.web.resume_generator.build_resume_docx") as mock_docx,
+        ):
+            mock_docx.return_value = __import__("io").BytesIO(b"fake-docx")
+            with (
+                patch("job_finder.web.resume_generator.get_drive_service"),
+                patch(
+                    "job_finder.web.resume_generator.upload_to_drive",
+                    return_value="https://docs.google.com/doc/xyz",
+                ),
+            ):
+                _generate_resume_background(
+                    db_path,
+                    gen_id,
+                    _MOCK_JOB_ROW,
+                    sample_resume_data,
+                    _BACKGROUND_CONFIG,
+                )
 
         # Generation completes successfully despite validation failure
         verify_conn = sqlite3.connect(db_path)
@@ -589,16 +651,20 @@ class TestValidatorBackgroundIntegration:
         ).fetchone()
         verify_conn.close()
 
-        assert row[0] == "done", f"Generation should still complete on validation failure, got status: {row[0]}"
+        assert row[0] == "done", (
+            f"Generation should still complete on validation failure, got status: {row[0]}"
+        )
         # validate_resume is fail-open: returns {"passed": True, "violations": []} even on API errors
         # The background function saves this fail-open result to DB
         if row[1] is not None:
             report = json.loads(row[1])
             assert report.get("passed") is True, "Fail-open report should be passed=True"
 
+
 # ---------------------------------------------------------------------------
 # TestValidatorQuickApplyIntegration
 # ---------------------------------------------------------------------------
+
 
 class TestValidatorQuickApplyIntegration:
     """Integration tests for validator in generate_resume_single quick-apply path."""
@@ -606,6 +672,7 @@ class TestValidatorQuickApplyIntegration:
     def _make_migrated_conn(self, db_path):
         """Set up a migrated DB and return open connection."""
         from job_finder.web.db_migrate import run_migrations
+
         run_migrations(db_path)
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -622,6 +689,7 @@ class TestValidatorQuickApplyIntegration:
             config = _BACKGROUND_CONFIG
 
             call_count = [0]
+
             # First call: generation; second call: audit
             def side_effect(*args, **kwargs):
                 call_count[0] += 1
@@ -633,7 +701,10 @@ class TestValidatorQuickApplyIntegration:
                     return ({"passed": True, "violations": []}, 0.01)
 
             with patch("job_finder.web.resume_generator.call_claude", side_effect=side_effect):
-                with patch("job_finder.web.resume_validator.call_claude", return_value=({"passed": True, "violations": []}, 0.01)):
+                with patch(
+                    "job_finder.web.resume_validator.call_claude",
+                    return_value=({"passed": True, "violations": []}, 0.01),
+                ):
                     with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
                         result = generate_resume_single(
                             _MOCK_JOB_ROW, sample_resume_data, conn, config
@@ -679,17 +750,26 @@ class TestValidatorQuickApplyIntegration:
                 else:
                     return (fixed_resume, 0.01)
 
-            with patch("job_finder.web.resume_generator.call_claude", return_value=(resume_with_error, 0.01)):
-                with patch("job_finder.web.resume_validator.call_claude", side_effect=audit_side_effect):
-                    with patch("job_finder.web.resume_generator.cost_gate", return_value=True):
-                        result = generate_resume_single(
-                            _MOCK_JOB_ROW, sample_resume_data, conn, config
-                        )
+            with (
+                patch(
+                    "job_finder.web.resume_generator.call_claude",
+                    return_value=(resume_with_error, 0.01),
+                ),
+                patch(
+                    "job_finder.web.resume_validator.call_claude", side_effect=audit_side_effect
+                ),
+                patch("job_finder.web.resume_generator.cost_gate", return_value=True),
+            ):
+                result = generate_resume_single(_MOCK_JOB_ROW, sample_resume_data, conn, config)
 
             # Result should be the fixed resume (without dbt)
             assert result is not None
-            assert "dbt" not in result.get("skills", []), "Fixed resume should not contain fabricated 'dbt' skill"
+            assert "dbt" not in result.get("skills", []), (
+                "Fixed resume should not contain fabricated 'dbt' skill"
+            )
             # Should have called validate then fix = 2 audit calls
-            assert audit_call_count[0] == 2, f"Expected 2 validator calls (audit + fix), got: {audit_call_count[0]}"
+            assert audit_call_count[0] == 2, (
+                f"Expected 2 validator calls (audit + fix), got: {audit_call_count[0]}"
+            )
         finally:
             conn.close()

@@ -7,21 +7,18 @@ Run `python -m job_finder.gmail_auth` to set up authentication.
 import base64
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from job_finder.models import Job
-from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
-from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
-from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 from job_finder.parsers.greenhouse_parser import parse_greenhouse_alert
-from job_finder.parsers.trueup_parser import parse_trueup_alert
+from job_finder.parsers.indeed_parser import parse_indeed_alert, parse_indeed_match_alert
+from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.monster_parser import parse_monster_alert
+from job_finder.parsers.trueup_parser import parse_trueup_alert
+from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +74,12 @@ def _should_archive_failure(body: str, jobs: list, sender: str) -> bool:
     if not body or len(body.strip()) < 500:
         return False
     preamble = body[:200].lower()
-    if any(indicator in preamble for indicator in _ARCHIVE_META_INDICATORS):
-        return False
-    return True
+    return not any(indicator in preamble for indicator in _ARCHIVE_META_INDICATORS)
 
 
-def _archive_parse_failure(sender: str, body: str, *, failures_dir: str = PARSE_FAILURES_DIR) -> None:
+def _archive_parse_failure(
+    sender: str, body: str, *, failures_dir: str = PARSE_FAILURES_DIR
+) -> None:
     """Archive HTML body from a failed parse to PARSE_FAILURES_DIR.
 
     Filename: {sender_domain}_{ISO_timestamp}.html
@@ -115,7 +112,8 @@ class GmailSource:
     def _authenticate(self, token_path: str):
         """Load saved OAuth credentials and build the Gmail service."""
         try:
-            from job_finder.gmail_auth import get_credentials, AuthenticationError
+            from job_finder.gmail_auth import AuthenticationError, get_credentials
+
             creds = get_credentials(token_path)
             return build("gmail", "v1", credentials=creds)
         except AuthenticationError as exc:
@@ -225,7 +223,7 @@ class GmailSource:
 
         return messages
 
-    def _get_message(self, message_id: str) -> Optional[dict]:
+    def _get_message(self, message_id: str) -> dict | None:
         """Fetch a single message by ID."""
         try:
             return (
@@ -238,7 +236,7 @@ class GmailSource:
             logger.warning("failed to fetch message %s: %s", message_id, e)
             return None
 
-    def _extract_body(self, message: dict) -> Optional[str]:
+    def _extract_body(self, message: dict) -> str | None:
         """Extract the email body (prefers text/plain, falls back to text/html)."""
         payload = message.get("payload", {})
 
@@ -278,13 +276,14 @@ class GmailSource:
         # Prefer plain text for LinkedIn (cleaner parsing), HTML for Glassdoor
         return text_body or html_body
 
-    def _extract_date(self, message: dict) -> Optional[datetime]:
+    def _extract_date(self, message: dict) -> datetime | None:
         """Extract the email date from headers."""
         headers = message.get("payload", {}).get("headers", [])
         for header in headers:
             if header["name"].lower() == "date":
                 try:
                     from email.utils import parsedate_to_datetime
+
                     return parsedate_to_datetime(header["value"])
                 except Exception:
                     logger.debug("email date parse failed", exc_info=True)
@@ -292,6 +291,6 @@ class GmailSource:
         # Fallback to internalDate
         internal_date = message.get("internalDate")
         if internal_date:
-            return datetime.fromtimestamp(int(internal_date) / 1000, tz=timezone.utc)
+            return datetime.fromtimestamp(int(internal_date) / 1000, tz=UTC)
 
         return None

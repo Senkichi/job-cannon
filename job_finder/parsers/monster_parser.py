@@ -20,7 +20,6 @@ inspect a recent email and update the class constants below.
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
 from bs4 import BeautifulSoup
 
@@ -42,7 +41,7 @@ _COMPANY_CELL_SELECTOR = "td.hdline-3.left-20"
 _COMPANY_SPAN_CLASS = "hdline-3"
 
 
-def parse_monster_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
+def parse_monster_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a Monster job alert email body (HTML) into Job objects.
 
     Args:
@@ -88,7 +87,7 @@ def parse_monster_alert(body: str, email_date: Optional[datetime] = None) -> lis
     return jobs
 
 
-def _parse_job_card(title_link, email_date: Optional[datetime]) -> Optional[Job]:
+def _parse_job_card(title_link, email_date: datetime | None) -> Job | None:
     """Parse a single job from its title link anchor element."""
     title = " ".join(title_link.get_text().split())
     if not title:
@@ -116,7 +115,7 @@ def _parse_job_card(title_link, email_date: Optional[datetime]) -> Optional[Job]
     )
 
 
-def _find_ancestor_table(tag) -> Optional[BeautifulSoup]:
+def _find_ancestor_table(tag) -> BeautifulSoup | None:
     """Walk up the DOM to find the nearest <table class="width-100"> ancestor."""
     node = tag.parent
     while node is not None:

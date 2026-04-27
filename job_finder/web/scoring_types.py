@@ -22,7 +22,8 @@ Usage:
 
 import json
 import re
-from typing import Literal, NamedTuple, Optional, TypedDict
+from typing import Literal, NamedTuple, TypedDict
+
 
 class JobRow(TypedDict, total=False):
     """Shape of a job record dict as returned by SQLite row_factory.
@@ -53,6 +54,7 @@ class JobRow(TypedDict, total=False):
     company_id: str | None
     status: str
 
+
 def format_salary_range(salary_min: int | None, salary_max: int | None) -> str:
     """Format salary_min/salary_max into a human-readable range string.
 
@@ -67,6 +69,7 @@ def format_salary_range(salary_min: int | None, salary_max: int | None) -> str:
         return f"up to ${salary_max:,}"
     return "Not specified"
 
+
 class ScoringResult(NamedTuple):
     """Discriminated return type for score_job_haiku and evaluate_job_sonnet.
 
@@ -79,7 +82,8 @@ class ScoringResult(NamedTuple):
     data: dict | None
     status: Literal["success", "budget_exceeded", "error", "skipped"]
 
-def unwrap_scoring_result(scoring_result: ScoringResult) -> Optional[dict]:
+
+def unwrap_scoring_result(scoring_result: ScoringResult) -> dict | None:
     """Unwrap a ScoringResult, returning the data dict on success or None.
 
     Centralizes the success/failure dispatch so callers don't repeat the
@@ -171,14 +175,14 @@ def build_description_snippet(
     remaining_chars = max_chars - len(snippet) - len(keyword_summary)
     if remaining_chars > 200 and len(description) > 1200:
         req_pattern = re.compile(
-            r'(requirements|qualifications|what you.ll bring|what we.re looking for|'
-            r'about you|your background|skills|experience required|must.have)',
+            r"(requirements|qualifications|what you.ll bring|what we.re looking for|"
+            r"about you|your background|skills|experience required|must.have)",
             re.IGNORECASE,
         )
         match = req_pattern.search(description, 800)
         if match:
             req_start = max(0, match.start() - 20)
-            req_section = description[req_start: req_start + remaining_chars].strip()
+            req_section = description[req_start : req_start + remaining_chars].strip()
             if req_section and req_section not in snippet:
                 snippet += f"\n\n[...Requirements section:]\n{req_section}"
 

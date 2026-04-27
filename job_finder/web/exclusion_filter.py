@@ -6,16 +6,16 @@ and a configurable salary floor.
 """
 
 import logging
-from typing import Optional
 
 from job_finder.config import COMPANY_DENYLIST, get_company_denylist
 
 logger = logging.getLogger(__name__)
 
+
 def should_exclude(
     job_row: dict,
     exclusions: dict,
-    min_salary: Optional[int] = None,
+    min_salary: int | None = None,
     config: dict | None = None,
 ) -> tuple[bool, str]:
     """Check if a job should be excluded before Haiku scoring.
@@ -53,9 +53,7 @@ def should_exclude(
             return True, f"Title contains excluded keyword: '{keyword}'"
 
     # 2. Company exclusions (config + denylist, case-insensitive, whitespace-trimmed)
-    excluded_companies = [
-        c.lower().strip() for c in exclusions.get("companies", []) if c
-    ]
+    excluded_companies = [c.lower().strip() for c in exclusions.get("companies", []) if c]
     # Merge in the denylist (hardcoded defaults + optional config entries)
     denylist = get_company_denylist(config) if config else COMPANY_DENYLIST
     excluded_companies_set = set(excluded_companies) | denylist
@@ -114,9 +112,7 @@ def count_scorable(conn, config: dict) -> int:
         min_salary = config.get("profile", {}).get("min_salary")
         if min_salary is not None:
             floor = min_salary * 0.85
-            conditions.append(
-                "NOT (salary_max IS NOT NULL AND salary_max > 0 AND salary_max < ?)"
-            )
+            conditions.append("NOT (salary_max IS NOT NULL AND salary_max > 0 AND salary_max < ?)")
             params.append(floor)
 
         where = " AND ".join(conditions)

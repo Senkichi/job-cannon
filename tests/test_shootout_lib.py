@@ -16,31 +16,33 @@ per the plan's behavior contracts. 20+ tests covering:
   report.py    (tests 18-20): heatmap render, recommendation logic,
                                 full-matrix section shape.
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
-import statistics
 import subprocess
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from scripts.shootout_lib import (
-    baseline as baseline_mod,
     candidates as candidates_mod,
+)
+from scripts.shootout_lib import (
     gold_baseline as gold_mod,
-    metrics as metrics_mod,
-    non_scoring_sites as non_scoring_mod,
-    report as report_mod,
 )
 from scripts.shootout_lib.baseline import (
     BaselineSample,
     ShootoutInsufficientBaselineError,
     build_baseline_sample,
+)
+from scripts.shootout_lib.candidates import (
+    determinism_probe,
+    force_ollama,
+    reset_vram,
+    run_candidate,
 )
 from scripts.shootout_lib.gold_baseline import (
     OPUS_BUDGET_USD,
@@ -53,18 +55,11 @@ from scripts.shootout_lib.metrics import (
     retry_rate_gate,
     tiebreaker_key,
 )
-from scripts.shootout_lib.candidates import (
-    determinism_probe,
-    force_ollama,
-    reset_vram,
-    run_candidate,
-)
 from scripts.shootout_lib.non_scoring_sites import (
     opus_reference_agreement,
     run_homepage_backfill,
 )
 from scripts.shootout_lib.report import recommend_winner, render_matrix
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic in-memory SQLite with mixed provider rows
@@ -105,8 +100,15 @@ def mem_conn():
     return conn
 
 
-def _insert_job(conn, dedup_key, score, provider="anthropic", cost_provider="anthropic",
-                purpose="sonnet_eval", jd_len=500):
+def _insert_job(
+    conn,
+    dedup_key,
+    score,
+    provider="anthropic",
+    cost_provider="anthropic",
+    purpose="sonnet_eval",
+    jd_len=500,
+):
     """Insert a job + a matching scoring_costs row.
 
     If cost_provider is None, no cost row is inserted (simulates contamination).
@@ -117,9 +119,18 @@ def _insert_job(conn, dedup_key, score, provider="anthropic", cost_provider="ant
         "scoring_provider, legitimacy_note, job_archetype) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            dedup_key, f"Engineer {dedup_key}", f"Co{dedup_key}",
-            "x" * jd_len, "Remote", 100000, 150000, score, score - 5,
-            provider, None, "data_science_ic",
+            dedup_key,
+            f"Engineer {dedup_key}",
+            f"Co{dedup_key}",
+            "x" * jd_len,
+            "Remote",
+            100000,
+            150000,
+            score,
+            score - 5,
+            provider,
+            None,
+            "data_science_ic",
         ),
     )
     if cost_provider is not None:
@@ -134,20 +145,24 @@ def _populate_balanced(conn, per_quartile=30):
     """Populate all 4 quartiles with `per_quartile` anthropic-provider rows."""
     # Quartile 1: 0-25
     for i in range(per_quartile):
-        _insert_job(conn, f"q1-{i}", score=float(i % 25), provider="anthropic",
-                    cost_provider="anthropic")
+        _insert_job(
+            conn, f"q1-{i}", score=float(i % 25), provider="anthropic", cost_provider="anthropic"
+        )
     # Quartile 2: 25-50
     for i in range(per_quartile):
-        _insert_job(conn, f"q2-{i}", score=25.0 + (i % 25), provider="anthropic",
-                    cost_provider="anthropic")
+        _insert_job(
+            conn, f"q2-{i}", score=25.0 + (i % 25), provider="anthropic", cost_provider="anthropic"
+        )
     # Quartile 3: 50-75
     for i in range(per_quartile):
-        _insert_job(conn, f"q3-{i}", score=50.0 + (i % 25), provider="anthropic",
-                    cost_provider="anthropic")
+        _insert_job(
+            conn, f"q3-{i}", score=50.0 + (i % 25), provider="anthropic", cost_provider="anthropic"
+        )
     # Quartile 4: 75-100
     for i in range(per_quartile):
-        _insert_job(conn, f"q4-{i}", score=75.0 + (i % 25), provider="anthropic",
-                    cost_provider="anthropic")
+        _insert_job(
+            conn, f"q4-{i}", score=75.0 + (i % 25), provider="anthropic", cost_provider="anthropic"
+        )
     conn.commit()
 
 
@@ -161,20 +176,26 @@ def test_1_anthropic_filter_excludes_non_anthropic_rows(mem_conn):
     non-anthropic MUST be excluded from the baseline pool."""
     # Anthropic on both sides — INCLUDED
     for i in range(30):
-        _insert_job(mem_conn, f"good-{i}", score=10.0 * (i % 10),
-                    provider="anthropic", cost_provider="anthropic")
+        _insert_job(
+            mem_conn,
+            f"good-{i}",
+            score=10.0 * (i % 10),
+            provider="anthropic",
+            cost_provider="anthropic",
+        )
     # jobs.scoring_provider wrong — EXCLUDED
     for i in range(20):
-        _insert_job(mem_conn, f"bad1-{i}", score=50.0,
-                    provider="ollama", cost_provider="anthropic")
+        _insert_job(
+            mem_conn, f"bad1-{i}", score=50.0, provider="ollama", cost_provider="anthropic"
+        )
     # scoring_costs.provider wrong — EXCLUDED
     for i in range(20):
-        _insert_job(mem_conn, f"bad2-{i}", score=50.0,
-                    provider="anthropic", cost_provider="ollama")
+        _insert_job(
+            mem_conn, f"bad2-{i}", score=50.0, provider="anthropic", cost_provider="ollama"
+        )
     # Missing scoring_costs row entirely — EXCLUDED
     for i in range(20):
-        _insert_job(mem_conn, f"bad3-{i}", score=50.0,
-                    provider="anthropic", cost_provider=None)
+        _insert_job(mem_conn, f"bad3-{i}", score=50.0, provider="anthropic", cost_provider=None)
     mem_conn.commit()
 
     # Pool too small for n=100 — assert it raises with expected count=30 eligible
@@ -244,23 +265,44 @@ def test_4_dev_holdout_split_is_deterministic_given_seed(mem_conn):
 
 def _fake_baseline(n_dev=2, n_holdout=0):
     """A simple BaselineSample-ish duck type for gold_baseline tests."""
-    dev = [{"dedup_key": f"d-{i}", "title": f"Role {i}",
-            "jd_full": f"jd-{i}" * 60, "company": f"Co{i}",
-            "location": "Remote", "salary": "$100k",
-            "sonnet_score": 50.0 + i, "haiku_score": 45.0 + i,
-            "scoring_provider": "anthropic", "legitimacy_note": None,
-            "job_archetype": "data_science_ic"}
-           for i in range(n_dev)]
-    holdout = [{"dedup_key": f"h-{i}", "title": f"Role h{i}",
-                "jd_full": f"jd-h{i}" * 60, "company": f"HCo{i}",
-                "location": "Remote", "salary": "$110k",
-                "sonnet_score": 60.0 + i, "haiku_score": 55.0 + i,
-                "scoring_provider": "anthropic", "legitimacy_note": None,
-                "job_archetype": "data_science_ic"}
-               for i in range(n_holdout)]
-    return BaselineSample(dev=tuple(dev), holdout=tuple(holdout),
-                          quartile_counts={"q1": 0, "q2": 1, "q3": 1, "q4": 0},
-                          total_eligible_pool=2)
+    dev = [
+        {
+            "dedup_key": f"d-{i}",
+            "title": f"Role {i}",
+            "jd_full": f"jd-{i}" * 60,
+            "company": f"Co{i}",
+            "location": "Remote",
+            "salary": "$100k",
+            "sonnet_score": 50.0 + i,
+            "haiku_score": 45.0 + i,
+            "scoring_provider": "anthropic",
+            "legitimacy_note": None,
+            "job_archetype": "data_science_ic",
+        }
+        for i in range(n_dev)
+    ]
+    holdout = [
+        {
+            "dedup_key": f"h-{i}",
+            "title": f"Role h{i}",
+            "jd_full": f"jd-h{i}" * 60,
+            "company": f"HCo{i}",
+            "location": "Remote",
+            "salary": "$110k",
+            "sonnet_score": 60.0 + i,
+            "haiku_score": 55.0 + i,
+            "scoring_provider": "anthropic",
+            "legitimacy_note": None,
+            "job_archetype": "data_science_ic",
+        }
+        for i in range(n_holdout)
+    ]
+    return BaselineSample(
+        dev=tuple(dev),
+        holdout=tuple(holdout),
+        quartile_counts={"q1": 0, "q2": 1, "q3": 1, "q4": 0},
+        total_eligible_pool=2,
+    )
 
 
 def test_5_gold_baseline_uses_frozen_v3_scoring_prompt():
@@ -272,12 +314,24 @@ def test_5_gold_baseline_uses_frozen_v3_scoring_prompt():
 
     def fake_call_claude(**kwargs):
         captured.update(kwargs)
-        return ({"title_fit": 3, "location_fit": 4, "comp_fit": 3,
-                 "domain_match": 3, "seniority_match": 3, "skills_match": 3,
-                 "rationale": {"strengths": [], "gaps": [], "talking_points": [],
-                               "resume_priority_skills": []},
-                 "legitimacy_note": None},
-                0.05)
+        return (
+            {
+                "title_fit": 3,
+                "location_fit": 4,
+                "comp_fit": 3,
+                "domain_match": 3,
+                "seniority_match": 3,
+                "skills_match": 3,
+                "rationale": {
+                    "strengths": [],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+                "legitimacy_note": None,
+            },
+            0.05,
+        )
 
     with patch.object(gold_mod, "call_claude", side_effect=fake_call_claude):
         generate_gold_baseline(sample, config={"profile": {}}, conn=MagicMock())
@@ -294,12 +348,24 @@ def test_6_gold_baseline_model_is_claude_opus_4_6_and_purpose_is_shootout():
 
     def fake_call_claude(**kwargs):
         captured.append(kwargs)
-        return ({"title_fit": 3, "location_fit": 4, "comp_fit": 3,
-                 "domain_match": 3, "seniority_match": 3, "skills_match": 3,
-                 "rationale": {"strengths": [], "gaps": [], "talking_points": [],
-                               "resume_priority_skills": []},
-                 "legitimacy_note": None},
-                0.05)
+        return (
+            {
+                "title_fit": 3,
+                "location_fit": 4,
+                "comp_fit": 3,
+                "domain_match": 3,
+                "seniority_match": 3,
+                "skills_match": 3,
+                "rationale": {
+                    "strengths": [],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+                "legitimacy_note": None,
+            },
+            0.05,
+        )
 
     with patch.object(gold_mod, "call_claude", side_effect=fake_call_claude):
         generate_gold_baseline(sample, config={"profile": {}}, conn=MagicMock())
@@ -318,12 +384,24 @@ def test_7_gold_baseline_budget_cap_short_circuits(capsys):
 
     # Each call reports $10.00 → exceeds budget of $20.00 after 2 calls
     def fake_call_claude(**kwargs):
-        return ({"title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                 "domain_match": 3, "seniority_match": 3, "skills_match": 3,
-                 "rationale": {"strengths": [], "gaps": [], "talking_points": [],
-                               "resume_priority_skills": []},
-                 "legitimacy_note": None},
-                10.0)
+        return (
+            {
+                "title_fit": 3,
+                "location_fit": 3,
+                "comp_fit": 3,
+                "domain_match": 3,
+                "seniority_match": 3,
+                "skills_match": 3,
+                "rationale": {
+                    "strengths": [],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+                "legitimacy_note": None,
+            },
+            10.0,
+        )
 
     call_count = {"n": 0}
 
@@ -333,8 +411,9 @@ def test_7_gold_baseline_budget_cap_short_circuits(capsys):
 
     with patch.object(gold_mod, "call_claude", side_effect=counting_call):
         with pytest.raises(OpusBudgetExceededError) as excinfo:
-            generate_gold_baseline(sample, config={"profile": {}},
-                                   conn=MagicMock(), budget_usd=20.0)
+            generate_gold_baseline(
+                sample, config={"profile": {}}, conn=MagicMock(), budget_usd=20.0
+            )
         # Budget check short-circuits BEFORE the 3rd call
         assert call_count["n"] == 2
         assert "20" in str(excinfo.value)
@@ -353,19 +432,29 @@ def test_8_gold_baseline_bypasses_app_cost_gate():
     sample = _fake_baseline(n_dev=1)
 
     def fake_call_claude(**kwargs):
-        return ({"title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                 "domain_match": 3, "seniority_match": 3, "skills_match": 3,
-                 "rationale": {"strengths": [], "gaps": [], "talking_points": [],
-                               "resume_priority_skills": []},
-                 "legitimacy_note": None},
-                0.05)
+        return (
+            {
+                "title_fit": 3,
+                "location_fit": 3,
+                "comp_fit": 3,
+                "domain_match": 3,
+                "seniority_match": 3,
+                "skills_match": 3,
+                "rationale": {
+                    "strengths": [],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+                "legitimacy_note": None,
+            },
+            0.05,
+        )
 
     # Patch cost_gate to False — if gold_baseline uses it, the test fails.
     with patch("job_finder.web.claude_client.cost_gate", return_value=False):
         with patch.object(gold_mod, "call_claude", side_effect=fake_call_claude):
-            results = generate_gold_baseline(
-                sample, config={"profile": {}}, conn=MagicMock()
-            )
+            results = generate_gold_baseline(sample, config={"profile": {}}, conn=MagicMock())
     assert len(results) == 1
     assert "d-0" in results
 
@@ -378,10 +467,18 @@ def test_8_gold_baseline_bypasses_app_cost_gate():
 def test_9_paired_mae_computes_absolute_delta_mean_on_dimension():
     """paired_mae: mean(abs(c - g)) for matched dedup_keys on the given
     dimension. Returns {mae, n, deltas}."""
-    cand = {"k1": {"title_fit": 5}, "k2": {"title_fit": 3},
-            "k3": {"title_fit": 1}, "k4": {"title_fit": 4}}
-    gold = {"k1": {"title_fit": 4}, "k2": {"title_fit": 4},
-            "k3": {"title_fit": 2}, "k4": {"title_fit": 4}}
+    cand = {
+        "k1": {"title_fit": 5},
+        "k2": {"title_fit": 3},
+        "k3": {"title_fit": 1},
+        "k4": {"title_fit": 4},
+    }
+    gold = {
+        "k1": {"title_fit": 4},
+        "k2": {"title_fit": 4},
+        "k3": {"title_fit": 2},
+        "k4": {"title_fit": 4},
+    }
     out = paired_mae(cand, gold, dimension="title_fit")
     # deltas: 1, -1, -1, 0  →  mae = (1+1+1+0)/4 = 0.75
     assert out["n"] == 4
@@ -403,9 +500,9 @@ def test_10_bca_bootstrap_ci_is_deterministic_under_fixed_seed():
 
 def test_11_retry_rate_gate_thresholds_and_suppression():
     """retry_rate_gate:
-      - n < 20 → SUPPRESSED (regardless of rate)
-      - rate > 0.20 AND n >= 20 → WARN
-      - rate <= 0.20 AND n >= 20 → PASS
+    - n < 20 → SUPPRESSED (regardless of rate)
+    - rate > 0.20 AND n >= 20 → WARN
+    - rate <= 0.20 AND n >= 20 → PASS
     """
     # n < 20 → SUPPRESSED
     verdict, rate = retry_rate_gate(retries=3, n=10)
@@ -433,15 +530,33 @@ def test_12_tiebreaker_key_orders_by_uniformity_retry_latency_vram():
       (uniformity_stddev, retry_rate, -tokens_per_sec, vram_mb)
     so sorted() gives D-23 precedence."""
     # A: wide per-dim spread (high stddev, bad uniformity)
-    a = {"per_dim_mae": {"title_fit": 0.1, "location_fit": 2.0,
-                         "comp_fit": 0.1, "domain_match": 2.0,
-                         "seniority_match": 0.1, "skills_match": 2.0},
-         "retry_rate": 0.0, "tokens_per_sec": 50.0, "vram_mb": 5000}
+    a = {
+        "per_dim_mae": {
+            "title_fit": 0.1,
+            "location_fit": 2.0,
+            "comp_fit": 0.1,
+            "domain_match": 2.0,
+            "seniority_match": 0.1,
+            "skills_match": 2.0,
+        },
+        "retry_rate": 0.0,
+        "tokens_per_sec": 50.0,
+        "vram_mb": 5000,
+    }
     # B: tight per-dim spread (low stddev, good uniformity)
-    b = {"per_dim_mae": {"title_fit": 0.5, "location_fit": 0.5,
-                         "comp_fit": 0.5, "domain_match": 0.5,
-                         "seniority_match": 0.5, "skills_match": 0.5},
-         "retry_rate": 0.0, "tokens_per_sec": 50.0, "vram_mb": 5000}
+    b = {
+        "per_dim_mae": {
+            "title_fit": 0.5,
+            "location_fit": 0.5,
+            "comp_fit": 0.5,
+            "domain_match": 0.5,
+            "seniority_match": 0.5,
+            "skills_match": 0.5,
+        },
+        "retry_rate": 0.0,
+        "tokens_per_sec": 50.0,
+        "vram_mb": 5000,
+    }
     ka = tiebreaker_key(a)
     kb = tiebreaker_key(b)
     # B has lower uniformity stddev, should sort first
@@ -484,14 +599,32 @@ def test_13_reset_vram_calls_ollama_stop_and_polls_nvidia_smi():
 
 def test_14_determinism_probe_runs_five_times_per_fixture_and_checks_identity():
     """determinism_probe runs each fixture 5×, returns
-      {byte_identical: bool, per_fixture: [{outputs:[5 strs], identical}]}."""
+    {byte_identical: bool, per_fixture: [{outputs:[5 strs], identical}]}."""
     fixtures = [
-        {"dedup_key": "low", "title": "L", "jd_full": "l-jd", "company": "C",
-         "location": "Remote", "salary": "$80k"},
-        {"dedup_key": "mid", "title": "M", "jd_full": "m-jd", "company": "C",
-         "location": "Remote", "salary": "$120k"},
-        {"dedup_key": "hi", "title": "H", "jd_full": "h-jd", "company": "C",
-         "location": "Remote", "salary": "$150k"},
+        {
+            "dedup_key": "low",
+            "title": "L",
+            "jd_full": "l-jd",
+            "company": "C",
+            "location": "Remote",
+            "salary": "$80k",
+        },
+        {
+            "dedup_key": "mid",
+            "title": "M",
+            "jd_full": "m-jd",
+            "company": "C",
+            "location": "Remote",
+            "salary": "$120k",
+        },
+        {
+            "dedup_key": "hi",
+            "title": "H",
+            "jd_full": "h-jd",
+            "company": "C",
+            "location": "Remote",
+            "salary": "$150k",
+        },
     ]
 
     def fake_call_model(**kwargs):
@@ -501,32 +634,61 @@ def test_14_determinism_probe_runs_five_times_per_fixture_and_checks_identity():
         if jid == "hi":
             # Drifty — vary output on each call by counting invocations
             fake_call_model.hi_count = getattr(fake_call_model, "hi_count", 0) + 1
-            return type("MR", (), {
-                "data": {"title_fit": 3 + (fake_call_model.hi_count % 2),
-                         "location_fit": 3, "comp_fit": 3,
-                         "domain_match": 3, "seniority_match": 3,
-                         "skills_match": 3,
-                         "rationale": {"strengths": [], "gaps": [],
-                                       "talking_points": [],
-                                       "resume_priority_skills": []},
-                         "legitimacy_note": None},
-                "cost_usd": 0.0, "input_tokens": 10, "output_tokens": 20,
-                "model": "qwen3.5:27b", "provider": "ollama",
-                "schema_valid": True,
-            })()
+            return type(
+                "MR",
+                (),
+                {
+                    "data": {
+                        "title_fit": 3 + (fake_call_model.hi_count % 2),
+                        "location_fit": 3,
+                        "comp_fit": 3,
+                        "domain_match": 3,
+                        "seniority_match": 3,
+                        "skills_match": 3,
+                        "rationale": {
+                            "strengths": [],
+                            "gaps": [],
+                            "talking_points": [],
+                            "resume_priority_skills": [],
+                        },
+                        "legitimacy_note": None,
+                    },
+                    "cost_usd": 0.0,
+                    "input_tokens": 10,
+                    "output_tokens": 20,
+                    "model": "qwen3.5:27b",
+                    "provider": "ollama",
+                    "schema_valid": True,
+                },
+            )()
         # Identical every call for low and mid
-        return type("MR", (), {
-            "data": {"title_fit": 3, "location_fit": 3, "comp_fit": 3,
-                     "domain_match": 3, "seniority_match": 3,
-                     "skills_match": 3,
-                     "rationale": {"strengths": [], "gaps": [],
-                                   "talking_points": [],
-                                   "resume_priority_skills": []},
-                     "legitimacy_note": None},
-            "cost_usd": 0.0, "input_tokens": 10, "output_tokens": 20,
-            "model": "qwen3.5:27b", "provider": "ollama",
-            "schema_valid": True,
-        })()
+        return type(
+            "MR",
+            (),
+            {
+                "data": {
+                    "title_fit": 3,
+                    "location_fit": 3,
+                    "comp_fit": 3,
+                    "domain_match": 3,
+                    "seniority_match": 3,
+                    "skills_match": 3,
+                    "rationale": {
+                        "strengths": [],
+                        "gaps": [],
+                        "talking_points": [],
+                        "resume_priority_skills": [],
+                    },
+                    "legitimacy_note": None,
+                },
+                "cost_usd": 0.0,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "model": "qwen3.5:27b",
+                "provider": "ollama",
+                "schema_valid": True,
+            },
+        )()
 
     with patch.object(candidates_mod, "call_model", side_effect=fake_call_model):
         result = determinism_probe("qwen3.5:27b", fixtures, config={}, conn=MagicMock())
@@ -551,12 +713,16 @@ def test_15_run_candidate_resumes_from_checkpoint_and_skips_completed_sites(tmp_
     in completed_sites, appends new. Atomic writes (temp-file-rename)."""
     cp_path = tmp_path / "cand.json"
     # Pre-existing checkpoint with one completed site and determinism done
-    cp_path.write_text(json.dumps({
-        "model": "qwen3.5:27b",
-        "completed_sites": ["haiku_score"],
-        "per_site": {"haiku_score": {"verdict": "PASS", "n": 100}},
-        "determinism": {"byte_identical": True, "per_fixture": []},
-    }))
+    cp_path.write_text(
+        json.dumps(
+            {
+                "model": "qwen3.5:27b",
+                "completed_sites": ["haiku_score"],
+                "per_site": {"haiku_score": {"verdict": "PASS", "n": 100}},
+                "determinism": {"byte_identical": True, "per_fixture": []},
+            }
+        )
+    )
 
     # Fake _run_site that records calls and never revisits haiku_score
     visited = []
@@ -568,9 +734,11 @@ def test_15_run_candidate_resumes_from_checkpoint_and_skips_completed_sites(tmp_
     # Stub determinism_probe to be a no-op (already done)
     with patch.object(candidates_mod, "reset_vram", return_value=500):
         with patch.object(candidates_mod, "_run_site", side_effect=fake_run_site):
-            with patch.object(candidates_mod, "determinism_probe",
-                              return_value={"byte_identical": True,
-                                            "per_fixture": []}):
+            with patch.object(
+                candidates_mod,
+                "determinism_probe",
+                return_value={"byte_identical": True, "per_fixture": []},
+            ):
                 sample = _fake_baseline(n_dev=3, n_holdout=0)
                 state = run_candidate(
                     model="qwen3.5:27b",
@@ -603,23 +771,26 @@ def test_16_run_homepage_backfill_returns_structural_and_hallucination_keys(mem_
     # Populate the DB with 5 rows eligible for homepage_backfill (mocked input)
     for i in range(5):
         mem_conn.execute(
-            "INSERT INTO jobs(dedup_key, title, company, jd_full) "
-            "VALUES (?, ?, ?, ?)",
-            (f"hb-{i}", f"Role {i}", f"Co{i}",
-             f"Software engineer at Co{i}. Remote. $100k base.")
+            "INSERT INTO jobs(dedup_key, title, company, jd_full) VALUES (?, ?, ?, ?)",
+            (f"hb-{i}", f"Role {i}", f"Co{i}", f"Software engineer at Co{i}. Remote. $100k base."),
         )
     mem_conn.commit()
 
     # Fake the homepage_backfill site call — every field is a verbatim
     # substring → zero hallucinations.
     def fake_site_call(row, config, conn):
-        return {"extracted": {"title": row["title"], "company": row["company"]},
-                "retries": 0,
-                "valid": True}
+        return {
+            "extracted": {"title": row["title"], "company": row["company"]},
+            "retries": 0,
+            "valid": True,
+        }
 
     # Stub out the site call within the module
     result = run_homepage_backfill(
-        mem_conn, config={}, model="qwen3.5:27b", n=5,
+        mem_conn,
+        config={},
+        model="qwen3.5:27b",
+        n=5,
         site_call=fake_site_call,
     )
     assert "n" in result
@@ -674,28 +845,49 @@ def test_17_opus_reference_agreement_site_type_routing():
 def _fake_all_results(verdicts=None):
     """Construct a minimal all_results dict for report.py tests.
     verdicts: {model: {site: verdict}}"""
-    sites = ["haiku_score", "sonnet_eval", "enrich_job", "enrich_job_sonnet",
-             "homepage_backfill", "careers_scrape_url", "careers_scrape_jobs",
-             "ai_nav_discovery", "description_reformat"]
+    sites = [
+        "haiku_score",
+        "sonnet_eval",
+        "enrich_job",
+        "enrich_job_sonnet",
+        "homepage_backfill",
+        "careers_scrape_url",
+        "careers_scrape_jobs",
+        "ai_nav_discovery",
+        "description_reformat",
+    ]
     if verdicts is None:
         verdicts = {
-            "qwen3.5:27b": {s: "PASS" for s in sites},
-            "phi4:14b": {s: "WARN" if s in ("enrich_job", "careers_scrape_url") else "PASS" for s in sites},
+            "qwen3.5:27b": dict.fromkeys(sites, "PASS"),
+            "phi4:14b": {
+                s: "WARN" if s in ("enrich_job", "careers_scrape_url") else "PASS" for s in sites
+            },
             "qwen2.5:14b": {s: "FAIL" if s == "ai_nav_discovery" else "PASS" for s in sites},
-            "qwen2.5:32b": {s: "PASS" for s in sites},
-            "qwen3:14b": {s: "WARN" for s in sites},
-            "gemma3:27b": {s: "PASS" for s in sites},
+            "qwen2.5:32b": dict.fromkeys(sites, "PASS"),
+            "qwen3:14b": dict.fromkeys(sites, "WARN"),
+            "gemma3:27b": dict.fromkeys(sites, "PASS"),
         }
     out = {}
     for model, sv in verdicts.items():
         out[model] = {
             "model": model,
-            "per_site": {s: {"verdict": v, "mae": 0.5, "n": 100,
-                             "verdict_rank": {"PASS": 0, "WARN": 1, "FAIL": 2}.get(v, 99)}
-                         for s, v in sv.items()},
-            "per_dim_mae": {"title_fit": 0.5, "location_fit": 0.5,
-                            "comp_fit": 0.5, "domain_match": 0.5,
-                            "seniority_match": 0.5, "skills_match": 0.5},
+            "per_site": {
+                s: {
+                    "verdict": v,
+                    "mae": 0.5,
+                    "n": 100,
+                    "verdict_rank": {"PASS": 0, "WARN": 1, "FAIL": 2}.get(v, 99),
+                }
+                for s, v in sv.items()
+            },
+            "per_dim_mae": {
+                "title_fit": 0.5,
+                "location_fit": 0.5,
+                "comp_fit": 0.5,
+                "domain_match": 0.5,
+                "seniority_match": 0.5,
+                "skills_match": 0.5,
+            },
             "retry_rate": 0.05,
             "tokens_per_sec": 50.0,
             "vram_mb": 10000,
@@ -720,17 +912,25 @@ def test_18_render_matrix_produces_six_by_nine_heatmap_with_verdict_glyphs():
 
 def test_19_recommend_winner_picks_single_sweeper_or_per_site_mapping():
     """recommend_winner logic:
-      - single sweep → {mode: single, model: <x>}
-      - multiple sweepers → tiebreaker
-      - zero sweepers → {mode: per_site, mapping: {...}}"""
+    - single sweep → {mode: single, model: <x>}
+    - multiple sweepers → tiebreaker
+    - zero sweepers → {mode: per_site, mapping: {...}}"""
     # Case A: exactly one sweeper (qwen3.5:27b passes all; others have WARN/FAIL)
-    sites = ["haiku_score", "sonnet_eval", "enrich_job", "enrich_job_sonnet",
-             "homepage_backfill", "careers_scrape_url", "careers_scrape_jobs",
-             "ai_nav_discovery", "description_reformat"]
+    sites = [
+        "haiku_score",
+        "sonnet_eval",
+        "enrich_job",
+        "enrich_job_sonnet",
+        "homepage_backfill",
+        "careers_scrape_url",
+        "careers_scrape_jobs",
+        "ai_nav_discovery",
+        "description_reformat",
+    ]
     verdicts_a = {
-        "qwen3.5:27b": {s: "PASS" for s in sites},
-        "phi4:14b": {**{s: "PASS" for s in sites}, "ai_nav_discovery": "WARN"},
-        "qwen2.5:14b": {**{s: "PASS" for s in sites}, "enrich_job": "FAIL"},
+        "qwen3.5:27b": dict.fromkeys(sites, "PASS"),
+        "phi4:14b": {**dict.fromkeys(sites, "PASS"), "ai_nav_discovery": "WARN"},
+        "qwen2.5:14b": {**dict.fromkeys(sites, "PASS"), "enrich_job": "FAIL"},
     }
     rec = recommend_winner(_fake_all_results(verdicts_a))
     assert rec["mode"] == "single"
@@ -738,8 +938,8 @@ def test_19_recommend_winner_picks_single_sweeper_or_per_site_mapping():
 
     # Case B: zero sweepers — per-site mapping
     verdicts_b = {
-        "qwen3.5:27b": {**{s: "PASS" for s in sites}, "ai_nav_discovery": "FAIL"},
-        "phi4:14b": {**{s: "PASS" for s in sites}, "enrich_job": "FAIL"},
+        "qwen3.5:27b": {**dict.fromkeys(sites, "PASS"), "ai_nav_discovery": "FAIL"},
+        "phi4:14b": {**dict.fromkeys(sites, "PASS"), "enrich_job": "FAIL"},
     }
     rec = recommend_winner(_fake_all_results(verdicts_b))
     assert rec["mode"] == "per_site"
@@ -752,12 +952,15 @@ def test_20_render_matrix_has_five_required_h2_sections():
     heatmap, methodology, per-site detail, per-candidate drill-downs,
     recommendation."""
     results = _fake_all_results()
-    md = render_matrix(results, methodology_notes={
-        "baseline_filter_sql": "scoring_provider='anthropic' AND ...",
-        "pool_size": 623,
-        "gold_model": "claude-opus-4-6",
-        "prompt_sha256": "255c690e06ee58c87d32dc19ef4abd8ca25e9339eae009a327762f6de2d0c9da",
-    })
+    md = render_matrix(
+        results,
+        methodology_notes={
+            "baseline_filter_sql": "scoring_provider='anthropic' AND ...",
+            "pool_size": 623,
+            "gold_model": "claude-opus-4-6",
+            "prompt_sha256": "255c690e06ee58c87d32dc19ef4abd8ca25e9339eae009a327762f6de2d0c9da",
+        },
+    )
     h2_lines = [ln for ln in md.splitlines() if ln.startswith("## ")]
     assert len(h2_lines) >= 5, f"Expected >= 5 H2 sections, got {len(h2_lines)}: {h2_lines}"
     combined = "\n".join(h2_lines).lower()
@@ -776,9 +979,15 @@ def test_20_render_matrix_has_five_required_h2_sections():
 
 def test_21_force_ollama_returns_deepcopy_never_mutates_input():
     """force_ollama must return a deep copy — never mutate caller's config."""
-    cfg = {"providers": {"scoring": {"provider": "anthropic",
-                                     "model": "claude-opus-4-6",
-                                     "fallback_chain": [{"provider": "ollama"}]}}}
+    cfg = {
+        "providers": {
+            "scoring": {
+                "provider": "anthropic",
+                "model": "claude-opus-4-6",
+                "fallback_chain": [{"provider": "ollama"}],
+            }
+        }
+    }
     orig = json.dumps(cfg, sort_keys=True)
     new = force_ollama(cfg, "scoring", "qwen3.5:27b")
     assert new is not cfg

@@ -25,37 +25,39 @@ BATCH_SIZE = 10
 
 _SYSTEM_PROMPT = (
     "You are a company URL lookup tool. For each company, return its official "
-    "homepage URL and careers/jobs page URL. Return JSON with a \"companies\" array. "
-    "Each element: {\"name\":\"original name\",\"homepage_url\":\"https://...\","
-    "\"careers_url\":\"https://...\",\"company_size\":\"startup|small|mid-size|large\","
-    "\"industry\":\"one word or phrase\"}. "
+    'homepage URL and careers/jobs page URL. Return JSON with a "companies" array. '
+    'Each element: {"name":"original name","homepage_url":"https://...",'
+    '"careers_url":"https://...","company_size":"startup|small|mid-size|large",'
+    '"industry":"one word or phrase"}. '
     "Only include URLs you are confident about. Omit any field you are unsure of. "
     "Do NOT guess or fabricate URLs."
 )
 
-_JSON_SCHEMA = json.dumps({
-    "type": "object",
-    "properties": {
-        "companies": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "homepage_url": {"type": "string"},
-                    "careers_url": {"type": "string"},
-                    "company_size": {
-                        "type": "string",
-                        "enum": ["startup", "small", "mid-size", "large"],
+_JSON_SCHEMA = json.dumps(
+    {
+        "type": "object",
+        "properties": {
+            "companies": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "homepage_url": {"type": "string"},
+                        "careers_url": {"type": "string"},
+                        "company_size": {
+                            "type": "string",
+                            "enum": ["startup", "small", "mid-size", "large"],
+                        },
+                        "industry": {"type": "string"},
                     },
-                    "industry": {"type": "string"},
+                    "required": ["name"],
                 },
-                "required": ["name"],
-            },
-        }
-    },
-    "required": ["companies"],
-})
+            }
+        },
+        "required": ["companies"],
+    }
+)
 
 # Canonical industry mapping
 _INDUSTRY_CANONICAL = {
@@ -92,7 +94,7 @@ def enrich_companies_via_claude(
     all_results: list[dict] = []
 
     for batch_start in range(0, len(companies), BATCH_SIZE):
-        batch = companies[batch_start:batch_start + BATCH_SIZE]
+        batch = companies[batch_start : batch_start + BATCH_SIZE]
         batch_results = _classify_batch(batch)
         all_results.extend(batch_results)
 
@@ -112,13 +114,20 @@ def _classify_batch(companies: list[dict]) -> list[dict]:
 
     cmd = [
         "claude",
-        "-p", prompt,
-        "--model", "haiku",
-        "--output-format", "json",
+        "-p",
+        prompt,
+        "--model",
+        "haiku",
+        "--output-format",
+        "json",
         "--no-session-persistence",
-        "--system-prompt", _SYSTEM_PROMPT,
-        "--json-schema", _JSON_SCHEMA,
-        "--allowedTools", "WebSearch", "WebFetch",
+        "--system-prompt",
+        _SYSTEM_PROMPT,
+        "--json-schema",
+        _JSON_SCHEMA,
+        "--allowedTools",
+        "WebSearch",
+        "WebFetch",
     ]
 
     try:
@@ -140,8 +149,11 @@ def _classify_batch(companies: list[dict]) -> list[dict]:
         return []
 
     if result.returncode != 0:
-        logger.warning("Claude CLI failed (rc=%d): %s", result.returncode,
-                        result.stderr[:200] if result.stderr else result.stdout[:200])
+        logger.warning(
+            "Claude CLI failed (rc=%d): %s",
+            result.returncode,
+            result.stderr[:200] if result.stderr else result.stdout[:200],
+        )
         return []
 
     try:

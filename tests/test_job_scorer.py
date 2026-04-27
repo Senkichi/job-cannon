@@ -12,6 +12,7 @@ Plan 1 scope: score_job is a pure-function addition — no production
 callers yet. Plan 2's scoring_orchestrator is the first caller. Tests
 mock call_model() directly so they do not require Ollama/network.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -26,7 +27,6 @@ from job_finder.web.job_scorer import (
     score_job,
 )
 from job_finder.web.model_provider import ModelResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -157,8 +157,12 @@ class TestHappyPath:
 
         assert result.data is not None
         for key in (
-            "title_fit", "location_fit", "comp_fit",
-            "domain_match", "seniority_match", "skills_match",
+            "title_fit",
+            "location_fit",
+            "comp_fit",
+            "domain_match",
+            "seniority_match",
+            "skills_match",
         ):
             assert key in result.data.sub_scores, f"Missing sub-score key: {key}"
             assert isinstance(result.data.sub_scores[key], int)
@@ -265,8 +269,11 @@ class TestErrorPaths:
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             bad = ModelResult(
                 data={"title_fit": 5},  # incomplete
-                cost_usd=0.0, input_tokens=100, output_tokens=10,
-                model="qwen2.5:14b", provider="ollama",
+                cost_usd=0.0,
+                input_tokens=100,
+                output_tokens=10,
+                model="qwen2.5:14b",
+                provider="ollama",
                 schema_valid=False,
             )
             mock_call.return_value = bad
@@ -279,8 +286,13 @@ class TestErrorPaths:
         """Empty data dict -> status='error'."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             empty = ModelResult(
-                data={}, cost_usd=0.0, input_tokens=0, output_tokens=0,
-                model="qwen2.5:14b", provider="ollama", schema_valid=True,
+                data={},
+                cost_usd=0.0,
+                input_tokens=0,
+                output_tokens=0,
+                model="qwen2.5:14b",
+                provider="ollama",
+                schema_valid=True,
             )
             mock_call.return_value = empty
             result = score_job(_good_job(), mock_conn, config)
@@ -357,6 +369,7 @@ class TestModuleInvariants:
     def test_module_exports_expected_names(self):
         """__all__ declares score_job, ScoringResult, JOB_ASSESSMENT_SCHEMA."""
         from job_finder.web import job_scorer
+
         assert "score_job" in job_scorer.__all__
         assert "ScoringResult" in job_scorer.__all__
         assert "JOB_ASSESSMENT_SCHEMA" in job_scorer.__all__

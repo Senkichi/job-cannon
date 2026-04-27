@@ -22,7 +22,6 @@ from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import load_profile, save_profile, validate_profile
-from job_finder.web.blueprints.profile import _get_all_skills
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +63,11 @@ RECOMMENDATION_SCHEMA = {
 # Safety allowlists for apply-fix endpoint
 _SAFE_ACTION_TYPES = {"add_skill", "update_field"}
 _SAFE_EDITABLE_FIELDS = {
-    "skills",                          # Top-level skills list
+    "skills",  # Top-level skills list
     "resume_preferences.summary_style",
     "resume_preferences.emphasis",
 }
+
 
 @profile_recs_bp.route("/recommendation", strict_slashes=False)
 def recommendation():
@@ -97,11 +97,7 @@ def recommendation():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
         system = (
             "You are a profile improvement advisor. Given a profile validation warning "
@@ -156,6 +152,7 @@ def recommendation():
             error=True,
         )
 
+
 @profile_recs_bp.route("/recommendations-all", methods=["POST"], strict_slashes=False)
 def recommendations_all():
     """POST /profile/recommendations-all -- Batch Haiku recommendations for all current warnings.
@@ -177,11 +174,7 @@ def recommendations_all():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config.get("DB_PATH", "jobs.db")
         conn = get_db(db_path)
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("haiku", DEFAULT_MODEL_HAIKU)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
         system = (
             "You are a profile improvement advisor. Given a set of profile validation warnings "
@@ -193,8 +186,7 @@ def recommendations_all():
         )
 
         warnings_text = "\n".join(
-            f"- Field: {w['field']}, Message: {w['message']}"
-            for w in warnings
+            f"- Field: {w['field']}, Message: {w['message']}" for w in warnings
         )
         profile_json = json.dumps(profile, indent=2)
         user_message = (
@@ -234,6 +226,7 @@ def recommendations_all():
             warnings=[],
         )
 
+
 @profile_recs_bp.route("/apply-fix", methods=["POST"], strict_slashes=False)
 def apply_fix():
     """POST /profile/apply-fix -- Apply a structured one-click fix to the profile.
@@ -252,11 +245,17 @@ def apply_fix():
 
     # Validate action type
     if action_type not in _SAFE_ACTION_TYPES:
-        return f"Invalid action type: {action_type!r}. Allowed: {', '.join(_SAFE_ACTION_TYPES)}", 400
+        return (
+            f"Invalid action type: {action_type!r}. Allowed: {', '.join(_SAFE_ACTION_TYPES)}",
+            400,
+        )
 
     # Validate editable field for update_field actions
     if action_type == "update_field" and field not in _SAFE_EDITABLE_FIELDS:
-        return f"Field not editable: {field!r}. Allowed fields: {', '.join(sorted(_SAFE_EDITABLE_FIELDS))}", 400
+        return (
+            f"Field not editable: {field!r}. Allowed fields: {', '.join(sorted(_SAFE_EDITABLE_FIELDS))}",
+            400,
+        )
 
     try:
         profile = load_profile(_PROFILE_PATH)

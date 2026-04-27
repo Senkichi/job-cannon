@@ -7,11 +7,10 @@ Usage:
     uv run --active python scripts/full_company_backfill.py
 """
 
+import logging
 import os
-import sqlite3
 import sys
 import time
-import logging
 
 # Force unbuffered stdout so progress appears in background/piped contexts
 sys.stdout.reconfigure(line_buffering=True)
@@ -24,9 +23,9 @@ logging.basicConfig(
     format="%(levelname)s %(name)s: %(message)s",
 )
 
+from job_finder.config import get_company_denylist, load_config
 from job_finder.web.company_enricher import enrich_company_info
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.config import load_config, get_company_denylist
 
 BATCH_SIZE = 50
 DELAY_BETWEEN_CALLS = 0.5  # seconds
@@ -47,13 +46,11 @@ def run_full_enrichment():
 
         # Filter out denylist
         eligible = [
-            (r["id"], r["name_raw"])
-            for r in rows
-            if r["name_raw"].lower() not in denylist
+            (r["id"], r["name_raw"]) for r in rows if r["name_raw"].lower() not in denylist
         ]
 
         total = len(eligible)
-        print(f"=== Full Company Enrichment Backfill ===")
+        print("=== Full Company Enrichment Backfill ===")
         print(f"Total eligible: {total}")
         print(f"Estimated time: ~{total * 3 / 60:.0f} minutes")
         print()
@@ -144,10 +141,10 @@ def run_full_enrichment():
                 rate = enriched / (i + 1) * 100
                 remaining = (total - i - 1) * (elapsed / (i + 1))
                 print(
-                    f"  [{i+1:4d}/{total}] "
+                    f"  [{i + 1:4d}/{total}] "
                     f"hit={enriched} ({rate:.0f}%) "
                     f"empty={stats['empty']} err={stats['error']} "
-                    f"elapsed={elapsed/60:.1f}m remaining=~{remaining/60:.0f}m"
+                    f"elapsed={elapsed / 60:.1f}m remaining=~{remaining / 60:.0f}m"
                 )
 
             time.sleep(DELAY_BETWEEN_CALLS)
@@ -157,20 +154,20 @@ def run_full_enrichment():
         elapsed = time.time() - start_time
         enriched = stats["both"] + stats["size_only"] + stats["industry_only"]
 
-        print(f"\n=== Backfill Complete ({elapsed/60:.1f} minutes) ===")
+        print(f"\n=== Backfill Complete ({elapsed / 60:.1f} minutes) ===")
         print(f"Processed: {total}")
         print(f"Both:          {stats['both']}")
         print(f"Size only:     {stats['size_only']}")
         print(f"Industry only: {stats['industry_only']}")
         print(f"Empty:         {stats['empty']}")
         print(f"Error:         {stats['error']}")
-        print(f"Hit rate:      {enriched}/{total} ({100*enriched/total:.0f}%)")
+        print(f"Hit rate:      {enriched}/{total} ({100 * enriched / total:.0f}%)")
 
-        print(f"\nIndustry distribution:")
+        print("\nIndustry distribution:")
         for ind, cnt in sorted(industry_dist.items(), key=lambda x: -x[1]):
             print(f"  {ind:25s}: {cnt}")
 
-        print(f"\nSize distribution:")
+        print("\nSize distribution:")
         for sz, cnt in sorted(size_dist.items(), key=lambda x: -x[1]):
             print(f"  {sz:15s}: {cnt}")
 
@@ -182,9 +179,13 @@ def run_full_enrichment():
                 COUNT(*) as total
             FROM companies"""
         ).fetchone()
-        print(f"\nFinal coverage:")
-        print(f"  company_size: {r['has_size']}/{r['total']} ({100*r['has_size']/r['total']:.1f}%)")
-        print(f"  industry:     {r['has_industry']}/{r['total']} ({100*r['has_industry']/r['total']:.1f}%)")
+        print("\nFinal coverage:")
+        print(
+            f"  company_size: {r['has_size']}/{r['total']} ({100 * r['has_size'] / r['total']:.1f}%)"
+        )
+        print(
+            f"  industry:     {r['has_industry']}/{r['total']} ({100 * r['has_industry'] / r['total']:.1f}%)"
+        )
 
 
 if __name__ == "__main__":

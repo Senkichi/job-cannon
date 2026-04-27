@@ -4,13 +4,12 @@
 # file are patched via unittest.mock.patch. Verified 2026-03-15. No unpatched
 # HTTP calls exist in the test suite.
 
-import pytest
 from datetime import datetime
 
-from job_finder.parsers.linkedin_parser import parse_linkedin_alert
 from job_finder.parsers.glassdoor_parser import parse_glassdoor_alert
-from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 from job_finder.parsers.indeed_parser import parse_indeed_alert
+from job_finder.parsers.linkedin_parser import parse_linkedin_alert
+from job_finder.parsers.ziprecruiter_parser import parse_ziprecruiter_alert
 
 # Sample Glassdoor HTML (simplified from actual format)
 SAMPLE_GLASSDOOR_HTML = """
@@ -29,6 +28,7 @@ SAMPLE_GLASSDOOR_HTML = """
 </a>
 </body></html>
 """
+
 
 class TestGlassdoorParser:
     def test_parse_basic_alert(self):
@@ -55,6 +55,7 @@ class TestGlassdoorParser:
     def test_empty_html(self):
         assert parse_glassdoor_alert("") == []
         assert parse_glassdoor_alert("<html></html>") == []
+
 
 # Sample Glassdoor positional HTML (new classless format as of 2026)
 SAMPLE_GLASSDOOR_POSITIONAL_HTML = """
@@ -98,6 +99,7 @@ SAMPLE_GLASSDOOR_POSITIONAL_HTML = """
 </a>
 </body></html>
 """
+
 
 class TestGlassdoorPositionalParser:
     """Tests for Glassdoor positional extraction (no CSS classes)."""
@@ -143,15 +145,18 @@ class TestGlassdoorPositionalParser:
 
     def test_real_archived_email(self):
         """Parse a real archived Glassdoor email from data/parse_failures/."""
-        import os
-        email_path = os.path.join("data", "parse_failures", "glassdoor_com_2026-03-25T12-38-48.html")
+
+        email_path = os.path.join(
+            "data", "parse_failures", "glassdoor_com_2026-03-25T12-38-48.html"
+        )
         if os.path.exists(email_path):
             with open(email_path, encoding="utf-8") as f:
                 body = f.read()
             jobs = parse_glassdoor_alert(body)
-            assert len(jobs) > 0, f"Real Glassdoor email produced 0 jobs"
+            assert len(jobs) > 0, "Real Glassdoor email produced 0 jobs"
             assert all(j.company and j.company != "Unknown" for j in jobs)
             assert all(j.title for j in jobs)
+
 
 class TestDeduplication:
     def test_dedup_key_consistency(self):
@@ -176,11 +181,10 @@ class TestDeduplication:
     def test_dedup_key_case_insensitive(self):
         from job_finder.models import Job
 
-        j1 = Job(title="Staff DS", company="TOAST", location="US",
-                  source="a", source_url="")
-        j2 = Job(title="staff ds", company="toast", location="us",
-                  source="b", source_url="")
+        j1 = Job(title="Staff DS", company="TOAST", location="US", source="a", source_url="")
+        j2 = Job(title="staff ds", company="toast", location="us", source="b", source_url="")
         assert j1.dedup_key == j2.dedup_key
+
 
 # ---------------------------------------------------------------------------
 # Meta-email pollution filter tests (Phase 6 - Task 2)
@@ -253,6 +257,7 @@ View job: https://www.linkedin.com/comm/jobs/view/4364166509/?trackingId=test123
 ---------------------------------------------------------
 """
 
+
 class TestLinkedInMetaEmailFilter:
     """Test that LinkedIn parser rejects meta-email digest/count bodies."""
 
@@ -280,9 +285,7 @@ class TestLinkedInMetaEmailFilter:
     def test_normal_alert_not_filtered(self):
         """LinkedIn parser still returns jobs for normal job alert emails (no false positives)."""
         result = parse_linkedin_alert(LINKEDIN_NORMAL_BODY)
-        assert len(result) == 2, (
-            f"Expected 2 jobs from normal alert, got {len(result)}"
-        )
+        assert len(result) == 2, f"Expected 2 jobs from normal alert, got {len(result)}"
 
     def test_meta_text_in_job_title_not_filtered(self):
         """Meta-like text in a job title (after first 200 chars) should not trigger filter."""
@@ -302,6 +305,7 @@ class TestLinkedInMetaEmailFilter:
         date = datetime(2026, 3, 9)
         result = parse_linkedin_alert(LINKEDIN_META_BODY_DIGEST, email_date=date)
         assert result == []
+
 
 class TestGlassdoorMetaEmailFilter:
     """Test that Glassdoor parser handles meta/empty emails correctly."""
@@ -326,6 +330,7 @@ class TestGlassdoorMetaEmailFilter:
         result = parse_glassdoor_alert(SAMPLE_GLASSDOOR_HTML)
         assert len(result) == 2, f"Expected 2 jobs, got {len(result)}"
 
+
 class TestZipRecruiterMetaEmailFilter:
     """Test that ZipRecruiter parser rejects meta-email content."""
 
@@ -346,6 +351,7 @@ class TestZipRecruiterMetaEmailFilter:
         </body></html>"""
         result = parse_ziprecruiter_alert(body)
         assert result == [], f"Expected [], got {len(result)} jobs from ZipRecruiter digest"
+
 
 # ---------------------------------------------------------------------------
 # Indeed parser tests (Phase 14 - Task 1)
@@ -470,6 +476,7 @@ SAMPLE_INDEED_NON_TABLE_LAYOUT = """
 </body></html>
 """
 
+
 class TestIndeedParser:
     """Tests for the Indeed dual-strategy parser."""
 
@@ -481,9 +488,7 @@ class TestIndeedParser:
     def test_job_source_is_indeed(self):
         """All parsed jobs have source='indeed'."""
         jobs = parse_indeed_alert(SAMPLE_INDEED_ALERT_HTML)
-        assert all(j.source == "indeed" for j in jobs), (
-            "All jobs should have source='indeed'"
-        )
+        assert all(j.source == "indeed" for j in jobs), "All jobs should have source='indeed'"
 
     def test_job_source_url_contains_indeed(self):
         """All parsed jobs have source_url containing 'indeed.com'."""
@@ -497,9 +502,7 @@ class TestIndeedParser:
         jobs = parse_indeed_alert(SAMPLE_INDEED_ALERT_HTML)
         assert len(jobs) > 0
         titles = [j.title for j in jobs]
-        assert all(t and t != "Unknown" for t in titles), (
-            f"Some titles are Unknown: {titles}"
-        )
+        assert all(t and t != "Unknown" for t in titles), f"Some titles are Unknown: {titles}"
 
     def test_indeed_meta_email_filtered(self):
         """Digest meta-emails return []."""
@@ -527,8 +530,12 @@ class TestIndeedParser:
         assert len(jobs) > 0
         has_company = any(j.company and j.company != "Unknown" for j in jobs)
         has_location = any(j.location and j.location != "Unknown" for j in jobs)
-        assert has_company, f"No jobs with extracted company: {[(j.title, j.company) for j in jobs]}"
-        assert has_location, f"No jobs with extracted location: {[(j.title, j.location) for j in jobs]}"
+        assert has_company, (
+            f"No jobs with extracted company: {[(j.title, j.company) for j in jobs]}"
+        )
+        assert has_location, (
+            f"No jobs with extracted location: {[(j.title, j.location) for j in jobs]}"
+        )
 
     def test_indeed_deduplicates_urls(self):
         """Duplicate URLs within same email are deduplicated."""
@@ -550,20 +557,25 @@ class TestIndeedParser:
         assert len(jobs) > 0
         assert all(j.posted_date == date for j in jobs)
 
+
 # ---------------------------------------------------------------------------
 # Parse failure archival tests (Phase 14 - Task 2)
 # ---------------------------------------------------------------------------
 
 import os
-import tempfile
 import sqlite3
 
 # A realistic non-meta email body that is long enough to trigger archival (> 500 chars)
-_LONG_NONMETA_HTML_BODY = """<html><body>""" + (
-    "<p>This is a job alert email with various content but no parseable job cards. "
-    "The parser returned zero jobs for this email even though it is not a meta-email. "
-    "This should trigger parse failure archival so we can debug what changed.</p>"
-) * 5 + """</body></html>"""
+_LONG_NONMETA_HTML_BODY = (
+    """<html><body>"""
+    + (
+        "<p>This is a job alert email with various content but no parseable job cards. "
+        "The parser returned zero jobs for this email even though it is not a meta-email. "
+        "This should trigger parse failure archival so we can debug what changed.</p>"
+    )
+    * 5
+    + """</body></html>"""
+)
 
 # A meta-email body (should NOT trigger archival)
 _META_HTML_BODY = """<html><body>
@@ -574,12 +586,13 @@ _META_HTML_BODY = """<html><body>
 # A short body (< 500 chars) — should NOT trigger archival (likely empty/broken)
 _SHORT_BODY = "<html><body><p>Short email.</p></body></html>"
 
+
 class TestParseFailureArchival:
     """Tests for _should_archive_failure and _archive_parse_failure helpers."""
 
     def test_archive_on_zero_jobs(self, tmp_path, monkeypatch):
         """Parse failure with long non-meta body writes a file to data/parse_failures/."""
-        from job_finder.sources.gmail_source import _should_archive_failure, _archive_parse_failure
+        from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
 
         sender = "alert@indeed.com"
         assert _should_archive_failure(_LONG_NONMETA_HTML_BODY, [], sender) is True
@@ -609,12 +622,15 @@ class TestParseFailureArchival:
 
     def test_no_archive_when_jobs_found(self):
         """If parser returned jobs, no archival needed."""
-        from job_finder.sources.gmail_source import _should_archive_failure
         from job_finder.models import Job
+        from job_finder.sources.gmail_source import _should_archive_failure
 
         fake_job = Job(
-            title="Data Scientist", company="Acme", location="Remote",
-            source="indeed", source_url="https://indeed.com/viewjob?jk=abc"
+            title="Data Scientist",
+            company="Acme",
+            location="Remote",
+            source="indeed",
+            source_url="https://indeed.com/viewjob?jk=abc",
         )
         result = _should_archive_failure(_LONG_NONMETA_HTML_BODY, [fake_job], "alert@indeed.com")
         assert result is False, "Should not archive when jobs were found"
@@ -642,9 +658,7 @@ class TestParseFailureArchival:
         assert filename.startswith("indeed_com_"), (
             f"Filename should start with 'indeed_com_', got: {filename}"
         )
-        assert filename.endswith(".html"), (
-            f"Filename should end with '.html', got: {filename}"
-        )
+        assert filename.endswith(".html"), f"Filename should end with '.html', got: {filename}"
 
     def test_archive_writes_correct_content(self, tmp_path, monkeypatch):
         """Archived file contains the original HTML body."""
@@ -674,22 +688,24 @@ class TestParseFailureArchival:
 
     def test_parse_failures_list_populated(self, tmp_path):
         """GmailSource.parse_failures list is populated during parse failures."""
-        from job_finder.sources.gmail_source import _should_archive_failure, GmailSource
-
         # Verify the attribute is initialized (without OAuth)
         # We can't instantiate GmailSource without token.json, so check the class
         # structure by reading parse_failures behavior through _should_archive_failure
         # and confirming the list would be populated.
-
         # For the attribute check, verify the attribute is defined on the class
         # by checking __init__ behavior via mock
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
+        from job_finder.sources.gmail_source import GmailSource
 
         with patch.object(GmailSource, "_authenticate", return_value=MagicMock()):
             source = GmailSource()
-            assert hasattr(source, "parse_failures"), "GmailSource should have parse_failures attribute"
+            assert hasattr(source, "parse_failures"), (
+                "GmailSource should have parse_failures attribute"
+            )
             assert isinstance(source.parse_failures, list), "parse_failures should be a list"
             assert source.parse_failures == [], "parse_failures should start empty"
+
 
 class TestParseFailureActivityFeed:
     """Tests for parse failure activity feed entries in runs table."""
@@ -719,7 +735,8 @@ class TestParseFailureActivityFeed:
 
     def test_parse_failure_creates_runs_entry(self, tmp_path):
         """parse_failures list in GmailSource creates runs table entries."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from job_finder.web.pipeline_runner import _fetch_gmail
 
         db_path = self._make_db(tmp_path)
@@ -749,7 +766,8 @@ class TestParseFailureActivityFeed:
 
     def test_no_runs_entry_when_no_failures(self, tmp_path):
         """No parse_failure entry when parse_failures list is empty."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from job_finder.web.pipeline_runner import _fetch_gmail
 
         db_path = self._make_db(tmp_path)
@@ -773,6 +791,7 @@ class TestParseFailureActivityFeed:
         conn.close()
 
         assert len(rows) == 0, f"Expected no parse_failure entries, got {len(rows)}"
+
 
 # ---------------------------------------------------------------------------
 # Indeed plain-text parser tests (Phase 14 - Plan 03)
@@ -846,6 +865,7 @@ https://engage.indeed.com/f/a/SINGLE_JOB_URL_ENCODED
 Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 """
 
+
 class TestIndeedPlaintextParser:
     """Tests for the plain-text strategy of the Indeed parser."""
 
@@ -906,9 +926,7 @@ class TestIndeedPlaintextParser:
         """source_id is a non-empty string extracted from the engage.indeed.com URL."""
         jobs = parse_indeed_alert(SAMPLE_INDEED_PLAINTEXT_MULTI)
         assert len(jobs) >= 1
-        assert jobs[0].source_id, (
-            f"Expected non-empty source_id, got '{jobs[0].source_id}'"
-        )
+        assert jobs[0].source_id, f"Expected non-empty source_id, got '{jobs[0].source_id}'"
 
     def test_plaintext_no_salary_job(self):
         """Engineering Manager job (no salary line) has salary_min=None and salary_max=None."""
@@ -934,9 +952,7 @@ class TestIndeedPlaintextParser:
             f"'Easily apply' should not be a job title, but found in titles: {titles}"
         )
         eng_mgr = next((j for j in jobs if j.title == "Engineering Manager"), None)
-        assert eng_mgr is not None, (
-            f"Engineering Manager job not found. Titles: {titles}"
-        )
+        assert eng_mgr is not None, f"Engineering Manager job not found. Titles: {titles}"
         assert eng_mgr.company == "Omnifold", (
             f"Expected company 'Omnifold' for Engineering Manager, got '{eng_mgr.company}'"
         )
@@ -947,8 +963,7 @@ class TestIndeedPlaintextParser:
         jobs = parse_indeed_alert(SAMPLE_INDEED_PLAINTEXT_MULTI, email_date=date)
         assert len(jobs) > 0
         assert all(j.posted_date == date for j in jobs), (
-            f"Expected all jobs to have posted_date={date}, "
-            f"got {[j.posted_date for j in jobs]}"
+            f"Expected all jobs to have posted_date={date}, got {[j.posted_date for j in jobs]}"
         )
 
     def test_plaintext_source_is_indeed(self):
@@ -958,6 +973,7 @@ class TestIndeedPlaintextParser:
         assert all(j.source == "indeed" for j in jobs), (
             f"All jobs should have source='indeed', got {[j.source for j in jobs]}"
         )
+
 
 # Sample Indeed rc/clk/dl plain-text email (new 2026+ format)
 SAMPLE_INDEED_RC_CLK_PLAINTEXT = """Indeed Job Alert
@@ -985,6 +1001,7 @@ Do not share this email
 \u00a9 2026 Indeed, Inc.
 Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 """
+
 
 class TestIndeedRcClkParser:
     """Tests for Indeed rc/clk/dl URL format parsing."""
@@ -1025,14 +1042,15 @@ class TestIndeedRcClkParser:
 
     def test_real_archived_email(self):
         """Parse a real archived Indeed email from data/parse_failures/."""
-        import os
+
         email_path = os.path.join("data", "parse_failures", "indeed_com_2026-03-25T12-39-03.html")
         if os.path.exists(email_path):
             with open(email_path, encoding="utf-8") as f:
                 body = f.read()
             jobs = parse_indeed_alert(body)
-            assert len(jobs) > 0, f"Real Indeed email produced 0 jobs"
+            assert len(jobs) > 0, "Real Indeed email produced 0 jobs"
             assert all(j.source == "indeed" for j in jobs)
+
 
 # ---------------------------------------------------------------------------
 # ZipRecruiter placeholder rejection tests (Phase 20 - Plan 03)
@@ -1040,11 +1058,14 @@ class TestIndeedRcClkParser:
 
 from job_finder.parsers.ziprecruiter_parser import _extract_job_from_container
 
+
 def _make_zr_container(lines: list[str]):
     """Helper: create a BS4 div tag whose text content is the given lines."""
     from bs4 import BeautifulSoup
+
     html = "<div>" + "<br/>".join(lines) + "</div>"
     return BeautifulSoup(html, "html.parser").div
+
 
 class TestPlaceholderRejection:
     """Tests confirming that HTML template artifact values are rejected by the parser."""
@@ -1057,7 +1078,8 @@ class TestPlaceholderRejection:
         )
         assert result is None, (
             f"Expected None for placeholder title 'Title', got Job(title={result.title!r})"
-            if result else ""
+            if result
+            else ""
         )
 
     def test_rejects_placeholder_company(self):
@@ -1068,7 +1090,8 @@ class TestPlaceholderRejection:
         )
         assert result is None, (
             f"Expected None for placeholder company 'Body', got Job(company={result.company!r})"
-            if result else ""
+            if result
+            else ""
         )
 
     def test_rejects_short_title(self):
@@ -1079,7 +1102,8 @@ class TestPlaceholderRejection:
         )
         assert result is None, (
             f"Expected None for short title 'Hi' (len=2), got Job(title={result.title!r})"
-            if result else ""
+            if result
+            else ""
         )
 
     def test_rejects_short_company(self):
@@ -1090,14 +1114,13 @@ class TestPlaceholderRejection:
         )
         assert result is None, (
             f"Expected None for single-char company 'X', got Job(company={result.company!r})"
-            if result else ""
+            if result
+            else ""
         )
 
     def test_accepts_valid_job(self):
         """_extract_job_from_container returns a Job for realistic title/company values."""
-        container = _make_zr_container(
-            ["Senior Data Scientist", "Acme Corp", "New York, NY"]
-        )
+        container = _make_zr_container(["Senior Data Scientist", "Acme Corp", "New York, NY"])
         result = _extract_job_from_container(
             container, "https://www.ziprecruiter.com/jobs/sds-12345678", None
         )
@@ -1123,10 +1146,12 @@ class TestPlaceholderRejection:
             f"{[(j.title, j.company) for j in jobs]}"
         )
 
+
 # ---------------------------------------------------------------------------
 # Parser audit tests (Phase 25 - Plan 01)
 # Systematic coverage of all four parsers: title, company, location, salary
 # ---------------------------------------------------------------------------
+
 
 class TestParserAudit:
     """Audit-quality regression tests for all four parsers.
@@ -1375,6 +1400,7 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
         """Glassdoor parser logs WARNING when job card links exist but zero jobs extracted
         (i.e., card structure is completely unextractable by either CSS-class or positional method)."""
         import logging
+
         # Build HTML with real jobListing hrefs but NO extractable content at all
         # (empty card with no spans, no p tags — nothing to extract)
         html = """
@@ -1390,7 +1416,9 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
         with caplog.at_level(logging.WARNING, logger="job_finder.parsers.glassdoor_parser"):
             jobs = parse_glassdoor_alert(html)
 
-        assert jobs == [], f"Expected [] when cards have no extractable content, got {len(jobs)} jobs"
+        assert jobs == [], (
+            f"Expected [] when cards have no extractable content, got {len(jobs)} jobs"
+        )
         assert any("CSS classes may have changed" in r.message for r in caplog.records), (
             f"Expected CSS drift warning. Got log records: {[r.message for r in caplog.records]}"
         )
@@ -1439,7 +1467,9 @@ https://engage.indeed.com/f/a/TURNRIVER_JOB_ENCODED
         j = jobs[0]
         assert j.title == "Senior Manager, Data Science"
         assert j.company == "Turn/River", f"Expected 'Turn/River', got '{j.company}'"
-        assert j.location == "San Francisco, CA", f"Expected 'San Francisco, CA', got '{j.location}'"
+        assert j.location == "San Francisco, CA", (
+            f"Expected 'San Francisco, CA', got '{j.location}'"
+        )
         assert j.salary_min == 220000
         assert j.salary_max == 230000
 
@@ -1492,7 +1522,9 @@ Terms: https://engage.indeed.com/f/a/TERMS_LINK
 """
         jobs = parse_indeed_alert(body)
         # Footer links should NOT produce jobs — only 2 real jobs expected
-        assert len(jobs) == 2, f"Expected 2 jobs (not footer links), got {len(jobs)}: {[j.title for j in jobs]}"
+        assert len(jobs) == 2, (
+            f"Expected 2 jobs (not footer links), got {len(jobs)}: {[j.title for j in jobs]}"
+        )
         titles = {j.title for j in jobs}
         assert "Software Engineer" in titles
         assert "Principal Engineer" in titles
@@ -1581,9 +1613,8 @@ This email does not have the expected format.
         # Tests _extract_job_from_container directly for reliable field extraction.
         """
         from job_finder.parsers.ziprecruiter_parser import _extract_job_from_container
-        container = _make_zr_container(
-            ["Director of Engineering", "Acme Robotics", "Boston, MA"]
-        )
+
+        container = _make_zr_container(["Director of Engineering", "Acme Robotics", "Boston, MA"])
         job = _extract_job_from_container(
             container, "https://www.ziprecruiter.com/jobs/director-eng-12345678", None
         )
@@ -1599,9 +1630,8 @@ This email does not have the expected format.
         # CODE-ONLY AUDIT: No real ZipRecruiter email sample available.
         """
         from job_finder.parsers.ziprecruiter_parser import _extract_job_from_container
-        container = _make_zr_container(
-            ["Data Analyst", "Widget Co", "Chicago, IL"]
-        )
+
+        container = _make_zr_container(["Data Analyst", "Widget Co", "Chicago, IL"])
         job = _extract_job_from_container(
             container, "https://www.ziprecruiter.com/jobs/da-99999999", None
         )
@@ -1609,6 +1639,7 @@ This email does not have the expected format.
         assert job.title == "Data Analyst"
         assert job.salary_min is None
         assert job.salary_max is None
+
 
 # ---------------------------------------------------------------------------
 # Parse failure archival E2E tests (Phase 25 - Plan 01)
@@ -1623,9 +1654,12 @@ _UNPARSEABLE_LONG_HTML = (
     "<a href='https://www.glassdoor.com/partner/jobListing.htm?pos=1&jobListingId=99999'>"
     "<img src='job-card-image.png' alt=''/>"
     "</a>"
-    + ("<p>This email contains what looks like a job listing but uses an image-only card "
-       "format so the parser will return zero jobs. This block pads the email body length "
-       "past the 500-character archival threshold so we can verify the archival path fires.</p>") * 4
+    + (
+        "<p>This email contains what looks like a job listing but uses an image-only card "
+        "format so the parser will return zero jobs. This block pads the email body length "
+        "past the 500-character archival threshold so we can verify the archival path fires.</p>"
+    )
+    * 4
     + "</body></html>"
 )
 
@@ -1637,6 +1671,7 @@ _ALL_PARSERS = [
     ("no-reply@ziprecruiter.com", parse_ziprecruiter_alert),
 ]
 
+
 class TestParseFailureE2E:
     """End-to-end parse failure archival tests.
 
@@ -1646,7 +1681,7 @@ class TestParseFailureE2E:
 
     def test_e2e_full_flow_should_archive_then_write_file(self, tmp_path, monkeypatch):
         """E2E: simulate parse failure then archive — verify file written to data/parse_failures/."""
-        from job_finder.sources.gmail_source import _should_archive_failure, _archive_parse_failure
+        from job_finder.sources.gmail_source import _archive_parse_failure, _should_archive_failure
 
         sender = "noreply@glassdoor.com"
 
@@ -1734,14 +1769,12 @@ class TestParseFailureE2E:
         assert len(meta_body) >= 500
 
         result = _should_archive_failure(meta_body, [], "noreply@glassdoor.com")
-        assert result is False, (
-            f"Expected False for meta-email body, got {result}"
-        )
+        assert result is False, f"Expected False for meta-email body, got {result}"
 
     def test_e2e_jobs_found_does_not_trigger_archival(self):
         """_should_archive_failure returns False when parser returned jobs (no failure)."""
-        from job_finder.sources.gmail_source import _should_archive_failure
         from job_finder.models import Job
+        from job_finder.sources.gmail_source import _should_archive_failure
 
         fake_job = Job(
             title="Senior Engineer",
@@ -1750,5 +1783,7 @@ class TestParseFailureE2E:
             source="glassdoor",
             source_url="https://glassdoor.com/job/1",
         )
-        result = _should_archive_failure(_UNPARSEABLE_LONG_HTML, [fake_job], "noreply@glassdoor.com")
+        result = _should_archive_failure(
+            _UNPARSEABLE_LONG_HTML, [fake_job], "noreply@glassdoor.com"
+        )
         assert result is False, "Expected False when jobs were returned (not a parse failure)"

@@ -25,7 +25,8 @@ name in the caller's module namespace).
 
 import logging
 import sqlite3
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from job_finder.db import persist_job_assessment
 
@@ -55,6 +56,7 @@ def load_scoring_profile(config: dict) -> dict:
     )
     return load_profile(profile_path)
 
+
 def _resolve_scoring_model(config: dict, provider: str | None) -> str | None:
     """Pull the active model ID for the scoring tier from config.
 
@@ -72,7 +74,7 @@ def score_and_persist_job(
     conn: sqlite3.Connection,
     config: dict,
     client: Any | None = None,
-    scorer_fn: Optional[Callable] = None,
+    scorer_fn: Callable | None = None,
 ):
     """Unified v3.0 scoring entry point.
 
@@ -93,15 +95,14 @@ def score_and_persist_job(
     # already carries orchestrator-adjacent surface area.
     if scorer_fn is None:
         from job_finder.web.job_scorer import score_job as _default_scorer
+
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
     result = scorer_fn(job, conn, config, client=client)
 
     if result is None:
-        logger.info(
-            "score_and_persist_job: no result for dedup_key=%s", dedup_key
-        )
+        logger.info("score_and_persist_job: no result for dedup_key=%s", dedup_key)
         return None
 
     # Pass-through for skipped / error envelopes — no DB write, no raise.
@@ -119,7 +120,11 @@ def score_and_persist_job(
     model = _resolve_scoring_model(config, provider)
 
     persist_job_assessment(
-        conn, dedup_key, assessment, provider=provider, model=model,
+        conn,
+        dedup_key,
+        assessment,
+        provider=provider,
+        model=model,
     )
     conn.commit()
     return result

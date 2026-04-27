@@ -10,10 +10,12 @@ Per Phase 33 CONTEXT §D-02/D-13:
       html_reasoning → URL/title substring equality
       transformation → length-ratio + key-fact preservation
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ def run_homepage_backfill(
                 # Fallback: use the enrichment_tiers path as a homepage backfill
                 # analog when no explicit site_call is provided.
                 from job_finder.web.enrichment_tiers import extract_with_haiku
+
                 source = (
                     f"{row_dict.get('title', '')} at {row_dict.get('company', '')}. "
                     f"Location: {row_dict.get('location', '')}. "
@@ -78,8 +81,7 @@ def run_homepage_backfill(
                     "valid": isinstance(out, dict) and bool(out),
                 }
         except Exception as exc:
-            site_result = {"extracted": {}, "retries": 1, "valid": False,
-                           "error": str(exc)}
+            site_result = {"extracted": {}, "retries": 1, "valid": False, "error": str(exc)}
             retry_count += 1
 
         extracted = site_result.get("extracted") or {}
@@ -101,13 +103,15 @@ def run_homepage_backfill(
                 case_halls.append({"field": k, "value": v[:80]})
                 hallucinations += 1
 
-        per_case.append({
-            "dedup_key": row_dict.get("dedup_key"),
-            "extracted_fields": list(extracted.keys()),
-            "valid": valid,
-            "retries": retries,
-            "hallucinations": case_halls,
-        })
+        per_case.append(
+            {
+                "dedup_key": row_dict.get("dedup_key"),
+                "extracted_fields": list(extracted.keys()),
+                "valid": valid,
+                "retries": retries,
+                "hallucinations": case_halls,
+            }
+        )
 
     total_fields = sum(len(c["extracted_fields"]) for c in per_case) or 1
     hallucination_rate = hallucinations / total_fields
@@ -178,8 +182,11 @@ def opus_reference_agreement(
         a = _field_set(candidate_output)
         b = _field_set(opus_output)
         agreement = _jaccard(a, b)
-        return {"agreement": agreement, "verdict": _verdict_from_agreement(agreement),
-                "site_type": site_type}
+        return {
+            "agreement": agreement,
+            "verdict": _verdict_from_agreement(agreement),
+            "site_type": site_type,
+        }
 
     if site_type == "html_reasoning":
         # URL or title string equality / substring
@@ -196,8 +203,11 @@ def opus_reference_agreement(
             agreement = min(len(c), len(o)) / max(len(c), len(o))
         else:
             agreement = 0.0
-        return {"agreement": agreement, "verdict": _verdict_from_agreement(agreement),
-                "site_type": site_type}
+        return {
+            "agreement": agreement,
+            "verdict": _verdict_from_agreement(agreement),
+            "site_type": site_type,
+        }
 
     if site_type == "transformation":
         c = str(candidate_output or "")
@@ -214,8 +224,11 @@ def opus_reference_agreement(
             token_agreement = _jaccard(tokens_c, tokens_o)
             # Combined metric
             agreement = 0.5 * len_ratio + 0.5 * token_agreement
-        return {"agreement": agreement, "verdict": _verdict_from_agreement(agreement),
-                "site_type": site_type}
+        return {
+            "agreement": agreement,
+            "verdict": _verdict_from_agreement(agreement),
+            "site_type": site_type,
+        }
 
     # Unknown site_type — safest is FAIL with zero agreement
     return {"agreement": 0.0, "verdict": "FAIL", "site_type": site_type}

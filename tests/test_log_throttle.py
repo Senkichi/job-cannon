@@ -2,9 +2,8 @@
 
 import logging
 import time
-from unittest.mock import patch
 
-from job_finder.web.log_throttle import throttled_log, _seen, _lock
+from job_finder.web.log_throttle import _lock, _seen, throttled_log
 
 
 class TestThrottledLog:
@@ -68,7 +67,11 @@ class TestThrottledLog:
         error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert len(error_records) >= 2
         # The suppression summary should mention count
-        summary_records = [r for r in caplog.records if "suppressed" in r.message.lower() and r.levelno == logging.ERROR]
+        summary_records = [
+            r
+            for r in caplog.records
+            if "suppressed" in r.message.lower() and r.levelno == logging.ERROR
+        ]
         assert len(summary_records) == 1
 
     def test_format_args_passed_through(self, caplog):

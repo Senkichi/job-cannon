@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,26 +24,24 @@ def mem_db():
 
 class TestPostingAge:
     def test_age_from_iso_string(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         signals = compute_legitimacy_signals({"first_seen_at": old_date}, None)
         assert signals["posting_age_days"] == 45
 
     def test_age_over_60_triggers_warning(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=65)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=65)).isoformat()
         signals = compute_legitimacy_signals({"first_seen_at": old_date}, None)
         assert "WARNING" in signals["legitimacy_note"]
         assert "65 days old" in signals["legitimacy_note"]
 
     def test_age_over_30_triggers_note(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=35)).isoformat()
         signals = compute_legitimacy_signals({"first_seen_at": old_date}, None)
         assert "Note:" in signals["legitimacy_note"]
 
     def test_recent_posting_no_age_flag(self):
-        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-        signals = compute_legitimacy_signals(
-            {"first_seen_at": recent, "salary_min": 100000}, None
-        )
+        recent = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+        signals = compute_legitimacy_signals({"first_seen_at": recent, "salary_min": 100000}, None)
         # No age flag; salary present means no salary flag either
         assert "days old" not in signals["legitimacy_note"]
 
@@ -52,9 +50,7 @@ class TestPostingAge:
         assert signals["posting_age_days"] is None
 
     def test_z_suffix_timestamp(self):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=10)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        old_date = (datetime.now(UTC) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
         signals = compute_legitimacy_signals({"first_seen_at": old_date}, None)
         assert signals["posting_age_days"] == 10
 
@@ -121,7 +117,7 @@ class TestJDSpecificity:
 
 class TestHealthyJob:
     def test_no_flags(self):
-        recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+        recent = (datetime.now(UTC) - timedelta(days=3)).isoformat()
         job = {
             "first_seen_at": recent,
             "salary_min": 150000,
@@ -133,7 +129,7 @@ class TestHealthyJob:
 
 class TestAllFlags:
     def test_old_no_salary_short_desc(self, mem_db):
-        old_date = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=90)).isoformat()
         mem_db.execute(
             "INSERT INTO jobs (dedup_key, sources) VALUES (?, ?)",
             ("multi", json.dumps(["a", "b", "c", "d", "e"])),

@@ -1,6 +1,11 @@
 """Flask entry point for job-finder web application."""
 
-from job_finder.config import load_config, DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_SERVER_DEBUG
+from job_finder.config import (
+    DEFAULT_SERVER_DEBUG,
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_PORT,
+    load_config,
+)
 from job_finder.web import create_app
 
 cfg = load_config()

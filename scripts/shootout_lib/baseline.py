@@ -6,12 +6,12 @@ Per Phase 33 CONTEXT §D-06/D-08/D-09/D-10:
   - n=100 total (80 dev + 20 holdout)
   - Aborts on insufficient pool with three-option remediation message
 """
+
 from __future__ import annotations
 
 import random
 import sqlite3
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 class ShootoutInsufficientBaselineError(Exception):
@@ -121,7 +121,7 @@ def build_baseline_sample(
         else:
             # Positional tuple — map via column description
             cols = [c[0] for c in conn.execute(_BASELINE_POOL_SQL).description]
-            pool.append(dict(zip(cols, r)))
+            pool.append(dict(zip(cols, r, strict=False)))
             break  # one reshape is enough; but normal case is sqlite3.Row
 
     total = len(pool)
@@ -142,7 +142,8 @@ def build_baseline_sample(
         if len(buckets[q]) < per_bucket:
             raise ShootoutInsufficientBaselineError(
                 _three_option_message(
-                    total, n,
+                    total,
+                    n,
                     detail=f"Quartile {q} has only {len(buckets[q])} rows (need {per_bucket}).",
                 )
             )
@@ -161,7 +162,7 @@ def build_baseline_sample(
     dev = tuple(sampled[:dev_n])
     holdout = tuple(sampled[dev_n:])
 
-    counts = {q: per_bucket for q in ("q1", "q2", "q3", "q4")}
+    counts = dict.fromkeys(("q1", "q2", "q3", "q4"), per_bucket)
 
     return BaselineSample(
         dev=dev,

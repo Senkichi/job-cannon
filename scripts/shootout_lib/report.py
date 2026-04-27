@@ -7,12 +7,10 @@ Per Phase 33 CONTEXT §D-22/D-23/D-24:
     if zero candidates sweep.
   - Tiebreaker precedence: uniformity → retry rate → latency → VRAM.
 """
+
 from __future__ import annotations
 
-from typing import Any
-
 from scripts.shootout_lib.metrics import tiebreaker_key
-
 
 _VERDICT_GLYPH = {
     "PASS": "✅",
@@ -26,9 +24,15 @@ def _all_sites(all_results: dict) -> list[str]:
     """Return the union of sites seen across all candidate results, in a
     stable order (matching the plan's canonical 9-site order)."""
     canonical = [
-        "haiku_score", "sonnet_eval", "enrich_job", "enrich_job_sonnet",
-        "homepage_backfill", "careers_scrape_url", "careers_scrape_jobs",
-        "ai_nav_discovery", "description_reformat",
+        "haiku_score",
+        "sonnet_eval",
+        "enrich_job",
+        "enrich_job_sonnet",
+        "homepage_backfill",
+        "careers_scrape_url",
+        "careers_scrape_jobs",
+        "ai_nav_discovery",
+        "description_reformat",
     ]
     seen = set()
     for r in all_results.values():
@@ -72,7 +76,7 @@ def _render_methodology(notes: dict) -> str:
         f"- Total eligible Anthropic-filtered pool size: **{notes.get('pool_size', 'N/A')}** rows"
     )
     lines.append(
-        f"- Sampled n=100 (80 dev + 20 holdout), stratified across 4 score quartiles (25 per bucket)"
+        "- Sampled n=100 (80 dev + 20 holdout), stratified across 4 score quartiles (25 per bucket)"
     )
     lines.append(f"- Filter SQL: `{notes.get('baseline_filter_sql', 'N/A')}`")
     lines.append("")
@@ -81,9 +85,7 @@ def _render_methodology(notes: dict) -> str:
     lines.append(f"- Prompt sha256: `{notes.get('prompt_sha256', 'N/A')}`")
     lines.append(f"- Prompt source: Plan 1 commit `{notes.get('prompt_commit_sha', 'N/A')}`")
     lines.append(f"- Cumulative Opus spend: ${notes.get('opus_spend_usd', 0.0):.4f}")
-    lines.append(
-        f"- Hard budget cap: ${notes.get('opus_budget_cap', 30.0):.2f} (D-14)"
-    )
+    lines.append(f"- Hard budget cap: ${notes.get('opus_budget_cap', 30.0):.2f} (D-14)")
     lines.append("")
     lines.append("### Statistical methods")
     lines.append(
@@ -106,9 +108,7 @@ def _render_methodology(notes: dict) -> str:
         f"- VRAM reset between candidates: `ollama stop` + poll `nvidia-smi` until "
         f"memory.used < {gates.get('vram_threshold_mb', 1000)} MB"
     )
-    lines.append(
-        "- Gate failure behavior: flag-and-continue (D-21); no auto-exclusion"
-    )
+    lines.append("- Gate failure behavior: flag-and-continue (D-21); no auto-exclusion")
     excluded = notes.get("excluded_candidates", [])
     if excluded:
         lines.append("")
@@ -127,8 +127,9 @@ def _render_per_site(all_results: dict) -> str:
         # Choose column set by site type (scoring has per-dim; non-scoring differs)
         is_scoring = site in ("haiku_score", "sonnet_eval")
         if is_scoring:
-            header = ("| Candidate | Verdict | n | MAE | CI low | CI high | "
-                      "Retry | Retry gate | tok/s |")
+            header = (
+                "| Candidate | Verdict | n | MAE | CI low | CI high | Retry | Retry gate | tok/s |"
+            )
             sep = "|---|---|---|---|---|---|---|---|---|"
         else:
             header = "| Candidate | Verdict | n | Retries | Notes |"
@@ -190,9 +191,7 @@ def _render_per_candidate(all_results: dict) -> str:
         passed = verdicts.count("PASS")
         warned = verdicts.count("WARN")
         failed = verdicts.count("FAIL")
-        lines.append(
-            f"- Site verdicts: {passed} PASS / {warned} WARN / {failed} FAIL"
-        )
+        lines.append(f"- Site verdicts: {passed} PASS / {warned} WARN / {failed} FAIL")
         lines.append("")
     return "\n".join(lines)
 
@@ -205,7 +204,7 @@ def _render_recommendation(all_results: dict) -> str:
         lines.append(rec["rationale"])
         lines.append("")
         lines.append(
-            f"Phase 34 Plan 1 should wire this model as `providers.scoring.model = \"{rec['model']}\"`."
+            f'Phase 34 Plan 1 should wire this model as `providers.scoring.model = "{rec["model"]}"`.'
         )
     else:
         lines.append("**No single-model sweep — per-site mapping recommended.**\n")
@@ -221,14 +220,16 @@ def _render_recommendation(all_results: dict) -> str:
 def render_matrix(all_results: dict, methodology_notes: dict | None = None) -> str:
     """Compose the 5-section D-22 matrix as a single markdown string."""
     methodology_notes = methodology_notes or {}
-    return "\n\n".join([
-        "# v3.0 Local-LLM Site-Fitness Shootout Results\n",
-        _render_heatmap(all_results),
-        _render_methodology(methodology_notes),
-        _render_per_site(all_results),
-        _render_per_candidate(all_results),
-        _render_recommendation(all_results),
-    ])
+    return "\n\n".join(
+        [
+            "# v3.0 Local-LLM Site-Fitness Shootout Results\n",
+            _render_heatmap(all_results),
+            _render_methodology(methodology_notes),
+            _render_per_site(all_results),
+            _render_per_candidate(all_results),
+            _render_recommendation(all_results),
+        ]
+    )
 
 
 def recommend_winner(all_results: dict) -> dict:
@@ -236,11 +237,10 @@ def recommend_winner(all_results: dict) -> dict:
     uniformity → retry → latency → VRAM."""
     sites = _all_sites(all_results)
     sweepers = [
-        m for m, r in all_results.items()
-        if sites and all(
-            (r.get("per_site", {}).get(s, {}).get("verdict") == "PASS")
-            for s in sites
-        )
+        m
+        for m, r in all_results.items()
+        if sites
+        and all((r.get("per_site", {}).get(s, {}).get("verdict") == "PASS") for s in sites)
     ]
     if len(sweepers) == 1:
         m = sweepers[0]
@@ -267,8 +267,9 @@ def recommend_winner(all_results: dict) -> dict:
     # Zero sweep → per-site mapping
     mapping: dict[str, str] = {}
     for site in sites:
-        # For each site, rank candidates by (verdict_rank, MAE-or-proxy)
-        def _rank_key(kv):
+        # For each site, rank candidates by (verdict_rank, MAE-or-proxy).
+        # site=site default-arg captures the loop value at definition time.
+        def _rank_key(kv, site=site):
             model, result = kv
             site_r = result.get("per_site", {}).get(site, {})
             verdict = site_r.get("verdict", "SKIP")

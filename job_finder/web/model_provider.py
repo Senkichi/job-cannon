@@ -6,22 +6,27 @@ Phase 29 deliverable: daily rate limit tracker (_check_daily_limit, _increment_u
     _init_usage_from_db, _ensure_usage_current).
 Phase 32 fix: prompt_variant for primary provider, inter-request throttling, 429 retry.
 """
+
 from __future__ import annotations
 
 import logging
 import sqlite3
 import time
 from abc import ABC, abstractmethod
-
-import requests
 from dataclasses import dataclass
 from datetime import date as _date
 from typing import Any
 
+import requests
 from jsonschema import ValidationError, validate
 
 from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_OPUS, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import BudgetExceededError, FREE_PROVIDERS, cost_gate, record_cost
+from job_finder.web.claude_client import (  # noqa: F401 — record_cost re-exported for test patching
+    FREE_PROVIDERS,
+    BudgetExceededError,
+    cost_gate,
+    record_cost,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +160,11 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     # tiers without duplicating the cascade in config.yaml.  The model and
     # prompt_variant stay tier-specific (only provider + fallback_chain inherit).
     if not tier_cfg:
-        _non_meta = {k: v for k, v in providers_cfg.items()
-                     if isinstance(v, dict) and k not in ("daily_limits", "throttle_delays")}
+        _non_meta = {
+            k: v
+            for k, v in providers_cfg.items()
+            if isinstance(v, dict) and k not in ("daily_limits", "throttle_delays")
+        }
         if _non_meta:
             _donor = next(iter(_non_meta.values()))
             tier_cfg = {
@@ -171,8 +179,8 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 
     provider = tier_cfg.get("provider", "anthropic")
     model = tier_cfg.get("model") or default_model
-    prompt_variant = tier_cfg.get("prompt_variant", None)
-    fallback = tier_cfg.get("fallback", None)
+    prompt_variant = tier_cfg.get("prompt_variant")
+    fallback = tier_cfg.get("fallback")
     fallback_chain = tier_cfg.get("fallback_chain", [])
     daily_limits = providers_cfg.get("daily_limits", {})
     throttle_delays = providers_cfg.get("throttle_delays", {})
@@ -195,9 +203,13 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
 # Single source of truth for all registered provider names.
 # _make_adapter() derives its validation from this set — adding a new provider
 # requires updating both _SUPPORTED_PROVIDERS and the dispatch chain in _make_adapter().
-_SUPPORTED_PROVIDERS: frozenset[str] = frozenset({
-    "anthropic", "gemini", "ollama",
-})
+_SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "anthropic",
+        "gemini",
+        "ollama",
+    }
+)
 
 # Alias for backward-compat — canonical definition is in claude_client.py.
 _FREE_PROVIDERS = FREE_PROVIDERS
@@ -221,7 +233,7 @@ def tier_has_configured_provider(
     tier: str,
     config: dict,
     client: Any | None,
-    conn: "sqlite3.Connection | None" = None,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Return True if the tier has at least one operationally-routable provider entry.
 
@@ -374,23 +386,20 @@ def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
     Returns:
         New list where the last message content has schema errors appended.
     """
-    error_text = (
-        "\n\nSchema validation errors from previous attempt:\n"
-        + "\n".join(f"- {e}" for e in errors)
+    error_text = "\n\nSchema validation errors from previous attempt:\n" + "\n".join(
+        f"- {e}" for e in errors
     )
-    return messages[:-1] + [
-        {**messages[-1], "content": messages[-1]["content"] + error_text}
-    ]
+    return messages[:-1] + [{**messages[-1], "content": messages[-1]["content"] + error_text}]
 
 
 def _make_adapter(
     provider_name: str,
     client: Any | None,
-    conn: "sqlite3.Connection | None" = None,
+    conn: sqlite3.Connection | None = None,
     config: dict | None = None,
     job_id: str | None = None,
     purpose: str = "",
-) -> "BaseProvider":
+) -> BaseProvider:
     """Instantiate the correct provider adapter.
 
     Args:
@@ -433,13 +442,14 @@ def _make_adapter(
         )
     if provider_name == "gemini":
         from job_finder.web.providers.gemini_provider import GeminiProvider
+
         return GeminiProvider(config=config)
     if provider_name == "ollama":
         return OllamaProvider(config=config)
 
 
 def _maybe_record_cost(
-    result: "ModelResult",
+    result: ModelResult,
     conn: sqlite3.Connection,
     job_id: str | None,
     purpose: str,
@@ -464,12 +474,21 @@ def _maybe_record_cost(
     else:
         cost_usd = result.cost_usd
     from job_finder.json_utils import utc_now_iso
+
     conn.execute(
         "INSERT INTO scoring_costs "
         "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (job_id, purpose, result.model, result.input_tokens, result.output_tokens,
-         cost_usd, utc_now_iso(), result.provider),
+        (
+            job_id,
+            purpose,
+            result.model,
+            result.input_tokens,
+            result.output_tokens,
+            cost_usd,
+            utc_now_iso(),
+            result.provider,
+        ),
     )
     conn.commit()
 
@@ -486,7 +505,7 @@ def call_model(
     max_tokens: int = 1024,
     timeout: float | None = None,
     client: Any | None = None,
-) -> "ModelResult":
+) -> ModelResult:
     """Dispatch a model call to the configured provider for the given tier.
 
     Routes by tier, validates output schema with jsonschema, retries once with
@@ -541,7 +560,8 @@ def call_model(
             "call_model CASCADE: tier=%s chain=[%s] purpose=%s job_id=%s",
             tier,
             ", ".join(f"{e['provider']}:{e['model']}" for e in chain),
-            purpose, job_id,
+            purpose,
+            job_id,
         )
 
         # Track last-call time per provider for inter-request throttling
@@ -550,7 +570,6 @@ def call_model(
         for entry in chain:
             entry_provider = entry["provider"]
             entry_model = entry["model"]
-            entry_variant = entry.get("prompt_variant")
 
             # Skip if daily limit exhausted
             if not _check_daily_limit(entry_provider, daily_limits):
@@ -561,8 +580,12 @@ def call_model(
             # Ollama unreachable -> RuntimeError)
             try:
                 adapter = _make_adapter(
-                    entry_provider, client, conn, config,
-                    job_id=job_id, purpose=purpose,
+                    entry_provider,
+                    client,
+                    conn,
+                    config,
+                    job_id=job_id,
+                    purpose=purpose,
                 )
             except (ValueError, RuntimeError) as exc:
                 logger.warning("Cascade: %s unavailable: %s", entry_provider, exc)
@@ -595,16 +618,25 @@ def call_model(
                 try:
                     _last_call[entry_provider] = time.monotonic()
                     result = adapter.call(
-                        entry_model, effective_system, messages, output_schema, max_tokens, timeout,
+                        entry_model,
+                        effective_system,
+                        messages,
+                        output_schema,
+                        max_tokens,
+                        timeout,
                     )
                     # Sanitize output for non-Anthropic providers (strip extra keys, coerce types)
                     if entry_provider != "anthropic" and isinstance(result.data, dict):
                         sanitized = _sanitize_output(result.data, output_schema)
                         if sanitized is not result.data:
                             result = ModelResult(
-                                data=sanitized, cost_usd=result.cost_usd,
-                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                                model=result.model, provider=result.provider, schema_valid=result.schema_valid,
+                                data=sanitized,
+                                cost_usd=result.cost_usd,
+                                input_tokens=result.input_tokens,
+                                output_tokens=result.output_tokens,
+                                model=result.model,
+                                provider=result.provider,
+                                schema_valid=result.schema_valid,
                             )
                     # Schema validation + retry (per-provider, using original messages)
                     errors = _validate_schema(result.data, output_schema)
@@ -612,15 +644,24 @@ def call_model(
                         augmented = _augment_with_errors(messages, errors)
                         _last_call[entry_provider] = time.monotonic()
                         result = adapter.call(
-                            entry_model, effective_system, augmented, output_schema, max_tokens, timeout,
+                            entry_model,
+                            effective_system,
+                            augmented,
+                            output_schema,
+                            max_tokens,
+                            timeout,
                         )
                         if entry_provider != "anthropic" and isinstance(result.data, dict):
                             sanitized = _sanitize_output(result.data, output_schema)
                             if sanitized is not result.data:
                                 result = ModelResult(
-                                    data=sanitized, cost_usd=result.cost_usd,
-                                    input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                                    model=result.model, provider=result.provider, schema_valid=result.schema_valid,
+                                    data=sanitized,
+                                    cost_usd=result.cost_usd,
+                                    input_tokens=result.input_tokens,
+                                    output_tokens=result.output_tokens,
+                                    model=result.model,
+                                    provider=result.provider,
+                                    schema_valid=result.schema_valid,
                                 )
                         errors = _validate_schema(result.data, output_schema)
                     if not errors:
@@ -632,32 +673,42 @@ def call_model(
                             # scoring result because of a transient DB lock.
                             logger.warning(
                                 "Cascade: %s cost recording failed (non-fatal): %s",
-                                entry_provider, cost_exc,
+                                entry_provider,
+                                cost_exc,
                             )
                         logger.info(
                             "call_model ROUTED: tier=%s provider=%s model=%s purpose=%s job_id=%s",
-                            tier, result.provider, result.model, purpose, job_id,
+                            tier,
+                            result.provider,
+                            result.model,
+                            purpose,
+                            job_id,
                         )
                         return result
                     # Schema still invalid after retry — skip to next provider
                     logger.warning(
-                        "Cascade: %s schema invalid after retry, skipping", entry_provider,
+                        "Cascade: %s schema invalid after retry, skipping",
+                        entry_provider,
                     )
                     break  # Don't retry schema failures
                 except requests.HTTPError as exc:
                     if exc.response is not None and exc.response.status_code == 429:
                         if attempt < max_retries:
-                            backoff = (2 ** attempt) * 2  # 2s, 4s
+                            backoff = (2**attempt) * 2  # 2s, 4s
                             logger.warning(
                                 "Cascade: %s rate limited (429), retry %d/%d after %ds",
-                                entry_provider, attempt + 1, max_retries, backoff,
+                                entry_provider,
+                                attempt + 1,
+                                max_retries,
+                                backoff,
                             )
                             time.sleep(backoff)
                             continue
                         # Exhausted retries — mark provider as done for today
                         logger.warning(
                             "Cascade: %s rate limited (429) after %d retries, marking exhausted",
-                            entry_provider, max_retries,
+                            entry_provider,
+                            max_retries,
                         )
                         _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
                         break

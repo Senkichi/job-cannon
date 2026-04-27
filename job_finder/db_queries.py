@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, date
+from datetime import date, datetime
 
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:

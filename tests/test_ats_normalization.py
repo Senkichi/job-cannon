@@ -1,7 +1,5 @@
 """Tests for ATS text normalization in docx_formatter."""
 
-import pytest
-
 from job_finder.web.docx_formatter import (
     _ATS_NORMALIZE_MAP,
     _normalize_for_ats,
@@ -26,7 +24,7 @@ class TestNormalizeForAts:
         assert _normalize_for_ats("\u2018hello\u2019") == "'hello'"
 
     def test_smart_double_quotes(self):
-        assert _normalize_for_ats("\u201Chello\u201D") == '"hello"'
+        assert _normalize_for_ats("\u201chello\u201d") == '"hello"'
 
     def test_em_dash(self):
         assert _normalize_for_ats("Python \u2014 Expert") == "Python  -  Expert"
@@ -38,18 +36,18 @@ class TestNormalizeForAts:
         assert _normalize_for_ats("etc\u2026") == "etc..."
 
     def test_non_breaking_space(self):
-        assert _normalize_for_ats("100\u00A0employees") == "100 employees"
+        assert _normalize_for_ats("100\u00a0employees") == "100 employees"
 
     def test_zero_width_chars_removed(self):
-        assert _normalize_for_ats("hello\u200Bworld") == "helloworld"
-        assert _normalize_for_ats("test\u200C\u200D\uFEFF") == "test"
+        assert _normalize_for_ats("hello\u200bworld") == "helloworld"
+        assert _normalize_for_ats("test\u200c\u200d\ufeff") == "test"
 
     def test_bullet_chars(self):
         assert _normalize_for_ats("\u2022 Item 1") == "- Item 1"
-        assert _normalize_for_ats("\u25CF Item 2") == "- Item 2"
+        assert _normalize_for_ats("\u25cf Item 2") == "- Item 2"
 
     def test_guillemets(self):
-        assert _normalize_for_ats("\u00ABhello\u00BB") == '"hello"'
+        assert _normalize_for_ats("\u00abhello\u00bb") == '"hello"'
 
     def test_every_char_in_map(self):
         """Every character in the map produces a different output."""
@@ -72,7 +70,7 @@ class TestNormalizeResumeData:
         assert _normalize_resume_data("hello\u2019s") == "hello's"
 
     def test_list(self):
-        result = _normalize_resume_data(["\u201Cfoo\u201D", "plain"])
+        result = _normalize_resume_data(["\u201cfoo\u201d", "plain"])
         assert result == ['"foo"', "plain"]
 
     def test_dict(self):
@@ -98,9 +96,9 @@ class TestNormalizeResumeData:
 
     def test_immutability(self):
         """Original data must not be mutated."""
-        original = {"name": "\u201Ctest\u201D"}
+        original = {"name": "\u201ctest\u201d"}
         _normalize_resume_data(original)
-        assert original["name"] == "\u201Ctest\u201D"
+        assert original["name"] == "\u201ctest\u201d"
 
 
 class TestBuildResumeDocxNormalization:
@@ -111,8 +109,8 @@ class TestBuildResumeDocxNormalization:
 
         resume_data = {
             "name": "Test\u2019s User",
-            "contact_line": "email\u00A0|\u00A0phone",
-            "summary": "\u201CSmart quotes\u201D in summary",
+            "contact_line": "email\u00a0|\u00a0phone",
+            "summary": "\u201cSmart quotes\u201d in summary",
             "skills": ["Python", "SQL\u2014Expert"],
             "positions": [
                 {
@@ -122,9 +120,7 @@ class TestBuildResumeDocxNormalization:
                     "achievements": ["\u2022 Built systems"],
                 }
             ],
-            "education": [
-                {"degree": "BS", "institution": "MIT", "year": "2020"}
-            ],
+            "education": [{"degree": "BS", "institution": "MIT", "year": "2020"}],
         }
         buf = build_resume_docx(resume_data)
         assert buf is not None

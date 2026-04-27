@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from job_finder.models import Job
 from job_finder.sources.portal_search_source import (
     SERP_PORTALS,
@@ -29,6 +27,7 @@ def _make_job(title="Engineer", company="Acme", url="https://example.com/1"):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class TestHelpers:
     def test_safe_int(self):
         assert _safe_int(100000) == 100000
@@ -51,6 +50,7 @@ class TestHelpers:
 # ---------------------------------------------------------------------------
 # Free API fetchers
 # ---------------------------------------------------------------------------
+
 
 class TestFreeAPIs:
     @patch("job_finder.sources.portal_search_source.requests.get")
@@ -81,6 +81,7 @@ class TestFreeAPIs:
         mock_get.return_value = mock_resp
 
         from job_finder.sources.portal_search_source import _fetch_remoteok
+
         jobs = _fetch_remoteok(["Staff Engineer"])
 
         assert len(jobs) == 1
@@ -93,6 +94,7 @@ class TestFreeAPIs:
         mock_get.side_effect = ConnectionError("timeout")
 
         from job_finder.sources.portal_search_source import _fetch_remoteok
+
         jobs = _fetch_remoteok(["Engineer"])
         assert jobs == []
 
@@ -116,6 +118,7 @@ class TestFreeAPIs:
         mock_get.return_value = mock_resp
 
         from job_finder.sources.portal_search_source import _fetch_remotive
+
         jobs = _fetch_remotive(["ML Platform"])
 
         assert len(jobs) == 1
@@ -142,6 +145,7 @@ class TestFreeAPIs:
         mock_get.return_value = mock_resp
 
         from job_finder.sources.portal_search_source import _fetch_himalayas
+
         jobs = _fetch_himalayas(["Data Infrastructure"])
 
         assert len(jobs) == 1
@@ -166,6 +170,7 @@ class TestFreeAPIs:
         mock_get.return_value = mock_resp
 
         from job_finder.sources.portal_search_source import _fetch_himalayas
+
         jobs = _fetch_himalayas(["Staff Engineer", "Data Infrastructure"])
 
         assert len(jobs) == 1
@@ -174,6 +179,7 @@ class TestFreeAPIs:
 # ---------------------------------------------------------------------------
 # SERP portal search
 # ---------------------------------------------------------------------------
+
 
 class TestFetchSerpPortals:
     def test_basic_batch(self):
@@ -217,6 +223,7 @@ class TestFetchSerpPortals:
 # Combined entry point
 # ---------------------------------------------------------------------------
 
+
 class TestFetchAllPortals:
     @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
     @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
@@ -256,17 +263,18 @@ class TestFetchAllPortals:
 # Ingestion runner integration
 # ---------------------------------------------------------------------------
 
+
 class TestFetchPortalSearchIntegration:
     def test_disabled_returns_empty(self):
         from job_finder.web.ingestion_runner import _fetch_portal_search
+
         summary = {}
-        result = _fetch_portal_search(
-            {"sources": {"portal_search": {"enabled": False}}}, summary
-        )
+        result = _fetch_portal_search({"sources": {"portal_search": {"enabled": False}}}, summary)
         assert result == []
 
     def test_no_keywords_returns_empty(self):
         from job_finder.web.ingestion_runner import _fetch_portal_search
+
         summary = {}
         result = _fetch_portal_search(
             {"sources": {"portal_search": {"enabled": True, "keywords": []}}},

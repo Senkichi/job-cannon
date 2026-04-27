@@ -102,11 +102,13 @@ def main():
             ).fetchall()
             for row in rows:
                 urls = json.loads(row["source_urls"] or "[]")
-                archived_samples.append({
-                    "company": company_row["name"],
-                    "title": row["title"],
-                    "url": urls[0] if urls else "",
-                })
+                archived_samples.append(
+                    {
+                        "company": company_row["name"],
+                        "title": row["title"],
+                        "url": urls[0] if urls else "",
+                    }
+                )
 
         if i % 10 == 0 or i == len(companies):
             elapsed = time.time() - t0
@@ -115,9 +117,13 @@ def main():
     elapsed = time.time() - t0
     print()
     print(f"=== Summary (elapsed={elapsed:.1f}s) ===")
-    print(f"Companies: checked={summary['checked_companies']}  skipped={summary['skipped_companies']}")
-    print(f"Jobs:      checked={summary['checked']}  live={summary['live']}  "
-          f"expired={summary['expired']}  unparseable={summary['unparseable']}")
+    print(
+        f"Companies: checked={summary['checked_companies']}  skipped={summary['skipped_companies']}"
+    )
+    print(
+        f"Jobs:      checked={summary['checked']}  live={summary['live']}  "
+        f"expired={summary['expired']}  unparseable={summary['unparseable']}"
+    )
 
     if skip_reasons:
         print()

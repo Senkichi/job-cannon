@@ -10,8 +10,8 @@ Covers:
 - Unexpected exception -> error_code='unknown'
 """
 
-import sys
 from unittest.mock import MagicMock, patch
+
 
 def _make_creds(
     scopes=None,
@@ -24,6 +24,7 @@ def _make_creds(
     creds.expired = expired
     creds.refresh_token = refresh_token
     return creds
+
 
 class TestGetDriveStatusNoToken:
     """Tests for missing token file case."""
@@ -39,12 +40,14 @@ class TestGetDriveStatusNoToken:
         assert result["error_code"] == "no_token"
         assert result["error"] is not None
 
+
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
 # drive_status.py uses lazy imports inside _compute_drive_status, so we patch
 # the google module paths directly rather than the module-level names.
 _PATCH_CREDENTIALS = "google.oauth2.credentials.Credentials.from_authorized_user_file"
 _PATCH_REQUEST = "google.auth.transport.requests.Request"
+
 
 class TestGetDriveStatusMissingScope:
     """Tests for token lacking drive.file scope."""
@@ -58,8 +61,7 @@ class TestGetDriveStatusMissingScope:
 
         creds = _make_creds(scopes=["https://www.googleapis.com/auth/gmail.readonly"])
 
-        with patch(_PATCH_CREDENTIALS, return_value=creds), \
-             patch(_PATCH_REQUEST):
+        with patch(_PATCH_CREDENTIALS, return_value=creds), patch(_PATCH_REQUEST):
             result = _compute_drive_status({}, token_path=str(token_file))
 
         assert result["ok"] is False
@@ -74,12 +76,12 @@ class TestGetDriveStatusMissingScope:
 
         creds = _make_creds(scopes=None)
 
-        with patch(_PATCH_CREDENTIALS, return_value=creds), \
-             patch(_PATCH_REQUEST):
+        with patch(_PATCH_CREDENTIALS, return_value=creds), patch(_PATCH_REQUEST):
             result = _compute_drive_status({}, token_path=str(token_file))
 
         assert result["ok"] is False
         assert result["error_code"] == "missing_scope"
+
 
 class TestGetDriveStatusRefreshFailed:
     """Tests for token refresh failure."""
@@ -98,6 +100,7 @@ class TestGetDriveStatusRefreshFailed:
         assert result["ok"] is False
         assert result["error_code"] == "refresh_failed"
 
+
 class TestGetDriveStatusNoFolderConfigured:
     """Tests for missing Drive folder_id config."""
 
@@ -110,12 +113,12 @@ class TestGetDriveStatusNoFolderConfigured:
 
         creds = _make_creds(scopes=[_DRIVE_FILE_SCOPE], expired=False)
 
-        with patch(_PATCH_CREDENTIALS, return_value=creds), \
-             patch(_PATCH_REQUEST):
+        with patch(_PATCH_CREDENTIALS, return_value=creds), patch(_PATCH_REQUEST):
             result = _compute_drive_status({}, token_path=str(token_file))
 
         assert result["ok"] is False
         assert result["error_code"] == "no_folder_id"
+
 
 class TestGetDriveStatusSuccess:
     """Tests for the happy path."""
@@ -130,13 +133,13 @@ class TestGetDriveStatusSuccess:
         creds = _make_creds(scopes=[_DRIVE_FILE_SCOPE], expired=False)
         config = {"drive": {"folder_id": "test-folder-id"}}
 
-        with patch(_PATCH_CREDENTIALS, return_value=creds), \
-             patch(_PATCH_REQUEST):
+        with patch(_PATCH_CREDENTIALS, return_value=creds), patch(_PATCH_REQUEST):
             result = _compute_drive_status(config, token_path=str(token_file))
 
         assert result["ok"] is True
         assert result["error"] is None
         assert result["error_code"] is None
+
 
 class TestGetDriveStatusCaching:
     """Tests for g-level caching behavior."""

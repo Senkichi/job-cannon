@@ -39,6 +39,7 @@ settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
 _CONFIG_PATH = "config.yaml"
 
+
 @settings_bp.route("/", strict_slashes=False)
 def index():
     """Settings page — display config.yaml values in editable form."""
@@ -67,16 +68,26 @@ def index():
 
     style_guide = load_style_guide()
     new_field_names = [
-        "summary_formula", "skills_format", "bullet_formula", "bullet_counts",
-        "confidentiality_rules", "typography_rules", "jd_mirroring_rules",
-        "anti_patterns", "role_archetype",
+        "summary_formula",
+        "skills_format",
+        "bullet_formula",
+        "bullet_counts",
+        "confidentiality_rules",
+        "typography_rules",
+        "jd_mirroring_rules",
+        "anti_patterns",
+        "role_archetype",
     ]
     new_fields_present = sum(1 for f in new_field_names if style_guide.get(f))
     new_fields_available = len(new_field_names) - new_fields_present
 
     guidelines_text = ""
     try:
-        guidelines_path = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "resume_generation_guidelines.md"
+        guidelines_path = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "docs"
+            / "resume_generation_guidelines.md"
+        )
         guidelines_text = guidelines_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         pass
@@ -91,6 +102,7 @@ def index():
         new_fields_available=new_fields_available,
         guidelines_text=guidelines_text,
     )
+
 
 @settings_bp.route("/save", methods=["POST"], strict_slashes=False)
 def save():
@@ -108,7 +120,10 @@ def save():
             try:
                 current_mtime = os.path.getmtime(_CONFIG_PATH)
                 if abs(float(submitted_mtime) - current_mtime) > 0.01:
-                    flash("Settings were modified externally. Page reloaded with latest values.", "warning")
+                    flash(
+                        "Settings were modified externally. Page reloaded with latest values.",
+                        "warning",
+                    )
                     return redirect(url_for("settings.index"))
             except (OSError, ValueError):
                 pass
@@ -131,7 +146,9 @@ def save():
             if existing_skills and not merged_skills:
                 wiped.append(f"skills ({len(existing_skills)} items)")
             logger.debug("settings save: blocked wipe of %s", ", ".join(wiped))
-            flash(f"Save blocked: would wipe {', '.join(wiped)}. Check form and try again.", "error")
+            flash(
+                f"Save blocked: would wipe {', '.join(wiped)}. Check form and try again.", "error"
+            )
             return redirect(url_for("settings.index"))
 
         _write_config(config, _CONFIG_PATH)
@@ -144,17 +161,21 @@ def save():
         # readers may observe the old dict between the two assignments below.
         current_app.config["JF_CONFIG"] = config
         if "db" in config:
-            current_app.config["DB_PATH"] = config["db"].get("path", current_app.config.get("DB_PATH"))
+            current_app.config["DB_PATH"] = config["db"].get(
+                "path", current_app.config.get("DB_PATH")
+            )
 
         flash("Settings saved successfully.", "success")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         flash(f"Error saving settings: {exc}", "error")
 
     return redirect(url_for("settings.index"))
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _deep_merge(base: dict, overrides: dict) -> dict:
     """Recursively merge *overrides* into *base*, returning a new dict.
@@ -170,6 +191,7 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
         else:
             merged[key] = value
     return merged
+
 
 def _parse_form_to_config(form) -> dict:
     """Convert flat form fields back to nested config dict.
@@ -268,15 +290,24 @@ def _parse_form_to_config(form) -> dict:
     # --- Scoring ---
     scoring = {}
     weights = {}
-    for wk in ("title_match", "seniority_alignment", "location_fit",
-                "salary_range", "industry_relevance", "company_signals", "recency"):
+    for wk in (
+        "title_match",
+        "seniority_alignment",
+        "location_fit",
+        "salary_range",
+        "industry_relevance",
+        "company_signals",
+        "recency",
+    ):
         fk = f"weight_{wk}"
         if _has(fk):
             weights[wk] = safe_float(form[fk])
     if weights:
         scoring["weights"] = weights
     if _has("min_score_threshold"):
-        scoring["min_score_threshold"] = safe_int(form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD)
+        scoring["min_score_threshold"] = safe_int(
+            form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD
+        )
     if _has("haiku_threshold"):
         scoring["haiku_threshold"] = safe_int(form["haiku_threshold"], DEFAULT_HAIKU_THRESHOLD)
     models = {}
@@ -287,7 +318,9 @@ def _parse_form_to_config(form) -> dict:
     if models:
         scoring["models"] = models
     if _has("multi_version_threshold") and form["multi_version_threshold"]:
-        scoring["multi_version_threshold"] = safe_int(form["multi_version_threshold"], DEFAULT_MULTI_VERSION_THRESHOLD)
+        scoring["multi_version_threshold"] = safe_int(
+            form["multi_version_threshold"], DEFAULT_MULTI_VERSION_THRESHOLD
+        )
     if scoring:
         config["scoring"] = scoring
 
@@ -339,6 +372,7 @@ def _parse_form_to_config(form) -> dict:
 
     return config
 
+
 def _parse_serpapi_queries(form) -> list:
     """Extract SerpAPI queries from form fields (variable number of rows)."""
     queries = []
@@ -354,6 +388,7 @@ def _parse_serpapi_queries(form) -> list:
         if i > 50:  # safety limit
             break
     return queries
+
 
 def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
     """Write config dict to YAML file atomically.

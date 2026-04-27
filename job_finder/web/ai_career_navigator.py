@@ -15,7 +15,6 @@ import json
 import logging
 from datetime import datetime
 
-from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
@@ -33,11 +32,31 @@ class _CLIClientStub:
 _CLI_CLIENT_STUB = _CLIClientStub()
 
 # Stop words excluded when deriving a search term from target titles
-_TITLE_STOP_WORDS = frozenset({
-    "lead", "senior", "staff", "principal", "head", "director", "manager",
-    "junior", "associate", "intern", "of", "the", "and", "for", "in", "at",
-    "i", "ii", "iii", "iv", "v",
-})
+_TITLE_STOP_WORDS = frozenset(
+    {
+        "lead",
+        "senior",
+        "staff",
+        "principal",
+        "head",
+        "director",
+        "manager",
+        "junior",
+        "associate",
+        "intern",
+        "of",
+        "the",
+        "and",
+        "for",
+        "in",
+        "at",
+        "i",
+        "ii",
+        "iii",
+        "iv",
+        "v",
+    }
+)
 
 
 def _derive_search_term(target_titles: list[str]) -> str:
@@ -104,9 +123,7 @@ def _take_snapshot(page) -> str:
         pass
 
     if not a11y_text:
-        a11y_text = page.evaluate(
-            "() => document.body.innerText.substring(0, 2000)"
-        )
+        a11y_text = page.evaluate("() => document.body.innerText.substring(0, 2000)")
 
     # Part 2: Extract links with hrefs (critical for goto discovery)
     try:
@@ -258,6 +275,7 @@ def _extract_with_recipe(
         List of job dicts with 'title', 'url', 'description' keys.
     """
     from bs4 import BeautifulSoup
+
     from job_finder.web.careers_crawler import _extract_jobs_from_soup
 
     html = page.content()
@@ -320,12 +338,16 @@ def discover_navigation_recipe(
     """
     # Pre-check: if the page already has extractable jobs, skip Haiku entirely
     pre_jobs = _extract_with_recipe(
-        page, {"method": "links_in_page"}, target_titles, [],
+        page,
+        {"method": "links_in_page"},
+        target_titles,
+        [],
     )
     if pre_jobs:
         logger.info(
             "ai_nav: page already has %d jobs for %s — empty recipe (no AI needed)",
-            len(pre_jobs), careers_url,
+            len(pre_jobs),
+            careers_url,
         )
         return {
             "version": 1,
@@ -346,7 +368,7 @@ def discover_navigation_recipe(
         f"{snapshot_text}\n\n"
         f"I want to find job listings. The search term to use is: {search_term}\n"
         f"If there's a search box, use {{keyword}} as the placeholder (it will be "
-        f"replaced with \"{search_term}\" at runtime).\n"
+        f'replaced with "{search_term}" at runtime).\n'
         f"Produce a navigation recipe JSON to find job listings on this page."
     )
 
@@ -471,13 +493,16 @@ def discover_navigation_recipe(
             else:
                 logger.debug(
                     "ai_nav: validation step %d failed for %s — continuing",
-                    steps_executed + 1, careers_url,
+                    steps_executed + 1,
+                    careers_url,
                 )
                 break  # Stop at first failure but still try extraction
 
         jobs = _extract_with_recipe(
-            page, recipe.get("extraction", {"method": "links_in_page"}),
-            target_titles, [],
+            page,
+            recipe.get("extraction", {"method": "links_in_page"}),
+            target_titles,
+            [],
         )
         if not jobs:
             logger.debug("ai_nav: recipe produced 0 jobs for %s — discarding", careers_url)
@@ -488,12 +513,17 @@ def discover_navigation_recipe(
             recipe["steps"] = steps[:steps_executed]
             logger.info(
                 "ai_nav: trimmed recipe for %s — %d/%d steps worked, %d jobs found",
-                careers_url, steps_executed, len(steps), len(jobs),
+                careers_url,
+                steps_executed,
+                len(steps),
+                len(jobs),
             )
         else:
             logger.info(
                 "ai_nav: discovered recipe for %s — %d steps, %d jobs found",
-                careers_url, len(steps), len(jobs),
+                careers_url,
+                len(steps),
+                len(jobs),
             )
         return recipe
 
@@ -547,7 +577,7 @@ def replay_navigation_recipe(
         if not success:
             raise RecipeStaleError(
                 f"Step failed: {step.get('action')} {step.get('role', '')} "
-                f"\"{step.get('name', '')}\""
+                f'"{step.get("name", "")}"'
             )
 
         # Brief wait after interactive steps for page to update

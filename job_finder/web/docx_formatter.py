@@ -34,43 +34,43 @@ Expected resume_data structure:
 """
 
 import io
-from typing import Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
-
 # ATS-safe character normalization map.
 # ATS parsers (Workday, Taleo, iCIMS) choke on these Unicode characters
 # during keyword extraction. Replace with ASCII equivalents.
-_ATS_NORMALIZE_MAP = str.maketrans({
-    "\u2018": "'",     # left single quote
-    "\u2019": "'",     # right single quote (apostrophe)
-    "\u201A": "'",     # single low-9 quote
-    "\u201B": "'",     # single high-reversed-9 quote
-    "\u201C": '"',     # left double quote
-    "\u201D": '"',     # right double quote
-    "\u201E": '"',     # double low-9 quote
-    "\u201F": '"',     # double high-reversed-9 quote
-    "\u2014": " - ",   # em dash -> space-hyphen-space
-    "\u2013": "-",     # en dash -> hyphen
-    "\u2026": "...",   # ellipsis
-    "\u00A0": " ",     # non-breaking space
-    "\u200B": "",      # zero-width space (remove)
-    "\u200C": "",      # zero-width non-joiner (remove)
-    "\u200D": "",      # zero-width joiner (remove)
-    "\uFEFF": "",      # BOM / zero-width no-break space (remove)
-    "\u2022": "-",     # bullet -> hyphen (for inline lists)
-    "\u25CF": "-",     # black circle bullet
-    "\u25CB": "-",     # white circle bullet
-    "\u00B7": "-",     # middle dot
-    "\u2023": "-",     # triangular bullet
-    "\u00AB": '"',     # left guillemet
-    "\u00BB": '"',     # right guillemet
-    "\u2039": "'",     # single left angle quote
-    "\u203A": "'",     # single right angle quote
-})
+_ATS_NORMALIZE_MAP = str.maketrans(
+    {
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote (apostrophe)
+        "\u201a": "'",  # single low-9 quote
+        "\u201b": "'",  # single high-reversed-9 quote
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u201e": '"',  # double low-9 quote
+        "\u201f": '"',  # double high-reversed-9 quote
+        "\u2014": " - ",  # em dash -> space-hyphen-space
+        "\u2013": "-",  # en dash -> hyphen
+        "\u2026": "...",  # ellipsis
+        "\u00a0": " ",  # non-breaking space
+        "\u200b": "",  # zero-width space (remove)
+        "\u200c": "",  # zero-width non-joiner (remove)
+        "\u200d": "",  # zero-width joiner (remove)
+        "\ufeff": "",  # BOM / zero-width no-break space (remove)
+        "\u2022": "-",  # bullet -> hyphen (for inline lists)
+        "\u25cf": "-",  # black circle bullet
+        "\u25cb": "-",  # white circle bullet
+        "\u00b7": "-",  # middle dot
+        "\u2023": "-",  # triangular bullet
+        "\u00ab": '"',  # left guillemet
+        "\u00bb": '"',  # right guillemet
+        "\u2039": "'",  # single left angle quote
+        "\u203a": "'",  # single right angle quote
+    }
+)
 
 
 def _normalize_for_ats(text: str) -> str:
@@ -99,13 +99,17 @@ def _set_margins(doc: Document, margin_inches: float = 1.0) -> None:
         section.left_margin = Inches(margin_inches)
         section.right_margin = Inches(margin_inches)
 
-def _add_centered_paragraph(doc: Document, text: str, style: str, font_size: Optional[int] = None) -> None:
+
+def _add_centered_paragraph(
+    doc: Document, text: str, style: str, font_size: int | None = None
+) -> None:
     """Add a centered paragraph with the given style and optional font size."""
     para = doc.add_paragraph(text, style=style)
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if font_size is not None:
         for run in para.runs:
             run.font.size = Pt(font_size)
+
 
 def build_resume_docx(resume_data: dict) -> io.BytesIO:
     """Build a .docx resume document from structured data.

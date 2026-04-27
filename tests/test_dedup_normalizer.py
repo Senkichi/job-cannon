@@ -13,9 +13,7 @@ Tests:
 """
 
 import json
-import os
 import sqlite3
-import tempfile
 from datetime import datetime
 
 import pytest
@@ -25,6 +23,7 @@ from job_finder.models import Job
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mem_db():
@@ -153,12 +152,27 @@ def mem_db():
     yield conn
     conn.close()
 
-def _insert_job(conn, dedup_key, title, company, location="Remote",
-                pipeline_status="discovered", first_seen=None, last_seen=None,
-                sources=None, source_urls=None, description=None,
-                haiku_score=None, sonnet_score=None, notes="",
-                salary_min=None, salary_max=None,
-                classification=None, sub_scores_json=None):
+
+def _insert_job(
+    conn,
+    dedup_key,
+    title,
+    company,
+    location="Remote",
+    pipeline_status="discovered",
+    first_seen=None,
+    last_seen=None,
+    sources=None,
+    source_urls=None,
+    description=None,
+    haiku_score=None,
+    sonnet_score=None,
+    notes="",
+    salary_min=None,
+    salary_max=None,
+    classification=None,
+    sub_scores_json=None,
+):
     """Helper to insert a job row into the in-memory DB.
 
     v3.0 (Phase 34 Plan 3 Commit A): classification + sub_scores_json are the
@@ -174,110 +188,159 @@ def _insert_job(conn, dedup_key, title, company, location="Remote",
         sources = ["test"]
     if source_urls is None:
         source_urls = [f"https://example.com/{dedup_key}"]
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              pipeline_status, first_seen, last_seen, description,
              haiku_score, sonnet_score, classification, sub_scores_json,
              notes, salary_min, salary_max)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (dedup_key, title, company, location, json.dumps(sources),
-          json.dumps(source_urls), pipeline_status, first_seen, last_seen,
-          description, haiku_score, sonnet_score, classification, sub_scores_json,
-          notes, salary_min, salary_max))
+    """,
+        (
+            dedup_key,
+            title,
+            company,
+            location,
+            json.dumps(sources),
+            json.dumps(source_urls),
+            pipeline_status,
+            first_seen,
+            last_seen,
+            description,
+            haiku_score,
+            sonnet_score,
+            classification,
+            sub_scores_json,
+            notes,
+            salary_min,
+            salary_max,
+        ),
+    )
     conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # Tests: normalize_company
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeCompany:
     def test_strips_inc_with_period(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Klaviyo Inc.") == normalize_company("Klaviyo")
 
     def test_strips_inc_with_comma_space(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Intuit, Inc.") == normalize_company("Intuit")
 
     def test_strips_llc(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Google LLC") == normalize_company("Google")
 
     def test_no_suffix_lowercased(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Apple") == "apple"
 
     def test_strips_corp(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Microsoft Corp.") == normalize_company("Microsoft")
 
     def test_strips_ltd(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Acme Ltd.") == normalize_company("Acme")
 
     def test_strips_corporation(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("IBM Corporation") == normalize_company("IBM")
 
     def test_strips_co(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("Trading Co.") == normalize_company("Trading")
 
     def test_case_insensitive_normalization(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("KLAVIYO INC.") == normalize_company("klaviyo")
 
     def test_whitespace_stripped(self):
         from job_finder.web.dedup_normalizer import normalize_company
+
         assert normalize_company("  Amazon  ") == "amazon"
+
 
 # ---------------------------------------------------------------------------
 # Tests: normalize_title
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeTitle:
     def test_expands_sr_to_senior(self):
         from job_finder.web.dedup_normalizer import normalize_title
-        assert normalize_title("Sr. Software Engineer") == normalize_title("Senior Software Engineer")
+
+        assert normalize_title("Sr. Software Engineer") == normalize_title(
+            "Senior Software Engineer"
+        )
 
     def test_expands_jr_to_junior(self):
         from job_finder.web.dedup_normalizer import normalize_title
+
         assert normalize_title("Jr. Developer") == normalize_title("Junior Developer")
 
     def test_strips_ic_level_suffix(self):
         from job_finder.web.dedup_normalizer import normalize_title
+
         assert normalize_title("Staff Engineer (IC5)") == normalize_title("Staff Engineer")
 
     def test_strips_level_n_suffix(self):
         from job_finder.web.dedup_normalizer import normalize_title
+
         assert normalize_title("Engineer Level 3") == normalize_title("Engineer")
 
     def test_expands_mgr_to_manager(self):
         from job_finder.web.dedup_normalizer import normalize_title
+
         assert normalize_title("Eng. Mgr.") == normalize_title("Engineering Manager")
 
     def test_case_insensitive(self):
         from job_finder.web.dedup_normalizer import normalize_title
-        assert normalize_title("SR. SOFTWARE ENGINEER") == normalize_title("Senior Software Engineer")
+
+        assert normalize_title("SR. SOFTWARE ENGINEER") == normalize_title(
+            "Senior Software Engineer"
+        )
 
     def test_whitespace_stripped(self):
         from job_finder.web.dedup_normalizer import normalize_title
+
         assert normalize_title("  Senior Engineer  ") == "senior engineer"
+
 
 # ---------------------------------------------------------------------------
 # Tests: normalized_dedup_key (location excluded)
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizedDedupKey:
     def test_location_excluded_from_key(self):
         from job_finder.models import Job
-        key_sf = Job.normalized_dedup_key("Klaviyo Inc.", "Sr. Software Engineer", "San Francisco, CA")
+
+        key_sf = Job.normalized_dedup_key(
+            "Klaviyo Inc.", "Sr. Software Engineer", "San Francisco, CA"
+        )
         key_nyc = Job.normalized_dedup_key("Klaviyo", "Senior Software Engineer", "NYC")
         assert key_sf == key_nyc
 
     def test_key_format_is_company_pipe_title(self):
         from job_finder.models import Job
+
         key = Job.normalized_dedup_key("Google LLC", "Senior Engineer")
         assert "|" in key
         # Should not have a third segment (no location)
@@ -286,24 +349,29 @@ class TestNormalizedDedupKey:
 
     def test_different_companies_differ(self):
         from job_finder.models import Job
+
         key1 = Job.normalized_dedup_key("Google", "Engineer")
         key2 = Job.normalized_dedup_key("Meta", "Engineer")
         assert key1 != key2
 
     def test_different_titles_differ(self):
         from job_finder.models import Job
+
         key1 = Job.normalized_dedup_key("Google", "Engineer")
         key2 = Job.normalized_dedup_key("Google", "Manager")
         assert key1 != key2
+
 
 # ---------------------------------------------------------------------------
 # Tests: Job.dedup_key uses normalized_dedup_key
 # ---------------------------------------------------------------------------
 
+
 class TestJobDedupKey:
     def test_dedup_key_uses_normalized_format(self):
         """Job.dedup_key should return company|title (no location)."""
         from job_finder.models import Job as JobModel
+
         job = Job(
             title="Sr. Engineer",
             company="Klaviyo Inc.",
@@ -316,31 +384,63 @@ class TestJobDedupKey:
 
     def test_dedup_key_ignores_location(self):
         """Two jobs with same company+title but different location should have same dedup_key."""
-        job_sf = Job(title="Software Engineer", company="Acme", location="San Francisco",
-                     source="test", source_url="https://example.com/sf")
-        job_nyc = Job(title="Software Engineer", company="Acme", location="New York",
-                      source="test", source_url="https://example.com/nyc")
+        job_sf = Job(
+            title="Software Engineer",
+            company="Acme",
+            location="San Francisco",
+            source="test",
+            source_url="https://example.com/sf",
+        )
+        job_nyc = Job(
+            title="Software Engineer",
+            company="Acme",
+            location="New York",
+            source="test",
+            source_url="https://example.com/nyc",
+        )
         assert job_sf.dedup_key == job_nyc.dedup_key
 
     def test_dedup_key_strips_company_suffix(self):
         """Jobs with same company (with/without Inc.) should have matching dedup_keys."""
-        job_inc = Job(title="Software Engineer", company="Klaviyo Inc.", location="Remote",
-                      source="test", source_url="https://example.com/1")
-        job_bare = Job(title="Software Engineer", company="Klaviyo", location="Remote",
-                       source="test", source_url="https://example.com/2")
+        job_inc = Job(
+            title="Software Engineer",
+            company="Klaviyo Inc.",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/1",
+        )
+        job_bare = Job(
+            title="Software Engineer",
+            company="Klaviyo",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/2",
+        )
         assert job_inc.dedup_key == job_bare.dedup_key
 
     def test_dedup_key_expands_title_abbreviations(self):
         """Jobs with Sr./Senior in title should have matching dedup_keys."""
-        job_sr = Job(title="Sr. Software Engineer", company="Acme", location="Remote",
-                     source="test", source_url="https://example.com/1")
-        job_senior = Job(title="Senior Software Engineer", company="Acme", location="Remote",
-                         source="test", source_url="https://example.com/2")
+        job_sr = Job(
+            title="Sr. Software Engineer",
+            company="Acme",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/1",
+        )
+        job_senior = Job(
+            title="Senior Software Engineer",
+            company="Acme",
+            location="Remote",
+            source="test",
+            source_url="https://example.com/2",
+        )
         assert job_sr.dedup_key == job_senior.dedup_key
+
 
 # ---------------------------------------------------------------------------
 # Tests: run_retroactive_dedup
 # ---------------------------------------------------------------------------
+
 
 class TestRunRetroactiveDedup:
     def test_merges_duplicate_jobs(self, mem_db):
@@ -348,12 +448,22 @@ class TestRunRetroactiveDedup:
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
         # Insert two rows that should be considered duplicates after normalization
-        _insert_job(mem_db, "klaviyo inc.|senior software engineer|san francisco",
-                    "Senior Software Engineer", "Klaviyo Inc.", location="San Francisco, CA",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "klaviyo|sr. software engineer|remote",
-                    "Sr. Software Engineer", "Klaviyo", location="Remote",
-                    first_seen="2026-01-02T00:00:00")
+        _insert_job(
+            mem_db,
+            "klaviyo inc.|senior software engineer|san francisco",
+            "Senior Software Engineer",
+            "Klaviyo Inc.",
+            location="San Francisco, CA",
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "klaviyo|sr. software engineer|remote",
+            "Sr. Software Engineer",
+            "Klaviyo",
+            location="Remote",
+            first_seen="2026-01-02T00:00:00",
+        )
 
         count = run_retroactive_dedup(mem_db)
 
@@ -367,10 +477,20 @@ class TestRunRetroactiveDedup:
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
         # First-seen row is the Klaviyo Inc. variant
-        _insert_job(mem_db, "old-key-1", "Senior Software Engineer", "Klaviyo Inc.",
-                    first_seen="2026-01-01T09:00:00")
-        _insert_job(mem_db, "old-key-2", "Sr. Software Engineer", "Klaviyo",
-                    first_seen="2026-01-05T09:00:00")
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Software Engineer",
+            "Klaviyo Inc.",
+            first_seen="2026-01-01T09:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Sr. Software Engineer",
+            "Klaviyo",
+            first_seen="2026-01-05T09:00:00",
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -383,17 +503,22 @@ class TestRunRetroactiveDedup:
         """FK references in pipeline_events are updated from duplicate key to canonical key."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "old-key-2", "Senior Engineer", "Acme", first_seen="2026-01-05T00:00:00"
+        )
 
         # Add pipeline_events referencing the duplicate key
         now = datetime.now().isoformat()
-        mem_db.execute("""
+        mem_db.execute(
+            """
             INSERT INTO pipeline_events (job_id, from_status, to_status, timestamp)
             VALUES ('old-key-2', 'discovered', 'applied', ?)
-        """, (now,))
+        """,
+            (now,),
+        )
         mem_db.commit()
 
         run_retroactive_dedup(mem_db)
@@ -408,10 +533,22 @@ class TestRunRetroactiveDedup:
         """Merge keeps the higher-precedence pipeline status."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    pipeline_status="discovered", first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    pipeline_status="applied", first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            pipeline_status="discovered",
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            pipeline_status="applied",
+            first_seen="2026-01-05T00:00:00",
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -424,14 +561,16 @@ class TestRunRetroactiveDedup:
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
         # Two pairs of duplicates
-        _insert_job(mem_db, "key-a1", "Senior Engineer", "Acme Inc.",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "key-a2", "Senior Engineer", "Acme",
-                    first_seen="2026-01-02T00:00:00")
-        _insert_job(mem_db, "key-b1", "Product Manager", "Google LLC",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "key-b2", "Product Manager", "Google",
-                    first_seen="2026-01-03T00:00:00")
+        _insert_job(
+            mem_db, "key-a1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(mem_db, "key-a2", "Senior Engineer", "Acme", first_seen="2026-01-02T00:00:00")
+        _insert_job(
+            mem_db, "key-b1", "Product Manager", "Google LLC", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "key-b2", "Product Manager", "Google", first_seen="2026-01-03T00:00:00"
+        )
 
         count = run_retroactive_dedup(mem_db)
 
@@ -445,10 +584,12 @@ class TestRunRetroactiveDedup:
         """Each merge operation creates a merge_log entry."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "old-key-2", "Senior Engineer", "Acme", first_seen="2026-01-05T00:00:00"
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -462,10 +603,22 @@ class TestRunRetroactiveDedup:
         """After merge, canonical row has combined sources from both rows."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    sources=["linkedin"], first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    sources=["glassdoor"], first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            sources=["linkedin"],
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            sources=["glassdoor"],
+            first_seen="2026-01-05T00:00:00",
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -482,10 +635,22 @@ class TestRunRetroactiveDedup:
         short_desc = "We are hiring a Senior Engineer."
         long_desc = "We are hiring a Senior Engineer. You will build scalable systems."
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    description=long_desc, first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    description=short_desc, first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            description=long_desc,
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            description=short_desc,
+            first_seen="2026-01-05T00:00:00",
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -497,10 +662,12 @@ class TestRunRetroactiveDedup:
         """run_retroactive_dedup returns 0 when no duplicates exist."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "key-unique-1", "Senior Engineer", "Acme",
-                    first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "key-unique-2", "Product Manager", "Acme",
-                    first_seen="2026-01-02T00:00:00")
+        _insert_job(
+            mem_db, "key-unique-1", "Senior Engineer", "Acme", first_seen="2026-01-01T00:00:00"
+        )
+        _insert_job(
+            mem_db, "key-unique-2", "Product Manager", "Acme", first_seen="2026-01-02T00:00:00"
+        )
 
         count = run_retroactive_dedup(mem_db)
 
@@ -513,8 +680,9 @@ class TestRunRetroactiveDedup:
         from job_finder.models import Job
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    first_seen="2026-01-01T00:00:00")
+        _insert_job(
+            mem_db, "old-key-1", "Senior Engineer", "Acme Inc.", first_seen="2026-01-01T00:00:00"
+        )
 
         run_retroactive_dedup(mem_db)
 
@@ -527,19 +695,33 @@ class TestRunRetroactiveDedup:
         """offer status takes precedence over rejected."""
         from job_finder.web.dedup_normalizer import run_retroactive_dedup
 
-        _insert_job(mem_db, "old-key-1", "Senior Engineer", "Acme Inc.",
-                    pipeline_status="offer", first_seen="2026-01-01T00:00:00")
-        _insert_job(mem_db, "old-key-2", "Senior Engineer", "Acme",
-                    pipeline_status="rejected", first_seen="2026-01-05T00:00:00")
+        _insert_job(
+            mem_db,
+            "old-key-1",
+            "Senior Engineer",
+            "Acme Inc.",
+            pipeline_status="offer",
+            first_seen="2026-01-01T00:00:00",
+        )
+        _insert_job(
+            mem_db,
+            "old-key-2",
+            "Senior Engineer",
+            "Acme",
+            pipeline_status="rejected",
+            first_seen="2026-01-05T00:00:00",
+        )
 
         run_retroactive_dedup(mem_db)
 
         rows = mem_db.execute("SELECT pipeline_status FROM jobs").fetchall()
         assert rows[0]["pipeline_status"] == "offer"
 
+
 # ---------------------------------------------------------------------------
 # Tests: ALLOWED_FK_TABLES allowlist (DEBT-04)
 # ---------------------------------------------------------------------------
+
 
 class TestAllowlist:
     """Verify SQL injection guard on _update_fk_tables (DEBT-04)."""
@@ -571,16 +753,18 @@ class TestAllowlist:
             "resume_preferences_detected",
             "scoring_costs",
         }
-        assert ALLOWED_FK_TABLES == frozenset(expected_tables)
+        assert frozenset(expected_tables) == ALLOWED_FK_TABLES
 
     def test_allowed_fk_tables_is_frozenset(self):
         """ALLOWED_FK_TABLES is a frozenset (immutable)."""
         from job_finder.web.dedup_normalizer import ALLOWED_FK_TABLES
+
         assert isinstance(ALLOWED_FK_TABLES, frozenset)
 
     def test_allowed_fk_tables_has_six_entries(self):
         """ALLOWED_FK_TABLES contains exactly 6 table names."""
         from job_finder.web.dedup_normalizer import ALLOWED_FK_TABLES
+
         assert len(ALLOWED_FK_TABLES) == 6
 
     def test_update_fk_tables_raises_for_unknown_table(self, mem_db):
@@ -590,29 +774,35 @@ class TestAllowlist:
         internal fk_tables list used in _update_fk_tables.
         """
         import unittest.mock as mock
+
         import job_finder.web.dedup_normalizer as mod
 
         bad_fk_tables = [("evil_table", "job_id")]
 
-        with mock.patch.object(
-            mod,
-            "_update_fk_tables",
-            wraps=lambda conn, old_key, new_key: _run_with_bad_tables(
-                conn, old_key, new_key, bad_fk_tables
+        with (
+            mock.patch.object(
+                mod,
+                "_update_fk_tables",
+                wraps=lambda conn, old_key, new_key: _run_with_bad_tables(
+                    conn, old_key, new_key, bad_fk_tables
+                ),
             ),
+            pytest.raises(AssertionError, match="SQL injection guard"),
         ):
-            with pytest.raises(AssertionError, match="SQL injection guard"):
-                mod._update_fk_tables(mem_db, "old", "new")
+            mod._update_fk_tables(mem_db, "old", "new")
 
     def test_update_fk_tables_succeeds_for_all_allowlisted(self, mem_db):
         """_update_fk_tables completes without assertion error for all 6 allowlisted tables."""
         from job_finder.web.dedup_normalizer import _update_fk_tables
+
         # Should not raise — all tables are in ALLOWED_FK_TABLES and exist in mem_db
         _update_fk_tables(mem_db, "nonexistent-old-key", "nonexistent-new-key")
+
 
 def _run_with_bad_tables(conn, old_key, new_key, fk_tables):
     """Helper: run the _update_fk_tables assert logic with a custom fk_tables list."""
     import sqlite3 as _sqlite3
+
     from job_finder.web.dedup_normalizer import ALLOWED_FK_TABLES
 
     for table, column in fk_tables:

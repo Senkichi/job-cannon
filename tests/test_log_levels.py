@@ -9,16 +9,18 @@ No network calls, no real Anthropic client, no Gmail credentials required.
 """
 
 import logging
+import os
 import sqlite3
 import tempfile
-import os
-from unittest.mock import MagicMock, patch
+from datetime import UTC
+from unittest.mock import patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
     """Create a temp DB with full migrations applied. Returns (path, conn)."""
@@ -31,30 +33,31 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     return path, conn
 
+
 # ---------------------------------------------------------------------------
 # pipeline_runner.py — 3 DEBUG demotions
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
 
     @pytest.mark.skip(
         reason="Plan 4 Commit E deleted run_haiku_scoring; the v3 unified "
-               "run_scoring routes through the provider cascade and never "
-               "shells out to the claude CLI directly, so the log-level "
-               "invariant has no live code path to guard."
+        "run_scoring routes through the provider cascade and never "
+        "shells out to the claude CLI directly, so the log-level "
+        "invariant has no live code path to guard."
     )
-    def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog):
-        ...
+    def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog): ...
 
     @pytest.mark.skip(
         reason="Plan 34-03 Commit E removed run_haiku_scoring from the "
-               "run_ingestion flow. run_scoring does not gate on claude CLI "
-               "presence (it routes via the provider cascade), so this "
-               "integration test no longer has a code path to exercise. "
-               "The static source inspection variant "
-               "(test_scoring_runner_claude_cli_not_found_log_level_in_source) "
-               "still guards the log-level invariant."
+        "run_ingestion flow. run_scoring does not gate on claude CLI "
+        "presence (it routes via the provider cascade), so this "
+        "integration test no longer has a code path to exercise. "
+        "The static source inspection variant "
+        "(test_scoring_runner_claude_cli_not_found_log_level_in_source) "
+        "still guards the log-level invariant."
     )
     def test_claude_cli_not_found_logs_at_debug(self, caplog):
         """When claude CLI is not on PATH, scoring_runner emits DEBUG not WARNING."""
@@ -67,28 +70,41 @@ class TestPipelineRunnerLogLevels:
         config = {
             "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
             "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
-            "profile": {"target_titles": [], "target_locations": [],
-                        "min_salary": None, "exclusions": {}, "industries": [], "skills": []},
+            "profile": {
+                "target_titles": [],
+                "target_locations": [],
+                "min_salary": None,
+                "exclusions": {},
+                "industries": [],
+                "skills": [],
+            },
         }
 
         fake_job = Job(
-            title="Fake Job", company="FakeCo", location="Remote",
-            source="test", source_url="http://example.com", source_id="x1",
+            title="Fake Job",
+            company="FakeCo",
+            location="Remote",
+            source="test",
+            source_url="http://example.com",
+            source_id="x1",
         )
 
         try:
-            with patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]), \
-                 patch.object(runner_module, "_fetch_serpapi", return_value=[]), \
-                 patch.object(runner_module, "_check_budget_alert"), \
-                 patch("job_finder.web.scoring_runner.shutil.which", return_value=None), \
-                 caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"):
+            with (
+                patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]),
+                patch.object(runner_module, "_fetch_serpapi", return_value=[]),
+                patch.object(runner_module, "_check_budget_alert"),
+                patch("job_finder.web.scoring_runner.shutil.which", return_value=None),
+                caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"),
+            ):
                 runner_module.run_ingestion(db_path, config)
         finally:
             if os.path.exists(db_path):
                 os.remove(db_path)
 
         debug_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.DEBUG and "claude cli not found" in r.message.lower()
         ]
         assert debug_records, (
@@ -100,13 +116,15 @@ class TestPipelineRunnerLogLevels:
         """'Zero-job email routed to activity feed' uses logger.debug not WARNING."""
         # Inspect the source directly: the log call at pipeline_runner line ~225
         # must be logger.debug, not logger.warning.
-        import ast
         import inspect
+
         import job_finder.web.pipeline_runner as runner_module
 
         source = inspect.getsource(runner_module._fetch_gmail)
         # Find the log call that mentions "activity feed" or "Zero-job email"
-        assert "logger.debug" in source and ("Zero-job email" in source or "activity feed" in source), (
+        assert "logger.debug" in source and (
+            "Zero-job email" in source or "activity feed" in source
+        ), (
             "pipeline_runner._fetch_gmail: 'Zero-job email routed to activity feed' "
             "must use logger.debug (found: check for logger.warning in source)"
         )
@@ -115,7 +133,7 @@ class TestPipelineRunnerLogLevels:
         for i, line in enumerate(lines):
             if "Zero-job email" in line or ("activity feed" in line and "routed" in line):
                 # The .debug/.warning call is on this line or the preceding line
-                context = "\n".join(lines[max(0, i-2):i+1])
+                context = "\n".join(lines[max(0, i - 2) : i + 1])
                 assert "logger.warning" not in context, (
                     f"'Zero-job email routed to activity feed' must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -123,14 +141,15 @@ class TestPipelineRunnerLogLevels:
 
     @pytest.mark.skip(
         reason="Plan 4 Commit E deleted run_haiku_scoring -- the "
-               "'Haiku: no result for' log path it guarded no longer exists."
+        "'Haiku: no result for' log path it guarded no longer exists."
     )
-    def test_haiku_no_result_logs_at_debug(self, caplog):
-        ...
+    def test_haiku_no_result_logs_at_debug(self, caplog): ...
+
 
 # ---------------------------------------------------------------------------
 # rejection_analyzer.py — INFO demotion
 # ---------------------------------------------------------------------------
+
 
 class TestRejectionAnalyzerLogLevels:
     """rejection_analyzer.py log level regressions."""
@@ -138,13 +157,14 @@ class TestRejectionAnalyzerLogLevels:
     def test_budget_cap_logs_at_info_not_warning(self, caplog):
         """'monthly budget cap reached' in rejection_analyzer uses logger.info."""
         import inspect
+
         import job_finder.web.rejection_analyzer as ra_module
 
         source = inspect.getsource(ra_module._run_analysis)
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if "budget cap reached" in line.lower() or "monthly budget cap" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
                     f"rejection_analyzer budget cap message must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -166,8 +186,21 @@ class TestRejectionAnalyzerLogLevels:
                 source_id, first_seen, last_seen, score, score_breakdown,
                 pipeline_status, rejection_reviewed)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("co|title|loc", "Eng", "Co", "NYC", "[]", "[]", "",
-             "2026-01-01", "2026-01-01", 50.0, "{}", "rejected", 0),
+            (
+                "co|title|loc",
+                "Eng",
+                "Co",
+                "NYC",
+                "[]",
+                "[]",
+                "",
+                "2026-01-01",
+                "2026-01-01",
+                50.0,
+                "{}",
+                "rejected",
+                0,
+            ),
         )
         conn.commit()
         conn.close()
@@ -183,19 +216,23 @@ class TestRejectionAnalyzerLogLevels:
                 os.remove(db_path)
 
         info_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.INFO and "budget cap" in r.message.lower()
         ]
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "budget cap" in r.message.lower()
         ]
         assert info_records, "Expected INFO record for budget cap in rejection_analyzer"
         assert not warning_records, "Budget cap must not be WARNING in rejection_analyzer"
 
+
 # ---------------------------------------------------------------------------
 # interview_prep.py — 2 INFO demotions
 # ---------------------------------------------------------------------------
+
 
 class TestInterviewPrepLogLevels:
     """interview_prep.py log level regressions."""
@@ -203,6 +240,7 @@ class TestInterviewPrepLogLevels:
     def test_cost_gate_false_logs_at_info(self, caplog):
         """When cost_gate returns False, interview_prep logs at INFO not WARNING."""
         import inspect
+
         import job_finder.web.interview_prep as ip_module
 
         source = inspect.getsource(ip_module._run_prep_generation)
@@ -213,7 +251,7 @@ class TestInterviewPrepLogLevels:
         for i, line in enumerate(lines):
             if "budget exceeded" in line.lower() and "cost_gate" not in line:
                 found_budget_log = True
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
                     f"interview_prep cost_gate=False branch must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -229,8 +267,8 @@ class TestInterviewPrepLogLevels:
     def test_budget_exceeded_error_logs_at_info(self, caplog):
         """BudgetExceededError handler in interview_prep uses logger.info not WARNING."""
         import inspect
+
         import job_finder.web.interview_prep as ip_module
-        from job_finder.web.claude_client import BudgetExceededError
 
         source = inspect.getsource(ip_module._run_prep_generation)
         lines = source.splitlines()
@@ -242,10 +280,10 @@ class TestInterviewPrepLogLevels:
                 in_budget_except = True
             if in_budget_except and ("logger.info" in line or "logger.warning" in line):
                 assert "logger.warning" not in line, (
-                    f"BudgetExceededError handler must not use logger.warning at line {i+1}: {line.strip()}"
+                    f"BudgetExceededError handler must not use logger.warning at line {i + 1}: {line.strip()}"
                 )
                 assert "logger.info" in line, (
-                    f"BudgetExceededError handler must use logger.info at line {i+1}: {line.strip()}"
+                    f"BudgetExceededError handler must use logger.info at line {i + 1}: {line.strip()}"
                 )
                 break
 
@@ -259,8 +297,19 @@ class TestInterviewPrepLogLevels:
                (dedup_key, title, company, location, sources, source_urls,
                 source_id, first_seen, last_seen, score, score_breakdown)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("co|eng|nyc", "Eng", "Co", "NYC", "[]", "[]", "",
-             "2026-01-01", "2026-01-01", 50.0, "{}"),
+            (
+                "co|eng|nyc",
+                "Eng",
+                "Co",
+                "NYC",
+                "[]",
+                "[]",
+                "",
+                "2026-01-01",
+                "2026-01-01",
+                50.0,
+                "{}",
+            ),
         )
         conn.commit()
         conn.close()
@@ -276,19 +325,23 @@ class TestInterviewPrepLogLevels:
                 os.remove(db_path)
 
         info_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.INFO and "budget exceeded" in r.message.lower()
         ]
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "budget" in r.message.lower()
         ]
         assert info_records, "Expected INFO record for budget exceeded in interview_prep"
         assert not warning_records, "Budget message must not be WARNING in interview_prep"
 
+
 # ---------------------------------------------------------------------------
 # ats_scanner.py — INFO demotion
 # ---------------------------------------------------------------------------
+
 
 class TestAtsScannerLogLevels:
     """ats_scanner.py log level regressions."""
@@ -296,13 +349,14 @@ class TestAtsScannerLogLevels:
     def test_promoted_to_unreachable_logs_at_info(self, caplog):
         """'promoted to unreachable' uses logger.info not WARNING."""
         import inspect
+
         import job_finder.web.ats_scanner as ats_module
 
         source = inspect.getsource(ats_module._handle_scan_error)
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if "promoted to unreachable" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
                     f"ats_scanner 'promoted to unreachable' must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -314,14 +368,15 @@ class TestAtsScannerLogLevels:
 
     def test_promoted_to_unreachable_caplog_integration(self, caplog):
         """_handle_scan_error promotion to unreachable emits INFO record."""
+        from datetime import datetime
+
         import job_finder.web.ats_scanner as ats_module
-        from datetime import datetime, timezone
 
         db_path, conn = _make_migrated_db()
 
         # Insert a company at retry_count = _MAX_RETRIES - 1 so the next error promotes it
         max_retries = ats_module._MAX_RETRIES
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         conn.execute(
             """INSERT INTO companies
@@ -331,9 +386,7 @@ class TestAtsScannerLogLevels:
         )
         conn.commit()
 
-        company_id = conn.execute(
-            "SELECT id FROM companies WHERE name = 'AcmeCorp'"
-        ).fetchone()[0]
+        company_id = conn.execute("SELECT id FROM companies WHERE name = 'AcmeCorp'").fetchone()[0]
 
         try:
             with caplog.at_level(logging.INFO, logger="job_finder.web.ats_prober"):
@@ -346,19 +399,23 @@ class TestAtsScannerLogLevels:
                 os.remove(db_path)
 
         info_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.INFO and "unreachable" in r.message.lower()
         ]
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "unreachable" in r.message.lower()
         ]
         assert info_records, "Expected INFO record for 'promoted to unreachable'"
         assert not warning_records, "'promoted to unreachable' must not be WARNING"
 
+
 # ---------------------------------------------------------------------------
 # blueprints/settings.py — DEBUG demotion
 # ---------------------------------------------------------------------------
+
 
 class TestSettingsLogLevels:
     """blueprints/settings.py log level regressions."""
@@ -366,25 +423,26 @@ class TestSettingsLogLevels:
     def test_blocked_wipe_logs_at_debug(self, caplog):
         """'settings save: blocked wipe of' uses logger.debug not WARNING."""
         import inspect
+
         from job_finder.web.blueprints import settings as settings_module
 
         source = inspect.getsource(settings_module)
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if "blocked wipe of" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
-                    f"settings 'blocked wipe of' must not use logger.warning.\n"
-                    f"Context:\n{context}"
+                    f"settings 'blocked wipe of' must not use logger.warning.\nContext:\n{context}"
                 )
                 assert "logger.debug" in context, (
-                    f"settings 'blocked wipe of' must use logger.debug.\n"
-                    f"Context:\n{context}"
+                    f"settings 'blocked wipe of' must use logger.debug.\nContext:\n{context}"
                 )
+
 
 # ---------------------------------------------------------------------------
 # blueprints/jobs.py — 2 INFO demotions
 # ---------------------------------------------------------------------------
+
 
 class TestJobsBlueprintLogLevels:
     """blueprints/jobs.py log level regressions."""
@@ -392,13 +450,14 @@ class TestJobsBlueprintLogLevels:
     def test_paste_jd_budget_cap_logs_at_info(self, caplog):
         """'paste-jd: budget cap reached' uses logger.info not WARNING."""
         import inspect
+
         from job_finder.web.blueprints import jobs as jobs_module
 
         source = inspect.getsource(jobs_module)
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if "paste-jd: budget cap reached" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
                     f"jobs.py 'paste-jd: budget cap reached' must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -411,13 +470,14 @@ class TestJobsBlueprintLogLevels:
     def test_rescore_budget_cap_logs_at_info(self, caplog):
         """'rescore: budget cap reached' uses logger.info not WARNING."""
         import inspect
+
         from job_finder.web.blueprints import jobs as jobs_module
 
         source = inspect.getsource(jobs_module)
         lines = source.splitlines()
         for i, line in enumerate(lines):
             if "rescore: budget cap reached" in line.lower():
-                context = "\n".join(lines[max(0, i-3):i+1])
+                context = "\n".join(lines[max(0, i - 3) : i + 1])
                 assert "logger.warning" not in context, (
                     f"jobs.py 'rescore: budget cap reached' must not use logger.warning.\n"
                     f"Context:\n{context}"
@@ -427,9 +487,11 @@ class TestJobsBlueprintLogLevels:
                     f"Context:\n{context}"
                 )
 
+
 # ---------------------------------------------------------------------------
 # parsers/ziprecruiter_parser.py — body-size guard
 # ---------------------------------------------------------------------------
+
 
 class TestZipRecruiterParserBodyGuard:
     """ziprecruiter_parser.py body-size guard regression."""
@@ -443,12 +505,11 @@ class TestZipRecruiterParserBodyGuard:
             result = parse_ziprecruiter_alert("")
         assert result == []
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "no jobs found" in r.message.lower()
         ]
-        assert not warning_records, (
-            "Empty body must NOT trigger 'no jobs found' WARNING"
-        )
+        assert not warning_records, "Empty body must NOT trigger 'no jobs found' WARNING"
 
     def test_no_jobs_warning_suppressed_for_short_body(self, caplog):
         """Body of <= 100 stripped chars does NOT trigger the 'no jobs found' WARNING."""
@@ -459,7 +520,8 @@ class TestZipRecruiterParserBodyGuard:
             result = parse_ziprecruiter_alert(short_body)
         assert result == []
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "no jobs found" in r.message.lower()
         ]
         assert not warning_records, (
@@ -486,7 +548,8 @@ class TestZipRecruiterParserBodyGuard:
 
         assert result == []
         warning_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno == logging.WARNING and "no jobs found" in r.message.lower()
         ]
         assert warning_records, (
@@ -496,6 +559,7 @@ class TestZipRecruiterParserBodyGuard:
     def test_guard_condition_present_in_source(self):
         """Source code contains the body-size guard expression."""
         import inspect
+
         from job_finder.parsers import ziprecruiter_parser
 
         source = inspect.getsource(ziprecruiter_parser.parse_ziprecruiter_alert)

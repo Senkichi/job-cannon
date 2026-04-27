@@ -271,6 +271,7 @@ def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
     dfse_cfg = config.get("sources", {}).get("dataforseo", {})
     if dfse_cfg.get("enabled") and dfse_cfg.get("api_key"):
         from job_finder.sources.dataforseo_source import DataForSEOSource
+
         dataforseo_source = DataForSEOSource(
             api_key=dfse_cfg["api_key"],
             depth=10,  # site: queries return few results; 10 is plenty
@@ -281,6 +282,7 @@ def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
 
     try:
         from job_finder.sources.portal_search_source import fetch_all_portals
+
         jobs = fetch_all_portals(
             keywords,
             dataforseo_source=dataforseo_source,
@@ -343,7 +345,9 @@ def _submit_dataforseo_tasks(
         if not task_ids:
             msg = f"DataForSEO: submit returned no task IDs for {len(queries)} queries (all tasks rejected)"
             summary["dataforseo_errors"].append(msg)
-            logger.warning("DataForSEO: submit_tasks returned no task IDs for %d queries", len(queries))
+            logger.warning(
+                "DataForSEO: submit_tasks returned no task IDs for %d queries", len(queries)
+            )
             return [], None
         logger.info("DataForSEO: submitted %d tasks (non-blocking)", len(task_ids))
         return task_ids, source
@@ -423,9 +427,7 @@ def _score_and_persist(
     except Exception as e:
         error_msg = f"{job.title} @ {job.company}: {e}"
         summary["job_errors"].append(error_msg)
-        logger.warning(
-            "Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e
-        )
+        logger.warning("Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e)
 
 
 def _touch_existing_job(job: Job, conn: sqlite3.Connection, summary: dict) -> None:
@@ -482,8 +484,8 @@ def _upsert_job_company(conn, job: Job) -> None:
         job: Job object whose company should be upserted.
     """
     try:
-        from job_finder.web.ats_detection import extract_ats_from_urls
         from job_finder.web.ats_company import upsert_company
+        from job_finder.web.ats_detection import extract_ats_from_urls
     except ImportError:
         return
 
@@ -546,9 +548,7 @@ def _prune_stale_data(conn: sqlite3.Connection, lookback_days: int = 7) -> None:
             " WHERE timestamp < datetime('now', '-30 days')"
             " AND source LIKE '%parse_failure%'"
         )
-        conn.execute(
-            "DELETE FROM runs WHERE timestamp < datetime('now', '-90 days')"
-        )
+        conn.execute("DELETE FROM runs WHERE timestamp < datetime('now', '-90 days')")
         # Trim email_parse_log rows (both per-message dedup rows and run-level
         # summary rows with sender='gmail').  TTL scales with lookback_days so
         # dedup records are never expired while Gmail still returns those emails.
@@ -573,7 +573,7 @@ def _log_to_email_parse_log(
     message_id: str,
     sender: str,
     jobs_found: int,
-    error: Optional[str],
+    error: str | None,
 ) -> None:
     """Insert a record into email_parse_log.
 
@@ -596,5 +596,3 @@ def _log_to_email_parse_log(
         conn.commit()
     except Exception as e:
         logger.warning("Failed to write to email_parse_log: %s", e)
-
-

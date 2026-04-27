@@ -1,6 +1,5 @@
 """Tests for Indeed match email parser (donotreply@match.indeed.com)."""
 
-import pytest
 from datetime import datetime
 
 from job_finder.parsers.indeed_parser import parse_indeed_match_alert
@@ -75,6 +74,7 @@ Indeed Tower 200 West 6th Street, Floor 36, Austin, TX 78701
 # Single-job format
 # ---------------------------------------------------------------------------
 
+
 class TestIndeedMatchSingleJob:
     def test_parses_single_job(self):
         jobs = parse_indeed_match_alert(SAMPLE_SINGLE_JOB_WITH_SALARY)
@@ -122,9 +122,11 @@ class TestIndeedMatchSingleJob:
         jobs = parse_indeed_match_alert(SAMPLE_SINGLE_JOB_WITH_SALARY, email_date=date)
         assert jobs[0].posted_date == date
 
+
 # ---------------------------------------------------------------------------
 # Multi-job format
 # ---------------------------------------------------------------------------
+
 
 class TestIndeedMatchMultiJob:
     def test_parses_multiple_jobs(self):
@@ -146,8 +148,8 @@ class TestIndeedMatchMultiJob:
     def test_hourly_salary_annualized(self):
         """$70 - $80 an hour should be annualized via 2080 multiplier."""
         jobs = parse_indeed_match_alert(SAMPLE_MULTI_JOB)
-        assert jobs[0].salary_min == int(70 * 2080)
-        assert jobs[0].salary_max == int(80 * 2080)
+        assert jobs[0].salary_min == (70 * 2080)
+        assert jobs[0].salary_max == (80 * 2080)
 
     def test_annual_salary_parsed(self):
         """$140,000 - $170,000 a year should be parsed directly."""
@@ -158,8 +160,8 @@ class TestIndeedMatchMultiJob:
     def test_single_hourly_annualized(self):
         """$95 an hour should be annualized."""
         jobs = parse_indeed_match_alert(SAMPLE_MULTI_JOB)
-        assert jobs[2].salary_min == int(95 * 2080)
-        assert jobs[2].salary_max == int(95 * 2080)
+        assert jobs[2].salary_min == (95 * 2080)
+        assert jobs[2].salary_max == (95 * 2080)
 
     def test_noise_lines_filtered(self):
         """'Easily apply' and 'Responsive employer' should not appear as titles."""
@@ -212,9 +214,11 @@ class TestIndeedMatchMultiJob:
         assert brand_mgr[0].company == "SGS Consulting"
         assert brand_mgr[0].location == "Remote"
 
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestIndeedMatchEdgeCases:
     def test_empty_body(self):
@@ -232,44 +236,53 @@ class TestIndeedMatchEdgeCases:
     def test_unrelated_url_returns_empty(self):
         assert parse_indeed_match_alert("Visit https://example.com") == []
 
+
 # ---------------------------------------------------------------------------
 # Salary fix regression: existing _extract_salary_from_text improvements
 # ---------------------------------------------------------------------------
+
 
 class TestHourlySalaryFix:
     """Verify the hourly range fix doesn't break existing salary parsing."""
 
     def test_hourly_range_annualized(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$70 - $80 an hour")
-        assert result == (int(70 * 2080), int(80 * 2080))
+        assert result == ((70 * 2080), (80 * 2080))
 
     def test_hourly_single_annualized(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$95 an hour")
-        assert result == (int(95 * 2080), int(95 * 2080))
+        assert result == ((95 * 2080), (95 * 2080))
 
     def test_hourly_per_hour(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$50.50 - $60 per hour")
-        assert result == (int(50.50 * 2080), int(60 * 2080))
+        assert result == (int(50.50 * 2080), (60 * 2080))
 
     def test_annual_range_unchanged(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$140,000 - $170,000 a year")
         assert result == (140000, 170000)
 
     def test_k_notation_unchanged(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$120K - $150K")
         assert result == (120000, 150000)
 
     def test_slash_hr_still_works(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("$25/hr")
-        assert result == (int(25 * 2080), int(25 * 2080))
+        assert result == ((25 * 2080), (25 * 2080))
 
     def test_no_salary(self):
         from job_finder.parsers.indeed_parser import _extract_salary_from_text
+
         result = _extract_salary_from_text("No salary listed here")
         assert result == (None, None)

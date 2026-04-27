@@ -14,6 +14,7 @@ Covers:
 import io
 from unittest.mock import MagicMock, patch
 
+
 def _make_creds(
     scopes=None,
     expired=False,
@@ -26,14 +27,15 @@ def _make_creds(
     creds.refresh_token = refresh_token
     return creds
 
+
 _DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
 
 class TestGetDriveServiceErrors:
     """Tests for error conditions in get_drive_service."""
 
     def test_raises_file_not_found_when_no_token(self, tmp_path):
         """Raises FileNotFoundError when token.json does not exist."""
-        from job_finder.gmail_auth import AuthenticationError
         from job_finder.web.drive_uploader import get_drive_service
 
         missing = str(tmp_path / "no_token.json")
@@ -73,6 +75,7 @@ class TestGetDriveServiceErrors:
             except ValueError as exc:
                 assert "refresh" in str(exc).lower() or "failed" in str(exc).lower()
 
+
 class TestGetDriveServiceSuccess:
     """Tests for the happy path of get_drive_service."""
 
@@ -84,11 +87,14 @@ class TestGetDriveServiceSuccess:
         creds.valid = True
         mock_service = MagicMock()
 
-        with patch("job_finder.gmail_auth.get_credentials", return_value=creds), \
-             patch("job_finder.web.drive_uploader.build", return_value=mock_service):
+        with (
+            patch("job_finder.gmail_auth.get_credentials", return_value=creds),
+            patch("job_finder.web.drive_uploader.build", return_value=mock_service),
+        ):
             service = get_drive_service(token_path=str(tmp_path / "token.json"))
 
         assert service is mock_service
+
 
 class TestUploadToDrive:
     """Tests for upload_to_drive."""
@@ -130,7 +136,7 @@ class TestUploadToDrive:
 
     def test_convert_to_gdoc_uses_gdoc_mime_type(self):
         """With convert_to_gdoc=True, mimeType is set to Google Docs format."""
-        from job_finder.web.drive_uploader import upload_to_drive, _GDOC_MIME
+        from job_finder.web.drive_uploader import _GDOC_MIME, upload_to_drive
 
         service = self._make_service(web_view_link="https://docs.google.com/d/test")
         buffer = io.BytesIO(b"fake docx content")

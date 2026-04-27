@@ -8,8 +8,8 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
-from job_finder.models import Job
 from job_finder.json_utils import safe_json_load, utc_now_iso
+from job_finder.models import Job
 
 _log = logging.getLogger(__name__)
 
@@ -185,9 +185,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         merged_location = ", ".join(dict.fromkeys(locs_list))
 
         # Smart description merge: keep longer; append different content
-        merged_description = merge_description(
-            existing["description"], job.description
-        )
+        merged_description = merge_description(existing["description"], job.description)
 
         # Eager promotion: if jd_full is NULL and merged description is
         # substantial, promote it so enrichment has a baseline to beat.
@@ -227,8 +225,11 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         # re-appearance as proof the job is live again (per CONTEXT.md decision)
         if existing["pipeline_status"] == "archived":
             update_pipeline_status(
-                conn, job.dedup_key, "discovered",
-                source="ingestion", evidence="re_appeared",
+                conn,
+                job.dedup_key,
+                "discovered",
+                source="ingestion",
+                evidence="re_appeared",
             )
         return False
     else:
@@ -272,9 +273,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         return True
 
 
-def log_run(
-    conn: sqlite3.Connection, source: str, fetched: int, new: int, scored: int
-) -> None:
+def log_run(conn: sqlite3.Connection, source: str, fetched: int, new: int, scored: int) -> None:
     """Log a pipeline run for auditing.
 
     Args:
@@ -326,23 +325,17 @@ def persist_job_assessment(
         model: Model identifier (e.g., "qwen2.5:14b"); None preserves existing.
     """
     cur = conn.cursor()
-    cur.execute(
-        "SELECT legitimacy_note FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    )
+    cur.execute("SELECT legitimacy_note FROM jobs WHERE dedup_key = ?", (dedup_key,))
     row = cur.fetchone()
     if row is None:
         # Silent no-op matches SQLite UPDATE-no-match semantics.
         return
     legitimacy_note = row[0]
-    final_classification = derive_classification(
-        assessment.sub_scores, legitimacy_note
-    )
+    final_classification = derive_classification(assessment.sub_scores, legitimacy_note)
 
     # Serialize sub_scores with stable key order for diff-friendliness.
     ordered_sub_scores = {
-        k: assessment.sub_scores[k]
-        for k in _SUB_SCORE_KEYS
-        if k in assessment.sub_scores
+        k: assessment.sub_scores[k] for k in _SUB_SCORE_KEYS if k in assessment.sub_scores
     }
 
     cur.execute(
@@ -524,9 +517,7 @@ _HIDDEN_STATUSES = ("archived", "withdrawn", "dismissed", "rejected")
 
 def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
     """Return distinct source names parsed from the JSON sources column."""
-    rows = conn.execute(
-        "SELECT DISTINCT sources FROM jobs WHERE sources != '[]'"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT sources FROM jobs WHERE sources != '[]'").fetchall()
     seen: set[str] = set()
     for row in rows:
         try:
@@ -645,29 +636,23 @@ def get_filtered_jobs(
     to classification IN-list shim via the mapping above.
     The explicit `classification=` kwarg is the preferred filter.
     """
-    allowed_sort_cols = (
-        {
-            "score",
-            "title",
-            "company",
-            "location",
-            "first_seen",
-            "salary_min",
-            "salary_max",
-            "pipeline_status",
-        }
-        | _CLASSIFICATION_SORT_KEYS
-    )
+    allowed_sort_cols = {
+        "score",
+        "title",
+        "company",
+        "location",
+        "first_seen",
+        "salary_min",
+        "salary_max",
+        "pipeline_status",
+    } | _CLASSIFICATION_SORT_KEYS
     if sort_by not in allowed_sort_cols:
         sort_by = "score"
     sort_dir = "DESC" if sort_dir.upper() != "ASC" else "ASC"
 
     # 'score' + 'classification*' collapse to the v3 classification-rank +
     # sub_score_sum composite ORDER BY (D-17 Commit A).
-    if (
-        sort_by == "score"
-        or sort_by in _CLASSIFICATION_SORT_KEYS
-    ):
+    if sort_by == "score" or sort_by in _CLASSIFICATION_SORT_KEYS:
         sort_expr = _classification_score_order(sort_dir)
     else:
         sort_expr = f"{sort_by} {sort_dir}"
@@ -706,6 +691,7 @@ def get_filtered_jobs(
 
     if freshness:
         from job_finder.utils.business_days import business_days_ago
+
         cutoff = None
         if freshness == "biz1":
             cutoff = business_days_ago(1).isoformat()
@@ -737,8 +723,7 @@ def get_filtered_jobs(
         mapped = _classifications_for_min_score(min_score)
         placeholders = ", ".join("?" * len(mapped))
         conditions.append(
-            f"(classification IN ({placeholders}) "
-            f"OR (classification IS NULL AND score >= ?))"
+            f"(classification IN ({placeholders}) OR (classification IS NULL AND score >= ?))"
         )
         params.extend(mapped)
         params.append(min_score)
@@ -746,8 +731,7 @@ def get_filtered_jobs(
         mapped = _classifications_for_max_score(max_score)
         placeholders = ", ".join("?" * len(mapped))
         conditions.append(
-            f"(classification IN ({placeholders}) "
-            f"OR (classification IS NULL AND score <= ?))"
+            f"(classification IN ({placeholders}) OR (classification IS NULL AND score <= ?))"
         )
         params.extend(mapped)
         params.append(max_score)
@@ -776,7 +760,12 @@ def get_filtered_jobs(
 # Re-exports for backward compatibility
 # ---------------------------------------------------------------------------
 
-from job_finder.db_queries import (  # noqa: E402
+from job_finder.db_pipeline import (  # noqa: F401
+    get_pending_detections,
+    get_pipeline_events,
+    resolve_detection,
+)
+from job_finder.db_queries import (  # noqa: F401
     get_dashboard_stats,
     get_distinct_locations,
     get_jobs_by_status,
@@ -784,9 +773,4 @@ from job_finder.db_queries import (  # noqa: E402
     get_recent_activity,
     get_recent_pipeline_events,
     get_recent_runs,
-)
-from job_finder.db_pipeline import (  # noqa: E402
-    get_pending_detections,
-    get_pipeline_events,
-    resolve_detection,
 )

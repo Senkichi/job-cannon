@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 from job_finder.db import persist_job_expiry_state, update_pipeline_status
 from job_finder.json_utils import safe_json_load, utc_now_iso
@@ -106,7 +105,7 @@ _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
 _SUPPORTED_PLATFORMS = frozenset({"lever", "ashby", "smartrecruiters", "greenhouse"})
 
 
-def _extract_posting_id(url: str, platform: str) -> Optional[str]:
+def _extract_posting_id(url: str, platform: str) -> str | None:
     """Extract a stable posting ID from an ATS job URL.
 
     Greenhouse has multiple URL shapes in the wild (canonical, job-boards
@@ -212,7 +211,9 @@ def reconcile_company(conn, company_row: dict) -> dict:
         logger.warning(
             "reconcile_company: workday '%s' returned %d postings (cap %d) — "
             "skipping to avoid false-expire on truncated board",
-            slug, len(postings), _WORKDAY_CAP,
+            slug,
+            len(postings),
+            _WORKDAY_CAP,
         )
         result["skipped"] = True
         result["skip_reason"] = "workday_truncated"
@@ -228,7 +229,9 @@ def reconcile_company(conn, company_row: dict) -> dict:
         logger.warning(
             "reconcile_company: %s/%s scan returned %d postings but 0 parseable IDs — "
             "skipping (scan URL format may have drifted)",
-            platform, slug, len(postings),
+            platform,
+            slug,
+            len(postings),
         )
         result["skipped"] = True
         result["skip_reason"] = "no_parseable_live_ids"
@@ -274,20 +277,28 @@ def reconcile_company(conn, company_row: dict) -> dict:
         else:
             persist_job_expiry_state(conn, dedup_key, EXPIRED, now)
             update_pipeline_status(
-                conn, dedup_key, "archived",
+                conn,
+                dedup_key,
+                "archived",
                 source="ats_reconciler",
                 evidence="ats_batch_reconcile missing_from_board",
             )
             result["expired"] += 1
             logger.info(
                 "reconcile_company: archived %s (missing from %s/%s board)",
-                dedup_key, platform, slug,
+                dedup_key,
+                platform,
+                slug,
             )
 
     logger.info(
         "reconcile_company: %s/%s checked=%d live=%d expired=%d unparseable=%d",
-        platform, slug,
-        result["checked"], result["live"], result["expired"], result["unparseable"],
+        platform,
+        slug,
+        result["checked"],
+        result["live"],
+        result["expired"],
+        result["unparseable"],
     )
     return result
 
@@ -331,7 +342,8 @@ def reconcile_all_companies(db_path: str, config: dict | None = None) -> dict:
             return summary
 
         logger.info(
-            "reconcile_all_companies: %d companies with ATS slugs", len(companies),
+            "reconcile_all_companies: %d companies with ATS slugs",
+            len(companies),
         )
 
         for company in companies:

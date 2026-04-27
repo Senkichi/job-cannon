@@ -8,8 +8,7 @@ Does NOT return description or job_highlights — enrichment pipeline fills thos
 
 import logging
 import re
-from typing import Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -83,7 +82,9 @@ class ThordataSource:
         raw_results = data.get("job_results", {}).get("jobs", [])
         logger.info(
             "Thordata '%s' @ '%s': %d raw results from API",
-            query, location, len(raw_results),
+            query,
+            location,
+            len(raw_results),
         )
 
         jobs = []
@@ -94,11 +95,14 @@ class ThordataSource:
 
         logger.info(
             "Thordata '%s' @ '%s': %d jobs after age filter (max_age_days=%d)",
-            query, location, len(jobs), self.max_age_days,
+            query,
+            location,
+            len(jobs),
+            self.max_age_days,
         )
         return jobs
 
-    def _parse_result(self, result: dict) -> Optional[Job]:
+    def _parse_result(self, result: dict) -> Job | None:
         """Parse a single Thordata Google Jobs result into a Job.
 
         Returns None if the job is missing required fields or is older than max_age_days.
@@ -114,7 +118,9 @@ class ThordataSource:
         if decision.action == "reject":
             logger.info(
                 "Thordata: skipping '%s' — company '%s' rejected (%s)",
-                title, company[:60], decision.reason,
+                title,
+                company[:60],
+                decision.reason,
             )
             return None
         # Keep the original company name — jobs.company is the raw source-of-truth.
@@ -126,7 +132,10 @@ class ThordataSource:
         if age_days is not None and age_days > self.max_age_days:
             logger.info(
                 "Skipping '%s' @ '%s' — posted %d days ago (max %d)",
-                title, company, age_days, self.max_age_days,
+                title,
+                company,
+                age_days,
+                self.max_age_days,
             )
             return None
 
@@ -146,7 +155,7 @@ class ThordataSource:
             description=None,  # enrichment pipeline fills this
         )
 
-    def _parse_posting_age(self, extensions: list[str]) -> Optional[int]:
+    def _parse_posting_age(self, extensions: list[str]) -> int | None:
         """Scan extensions for a posting age string and return days as int.
 
         Returns None if no age string is found (job is treated as includeable).
@@ -201,7 +210,7 @@ class ThordataSource:
 
     def _extract_salary_from_extensions(
         self, extensions: list[str]
-    ) -> tuple[Optional[int], Optional[int]]:
+    ) -> tuple[int | None, int | None]:
         """Scan extensions for a salary range string and return (min, max) in USD.
 
         Handles formats like:

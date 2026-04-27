@@ -1,7 +1,6 @@
 """Tests for company_enricher.py module."""
-from unittest.mock import patch
 
-import pytest
+from unittest.mock import patch
 
 from job_finder.web.company_enricher import enrich_company_info
 

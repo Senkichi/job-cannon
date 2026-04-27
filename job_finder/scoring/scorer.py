@@ -3,8 +3,7 @@
 Scores each job 0-100 based on weighted match criteria against the user's profile.
 """
 
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from thefuzz import fuzz
 
@@ -23,7 +22,9 @@ class JobScorer:
         """
         self.profile = config.get("profile", {})
         self.weights = config.get("scoring", {}).get("weights", {})
-        self.threshold = config.get("scoring", {}).get("min_score_threshold", DEFAULT_MIN_SCORE_THRESHOLD)
+        self.threshold = config.get("scoring", {}).get(
+            "min_score_threshold", DEFAULT_MIN_SCORE_THRESHOLD
+        )
 
         # Pre-compute lowercased exclusion sets for O(1) lookup on every scored job
         exclusions = self.profile.get("exclusions", {})
@@ -57,10 +58,7 @@ class JobScorer:
         breakdown["recency"] = self._score_recency(job.posted_date)
 
         # Weighted sum
-        total = sum(
-            breakdown[factor] * self.weights.get(factor, 0)
-            for factor in breakdown
-        )
+        total = sum(breakdown[factor] * self.weights.get(factor, 0) for factor in breakdown)
 
         return round(total, 1), breakdown
 
@@ -126,14 +124,10 @@ class JobScorer:
             return 90
 
         # Check fuzzy match against targets
-        best = max(
-            fuzz.partial_ratio(location_lower, t.lower()) for t in target_locations
-        )
+        best = max(fuzz.partial_ratio(location_lower, t.lower()) for t in target_locations)
         return best
 
-    def _score_salary(
-        self, salary_min: Optional[int], salary_max: Optional[int]
-    ) -> float:
+    def _score_salary(self, salary_min: int | None, salary_max: int | None) -> float:
         """Score based on salary range overlap with target."""
         target_min = self.profile.get("min_salary", 0)
 
@@ -182,16 +176,15 @@ class JobScorer:
         # Could expand with a company database, Glassdoor ratings, etc.
         return 50  # neutral default
 
-    def _score_recency(self, posted_date: Optional[datetime]) -> float:
+    def _score_recency(self, posted_date: datetime | None) -> float:
         """Score higher for more recent postings."""
         if not posted_date:
             return 50
 
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # Make posted_date aware if it isn't
         if posted_date.tzinfo is None:
-            posted_date = posted_date.replace(tzinfo=timezone.utc)
+            posted_date = posted_date.replace(tzinfo=UTC)
 
         age = now - posted_date
         if age < timedelta(days=1):

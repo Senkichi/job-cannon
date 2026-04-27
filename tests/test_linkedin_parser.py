@@ -5,8 +5,8 @@ Covers:
 - Normal job alert parsing
 """
 
-import pytest
-from job_finder.parsers.linkedin_parser import parse_linkedin_alert, _is_meta_email
+from job_finder.parsers.linkedin_parser import _is_meta_email, parse_linkedin_alert
+
 
 class TestNotificationFilter:
     """LinkedIn notification emails are rejected before parsing (DQ-04)."""
@@ -44,49 +44,53 @@ class TestNotificationFilter:
     def test_new_digest_format_with_count_preamble_not_meta(self):
         """LinkedIn new AI-powered digest: count preamble + real job listings → not meta."""
         sep = "-" * 57
-        body = "\n".join([
-            "Your job alert for product data scientist in San Francisco",
-            "",
-            "30+ new jobs match your preferences.",
-            "Manage alerts: https://www.linkedin.com/comm/jobs/alerts",
-            "",
-            "Results from the new AI-powered job search",
-            "",
-            "Data Scientist, People Innovation",
-            "OpenAI",
-            "San Francisco, CA",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/4382507866/",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Your job alert for product data scientist in San Francisco",
+                "",
+                "30+ new jobs match your preferences.",
+                "Manage alerts: https://www.linkedin.com/comm/jobs/alerts",
+                "",
+                "Results from the new AI-powered job search",
+                "",
+                "Data Scientist, People Innovation",
+                "OpenAI",
+                "San Francisco, CA",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/4382507866/",
+                sep,
+            ]
+        )
         assert _is_meta_email(body) is False
 
     def test_new_digest_format_parses_jobs(self):
         """The full new digest format should yield job objects, not be skipped."""
         sep = "-" * 57
-        body = "\n".join([
-            "Your job alert for product data scientist in San Francisco",
-            "",
-            "30+ new jobs match your preferences.",
-            "Manage alerts: https://www.linkedin.com/comm/jobs/alerts",
-            "",
-            "Results from the new AI-powered job search",
-            "",
-            "Data Scientist, People Innovation",
-            "OpenAI",
-            "San Francisco, CA",
-            "",
-            "This company is actively hiring",
-            "View job: https://www.linkedin.com/comm/jobs/view/4382507866/tracking",
-            sep,
-            "",
-            "Senior Data Scientist",
-            "Netflix",
-            "United States",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/4382524355/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Your job alert for product data scientist in San Francisco",
+                "",
+                "30+ new jobs match your preferences.",
+                "Manage alerts: https://www.linkedin.com/comm/jobs/alerts",
+                "",
+                "Results from the new AI-powered job search",
+                "",
+                "Data Scientist, People Innovation",
+                "OpenAI",
+                "San Francisco, CA",
+                "",
+                "This company is actively hiring",
+                "View job: https://www.linkedin.com/comm/jobs/view/4382507866/tracking",
+                sep,
+                "",
+                "Senior Data Scientist",
+                "Netflix",
+                "United States",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/4382524355/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 2
         assert result[0].title == "Data Scientist, People Innovation"
@@ -100,16 +104,18 @@ class TestFooterContaminationFilter:
     def test_see_all_jobs_header_filtered(self):
         """'See all jobs' navigation link above a job listing should be stripped."""
         sep = "-" * 40
-        body = "\n".join([
-            "See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search-results/?keywords=analytics",
-            "",
-            "Senior Data Scientist",
-            "Netflix",
-            "United States",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/4382524355/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "See all jobs on LinkedIn: https://www.linkedin.com/comm/jobs/search-results/?keywords=analytics",
+                "",
+                "Senior Data Scientist",
+                "Netflix",
+                "United States",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/4382524355/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist"
@@ -118,16 +124,18 @@ class TestFooterContaminationFilter:
     def test_view_all_jobs_header_filtered(self):
         """'View all jobs' navigation link above a job listing should be stripped."""
         sep = "-" * 40
-        body = "\n".join([
-            "View all jobs: https://www.linkedin.com/jobs/search-results/?keywords=data+scientist",
-            "",
-            "Staff Data Scientist",
-            "Acme Corp",
-            "San Francisco, CA",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/111222333/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "View all jobs: https://www.linkedin.com/jobs/search-results/?keywords=data+scientist",
+                "",
+                "Staff Data Scientist",
+                "Acme Corp",
+                "San Francisco, CA",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/111222333/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Staff Data Scientist"
@@ -135,16 +143,18 @@ class TestFooterContaminationFilter:
     def test_url_only_line_filtered(self):
         """A bare URL line at the top of a block should be stripped."""
         sep = "-" * 40
-        body = "\n".join([
-            "https://www.linkedin.com/comm/jobs/some-stray-link",
-            "",
-            "Data Analyst",
-            "Stripe",
-            "Remote",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/999888777/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "https://www.linkedin.com/comm/jobs/some-stray-link",
+                "",
+                "Data Analyst",
+                "Stripe",
+                "Remote",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/999888777/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Data Analyst"
@@ -152,14 +162,16 @@ class TestFooterContaminationFilter:
     def test_url_in_title_after_filter_returns_none(self):
         """A title that still contains a URL after filtering is rejected entirely."""
         sep = "-" * 40
-        body = "\n".join([
-            "Check this out: https://example.com/some-embedded-url in the title",
-            "Some Company",
-            "Remote",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/123456789/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Check this out: https://example.com/some-embedded-url in the title",
+                "Some Company",
+                "Remote",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/123456789/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert result == []
 
@@ -175,28 +187,30 @@ class TestHTMLInPlainText:
     def test_strong_tag_section_header_stripped(self):
         """<strong>…</strong> section header above a job block must not become the title."""
         sep = "-" * 57
-        body = "\n".join([
-            "Your job alert for senior data scientist",
-            "",
-            "30+ new jobs match your preferences.",
-            "",
-            "Senior Data Scientist, Analytics",
-            "Discord",
-            "San Francisco Bay Area",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/4388983970/tracking",
-            sep,
-            "",
-            "New jobs from your other alerts",
-            "",
-            '<strong class="font-bold" style="font-weight: 600;">product data scientist</strong>',
-            "",
-            "Data Scientist, Customer Analytics",
-            "Cresta",
-            "United States",
-            "View job: https://www.linkedin.com/comm/jobs/view/4364044356/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Your job alert for senior data scientist",
+                "",
+                "30+ new jobs match your preferences.",
+                "",
+                "Senior Data Scientist, Analytics",
+                "Discord",
+                "San Francisco Bay Area",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/4388983970/tracking",
+                sep,
+                "",
+                "New jobs from your other alerts",
+                "",
+                '<strong class="font-bold" style="font-weight: 600;">product data scientist</strong>',
+                "",
+                "Data Scientist, Customer Analytics",
+                "Cresta",
+                "United States",
+                "View job: https://www.linkedin.com/comm/jobs/view/4364044356/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 2
         assert result[0].title == "Senior Data Scientist, Analytics"
@@ -208,19 +222,21 @@ class TestHTMLInPlainText:
     def test_strong_tag_with_query_description(self):
         """<strong> header containing search query text is filtered."""
         sep = "-" * 57
-        body = "\n".join([
-            '<strong class="font-bold" style="font-weight: 600;">'
-            "senior data scientist posted in the last week"
-            "</strong>",
-            "",
-            "Data Scientist, Platform and B2B Products",
-            "OpenAI",
-            "San Francisco, CA",
-            "",
-            "This company is actively hiring",
-            "View job: https://www.linkedin.com/comm/jobs/view/4306142538/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                '<strong class="font-bold" style="font-weight: 600;">'
+                "senior data scientist posted in the last week"
+                "</strong>",
+                "",
+                "Data Scientist, Platform and B2B Products",
+                "OpenAI",
+                "San Francisco, CA",
+                "",
+                "This company is actively hiring",
+                "View job: https://www.linkedin.com/comm/jobs/view/4306142538/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Data Scientist, Platform and B2B Products"
@@ -230,17 +246,19 @@ class TestHTMLInPlainText:
     def test_strong_tag_jobs_in_area(self):
         """<strong>Data Scientist</strong> jobs in Bay Area is filtered."""
         sep = "-" * 57
-        body = "\n".join([
-            '<strong class="font-bold" style="font-weight: 600;">'
-            "Data Scientist</strong> jobs in San Francisco Bay Area",
-            "",
-            "Senior Data Scientist",
-            "Abridge",
-            "San Francisco",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/1234567/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                '<strong class="font-bold" style="font-weight: 600;">'
+                "Data Scientist</strong> jobs in San Francisco Bay Area",
+                "",
+                "Senior Data Scientist",
+                "Abridge",
+                "San Francisco",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/1234567/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist"
@@ -250,11 +268,13 @@ class TestHTMLInPlainText:
         """A block where the only real content is HTML produces no valid job
         with a recognizable title — HTML line is filtered, leaving insufficient data."""
         sep = "-" * 40
-        body = "\n".join([
-            '<div style="color: red;">Garbage Title</div>',
-            "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                '<div style="color: red;">Garbage Title</div>',
+                "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert result == []
 
@@ -263,14 +283,16 @@ class TestHTMLInPlainText:
         # Simulate a novel HTML pattern that doesn't match existing filters
         # but does contain < and > and style=
         sep = "-" * 40
-        body = "\n".join([
-            '<span style="font-size:12px">Novel HTML Pattern</span>',
-            "Some Company",
-            "Remote",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                '<span style="font-size:12px">Novel HTML Pattern</span>',
+                "Some Company",
+                "Remote",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         # The <span> line is filtered by the generic HTML check, leaving
         # only "Some Company" and "Remote" — not a real job block
@@ -289,20 +311,22 @@ class TestFacetSuggestionsSectionHeaders:
 
     def test_medical_jobs_section_header_stripped(self):
         sep = "-" * 57
-        body = "\n".join([
-            "Expand your search",
-            "",
-            "Recommendations based on your activity.",
-            "",
-            "Medical jobs",
-            "https://www.linkedin.com/jobs/search?q=medical",
-            "",
-            "Senior Data Scientist, Search Health",
-            "Google",
-            "Mountain View",
-            "View job: https://www.linkedin.com/comm/jobs/view/4388984872/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Expand your search",
+                "",
+                "Recommendations based on your activity.",
+                "",
+                "Medical jobs",
+                "https://www.linkedin.com/jobs/search?q=medical",
+                "",
+                "Senior Data Scientist, Search Health",
+                "Google",
+                "Mountain View",
+                "View job: https://www.linkedin.com/comm/jobs/view/4388984872/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist, Search Health"
@@ -311,16 +335,18 @@ class TestFacetSuggestionsSectionHeaders:
 
     def test_ai_ml_jobs_section_header_stripped(self):
         sep = "-" * 57
-        body = "\n".join([
-            "AI/ML jobs",
-            "https://www.linkedin.com/jobs/search?q=ai",
-            "",
-            "Senior AI Scientist",
-            "Intuit",
-            "Mountain View, CA",
-            "View job: https://www.linkedin.com/comm/jobs/view/4401738126/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "AI/ML jobs",
+                "https://www.linkedin.com/jobs/search?q=ai",
+                "",
+                "Senior AI Scientist",
+                "Intuit",
+                "Mountain View, CA",
+                "View job: https://www.linkedin.com/comm/jobs/view/4401738126/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior AI Scientist"
@@ -328,16 +354,18 @@ class TestFacetSuggestionsSectionHeaders:
 
     def test_remote_jobs_section_header_stripped(self):
         sep = "-" * 57
-        body = "\n".join([
-            "Remote jobs",
-            "https://www.linkedin.com/jobs/search?q=remote",
-            "",
-            "Senior Data Scientist II",
-            "Alma",
-            "United States",
-            "View job: https://www.linkedin.com/comm/jobs/view/4389267750/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Remote jobs",
+                "https://www.linkedin.com/jobs/search?q=remote",
+                "",
+                "Senior Data Scientist II",
+                "Alma",
+                "United States",
+                "View job: https://www.linkedin.com/comm/jobs/view/4389267750/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist II"
@@ -345,16 +373,18 @@ class TestFacetSuggestionsSectionHeaders:
 
     def test_medical_devices_jobs_header_stripped(self):
         sep = "-" * 57
-        body = "\n".join([
-            "Medical Devices jobs",
-            "https://www.linkedin.com/jobs/search?q=medical+devices",
-            "",
-            "Senior Data Scientist",
-            "Medtronic",
-            "San Jose, CA",
-            "View job: https://www.linkedin.com/comm/jobs/view/9999999/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Medical Devices jobs",
+                "https://www.linkedin.com/jobs/search?q=medical+devices",
+                "",
+                "Senior Data Scientist",
+                "Medtronic",
+                "San Jose, CA",
+                "View job: https://www.linkedin.com/comm/jobs/view/9999999/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist"
@@ -363,16 +393,18 @@ class TestFacetSuggestionsSectionHeaders:
     def test_clinical_jobs_header_stripped(self):
         """Generic '<topic> jobs' pattern catches arbitrary categories."""
         sep = "-" * 57
-        body = "\n".join([
-            "Clinical jobs",
-            "https://www.linkedin.com/jobs/search?q=clinical",
-            "",
-            "Research Scientist",
-            "Latent",
-            "San Francisco",
-            "View job: https://www.linkedin.com/comm/jobs/view/4399584320/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Clinical jobs",
+                "https://www.linkedin.com/jobs/search?q=clinical",
+                "",
+                "Research Scientist",
+                "Latent",
+                "San Francisco",
+                "View job: https://www.linkedin.com/comm/jobs/view/4399584320/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Research Scientist"
@@ -381,56 +413,58 @@ class TestFacetSuggestionsSectionHeaders:
     def test_full_facet_email_multi_section(self):
         """Full jobs-noreply email with multiple sections parses all jobs correctly."""
         sep = "-" * 57
-        body = "\n".join([
-            "Expand your search",
-            "",
-            "Recommendations based on your activity.",
-            "",
-            "Remote jobs",
-            "https://www.linkedin.com/jobs/search?q=remote",
-            "",
-            "Senior Data Scientist II",
-            "Alma",
-            "United States",
-            "View job: https://www.linkedin.com/comm/jobs/view/4389267750/tracking",
-            sep,
-            "",
-            "Senior Data Scientist, Consumer",
-            "Reddit, Inc.",
-            "United States",
-            "View job: https://www.linkedin.com/comm/jobs/view/4307901770/tracking",
-            sep,
-            "",
-            "View all jobs: https://www.linkedin.com/jobs/search?q=remote",
-            "",
-            "Medical jobs",
-            "https://www.linkedin.com/jobs/search?q=medical",
-            "",
-            "Senior Data Scientist, Search Health",
-            "Google",
-            "Mountain View",
-            "View job: https://www.linkedin.com/comm/jobs/view/4388984872/tracking",
-            sep,
-            "",
-            "Research Scientist",
-            "Latent",
-            "San Francisco",
-            "View job: https://www.linkedin.com/comm/jobs/view/4399584320/tracking",
-            sep,
-            "",
-            "View all jobs: https://www.linkedin.com/jobs/search?q=medical",
-            "",
-            "AI/ML jobs",
-            "https://www.linkedin.com/jobs/search?q=ai",
-            "",
-            "Senior AI Scientist",
-            "Intuit",
-            "94041",
-            "View job: https://www.linkedin.com/comm/jobs/view/4401738126/tracking",
-            sep,
-            "",
-            "This email was intended for Samuel Martin",
-        ])
+        body = "\n".join(
+            [
+                "Expand your search",
+                "",
+                "Recommendations based on your activity.",
+                "",
+                "Remote jobs",
+                "https://www.linkedin.com/jobs/search?q=remote",
+                "",
+                "Senior Data Scientist II",
+                "Alma",
+                "United States",
+                "View job: https://www.linkedin.com/comm/jobs/view/4389267750/tracking",
+                sep,
+                "",
+                "Senior Data Scientist, Consumer",
+                "Reddit, Inc.",
+                "United States",
+                "View job: https://www.linkedin.com/comm/jobs/view/4307901770/tracking",
+                sep,
+                "",
+                "View all jobs: https://www.linkedin.com/jobs/search?q=remote",
+                "",
+                "Medical jobs",
+                "https://www.linkedin.com/jobs/search?q=medical",
+                "",
+                "Senior Data Scientist, Search Health",
+                "Google",
+                "Mountain View",
+                "View job: https://www.linkedin.com/comm/jobs/view/4388984872/tracking",
+                sep,
+                "",
+                "Research Scientist",
+                "Latent",
+                "San Francisco",
+                "View job: https://www.linkedin.com/comm/jobs/view/4399584320/tracking",
+                sep,
+                "",
+                "View all jobs: https://www.linkedin.com/jobs/search?q=medical",
+                "",
+                "AI/ML jobs",
+                "https://www.linkedin.com/jobs/search?q=ai",
+                "",
+                "Senior AI Scientist",
+                "Intuit",
+                "94041",
+                "View job: https://www.linkedin.com/comm/jobs/view/4401738126/tracking",
+                sep,
+                "",
+                "This email was intended for Samuel Martin",
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 5
         titles = [j.title for j in result]
@@ -459,16 +493,18 @@ class TestJobsSimilarFilter:
 
     def test_jobs_similar_line_filtered(self):
         sep = "-" * 57
-        body = "\n".join([
-            "Jobs similar to Staff Data Scientist at Toast "
-            "https://www.linkedin.com/comm/jobs/view/4337163287",
-            "",
-            "Senior Manager, Advanced Analytics",
-            "Airbnb",
-            "San Francisco",
-            "View job: https://www.linkedin.com/comm/jobs/view/4399999999/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Jobs similar to Staff Data Scientist at Toast "
+                "https://www.linkedin.com/comm/jobs/view/4337163287",
+                "",
+                "Senior Manager, Advanced Analytics",
+                "Airbnb",
+                "San Francisco",
+                "View job: https://www.linkedin.com/comm/jobs/view/4399999999/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Manager, Advanced Analytics"
@@ -477,15 +513,17 @@ class TestJobsSimilarFilter:
     def test_jobs_similar_line_stripped_from_block(self):
         """'Jobs similar' line is stripped; remaining lines form a valid job."""
         sep = "-" * 40
-        body = "\n".join([
-            "Jobs similar to Lead Analyst at Scale AI",
-            "Data Analyst",
-            "Stripe",
-            "San Francisco",
-            "",
-            "View job: https://www.linkedin.com/comm/jobs/view/111/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Jobs similar to Lead Analyst at Scale AI",
+                "Data Analyst",
+                "Stripe",
+                "San Francisco",
+                "",
+                "View job: https://www.linkedin.com/comm/jobs/view/111/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Data Analyst"
@@ -497,19 +535,21 @@ class TestFooterNoiseFilter:
 
     def test_try_premium_upsell_filtered(self):
         sep = "-" * 57
-        body = "\n".join([
-            "Jobs where you'd be a top applicant",
-            "Based on your profile, the job criteria, and recruiter feedback",
-            "Unlock personalized recommendations and message recruiters directly.",
-            "Try Premium for $0",
-            "http://www.linkedin.com/premium/products/",
-            "",
-            "Senior Data Scientist",
-            "Netflix",
-            "Los Gatos, CA",
-            "View job: https://www.linkedin.com/comm/jobs/view/555/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Jobs where you'd be a top applicant",
+                "Based on your profile, the job criteria, and recruiter feedback",
+                "Unlock personalized recommendations and message recruiters directly.",
+                "Try Premium for $0",
+                "http://www.linkedin.com/premium/products/",
+                "",
+                "Senior Data Scientist",
+                "Netflix",
+                "Los Gatos, CA",
+                "View job: https://www.linkedin.com/comm/jobs/view/555/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Senior Data Scientist"
@@ -517,15 +557,17 @@ class TestFooterNoiseFilter:
 
     def test_edit_alert_filtered(self):
         sep = "-" * 40
-        body = "\n".join([
-            "Edit alert https://www.linkedin.com/jobs/jam/manage/12345",
-            "",
-            "Data Analyst",
-            "Stripe",
-            "San Francisco",
-            "View job: https://www.linkedin.com/comm/jobs/view/777/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Edit alert https://www.linkedin.com/jobs/jam/manage/12345",
+                "",
+                "Data Analyst",
+                "Stripe",
+                "San Francisco",
+                "View job: https://www.linkedin.com/comm/jobs/view/777/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Data Analyst"
@@ -533,15 +575,17 @@ class TestFooterNoiseFilter:
     def test_connection_count_filtered(self):
         """'1 connection' metadata line must not become part of job fields."""
         sep = "-" * 40
-        body = "\n".join([
-            "Staff Engineer",
-            "Acme Corp",
-            "San Francisco",
-            "",
-            "1 connection",
-            "View job: https://www.linkedin.com/comm/jobs/view/888/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "Staff Engineer",
+                "Acme Corp",
+                "San Francisco",
+                "",
+                "1 connection",
+                "View job: https://www.linkedin.com/comm/jobs/view/888/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "Staff Engineer"
@@ -551,15 +595,17 @@ class TestFooterNoiseFilter:
     def test_apply_with_resume_filtered(self):
         """'Apply with resume & profile' metadata must not affect parsing."""
         sep = "-" * 40
-        body = "\n".join([
-            "ML Engineer",
-            "DeepMind",
-            "London, UK",
-            "",
-            "Apply with resume & profile",
-            "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
-            sep,
-        ])
+        body = "\n".join(
+            [
+                "ML Engineer",
+                "DeepMind",
+                "London, UK",
+                "",
+                "Apply with resume & profile",
+                "View job: https://www.linkedin.com/comm/jobs/view/999/tracking",
+                sep,
+            ]
+        )
         result = parse_linkedin_alert(body)
         assert len(result) == 1
         assert result[0].title == "ML Engineer"

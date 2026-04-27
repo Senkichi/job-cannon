@@ -3,7 +3,7 @@
 import logging
 import sqlite3
 import time  # noqa: F401 — available for callers that may need it
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -38,6 +38,7 @@ _PERMANENT_MISS_CODES: frozenset[int] = frozenset({404, 410})
 # Retry state machine helpers (DEBT-01 / Phase 14)
 # ---------------------------------------------------------------------------
 
+
 def _compute_retry_after(retry_count: int) -> str:
     """Compute UTC ISO timestamp for next retry based on current retry_count.
 
@@ -55,10 +56,11 @@ def _compute_retry_after(retry_count: int) -> str:
     """
     index = min(retry_count, len(_BACKOFF_HOURS) - 1)
     hours = _BACKOFF_HOURS[index]
-    dt = datetime.now(timezone.utc) + timedelta(hours=hours)
+    dt = datetime.now(UTC) + timedelta(hours=hours)
     # Return in SQLite-compatible UTC format (no timezone offset suffix) for
     # correct comparison with datetime('now') in SQL WHERE clauses
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
 
 def _is_transient_error(exc_or_status) -> bool:
     """Return True if the given exception or status code indicates a transient error.
@@ -72,10 +74,14 @@ def _is_transient_error(exc_or_status) -> bool:
     if isinstance(exc_or_status, int):
         return exc_or_status in _TRANSIENT_CODES
     # Check for requests exception types indicating transient network issues
-    return isinstance(exc_or_status, (
-        requests.exceptions.Timeout,
-        requests.exceptions.ConnectionError,
-    ))
+    return isinstance(
+        exc_or_status,
+        (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ),
+    )
+
 
 def _handle_scan_error(
     conn: sqlite3.Connection,
@@ -97,9 +103,7 @@ def _handle_scan_error(
         error_detail: Description of the error.
         now: Current UTC ISO timestamp string.
     """
-    row = conn.execute(
-        "SELECT retry_count FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    row = conn.execute("SELECT retry_count FROM companies WHERE id = ?", (company_id,)).fetchone()
     if row is None:
         logger.warning("_handle_scan_error: company %d not found", company_id)
         return
@@ -121,7 +125,8 @@ def _handle_scan_error(
         conn.commit()
         logger.info(
             "_handle_scan_error: %s promoted to unreachable after %d failures",
-            company_name, new_retry_count,
+            company_name,
+            new_retry_count,
         )
     else:
         # Transient error — increment retry_count, set backoff retry_after
@@ -139,8 +144,13 @@ def _handle_scan_error(
         conn.commit()
         logger.info(
             "_handle_scan_error: %s set to error (retry %d/%d), retry_after=%s. Error: %s",
-            company_name, new_retry_count, _MAX_RETRIES, retry_after, error_detail,
+            company_name,
+            new_retry_count,
+            _MAX_RETRIES,
+            retry_after,
+            error_detail,
         )
+
 
 def _reset_retry_state(
     conn: sqlite3.Connection,
@@ -168,6 +178,7 @@ def _reset_retry_state(
     )
     conn.commit()
 
+
 def probe_single_company(
     company_id: int,
     conn: sqlite3.Connection,
@@ -190,11 +201,9 @@ def probe_single_company(
         Dict with at minimum a "status" key: "hit", "error", or "miss".
         "hit" also includes "jobs_found". "error" includes "detail".
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
-    company = conn.execute(
-        "SELECT * FROM companies WHERE id = ?", (company_id,)
-    ).fetchone()
+    company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
     if company is None:
         return {"status": "miss", "detail": "company not found"}
 
@@ -252,7 +261,9 @@ def probe_single_company(
                     data = resp.json()
                     jobs_count = len(data) if isinstance(data, list) else 0
                 except Exception:
-                    logger.debug("probe jobs_count parse failed for %s", company_name, exc_info=True)
+                    logger.debug(
+                        "probe jobs_count parse failed for %s", company_name, exc_info=True
+                    )
                     jobs_count = 0
                 logger.info("probe_single_company: %s -> hit (%d jobs)", company_name, jobs_count)
                 return {"status": "hit", "jobs_found": jobs_count}
@@ -334,6 +345,7 @@ def probe_single_company(
         conn.commit()
         return {"status": "miss"}
 
+
 def _probe_lever_with_result(slug: str) -> bool:
     """Return True if Lever slug has at least one active posting. Let transient exceptions propagate."""
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
@@ -342,6 +354,7 @@ def _probe_lever_with_result(slug: str) -> bool:
         data = r.json()
         return isinstance(data, list) and len(data) > 0
     return False
+
 
 def _probe_lever(slug: str) -> bool:
     """Return True if slug has at least one active Lever posting.
@@ -368,6 +381,7 @@ def _probe_lever(slug: str) -> bool:
         logger.debug("_probe_lever('%s') failed: %s", slug, e)
         return False
 
+
 def _probe_greenhouse(slug: str) -> bool:
     """Return True if slug is a valid Greenhouse board token.
 
@@ -386,6 +400,7 @@ def _probe_greenhouse(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_greenhouse('%s') failed: %s", slug, e)
         return False
+
 
 def _probe_workday(slug: str) -> bool:
     """Return True if Workday slug has active job postings.

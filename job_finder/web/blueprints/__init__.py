@@ -2,7 +2,11 @@
 
 import threading
 
-from job_finder.constants import PIPELINE_STATUSES, VALID_PIPELINE_STATUSES  # noqa: F401 — re-exported
+from job_finder.constants import (  # noqa: F401 — re-exported
+    PIPELINE_STATUSES,
+    VALID_PIPELINE_STATUSES,
+)
+
 
 def trigger_interview_prep_if_applied(
     dedup_key: str,
@@ -19,6 +23,7 @@ def trigger_interview_prep_if_applied(
     if new_status != "applied" or testing:
         return
     from job_finder.web.interview_prep import generate_interview_prep_background
+
     t = threading.Thread(
         target=generate_interview_prep_background,
         args=(dedup_key, db_path, config),

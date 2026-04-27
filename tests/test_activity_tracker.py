@@ -20,18 +20,21 @@ import pytest
 # Unit tests for log_activity()
 # ---------------------------------------------------------------------------
 
+
 class TestLogActivity:
     """Core log_activity() behavior tests."""
 
     def test_inserts_row(self, migrated_db):
         """log_activity inserts exactly 1 row with correct fields."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, conn = migrated_db
 
         log_activity(db_path, ACTION_SYNC, metadata={"status": "success"})
 
-        rows = conn.execute("SELECT * FROM user_activity WHERE action = ?", (ACTION_SYNC,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM user_activity WHERE action = ?", (ACTION_SYNC,)
+        ).fetchall()
         assert len(rows) == 1
         row = rows[0]
         assert row["action"] == "sync"
@@ -43,7 +46,7 @@ class TestLogActivity:
 
     def test_inserts_with_entity_id(self, migrated_db):
         """log_activity stores entity_id correctly."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_RESCORE
+        from job_finder.web.activity_tracker import ACTION_RESCORE, log_activity
 
         db_path, conn = migrated_db
         entity = "company|title|loc"
@@ -59,7 +62,7 @@ class TestLogActivity:
 
     def test_metadata_serialized_as_json(self, migrated_db):
         """metadata dict is stored as valid JSON TEXT that round-trips correctly."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, conn = migrated_db
         original_meta = {"foo": "bar", "count": 42, "nested": {"a": 1}}
@@ -71,7 +74,7 @@ class TestLogActivity:
 
     def test_empty_metadata_defaults_to_empty_dict(self, migrated_db):
         """log_activity with no metadata stores '{}' as metadata."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, conn = migrated_db
         log_activity(db_path, ACTION_SYNC)
@@ -81,7 +84,7 @@ class TestLogActivity:
 
     def test_none_metadata_defaults_to_empty_dict(self, migrated_db):
         """log_activity with metadata=None stores '{}' as metadata."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, conn = migrated_db
         log_activity(db_path, ACTION_SYNC, metadata=None)
@@ -96,7 +99,7 @@ class TestLogActivity:
         The caller's conn can be in any state — log_activity opens its own connection.
         After log_activity completes, a fresh connection can see the committed activity row.
         """
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, conn = migrated_db
 
@@ -117,27 +120,28 @@ class TestLogActivity:
 
     def test_failure_is_silent_bad_path(self):
         """log_activity with an invalid db_path does not raise any exception."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         # Should not raise — even on completely invalid path
         log_activity("/nonexistent/dir/bad.db", ACTION_SYNC, metadata={"status": "test"})
 
     def test_failure_on_missing_table(self, tmp_db_path):
         """log_activity on a DB without user_activity table does not raise."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         # tmp_db_path is a valid SQLite DB but has no tables
         log_activity(tmp_db_path, ACTION_SYNC)
 
     def test_no_app_context_required(self, migrated_db):
         """Calling log_activity outside any Flask app context works without RuntimeError."""
-        from job_finder.web.activity_tracker import log_activity, ACTION_SYNC
+        from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
 
         db_path, _ = migrated_db
 
         # No Flask app pushed — must not raise RuntimeError
         try:
             from flask import current_app
+
             _ = current_app._get_current_object()
             # If this succeeds, we're inside an app context — skip test
             pytest.skip("This test must run outside a Flask app context")
@@ -147,9 +151,11 @@ class TestLogActivity:
         # Must succeed without Flask context
         log_activity(db_path, ACTION_SYNC, metadata={"context": "none"})
 
+
 # ---------------------------------------------------------------------------
 # Tests for ACTION_* constants
 # ---------------------------------------------------------------------------
+
 
 class TestActionConstants:
     """ACTION_* constants exported with correct string values."""
@@ -157,25 +163,26 @@ class TestActionConstants:
     def test_constants_exported(self):
         """All ACTION_* constants are importable."""
         from job_finder.web.activity_tracker import (
-            ACTION_SYNC,
-            ACTION_SCHEDULED_SYNC,
-            ACTION_EXPAND_JOB,
-            ACTION_STATUS_CHANGE,
-            ACTION_PASTE_JD,
-            ACTION_RESCORE,
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
-            ACTION_GENERATE_RESUME,
-            ACTION_QUICK_APPLY,
-            ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_REJECTION_ANALYSIS,
-            ACTION_UPLOAD_RESUME_PDF,
             ACTION_CONFLICT_REVIEW,
-            ACTION_SAVE_CONFLICTS,
+            ACTION_EXPAND_JOB,
             ACTION_EXTRACT_STYLE,
-            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_GENERATE_RESUME,
+            ACTION_PASTE_JD,
+            ACTION_QUICK_APPLY,
+            ACTION_RESCORE,
+            ACTION_SAVE_CONFLICTS,
             ACTION_SAVE_JD,
+            ACTION_SCHEDULED_ATS_SCAN,
+            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_SCHEDULED_REJECTION_ANALYSIS,
+            ACTION_SCHEDULED_SYNC,
+            ACTION_STATUS_CHANGE,
+            ACTION_SYNC,
+            ACTION_UPLOAD_RESUME_PDF,
         )
+
         constants = [
             ACTION_SYNC,
             ACTION_SCHEDULED_SYNC,
@@ -202,25 +209,26 @@ class TestActionConstants:
     def test_constants_match_expected_names(self):
         """All ACTION_* constants have the expected string values."""
         from job_finder.web.activity_tracker import (
-            ACTION_SYNC,
-            ACTION_SCHEDULED_SYNC,
-            ACTION_EXPAND_JOB,
-            ACTION_STATUS_CHANGE,
-            ACTION_PASTE_JD,
-            ACTION_RESCORE,
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
-            ACTION_GENERATE_RESUME,
-            ACTION_QUICK_APPLY,
-            ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_REJECTION_ANALYSIS,
-            ACTION_UPLOAD_RESUME_PDF,
             ACTION_CONFLICT_REVIEW,
-            ACTION_SAVE_CONFLICTS,
+            ACTION_EXPAND_JOB,
             ACTION_EXTRACT_STYLE,
-            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_GENERATE_RESUME,
+            ACTION_PASTE_JD,
+            ACTION_QUICK_APPLY,
+            ACTION_RESCORE,
+            ACTION_SAVE_CONFLICTS,
             ACTION_SAVE_JD,
+            ACTION_SCHEDULED_ATS_SCAN,
+            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_SCHEDULED_REJECTION_ANALYSIS,
+            ACTION_SCHEDULED_SYNC,
+            ACTION_STATUS_CHANGE,
+            ACTION_SYNC,
+            ACTION_UPLOAD_RESUME_PDF,
         )
+
         assert ACTION_SYNC == "sync"
         assert ACTION_SCHEDULED_SYNC == "scheduled_sync"
         assert ACTION_EXPAND_JOB == "expand_job"
@@ -241,9 +249,11 @@ class TestActionConstants:
         assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
         assert ACTION_SAVE_JD == "save_jd"
 
+
 # ---------------------------------------------------------------------------
 # Integration tests for call site wiring
 # ---------------------------------------------------------------------------
+
 
 class TestCallSiteIntegration:
     """Integration tests verifying Flask routes create user_activity rows."""
@@ -251,7 +261,6 @@ class TestCallSiteIntegration:
     @pytest.fixture
     def app_with_db(self):
         """Create a Flask test app with its own migrated temp DB."""
-        import tempfile
         from job_finder.web import create_app
         from job_finder.web.db_migrate import run_migrations
 
@@ -259,12 +268,14 @@ class TestCallSiteIntegration:
         os.close(fd)
         run_migrations(db_path)
 
-        app = create_app(config={
-            "TESTING": True,
-            "db": {"path": db_path},
-            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
-            "polling": {"interval_minutes": 30},
-        })
+        app = create_app(
+            config={
+                "TESTING": True,
+                "db": {"path": db_path},
+                "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
+                "polling": {"interval_minutes": 30},
+            }
+        )
 
         # Insert a test job so routes have something to act on
         conn = sqlite3.connect(db_path)
@@ -293,6 +304,7 @@ class TestCallSiteIntegration:
         conn.close()
         # Best-effort cleanup — Windows may hold the file briefly due to bg threads
         import time as _time
+
         for _ in range(5):
             try:
                 if os.path.exists(db_path):

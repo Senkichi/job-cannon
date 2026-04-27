@@ -20,6 +20,7 @@ Gates:
     G4 production-path refit is enforced separately by
         tests/test_v3_production_path_refit.py — not run from this script.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,7 +28,6 @@ import json
 import statistics
 import sys
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Gate functions
@@ -66,7 +66,8 @@ def _quartile_for_score(score: float | int | None) -> str:
 
 
 def gate_g2_monotonicity(
-    report: dict, strict: bool,
+    report: dict,
+    strict: bool,
     min_bucket_n: int = 5,
     noise_tolerance_pct: float = 0.02,
 ) -> tuple[str, dict]:
@@ -177,7 +178,7 @@ def gate_g3_correlation(report: dict, batch_number: int) -> tuple[str, dict]:
     xs = [p[0] for p in pairs]
     ys = [p[1] for p in pairs]
     mx, my = statistics.mean(xs), statistics.mean(ys)
-    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=False))
     den_x = (sum((x - mx) ** 2 for x in xs)) ** 0.5
     den_y = (sum((y - my) ** 2 for y in ys)) ** 0.5
     r = num / (den_x * den_y) if den_x and den_y else 0.0
@@ -213,9 +214,7 @@ def evaluate_report(report: dict) -> tuple[int, dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="v3.0 rescore gate validator (Phase 34 Plan 4)"
-    )
+    parser = argparse.ArgumentParser(description="v3.0 rescore gate validator (Phase 34 Plan 4)")
     parser.add_argument("--batch-report", required=True)
     args = parser.parse_args(argv)
 
@@ -234,7 +233,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Validating rescore batch {report.get('batch_number')} (n={n})")
     for name in ("g1", "g2", "g3"):
         g = gates[name]
-        print(f"  {name.upper()}: {g['verdict'].upper()}  {json.dumps({k: v for k, v in g.items() if k != 'verdict'})}")
+        print(
+            f"  {name.upper()}: {g['verdict'].upper()}  {json.dumps({k: v for k, v in g.items() if k != 'verdict'})}"
+        )
 
     report["gates"] = gates
     path.write_text(json.dumps(report, indent=2))

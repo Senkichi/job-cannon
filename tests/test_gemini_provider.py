@@ -17,7 +17,7 @@ Tests cover:
 """
 
 import os
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,7 +26,6 @@ from google.genai import errors as genai_errors
 
 from job_finder.web.model_provider import BaseProvider, ModelResult
 from job_finder.web.providers.gemini_provider import GeminiProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -165,7 +164,9 @@ def test_call_without_schema_no_json_mode():
     call_kwargs = client.models.generate_content.call_args.kwargs
     config_obj = call_kwargs["config"]
     assert not hasattr(config_obj, "response_mime_type") or config_obj.response_mime_type is None
-    assert not hasattr(config_obj, "response_json_schema") or config_obj.response_json_schema is None
+    assert (
+        not hasattr(config_obj, "response_json_schema") or config_obj.response_json_schema is None
+    )
     assert result.data == {"text": "plain text response"}
 
 
@@ -218,14 +219,13 @@ def test_call_raises_after_double_429():
     client.models.generate_content.side_effect = [_make_429(), _make_429()]
     provider = GeminiProvider(config={}, client=client)
 
-    with patch("time.sleep"):
-        with pytest.raises(genai_errors.ClientError) as exc_info:
-            provider.call(
-                model="gemini-2.0-flash",
-                system="System",
-                messages=[{"role": "user", "content": "Hi"}],
-                output_schema={"type": "object"},
-            )
+    with patch("time.sleep"), pytest.raises(genai_errors.ClientError) as exc_info:
+        provider.call(
+            model="gemini-2.0-flash",
+            system="System",
+            messages=[{"role": "user", "content": "Hi"}],
+            output_schema={"type": "object"},
+        )
 
     assert exc_info.value.code == 429
     assert client.models.generate_content.call_count == 2

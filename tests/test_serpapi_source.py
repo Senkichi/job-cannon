@@ -7,8 +7,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from job_finder.sources.serpapi_source import SerpAPISource
 
 # ---------------------------------------------------------------------------
@@ -60,28 +58,35 @@ SAMPLE_SERPAPI_RESULT = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-_TEST_API_KEY = "test-key-does-not-matter"  # noqa: S105 -- test placeholder, not a real credential
+_TEST_API_KEY = "test-key-does-not-matter"
+
 
 def _make_source() -> SerpAPISource:
     return SerpAPISource(api_key=_TEST_API_KEY)
 
+
 def _result_with(**overrides) -> dict:
     """Return a copy of SAMPLE_SERPAPI_RESULT with the given keys overridden."""
     import copy
+
     result = copy.deepcopy(SAMPLE_SERPAPI_RESULT)
     result.update(overrides)
     return result
 
+
 def _result_with_salary(salary_str: str) -> dict:
     """Return result with a specific salary string in detected_extensions."""
     import copy
+
     result = copy.deepcopy(SAMPLE_SERPAPI_RESULT)
     result["detected_extensions"]["salary"] = salary_str
     return result
 
+
 # ---------------------------------------------------------------------------
 # Tests: TestSerpAPIFormatAudit
 # ---------------------------------------------------------------------------
+
 
 class TestSerpAPIFormatAudit:
     # AUDIT 2026-03-15: SerpAPI Google Jobs response fields verified against current API schema.
@@ -97,7 +102,10 @@ class TestSerpAPIFormatAudit:
         assert job.location == "San Francisco, CA"
         assert job.source == "serpapi"
         assert job.source_url == "https://www.linkedin.com/jobs/view/123456"
-        assert job.source_id == "eyJqb2JfdGl0bGUiOiJTZW5pb3IgRGF0YSBTY2llbnRpc3QiLCJjb21wYW55X25hbWUiOiJBY21lIENvcnAifQ=="
+        assert (
+            job.source_id
+            == "eyJqb2JfdGl0bGUiOiJTZW5pb3IgRGF0YSBTY2llbnRpc3QiLCJjb21wYW55X25hbWUiOiJBY21lIENvcnAifQ=="
+        )
 
     def test_parse_result_salary_k_dash_format(self):
         """Salary '$150K\u2013$200K a year' (en-dash) parses to 150000/200000."""
@@ -123,6 +131,7 @@ class TestSerpAPIFormatAudit:
         """Result with no salary key in detected_extensions yields None salary fields."""
         source = _make_source()
         import copy
+
         result = copy.deepcopy(SAMPLE_SERPAPI_RESULT)
         del result["detected_extensions"]["salary"]
         job = source._parse_result(result)
@@ -158,6 +167,7 @@ class TestSerpAPIFormatAudit:
         """No apply_options and no share_link falls back to job_id for source_url."""
         source = _make_source()
         import copy
+
         result = copy.deepcopy(SAMPLE_SERPAPI_RESULT)
         result["apply_options"] = []
         del result["share_link"]
@@ -371,7 +381,9 @@ class TestSerpAPIPagination:
             resp.raise_for_status.return_value = None
             if call_count < 2:
                 resp.json.return_value = {
-                    "jobs_results": [_result_with(job_id=f"job-{call_count}-{i}") for i in range(10)]
+                    "jobs_results": [
+                        _result_with(job_id=f"job-{call_count}-{i}") for i in range(10)
+                    ]
                 }
             else:
                 resp.json.return_value = {"jobs_results": []}

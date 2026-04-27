@@ -21,10 +21,9 @@ sqlite3 connection (not Flask g.db) for APScheduler/thread safety.
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
 
-from job_finder.config import DEFAULT_MODEL_SONNET, DEFAULT_MULTI_VERSION_THRESHOLD
+from job_finder.config import DEFAULT_MODEL_SONNET
 from job_finder.web.claude_client import call_claude, cost_gate
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.docx_formatter import build_resume_docx
@@ -83,11 +82,11 @@ RESUME_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 STRATEGY_POOL = [
-    "impact_focused",      # Lead with quantified business outcomes
-    "technical_depth",     # Emphasize technical architecture and system complexity
-    "leadership_scope",    # Emphasize team/org/stakeholder leadership and mentoring
-    "problem_solver",      # Frame as identifying problems and delivering solutions
-    "cross_functional",    # Highlight cross-team collaboration and influence
+    "impact_focused",  # Lead with quantified business outcomes
+    "technical_depth",  # Emphasize technical architecture and system complexity
+    "leadership_scope",  # Emphasize team/org/stakeholder leadership and mentoring
+    "problem_solver",  # Frame as identifying problems and delivering solutions
+    "cross_functional",  # Highlight cross-team collaboration and influence
 ]
 
 # Human-readable descriptions for each strategy (used in system prompt additions)
@@ -126,7 +125,6 @@ _STRATEGY_DESCRIPTIONS = {
 _RESUME_GUIDELINES = (
     "\n\n"
     "## RESUME WRITING GUIDELINES\n\n"
-
     "### SOURCE FIDELITY (highest priority rule)\n"
     "Never list a skill, tool, or technology the candidate has not actually used. "
     "Never fabricate achievements, companies, or experiences. "
@@ -134,20 +132,17 @@ _RESUME_GUIDELINES = (
     "uses Tableau, list Tableau. "
     "Gap mitigation: use the candidate's closest real analog, positioned to address "
     "the same underlying competency. Every bullet must trace back to profile data.\n\n"
-
     "### PROFESSIONAL SUMMARY\n"
     "3-4 sentences maximum. Formula: (1) Role archetype + years + context. "
     "(2) Strongest achievement with a number. "
     "(3) 2-3 JD capabilities + value prop for this role. "
     "Mirror the JD's title/archetype language in the opening. "
     "Never use the word 'seeking'. Keep to 3-4 rendered lines; cut if longer.\n\n"
-
     "### SKILLS SECTION\n"
     "Hard skills and methodologies ONLY. Never list soft skills "
     "(no 'Cross-Functional Collaboration', 'Stakeholder Communication', 'Team Leadership'). "
     "Soft skills belong in experience bullets, demonstrated through action. "
     "Front-load skills to JD priority order. 1-2 lines maximum, pipe-separated.\n\n"
-
     "### BULLET WRITING FORMULA\n"
     "Every bullet: Action Verb + What You Did + How/With What + Quantified Impact. "
     "Lead with strong verbs (Designed, Engineered, Architected, Directed, Built, Led). "
@@ -160,32 +155,27 @@ _RESUME_GUIDELINES = (
     "(b) methods-listing without business outcome; "
     "(c) two bullets both demonstrating the same dimension — vary them; "
     "(d) soft skill claims as standalone bullets.\n\n"
-
     "### BULLET COUNT BY SENIORITY\n"
     "Most recent/current role (Lead/Senior): 4-6 bullets. "
     "Previous role at same company: 2-3 bullets. "
     "Prior companies (mid-career): 1-2 bullets each. "
     "Early career: 1 bullet maximum.\n\n"
-
     "### CONFIDENTIALITY\n"
     "Never include specific client name in resume bullets. "
     "Use generic descriptors: 'a major enterprise client', 'a Fortune 500 financial services client'. "
     "Client names may exist in profile for context but must never surface in output. "
     "Omit specific team sizes unless the JD explicitly requires them.\n\n"
-
     "### TYPOGRAPHY\n"
     "No bold text within bullet point content (bold reserved for headers, company names, titles). "
     "No em dash anywhere in the document — restructure using commas or semicolons instead. "
     "Minimize parentheses; integrate details naturally. "
     "Do not define well-known acronyms (ITT, DiD, RCT, ROI, KPI, ETL).\n\n"
-
     "### JD MIRRORING\n"
     "Use the JD's exact terminology for tools and methodologies. "
     "Ensure each of the top 5-7 JD keywords appears at least once. "
     "Never lift full phrases verbatim from the JD. "
     "Use a JD phrase at most once; never repeat the same JD phrase across the resume. "
     "The reader should feel alignment, not pattern-matching.\n\n"
-
     "### PRE-DELIVERY CHECKS\n"
     "Before finalizing, verify: "
     "no fabricated skills or tools; "
@@ -205,13 +195,13 @@ _SYSTEM_PROMPT = (
     "CRITICAL CONSTRAINT: You must ONLY use information from the candidate's profile below. "
     "You may rephrase, reframe, and reorder content, but you must NEVER invent, infer, or add "
     "achievements, skills, companies, or experiences not present in the profile. "
-    "Every bullet point must trace back to the profile data."
-    + _RESUME_GUIDELINES
+    "Every bullet point must trace back to the profile data." + _RESUME_GUIDELINES
 )
 
 # ---------------------------------------------------------------------------
 # Helper: accepted preferences query
 # ---------------------------------------------------------------------------
+
 
 def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
     """Return accepted, unconsumed preference texts for resume prompt injection.
@@ -231,16 +221,18 @@ def _get_accepted_preferences(conn: sqlite3.Connection) -> list:
         logger.debug("Failed to load resume preferences (non-fatal)", exc_info=True)
         return []
 
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def generate_resume_single(
     job_row: dict,
     profile: dict,
     conn: sqlite3.Connection,
     config: dict,
-) -> Optional[dict]:
+) -> dict | None:
     """Generate a tailored resume dict via Sonnet with closed-world constraint.
 
     Args:
@@ -262,11 +254,7 @@ def generate_resume_single(
         )
         return None
 
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("sonnet", DEFAULT_MODEL_SONNET)
-    )
+    model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
     # Build fit_analysis context from job_row if present
     fit_analysis = job_row.get("fit_analysis")
@@ -315,7 +303,8 @@ def generate_resume_single(
             )
 
     # Inject style guide directives + accepted Drive feedback at same priority level
-    from job_finder.web.resume_style_guide import load_style_guide, _build_style_guide_directives
+    from job_finder.web.resume_style_guide import _build_style_guide_directives, load_style_guide
+
     style_guide = load_style_guide()
     style_directives = _build_style_guide_directives(style_guide)
     accepted_prefs = _get_accepted_preferences(conn)
@@ -360,7 +349,13 @@ def generate_resume_single(
     )
 
     # --- Inline validation for quick-apply path ---
-    from job_finder.web.resume_validator import validate_resume as _validate, fix_resume_violations as _fix
+    from job_finder.web.resume_validator import (
+        fix_resume_violations as _fix,
+    )
+    from job_finder.web.resume_validator import (
+        validate_resume as _validate,
+    )
+
     try:
         jd_text = job_row.get("jd_full", "")
         audit = _validate(result, jd_text, profile, conn, config)
@@ -376,9 +371,11 @@ def generate_resume_single(
 
     return result
 
+
 # ---------------------------------------------------------------------------
 # Background thread function
 # ---------------------------------------------------------------------------
+
 
 def _generate_resume_background(
     db_path: str,
@@ -425,6 +422,7 @@ def _generate_resume_background(
                 # Note: generate_resume_multi manages its own connections per thread
                 # Deferred import avoids circular import at module load time
                 from job_finder.web.resume_multi_version import generate_resume_multi
+
                 logger.info(
                     "_generate_resume_background: using multi-version synthesis for gen_id=%s "
                     "(classification=apply)",
@@ -444,12 +442,15 @@ def _generate_resume_background(
                         ("Monthly budget exceeded", gen_id),
                     )
                     conn.commit()
-                    logger.info("_generate_resume_background: budget exceeded for gen_id=%s", gen_id)
+                    logger.info(
+                        "_generate_resume_background: budget exceeded for gen_id=%s", gen_id
+                    )
                     return
 
             # --- Validate generated resume ---
-            from job_finder.web.resume_validator import validate_resume, fix_resume_violations
             import json as _json
+
+            from job_finder.web.resume_validator import fix_resume_violations, validate_resume
 
             validation_report = None
             try:
@@ -465,13 +466,16 @@ def _generate_resume_background(
 
                 # Auto-fix if error-severity violations found
                 has_errors = any(
-                    v.get("severity") == "error"
-                    for v in validation_report.get("violations", [])
+                    v.get("severity") == "error" for v in validation_report.get("violations", [])
                 )
                 if has_errors:
                     logger.info(
                         "_generate_resume_background: %d error violations, running fix pass for gen_id=%s",
-                        sum(1 for v in validation_report["violations"] if v.get("severity") == "error"),
+                        sum(
+                            1
+                            for v in validation_report["violations"]
+                            if v.get("severity") == "error"
+                        ),
                         gen_id,
                     )
                     fixed_resume = fix_resume_violations(
@@ -504,7 +508,7 @@ def _generate_resume_background(
             # Build document name: "Company - Title - YYYY-MM-DD"
             company = job_row.get("company", "Unknown")
             title = job_row.get("title", "Resume")
-            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date_str = datetime.now(UTC).strftime("%Y-%m-%d")
             doc_name = f"{company} - {title} - {date_str}"
 
             # Upload to Drive
@@ -528,7 +532,9 @@ def _generate_resume_background(
             conn.commit()
             logger.info(
                 "_generate_resume_background: done for gen_id=%s, type=%s, url=%s",
-                gen_id, generation_type, doc_url,
+                gen_id,
+                generation_type,
+                doc_url,
             )
 
         except Exception as e:
@@ -540,14 +546,17 @@ def _generate_resume_background(
                 )
                 conn.commit()
             except Exception:
-                logger.exception("_generate_resume_background: failed to update error state for gen_id=%s", gen_id)
-            logger.warning(
-                "_generate_resume_background: error for gen_id=%s: %s", gen_id, e
-            )
+                logger.exception(
+                    "_generate_resume_background: failed to update error state for gen_id=%s",
+                    gen_id,
+                )
+            logger.warning("_generate_resume_background: error for gen_id=%s: %s", gen_id, e)
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _format_education(profile: dict) -> str:
     """Format education from profile into a readable text block for the prompt."""
@@ -564,6 +573,7 @@ def _format_education(profile: dict) -> str:
         if ed.get("thesis"):
             text += f" | Thesis: {ed['thesis']}"
     return text
+
 
 def _format_profile_positions(profile: dict) -> str:
     """Format positions from profile into a readable text block for the prompt."""

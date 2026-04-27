@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 import pytest
 
 from job_finder.web.rejection_patterns import (
-    PatternReport,
     _detect_domain,
     _detect_seniority,
     extract_rejection_patterns,
@@ -133,10 +132,21 @@ def _score_to_sub_scores(score: float | None) -> str | None:
     return json.dumps(sub_scores)
 
 
-def _insert_job(db_path, dedup_key, title, company, pipeline_status="rejected",
-                haiku_score=None, sonnet_score=None, salary_min=None,
-                location="Remote", company_id=None, first_seen=None,
-                classification=None, sub_scores_json=None):
+def _insert_job(
+    db_path,
+    dedup_key,
+    title,
+    company,
+    pipeline_status="rejected",
+    haiku_score=None,
+    sonnet_score=None,
+    salary_min=None,
+    location="Remote",
+    company_id=None,
+    first_seen=None,
+    classification=None,
+    sub_scores_json=None,
+):
     """Insert a test rejection job.
 
     v3.0 migration: legacy haiku_score/sonnet_score kwargs are translated into
@@ -156,9 +166,21 @@ def _insert_job(db_path, dedup_key, title, company, pipeline_status="rejected",
                             haiku_score, sonnet_score, classification, sub_scores_json,
                             salary_min, company_id, first_seen, last_seen)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (dedup_key, title, company, location, pipeline_status,
-         haiku_score, sonnet_score, classification, sub_scores_json,
-         salary_min, company_id, first_seen, first_seen),
+        (
+            dedup_key,
+            title,
+            company,
+            location,
+            pipeline_status,
+            haiku_score,
+            sonnet_score,
+            classification,
+            sub_scores_json,
+            salary_min,
+            company_id,
+            first_seen,
+            first_seen,
+        ),
     )
     conn.commit()
     conn.close()
@@ -184,8 +206,9 @@ class TestExtractRejectionPatterns:
         assert report.patterns == []
 
     def test_basic_rejection(self, rejection_db):
-        _insert_job(rejection_db, "key1", "Junior Engineer", "Acme Corp",
-                     haiku_score=30, salary_min=80000)
+        _insert_job(
+            rejection_db, "key1", "Junior Engineer", "Acme Corp", haiku_score=30, salary_min=80000
+        )
         report = extract_rejection_patterns(rejection_db)
         assert report.total_rejections == 1
         assert report.rejection_by_seniority.get("junior") == 1
@@ -237,8 +260,9 @@ class TestExtractRejectionPatterns:
         assert any("Salary floor" in b for b in report.blockers)
 
     def test_company_join(self, rejection_db):
-        cid = _insert_company(rejection_db, "BigCo", company_size="large",
-                               ats_platform="greenhouse")
+        cid = _insert_company(
+            rejection_db, "BigCo", company_size="large", ats_platform="greenhouse"
+        )
         _insert_job(rejection_db, "k1", "Engineer", "BigCo", company_id=cid)
 
         report = extract_rejection_patterns(rejection_db)

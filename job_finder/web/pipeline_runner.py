@@ -14,18 +14,15 @@ in the APScheduler background thread -- it must NOT share a connection with
 the Flask request thread.
 """
 
-import json
 import logging
-import sqlite3
 import threading
 from datetime import datetime
-from typing import Optional
 
-from job_finder.config import DEFAULT_DAILY_BUDGET_USD, DEFAULT_LOOKBACK_DAYS
-from job_finder.db import upsert_job, log_run
-from job_finder.models import Job
+from job_finder.config import DEFAULT_DAILY_BUDGET_USD
+from job_finder.db import log_run
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
+
 # v3.0 (Phase 34 Plan 3 Commit E): the unified run_scoring is imported lazily
 # inside run_ingestion(). The legacy run_haiku_scoring / run_sonnet_evaluation
 # imports are gone — they remain available on scoring_runner for Plan 4 to
@@ -43,7 +40,7 @@ except ImportError:
 #   patch("job_finder.web.pipeline_runner._fetch_gmail", ...)  ← still valid
 #   patch("job_finder.web.pipeline_runner.GmailSource", ...)   ← still valid (imported above)
 #   patch("job_finder.web.pipeline_runner.upsert_job", ...)    ← still valid (imported above)
-from job_finder.web.ingestion_runner import (  # noqa: E402
+from job_finder.web.ingestion_runner import (  # noqa: F401
     _collect_dataforseo_results,
     _fetch_gmail,
     _fetch_portal_search,
@@ -65,6 +62,7 @@ logger = logging.getLogger(__name__)
 # inside a `with _budget_alert_lock:` block to prevent data races.
 _budget_alert_lock = threading.Lock()
 _last_budget_pct_notified: float = 0.0
+
 
 def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
@@ -147,10 +145,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)
 
         # --- Combine all jobs ---
-        all_jobs = (
-            gmail_jobs + serpapi_jobs + thordata_jobs
-            + portal_jobs + dataforseo_jobs
-        )
+        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + portal_jobs + dataforseo_jobs
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -174,7 +169,9 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
 
         if summary["dataforseo_fetched"] > 0 or summary["dataforseo_errors"]:
             try:
-                log_run(runner_conn, "dataforseo", summary["dataforseo_fetched"], jobs_new, jobs_scored)
+                log_run(
+                    runner_conn, "dataforseo", summary["dataforseo_fetched"], jobs_new, jobs_scored
+                )
             except Exception as e:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
@@ -183,6 +180,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     # use_unified_scorer toggle and the legacy two-tier else-branch).
     if score and new_job_keys:
         from job_finder.web.scoring_runner import run_scoring
+
         scoring_summary = run_scoring(new_job_keys, config, db_path)
         summary["scored"] = scoring_summary.get("scored", 0)
         summary["classified_apply"] = scoring_summary.get("classified_apply", 0)
@@ -196,9 +194,11 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
     total_fetched = (
-        summary["gmail_fetched"] + summary["serpapi_fetched"]
+        summary["gmail_fetched"]
+        + summary["serpapi_fetched"]
         + summary.get("thordata_fetched", 0)
-        + summary.get("dataforseo_fetched", 0) + summary.get("portal_search_fetched", 0)
+        + summary.get("dataforseo_fetched", 0)
+        + summary.get("portal_search_fetched", 0)
     )
     logger.info(
         "Ingestion complete: %d fetched, %d new, %d scored "
@@ -214,6 +214,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     )
 
     return summary
+
 
 def _check_budget_alert(config: dict, db_path: str) -> None:
     """Check monthly AI spend and fire budget alert notification if thresholds crossed.
@@ -235,6 +236,7 @@ def _check_budget_alert(config: dict, db_path: str) -> None:
     try:
         with standalone_connection(db_path) as conn:
             from job_finder.web.claude_client import get_cost_stats
+
             stats = get_cost_stats(conn)
 
         monthly_spend = stats.get("month", 0.0)

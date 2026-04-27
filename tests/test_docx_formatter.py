@@ -14,7 +14,6 @@ Covers:
 
 import io
 
-import pytest
 
 def _make_resume_data(**overrides) -> dict:
     """Build a minimal valid resume_data dict for testing."""
@@ -45,6 +44,7 @@ def _make_resume_data(**overrides) -> dict:
     base.update(overrides)
     return base
 
+
 class TestBuildResumeDocxOutput:
     """Tests for the output type and structure of build_resume_docx."""
 
@@ -73,12 +73,14 @@ class TestBuildResumeDocxOutput:
     def test_output_is_valid_docx(self):
         """Output can be opened as a valid Word document by python-docx."""
         from docx import Document
+
         from job_finder.web.docx_formatter import build_resume_docx
 
         buffer = build_resume_docx(_make_resume_data())
         # Should not raise
         doc = Document(buffer)
         assert doc is not None
+
 
 class TestBuildResumeDocxContent:
     """Tests for the textual content of the generated .docx."""
@@ -159,6 +161,7 @@ class TestBuildResumeDocxContent:
         text = self._get_full_text(buffer)
         assert "2012" in text
 
+
 class TestBuildResumeDocxEdgeCases:
     """Tests for missing/empty fields."""
 
@@ -203,11 +206,15 @@ class TestBuildResumeDocxEdgeCases:
         """Position dict without 'dates' key is handled safely."""
         from job_finder.web.docx_formatter import build_resume_docx
 
-        data = _make_resume_data(positions=[{
-            "title": "Engineer",
-            "company": "Corp",
-            "achievements": ["Did things."],
-        }])
+        data = _make_resume_data(
+            positions=[
+                {
+                    "title": "Engineer",
+                    "company": "Corp",
+                    "achievements": ["Did things."],
+                }
+            ]
+        )
         buffer = build_resume_docx(data)
         assert buffer.tell() == 0
 
@@ -215,9 +222,13 @@ class TestBuildResumeDocxEdgeCases:
         """Education dict without 'year' key is handled safely."""
         from job_finder.web.docx_formatter import build_resume_docx
 
-        data = _make_resume_data(education=[{
-            "degree": "B.S.",
-            "institution": "University",
-        }])
+        data = _make_resume_data(
+            education=[
+                {
+                    "degree": "B.S.",
+                    "institution": "University",
+                }
+            ]
+        )
         buffer = build_resume_docx(data)
         assert buffer.tell() == 0

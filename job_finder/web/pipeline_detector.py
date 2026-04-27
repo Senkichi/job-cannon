@@ -13,8 +13,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from job_finder.db import update_pipeline_status
 from job_finder.web.db_helpers import standalone_connection
@@ -29,20 +28,20 @@ REJECTION_QUERY = (
     'subject:("unfortunately" OR "not moving forward" OR '
     '"other direction" OR "other candidates" OR "not selected" OR '
     '"position has been filled" OR "no longer" OR "decided not to proceed") '
-    'newer_than:3d'
+    "newer_than:3d"
 )
 
 INTERVIEW_QUERY = (
     'subject:("interview" OR "next steps" OR "phone screen" OR '
     '"technical interview" OR "schedule time" OR "meet with") '
-    'newer_than:3d'
+    "newer_than:3d"
 )
 
 CONFIRMATION_QUERY = (
     'subject:("application received" OR "thank you for applying" OR '
     '"application confirmation" OR "we received your application" OR '
     '"successfully submitted") '
-    'newer_than:3d'
+    "newer_than:3d"
 )
 
 # ---------------------------------------------------------------------------
@@ -50,22 +49,41 @@ CONFIRMATION_QUERY = (
 # ---------------------------------------------------------------------------
 
 REJECTION_KEYWORDS = [
-    "unfortunately", "not moving forward", "other candidates",
-    "not selected", "position has been filled", "no longer moving forward",
-    "decided not to proceed", "other direction", "will not be moving forward",
-    "not proceed", "filled the position",
+    "unfortunately",
+    "not moving forward",
+    "other candidates",
+    "not selected",
+    "position has been filled",
+    "no longer moving forward",
+    "decided not to proceed",
+    "other direction",
+    "will not be moving forward",
+    "not proceed",
+    "filled the position",
 ]
 
 INTERVIEW_KEYWORDS = [
-    "interview", "phone screen", "next steps", "technical interview",
-    "schedule time", "meet with", "speak with", "chat with", "call with",
-    "video call", "hiring process",
+    "interview",
+    "phone screen",
+    "next steps",
+    "technical interview",
+    "schedule time",
+    "meet with",
+    "speak with",
+    "chat with",
+    "call with",
+    "video call",
+    "hiring process",
 ]
 
 CONFIRMATION_KEYWORDS = [
-    "application received", "thank you for applying", "application confirmation",
-    "we received your application", "successfully submitted",
-    "received your application", "thank you for your application",
+    "application received",
+    "thank you for applying",
+    "application confirmation",
+    "we received your application",
+    "successfully submitted",
+    "received your application",
+    "thank you for your application",
 ]
 
 # Maps Gmail query detection_type to classification
@@ -119,13 +137,25 @@ INACTIVE_STATUSES = {"archived", "rejected", "withdrawn"}
 
 # Common job title words to exclude from title matching
 TITLE_STOP_WORDS = {
-    "senior", "staff", "lead", "data", "the", "and", "for", "with",
-    "principal", "associate", "junior", "mid", "level",
+    "senior",
+    "staff",
+    "lead",
+    "data",
+    "the",
+    "and",
+    "for",
+    "with",
+    "principal",
+    "associate",
+    "junior",
+    "mid",
+    "level",
 }
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run_pipeline_detection(db_path: str, config: dict) -> dict:
     """Scan Gmail for pipeline emails and process matches.
@@ -198,9 +228,11 @@ def run_pipeline_detection(db_path: str, config: dict) -> dict:
 
     return summary
 
+
 # ---------------------------------------------------------------------------
 # Gmail service helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_gmail_service(config: dict):
     """Authenticate and return the Gmail API service.
@@ -209,13 +241,16 @@ def _get_gmail_service(config: dict):
     the APScheduler thread.
     """
     try:
-        from job_finder.sources.gmail_source import GmailSource, TOKEN_PATH
+        from job_finder.sources.gmail_source import TOKEN_PATH, GmailSource
+
         source = GmailSource(token_path=TOKEN_PATH)
         return source.service
     except Exception as e:
         from job_finder.web.log_throttle import throttled_log
+
         throttled_log(logger, logging.WARNING, "Pipeline detection: Gmail auth failed: %s", e)
         return None
+
 
 def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
     """Fetch and parse pipeline emails from Gmail using three query patterns.
@@ -307,12 +342,7 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
 
     for query, detection_type in queries:
         try:
-            result = (
-                service.users()
-                .messages()
-                .list(userId="me", q=query)
-                .execute()
-            )
+            result = service.users().messages().list(userId="me", q=query).execute()
             messages = result.get("messages", [])
         except Exception as e:
             logger.warning("Gmail query failed (%s): %s", detection_type, e)
@@ -326,10 +356,7 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
 
             try:
                 msg = (
-                    service.users()
-                    .messages()
-                    .get(userId="me", id=msg_id, format="full")
-                    .execute()
+                    service.users().messages().get(userId="me", id=msg_id, format="full").execute()
                 )
             except Exception as e:
                 logger.warning("Failed to fetch message %s: %s", msg_id, e)
@@ -345,33 +372,38 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
             # Parse date to ISO format
             try:
                 from email.utils import parsedate_to_datetime
+
                 email_date = parsedate_to_datetime(date_str).isoformat()
             except Exception:
                 logger.debug("email date parse failed, using internalDate", exc_info=True)
                 internal = msg.get("internalDate")
                 if internal:
-                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=timezone.utc).isoformat()
+                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=UTC).isoformat()
                 else:
                     email_date = datetime.now().isoformat()
 
             body = _extract_body_from_payload(payload)
 
-            emails.append({
-                "message_id": msg_id,
-                "subject": subject,
-                "from_address": from_address,
-                "date": email_date,
-                "body": body,
-                "detection_type": detection_type,
-            })
+            emails.append(
+                {
+                    "message_id": msg_id,
+                    "subject": subject,
+                    "from_address": from_address,
+                    "date": email_date,
+                    "body": body,
+                    "detection_type": detection_type,
+                }
+            )
 
     return emails
+
 
 # ---------------------------------------------------------------------------
 # Classification helpers
 # ---------------------------------------------------------------------------
 
-def _classify_email(subject: str, body: str) -> Optional[str]:
+
+def _classify_email(subject: str, body: str) -> str | None:
     """Classify email as 'rejection', 'interview', 'confirmation', or None.
 
     Checks subject and body against keyword sets for each detection type.
@@ -399,6 +431,7 @@ def _classify_email(subject: str, body: str) -> Optional[str]:
             return "confirmation"
 
     return None
+
 
 def _company_in_email(company: str | None, body: str, subject: str) -> bool:
     """Check if a company name appears in email subject or body.
@@ -430,13 +463,10 @@ def _company_in_email(company: str | None, body: str, subject: str) -> bool:
     # e.g., "Alameda County" (2 words) -> both "alameda" AND "county" must match
     words = company_lower.split()
     sig_words = [w for w in words if len(w) >= 5]
-    if sig_words and all(
-        re.search(r"\b" + re.escape(word) + r"\b", text)
-        for word in sig_words
-    ):
-        return True
+    return bool(
+        sig_words and all(re.search(r"\b" + re.escape(word) + r"\b", text) for word in sig_words)
+    )
 
-    return False
 
 def _title_in_email(title: str, subject: str, body: str) -> bool:
     """Check if significant words from job title appear in subject or body.
@@ -472,6 +502,7 @@ def _title_in_email(title: str, subject: str, body: str) -> bool:
     if len(sig_words) == 1:
         return matched == 1
     return matched >= 2
+
 
 def _timing_ok(email_date: str, job: dict) -> bool:
     """Check if email date is within timing windows of job activity.
@@ -509,6 +540,7 @@ def _timing_ok(email_date: str, job: dict) -> bool:
 
     return False
 
+
 def _sender_is_ats(from_address: str) -> bool:
     """Return True if the sender domain is a known ATS platform.
 
@@ -529,10 +561,8 @@ def _sender_is_ats(from_address: str) -> bool:
         return False
 
     sender_domain = match.group(1).lower()
-    return any(
-        sender_domain == d or sender_domain.endswith("." + d)
-        for d in ATS_DOMAINS
-    )
+    return any(sender_domain == d or sender_domain.endswith("." + d) for d in ATS_DOMAINS)
+
 
 def _extract_snippet(body: str, detection_type: str) -> str:
     """Extract the most relevant sentence from email body.
@@ -567,9 +597,11 @@ def _extract_snippet(body: str, detection_type: str) -> str:
 
     return ""
 
+
 # ---------------------------------------------------------------------------
 # Confidence scoring
 # ---------------------------------------------------------------------------
+
 
 def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
     """Compute 0-4 confidence score by checking four independent signals.
@@ -610,16 +642,16 @@ def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
         matched.append("timing")
 
     # Signal 4: ATS domain — only counts if detection_type is classified (Pitfall 3)
-    if email.get("detection_type") is not None and _sender_is_ats(
-        email.get("from_address", "")
-    ):
+    if email.get("detection_type") is not None and _sender_is_ats(email.get("from_address", "")):
         matched.append("ats_domain")
 
     return len(matched), matched
 
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_active_jobs(conn: sqlite3.Connection) -> list[dict]:
     """Load all jobs that are NOT in inactive pipeline statuses.
@@ -644,6 +676,7 @@ def _load_active_jobs(conn: sqlite3.Connection) -> list[dict]:
         return []
     return [dict(row) for row in rows]
 
+
 def _already_processed(conn: sqlite3.Connection, message_id: str) -> bool:
     """Check if a Gmail message ID has already been processed.
 
@@ -660,11 +693,12 @@ def _already_processed(conn: sqlite3.Connection, message_id: str) -> bool:
     ).fetchone()
     return row is not None
 
+
 def _mark_processed(
     conn: sqlite3.Connection,
     message_id: str,
     sender: str,
-    detection_type: Optional[str],
+    detection_type: str | None,
 ) -> None:
     """Mark a Gmail message ID as processed in email_parse_log.
 
@@ -690,11 +724,12 @@ def _mark_processed(
     except Exception as e:
         logger.warning("Failed to mark message as processed: %s", e)
 
+
 def _insert_detection(
     conn: sqlite3.Connection,
     message_id: str,
     detection_type: str,
-    job_id: Optional[str],
+    job_id: str | None,
     *,
     score: int,
     signals: list[str],
@@ -742,15 +777,17 @@ def _insert_detection(
     )
     conn.commit()
 
+
 # ---------------------------------------------------------------------------
 # Core email processing
 # ---------------------------------------------------------------------------
+
 
 def _process_email(
     email: dict,
     conn: sqlite3.Connection,
     jobs: list[dict],
-    config: Optional[dict] = None,
+    config: dict | None = None,
 ) -> str:
     """Process a single email: classify, match, score, auto-update or queue.
 
@@ -787,7 +824,7 @@ def _process_email(
     # Step 3: Score against all active jobs
     best_score = 0
     best_signals: list[str] = []
-    best_job: Optional[dict] = None
+    best_job: dict | None = None
 
     for job in jobs:
         score, signals = score_match(email, job)
@@ -827,6 +864,7 @@ def _process_email(
             # Fire pipeline change notification (non-blocking, non-fatal)
             try:
                 from job_finder.web.notifier import notify_pipeline_change
+
                 notify_pipeline_change(
                     detection_type,
                     best_job.get("title", ""),
@@ -838,7 +876,10 @@ def _process_email(
                 logger.debug("detection notification failed", exc_info=True)
 
         _insert_detection(
-            conn, message_id, detection_type, job_id,
+            conn,
+            message_id,
+            detection_type,
+            job_id,
             score=best_score,
             signals=best_signals,
             snippet=snippet,
@@ -854,7 +895,10 @@ def _process_email(
     elif best_score >= 1:
         # Low confidence: queue for review
         _insert_detection(
-            conn, message_id, detection_type, job_id,
+            conn,
+            message_id,
+            detection_type,
+            job_id,
             score=best_score,
             signals=best_signals,
             snippet=snippet,

@@ -10,23 +10,25 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Generic filler phrases that signal low-effort / perpetual postings.
-_FILLER_PHRASES = frozenset([
-    "fast-paced environment",
-    "team player",
-    "self-starter",
-    "wear many hats",
-    "other duties as assigned",
-    "competitive salary",
-    "great benefits",
-    "dynamic team",
-    "exciting opportunity",
-    "rock star",
-    "ninja",
-    "guru",
-])
+_FILLER_PHRASES = frozenset(
+    [
+        "fast-paced environment",
+        "team player",
+        "self-starter",
+        "wear many hats",
+        "other duties as assigned",
+        "competitive salary",
+        "great benefits",
+        "dynamic team",
+        "exciting opportunity",
+        "rock star",
+        "ninja",
+        "guru",
+    ]
+)
 
 _WORD_RE = re.compile(r"\b\w+\b")
 
@@ -46,13 +48,15 @@ def compute_legitimacy_signals(job_row: dict, conn) -> dict:
     signals = {}
 
     # 1. Posting age
-    first_seen = job_row.get("first_seen_at") or job_row.get("first_seen") or job_row.get("created_at")
+    first_seen = (
+        job_row.get("first_seen_at") or job_row.get("first_seen") or job_row.get("created_at")
+    )
     if first_seen:
         if isinstance(first_seen, str):
             first_seen = datetime.fromisoformat(first_seen.replace("Z", "+00:00"))
         if first_seen.tzinfo is None:
-            first_seen = first_seen.replace(tzinfo=timezone.utc)
-        age = (datetime.now(timezone.utc) - first_seen).days
+            first_seen = first_seen.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - first_seen).days
         signals["posting_age_days"] = age
     else:
         signals["posting_age_days"] = None
@@ -88,10 +92,7 @@ def compute_legitimacy_signals(job_row: dict, conn) -> dict:
     if text and len(text) > 100:
         words = _WORD_RE.findall(text.lower())
         total_words = len(words)
-        filler_count = sum(
-            1 for phrase in _FILLER_PHRASES
-            if phrase in text.lower()
-        )
+        filler_count = sum(1 for phrase in _FILLER_PHRASES if phrase in text.lower())
         signals["filler_ratio"] = round(filler_count / max(total_words / 50, 1), 2)
     else:
         signals["filler_ratio"] = 0.0

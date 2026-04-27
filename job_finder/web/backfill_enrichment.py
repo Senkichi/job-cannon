@@ -24,16 +24,14 @@ Exports:
     run_scoring_backfill: Score jobs with jd_full but no v3 classification yet.
 """
 
-import json
 import logging
 import sqlite3
-from typing import Any, Optional
 
+from job_finder.db import persist_job_assessment
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.job_scorer import score_job
-from job_finder.db import persist_job_assessment
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +46,7 @@ _SONNET_INPUT_TOKENS = 2000
 _SONNET_OUTPUT_TOKENS = 500
 
 # Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
-_ELIGIBLE_TIERS_QUERY = (
-    "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet', 'agentic', 'agentic_exhausted')"
-)
+_ELIGIBLE_TIERS_QUERY = "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet', 'agentic', 'agentic_exhausted')"
 
 # Borderline score range for re-scoring after tier advancement
 _BORDERLINE_MIN = 40
@@ -91,6 +87,7 @@ def _offline_config(config: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     """Count eligible jobs, estimate AI cost, and prompt user for confirmation.
@@ -137,14 +134,14 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     # unified scorer. Cost is dominated by the Anthropic fallback when
     # Ollama is unavailable; the Ollama path itself is free.
     fallback_pricing = MODEL_PRICING.get(
-        "claude-sonnet-4-6", {"input": 3.0, "output": 15.0},
+        "claude-sonnet-4-6",
+        {"input": 3.0, "output": 15.0},
     )
-    fallback_cost = (
-        (total_eligible * _SONNET_INPUT_TOKENS / 1_000_000) * fallback_pricing["input"]
-        + (total_eligible * _SONNET_OUTPUT_TOKENS / 1_000_000) * fallback_pricing["output"]
-    )
+    fallback_cost = (total_eligible * _SONNET_INPUT_TOKENS / 1_000_000) * fallback_pricing[
+        "input"
+    ] + (total_eligible * _SONNET_OUTPUT_TOKENS / 1_000_000) * fallback_pricing["output"]
 
-    print(f"\nEstimated AI cost (worst case -- 100% fallback to Anthropic):")
+    print("\nEstimated AI cost (worst case -- 100% fallback to Anthropic):")
     print(f"  Scoring (~{total_eligible} jobs): ${fallback_cost:.4f}")
     print("\nNote: Local Ollama path is free; estimate above assumes every")
     print("call escalates to the Anthropic fallback in the cascade chain.")
@@ -153,9 +150,10 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
     response = input("\nProceed with enrichment backfill? [y/N] ").strip().lower()
     return response == "y"
 
+
 def run_enrichment_pass(
     conn: sqlite3.Connection,
-    serpapi_key: Optional[str],
+    serpapi_key: str | None,
     config: dict,
     limit: int = 100,
 ) -> tuple[int, set]:
@@ -225,9 +223,10 @@ def run_enrichment_pass(
 
     return enriched_count, tier_advanced_keys
 
+
 def run_passes_to_convergence(
     conn: sqlite3.Connection,
-    serpapi_key: Optional[str],
+    serpapi_key: str | None,
     config: dict,
     limit: int = 100,
 ) -> tuple[int, set]:
@@ -270,6 +269,7 @@ def run_passes_to_convergence(
 
     return total_enriched, cumulative_tier_advanced_keys
 
+
 def run_scoring_backfill(
     conn: sqlite3.Connection,
     config: dict,
@@ -309,13 +309,18 @@ def run_scoring_backfill(
         if sr.status != "ok" or sr.data is None:
             logger.debug(
                 "score_job returned %s for '%s' (%s)",
-                sr.status, dedup_key, sr.error,
+                sr.status,
+                dedup_key,
+                sr.error,
             )
             continue
 
         persist_job_assessment(
-            conn, dedup_key, sr.data,
-            provider=sr.provider, model=model,
+            conn,
+            dedup_key,
+            sr.data,
+            provider=sr.provider,
+            model=model,
         )
         scored_count += 1
         if i % 10 == 0 or i == len(rows):
@@ -323,6 +328,7 @@ def run_scoring_backfill(
 
     print(f"Scoring backfill complete: {scored_count} jobs scored.")
     return scored_count
+
 
 def main() -> None:
     """CLI entry point for enrichment backfill.
@@ -344,7 +350,6 @@ def main() -> None:
 
     # Open own connection (thread-safe, not Flask g.db)
     with standalone_connection(db_path) as conn:
-
         print("\n=== Phase 1: Convergence Enrichment Passes ===")
         total_enriched, tier_advanced_keys = run_passes_to_convergence(
             conn, serpapi_key=serpapi_key, config=config
@@ -369,9 +374,10 @@ def main() -> None:
             r = dict(row)
             print(f"  {r['tier']:12s}: {r['cnt']:4d} jobs")
 
-        print(f"\nBackfill complete.")
+        print("\nBackfill complete.")
         print(f"  Enriched: {total_enriched}")
         print(f"  Scored: {scored_count}")
+
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,7 @@ import pytest
 # Fuzzy match tests
 # ---------------------------------------------------------------------------
 
+
 class TestFuzzyMatchCompany:
     """Tests for fuzzy_match_company()."""
 
@@ -52,7 +53,10 @@ class TestFuzzyMatchCompany:
         )
         conn.commit()
 
-        existing = [(row["id"], row["name"]) for row in conn.execute("SELECT id, name FROM companies").fetchall()]
+        existing = [
+            (row["id"], row["name"])
+            for row in conn.execute("SELECT id, name FROM companies").fetchall()
+        ]
 
         company_id, score = fuzzy_match_company("OpenAI, Inc.", existing)
 
@@ -79,7 +83,10 @@ class TestFuzzyMatchCompany:
         )
         conn.commit()
 
-        existing = [(row["id"], row["name"]) for row in conn.execute("SELECT id, name FROM companies").fetchall()]
+        existing = [
+            (row["id"], row["name"])
+            for row in conn.execute("SELECT id, name FROM companies").fetchall()
+        ]
 
         company_id, score = fuzzy_match_company("Netflix", existing)
 
@@ -96,7 +103,10 @@ class TestFuzzyMatchCompany:
         )
         conn.commit()
 
-        existing = [(row["id"], row["name"]) for row in conn.execute("SELECT id, name FROM companies").fetchall()]
+        existing = [
+            (row["id"], row["name"])
+            for row in conn.execute("SELECT id, name FROM companies").fetchall()
+        ]
 
         # "IBM" normalizes to "ibm" which is 3 chars — should skip matching
         company_id, score = fuzzy_match_company("IBM", existing)
@@ -104,22 +114,27 @@ class TestFuzzyMatchCompany:
         assert company_id is None
         assert score == 0
 
+
 # ---------------------------------------------------------------------------
 # Denylist tests
 # ---------------------------------------------------------------------------
 
+
 class TestDenylistFiltering:
     """Tests that denylist names are skipped during linkage."""
 
-    @pytest.mark.parametrize("company_name", [
-        "Unknown",
-        "Medical jobs",
-        "Clinical jobs",
-        "Crossing Hurdles",
-        "RemoteHunter",
-        "Jobgether",
-        "Mercor",
-    ])
+    @pytest.mark.parametrize(
+        "company_name",
+        [
+            "Unknown",
+            "Medical jobs",
+            "Clinical jobs",
+            "Crossing Hurdles",
+            "RemoteHunter",
+            "Jobgether",
+            "Mercor",
+        ],
+    )
     def test_denylist_skipped(self, company_name, migrated_db):
         """Jobs with denylist company names produce no company records."""
         from job_finder.web.backfill_companies import link_jobs_to_companies
@@ -144,9 +159,11 @@ class TestDenylistFiltering:
                 f"upsert_company was called with denylist name '{company_name}'"
             )
 
+
 # ---------------------------------------------------------------------------
 # Company linkage tests
 # ---------------------------------------------------------------------------
+
 
 class TestCompanyLinkage:
     """Tests for link_jobs_to_companies()."""
@@ -164,7 +181,9 @@ class TestCompanyLinkage:
         conn.commit()
 
         new_company_id = 42
-        with patch("job_finder.web.company_resolver.upsert_company", return_value=new_company_id) as mock_upsert:
+        with patch(
+            "job_finder.web.company_resolver.upsert_company", return_value=new_company_id
+        ) as mock_upsert:
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         assert linked_count >= 1
@@ -189,7 +208,9 @@ class TestCompanyLinkage:
             "VALUES ('stripe', 'Stripe', 'pending', '2026-01-01', '2026-01-01')"
         )
         conn.commit()
-        existing_id = conn.execute("SELECT id FROM companies WHERE name = 'stripe'").fetchone()["id"]
+        existing_id = conn.execute("SELECT id FROM companies WHERE name = 'stripe'").fetchone()[
+            "id"
+        ]
 
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen) "
@@ -233,7 +254,9 @@ class TestCompanyLinkage:
             call_count += 1
             return new_company_id
 
-        with patch("job_finder.web.company_resolver.upsert_company", side_effect=mock_upsert_side_effect):
+        with patch(
+            "job_finder.web.company_resolver.upsert_company", side_effect=mock_upsert_side_effect
+        ):
             linked_count, new_company_ids, matched_count = link_jobs_to_companies(conn)
 
         # upsert_company should be called only ONCE for 3 identical company names
@@ -241,14 +264,14 @@ class TestCompanyLinkage:
         assert linked_count == 3
 
         # All 3 jobs should link to same company
-        rows = conn.execute(
-            "SELECT company_id FROM jobs WHERE company = 'Acme Corp'"
-        ).fetchall()
+        rows = conn.execute("SELECT company_id FROM jobs WHERE company = 'Acme Corp'").fetchall()
         assert all(row["company_id"] == new_company_id for row in rows)
+
 
 # ---------------------------------------------------------------------------
 # ATS probing tests
 # ---------------------------------------------------------------------------
+
 
 class TestAtsProbing:
     """Tests for run_ats_probing()."""
@@ -269,9 +292,11 @@ class TestAtsProbing:
         assert result["hits"] == 2
         assert result["misses"] == 3
 
+
 # ---------------------------------------------------------------------------
 # DDG enrichment tests
 # ---------------------------------------------------------------------------
+
 
 class TestDdgEnrichment:
     """Tests for run_ddg_enrichment()."""
@@ -294,7 +319,9 @@ class TestDdgEnrichment:
         conn.commit()
 
         acme_id = conn.execute("SELECT id FROM companies WHERE name = 'acme'").fetchone()["id"]
-        widgetco_id = conn.execute("SELECT id FROM companies WHERE name = 'widgetco'").fetchone()["id"]
+        widgetco_id = conn.execute("SELECT id FROM companies WHERE name = 'widgetco'").fetchone()[
+            "id"
+        ]
         new_company_ids = [acme_id, widgetco_id]
 
         # Use homepage_url which exists in the companies schema as a storable field
@@ -319,7 +346,9 @@ class TestDdgEnrichment:
         )
         conn.commit()
 
-        company_id = conn.execute("SELECT id FROM companies WHERE name = 'testco'").fetchone()["id"]
+        company_id = conn.execute("SELECT id FROM companies WHERE name = 'testco'").fetchone()[
+            "id"
+        ]
 
         with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {}  # Empty result — no fields to store
@@ -329,6 +358,7 @@ class TestDdgEnrichment:
         assert result["enriched"] == 0
         assert result["empty_result"] == 1
 
+
 # ---------------------------------------------------------------------------
 # Summary output test
 # ---------------------------------------------------------------------------
@@ -336,6 +366,7 @@ class TestDdgEnrichment:
 # ---------------------------------------------------------------------------
 # Denylist cleanup tests
 # ---------------------------------------------------------------------------
+
 
 class TestDenylistCleanup:
     """Tests for cleanup_denylist_companies()."""
@@ -393,9 +424,7 @@ class TestDenylistCleanup:
             "VALUES ('mercor', 'Mercor', 'pending', '2026-01-01', '2026-01-01')"
         )
         conn.commit()
-        mercor_id = conn.execute(
-            "SELECT id FROM companies WHERE name = 'mercor'"
-        ).fetchone()["id"]
+        mercor_id = conn.execute("SELECT id FROM companies WHERE name = 'mercor'").fetchone()["id"]
 
         conn.execute(
             "INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, company_id) "
@@ -465,9 +494,11 @@ class TestDenylistCleanup:
         assert second_result["companies_deleted"] == 0
         assert second_result["jobs_unlinked"] == 0
 
+
 # ---------------------------------------------------------------------------
 # Duplicate company detection tests
 # ---------------------------------------------------------------------------
+
 
 class TestFindDuplicateCompanies:
     """Tests for find_duplicate_companies()."""
@@ -519,9 +550,11 @@ class TestFindDuplicateCompanies:
         # Third element is the normalized name
         assert first[2] == "acme"
 
+
 # ---------------------------------------------------------------------------
 # Fuzzy false positive detection tests
 # ---------------------------------------------------------------------------
+
 
 class TestFindFuzzyFalsePositives:
     """Tests for find_fuzzy_false_positives()."""
@@ -544,13 +577,18 @@ class TestFindFuzzyFalsePositives:
 
         results = find_fuzzy_false_positives(conn, threshold=85)
 
-        names_in_results = {(r["name_a"], r["name_b"]) for r in results} | {(r["name_b"], r["name_a"]) for r in results}
-        assert ("Stripe", "Strip") in names_in_results or ("stripe", "strip") in names_in_results or \
-               any(
-                   ("stripe" in r["name_a"].lower() and "strip" in r["name_b"].lower()) or
-                   ("strip" in r["name_a"].lower() and "stripe" in r["name_b"].lower())
-                   for r in results
-               )
+        names_in_results = {(r["name_a"], r["name_b"]) for r in results} | {
+            (r["name_b"], r["name_a"]) for r in results
+        }
+        assert (
+            ("Stripe", "Strip") in names_in_results
+            or ("stripe", "strip") in names_in_results
+            or any(
+                ("stripe" in r["name_a"].lower() and "strip" in r["name_b"].lower())
+                or ("strip" in r["name_a"].lower() and "stripe" in r["name_b"].lower())
+                for r in results
+            )
+        )
 
     def test_low_score_pair_excluded(self, migrated_db):
         """Companies 'google' and 'netflix' do not appear in results (low fuzzy score)."""
@@ -607,9 +645,11 @@ class TestFindFuzzyFalsePositives:
             assert isinstance(r["id_b"], int)
             assert isinstance(r["score"], int)
 
+
 # ---------------------------------------------------------------------------
 # Homepage URL verification tests
 # ---------------------------------------------------------------------------
+
 
 class TestVerifyHomepageUrls:
     """Tests for verify_homepage_urls()."""
@@ -677,9 +717,11 @@ class TestVerifyHomepageUrls:
         assert len(results) == 1
         assert results[0]["reachable"] is False
 
+
 # ---------------------------------------------------------------------------
 # Linkage verification tests
 # ---------------------------------------------------------------------------
+
 
 class TestVerifyAllLinkableJobsLinked:
     """Tests for verify_all_linkable_jobs_linked()."""
@@ -743,9 +785,11 @@ class TestVerifyAllLinkableJobsLinked:
 
         assert result["unlinked_non_denylist"] == 0
 
+
 # ---------------------------------------------------------------------------
 # Summary output test
 # ---------------------------------------------------------------------------
+
 
 class TestSummaryOutput:
     """Tests that main() calls all phases and prints summary."""
@@ -789,12 +833,15 @@ class TestSummaryOutput:
         output = captured.out
 
         # Summary should mention key metrics
-        assert any(word in output.lower() for word in ["linked", "created", "matched", "companies"])
+        assert any(
+            word in output.lower() for word in ["linked", "created", "matched", "companies"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # Tests: run_company_linkage scheduler wrapper (Fix 2)
 # ---------------------------------------------------------------------------
+
 
 class TestRunCompanyLinkage:
     """Tests for the scheduler-compatible run_company_linkage() wrapper."""
@@ -805,6 +852,7 @@ class TestRunCompanyLinkage:
 
         # Insert a job with no company_id
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
@@ -814,6 +862,7 @@ class TestRunCompanyLinkage:
         conn.commit()
 
         from job_finder.web.backfill_companies import run_company_linkage
+
         result = run_company_linkage(db_path, {})
         assert result["linked"] >= 1
 
@@ -822,6 +871,7 @@ class TestRunCompanyLinkage:
         db_path, conn = migrated_db
 
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen)
@@ -831,6 +881,7 @@ class TestRunCompanyLinkage:
         conn.commit()
 
         from job_finder.web.backfill_companies import run_company_linkage
+
         result1 = run_company_linkage(db_path, {})
         assert result1["linked"] >= 1
 
@@ -842,11 +893,13 @@ class TestRunCompanyLinkage:
 # Tests: Orphan cleanup — Fix 13
 # ---------------------------------------------------------------------------
 
+
 class TestOrphanCleanup:
     """Tests for cleanup_orphan_companies() and run_orphan_cleanup()."""
 
     def _insert_company(self, conn, name):
         from datetime import datetime
+
         now = datetime.now().isoformat()
         cursor = conn.execute(
             """INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at)
@@ -858,6 +911,7 @@ class TestOrphanCleanup:
 
     def _insert_job(self, conn, key, company_name, company_id=None):
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, company_id, location, first_seen, last_seen)
@@ -868,6 +922,7 @@ class TestOrphanCleanup:
 
     def _insert_scan_log(self, conn, company_id):
         from datetime import datetime
+
         now = datetime.now().isoformat()
         conn.execute(
             """INSERT INTO company_scan_log (company_id, scanned_at, jobs_found)
@@ -891,6 +946,7 @@ class TestOrphanCleanup:
         # Company C has neither — it is the orphan
 
         from job_finder.web.backfill_companies import cleanup_orphan_companies
+
         result = cleanup_orphan_companies(conn)
 
         assert result["orphans_deleted"] == 1
@@ -907,6 +963,7 @@ class TestOrphanCleanup:
         self._insert_scan_log(conn, company_id)
 
         from job_finder.web.backfill_companies import cleanup_orphan_companies
+
         result = cleanup_orphan_companies(conn)
 
         assert result["orphans_deleted"] == 0
@@ -919,15 +976,14 @@ class TestOrphanCleanup:
 
         company_id = self._insert_company(conn, "Recalib Co")
         # Manually set a stale total
-        conn.execute(
-            "UPDATE companies SET jobs_found_total = 99 WHERE id = ?", (company_id,)
-        )
+        conn.execute("UPDATE companies SET jobs_found_total = 99 WHERE id = ?", (company_id,))
         conn.commit()
         # Link 3 real jobs
         for i in range(3):
             self._insert_job(conn, f"recalib-{i}", "Recalib Co", company_id=company_id)
 
         from job_finder.web.backfill_companies import cleanup_orphan_companies
+
         cleanup_orphan_companies(conn)
 
         row = conn.execute(
@@ -942,6 +998,7 @@ class TestOrphanCleanup:
         self._insert_company(conn, "Orphan Again")
 
         from job_finder.web.backfill_companies import cleanup_orphan_companies
+
         result1 = cleanup_orphan_companies(conn)
         assert result1["orphans_deleted"] == 1
 
@@ -954,6 +1011,7 @@ class TestOrphanCleanup:
         conn.close()  # wrapper opens its own connection
 
         from job_finder.web.backfill_companies import run_orphan_cleanup
+
         result = run_orphan_cleanup(db_path, {})
 
         assert "orphans_deleted" in result
@@ -988,7 +1046,9 @@ class TestCleanupInvalidCompanyData:
             "VALUES ('medical jobs', 'Medical jobs', 'pending', '2026-01-01', '2026-01-01')"
         )
         conn.commit()
-        bad_id = conn.execute("SELECT id FROM companies WHERE name = 'medical jobs'").fetchone()["id"]
+        bad_id = conn.execute("SELECT id FROM companies WHERE name = 'medical jobs'").fetchone()[
+            "id"
+        ]
         self._insert_job(conn, "bad|eng", "Medical jobs", bad_id)
 
         config = {"filters": {}}
@@ -998,7 +1058,7 @@ class TestCleanupInvalidCompanyData:
             "SELECT company, company_id FROM jobs WHERE dedup_key = 'bad|eng'"
         ).fetchone()
         assert row["company"] == "Medical jobs"  # raw value NEVER modified
-        assert row["company_id"] is None           # linkage nulled
+        assert row["company_id"] is None  # linkage nulled
 
     def test_normalizable_company_links_to_correct_record(self, migrated_db):
         """Company with normalize action gets linked to the correct upserted record."""
@@ -1011,9 +1071,7 @@ class TestCleanupInvalidCompanyData:
         result = cleanup_invalid_company_data(conn, config)
 
         assert result["normalized"] >= 1
-        row = conn.execute(
-            "SELECT company_id FROM jobs WHERE dedup_key = 'stripe|swe'"
-        ).fetchone()
+        row = conn.execute("SELECT company_id FROM jobs WHERE dedup_key = 'stripe|swe'").fetchone()
         assert row["company_id"] is not None
 
     def test_cleanup_never_mutates_jobs_company(self, migrated_db):
@@ -1065,6 +1123,7 @@ class TestRunRegistryHygiene:
         conn.close()
 
         from job_finder.web.backfill_companies import run_registry_hygiene
+
         result = run_registry_hygiene(db_path, {"filters": {}})
 
         assert result["companies_denylist_deleted"] >= 1
@@ -1075,9 +1134,15 @@ class TestRunRegistryHygiene:
         conn.close()
 
         from job_finder.web.backfill_companies import run_registry_hygiene
+
         result = run_registry_hygiene(db_path, {"filters": {}})
 
-        for key in ("companies_denylist_deleted", "jobs_denylist_unlinked", "jobs_normalized", "orphans_deleted"):
+        for key in (
+            "companies_denylist_deleted",
+            "jobs_denylist_unlinked",
+            "jobs_normalized",
+            "orphans_deleted",
+        ):
             assert key in result
             assert isinstance(result[key], int)
 
@@ -1097,11 +1162,14 @@ class TestRetryAwareEnrichment:
             (name.lower(), name),
         )
         conn.commit()
-        return conn.execute("SELECT id FROM companies WHERE name = ?", (name.lower(),)).fetchone()["id"]
+        return conn.execute("SELECT id FROM companies WHERE name = ?", (name.lower(),)).fetchone()[
+            "id"
+        ]
 
     def test_empty_result_sets_backoff_and_error(self, migrated_db):
         """Empty DDG result sets enrichment_backoff_until and enrichment_last_error='no_signals_found'."""
         from unittest.mock import patch
+
         from job_finder.web.company_resolver import run_ddg_enrichment
 
         db_path, conn = migrated_db
@@ -1123,6 +1191,7 @@ class TestRetryAwareEnrichment:
     def test_success_clears_backoff_and_error(self, migrated_db):
         """Successful enrichment clears enrichment_backoff_until and enrichment_last_error."""
         from unittest.mock import patch
+
         from job_finder.web.company_resolver import run_ddg_enrichment
 
         db_path, conn = migrated_db
@@ -1133,7 +1202,9 @@ class TestRetryAwareEnrichment:
             "'2026-01-01', '2026-01-01')"
         )
         conn.commit()
-        company_id = conn.execute("SELECT id FROM companies WHERE name = 'goodco'").fetchone()["id"]
+        company_id = conn.execute("SELECT id FROM companies WHERE name = 'goodco'").fetchone()[
+            "id"
+        ]
 
         with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
             mock_enrich.return_value = {"company_size": "large"}
@@ -1149,6 +1220,7 @@ class TestRetryAwareEnrichment:
     def test_exception_sets_backoff_and_records_error_type(self, migrated_db):
         """Exception during enrichment sets backoff and records error class name."""
         from unittest.mock import patch
+
         from job_finder.web.company_resolver import run_ddg_enrichment
 
         db_path, conn = migrated_db
@@ -1169,6 +1241,7 @@ class TestRetryAwareEnrichment:
     def test_scheduled_enrichment_skips_backoff_companies(self, migrated_db):
         """run_scheduled_enrichment excludes companies within their backoff window."""
         from unittest.mock import patch
+
         from job_finder.web.backfill_companies import run_scheduled_enrichment
 
         db_path, conn = migrated_db

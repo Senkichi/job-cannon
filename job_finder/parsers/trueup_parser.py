@@ -11,8 +11,7 @@ open jobs" link requires HTTP requests which are out of scope for parsers.
 import logging
 import re
 from datetime import datetime
-from typing import Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -24,15 +23,19 @@ logger = logging.getLogger(__name__)
 TRUEUP_LINK_RE = re.compile(r"url\d+\.trueup\.io/ls/click", re.IGNORECASE)
 
 # Navigation/footer links to exclude
-_EXCLUDE_TEXTS = frozenset({
-    "view all open jobs", "view all open jobs  →", "trueup",
-    "update preferences", "unsubscribe", "my trueup",
-})
+_EXCLUDE_TEXTS = frozenset(
+    {
+        "view all open jobs",
+        "view all open jobs  →",
+        "trueup",
+        "update preferences",
+        "unsubscribe",
+        "my trueup",
+    }
+)
 
 
-def parse_trueup_alert(
-    body: str, email_date: Optional[datetime] = None
-) -> list[Job]:
+def parse_trueup_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a TrueUp weekly digest email into Job objects.
 
     Args:
@@ -73,15 +76,17 @@ def parse_trueup_alert(
         source_url = card.get("url", "")
         source_id = _extract_source_id(source_url)
 
-        jobs.append(Job(
-            title=title,
-            company=company,
-            location=card.get("location", "Unknown"),
-            source="trueup",
-            source_url=source_url,
-            source_id=source_id,
-            posted_date=email_date,
-        ))
+        jobs.append(
+            Job(
+                title=title,
+                company=company,
+                location=card.get("location", "Unknown"),
+                source="trueup",
+                source_url=source_url,
+                source_id=source_id,
+                posted_date=email_date,
+            )
+        )
 
     return jobs
 
@@ -139,15 +144,15 @@ def _find_card_container(element):
     return None
 
 
-def _extract_card_fields(container) -> Optional[dict]:
+def _extract_card_fields(container) -> dict | None:
     """Extract job fields from a card container div."""
     # Find all trueup links in this card
     card_links = container.find_all("a", href=TRUEUP_LINK_RE)
     # Filter out footer/nav links
     job_links = [
-        a for a in card_links
-        if a.get_text(strip=True).lower() not in _EXCLUDE_TEXTS
-        and len(a.get_text(strip=True)) > 1
+        a
+        for a in card_links
+        if a.get_text(strip=True).lower() not in _EXCLUDE_TEXTS and len(a.get_text(strip=True)) > 1
     ]
 
     if len(job_links) < 2:

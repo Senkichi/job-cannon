@@ -18,13 +18,14 @@ cost (what Anthropic would charge if using the API directly), NOT the
 recorded provider cost. This preserves D-14's spirit as a safety rail on
 wall-time/tokens regardless of the subscription billing path.
 """
+
 from __future__ import annotations
 
 import logging
 import sys
 from typing import Any
 
-from job_finder.web.claude_client import call_claude, compute_cost
+from job_finder.web.claude_client import call_claude
 from job_finder.web.scoring_prompts.v3_scoring_prompt import (
     JOB_ASSESSMENT_SCHEMA,
     V3_SCORING_PROMPT,
@@ -59,8 +60,13 @@ def _format_job_for_scoring(row: dict, config: dict) -> str:
     # just for this — the structure is small and flat enough)
     profile_parts: list[str] = []
     for key in (
-        "name", "target_titles", "target_locations", "target_salary_min",
-        "years_experience", "skills", "job_archetypes",
+        "name",
+        "target_titles",
+        "target_locations",
+        "target_salary_min",
+        "years_experience",
+        "skills",
+        "job_archetypes",
     ):
         if key in profile:
             profile_parts.append(f"{key}: {profile[key]}")

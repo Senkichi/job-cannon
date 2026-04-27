@@ -72,6 +72,7 @@ FIELD_LABELS = {
     "role_archetype": "Role archetype",
 }
 
+
 def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
     """Load style guide from JSON file.
 
@@ -82,13 +83,14 @@ def load_style_guide(path: str = _STYLE_GUIDE_PATH) -> dict:
         Dict with style guide data, or {} if file does not exist.
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
     except Exception as e:
         logger.warning("load_style_guide: failed to load '%s': %s", path, e)
         return {}
+
 
 def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """Save style guide dict to JSON file.
@@ -99,6 +101,7 @@ def save_style_guide(guide: dict, path: str = _STYLE_GUIDE_PATH) -> None:
     """
     with open(path, "w", encoding="utf-8") as f:
         json.dump(guide, f, indent=2, ensure_ascii=False)
+
 
 def _build_style_guide_directives(guide: dict) -> list[str]:
     """Convert a style guide dict to a list of formatted prompt directive strings.
@@ -131,6 +134,7 @@ def _build_style_guide_directives(guide: dict) -> list[str]:
 
     return directives
 
+
 def extract_style_guide(
     raw_text: str,
     existing_guide: dict,
@@ -153,11 +157,7 @@ def extract_style_guide(
         None on error (caller must handle failure).
     """
     try:
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         if existing_guide:
             system = (
@@ -206,6 +206,7 @@ def extract_style_guide(
     except Exception as e:
         logger.warning("extract_style_guide: failed: %s", e)
         return None
+
 
 def merge_guidelines_into_guide(
     guidelines_text: str,
@@ -282,6 +283,7 @@ def merge_guidelines_into_guide(
         logger.warning("merge_guidelines_into_guide: failed (mode=%s): %s", mode, e)
         return None
 
+
 def migrate_style_guide(
     config: dict,
     conn: sqlite3.Connection,
@@ -304,16 +306,16 @@ def migrate_style_guide(
     try:
         from pathlib import Path
 
-        guidelines_path = Path(__file__).resolve().parent.parent.parent / "docs" / "resume_generation_guidelines.md"
+        guidelines_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "docs"
+            / "resume_generation_guidelines.md"
+        )
         guidelines_text = guidelines_path.read_text(encoding="utf-8")
 
         existing_guide = load_style_guide(style_guide_path)
 
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,

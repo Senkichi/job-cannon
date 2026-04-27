@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 guidelines_bp = Blueprint("guidelines", __name__, url_prefix="/settings")
 
+
 @guidelines_bp.route("/migrate-style-guide", methods=["POST"], strict_slashes=False)
 def migrate_style_guide_route():
     """Run Sonnet-powered migration of the style guide to populate new guideline fields."""
@@ -34,18 +35,18 @@ def migrate_style_guide_route():
             field_count = sum(1 for v in result.values() if v)
             return (
                 f'<div id="style-guide-migrate-section" class="text-xs text-emerald-400">'
-                f'Style guide migrated. {field_count} fields now populated.'
-                f'</div>',
+                f"Style guide migrated. {field_count} fields now populated."
+                f"</div>",
                 200,
             )
         else:
             return (
                 '<div id="style-guide-migrate-section" class="text-xs text-red-400">'
-                'Migration failed: Sonnet returned no result. Check logs for details.'
+                "Migration failed: Sonnet returned no result. Check logs for details."
                 f'<button type="button" hx-post="{url_for("guidelines.migrate_style_guide_route")}" '
                 'hx-target="#style-guide-migrate-section" hx-swap="outerHTML" '
                 'class="ml-2 text-xs text-violet-400 hover:text-violet-300">Retry</button>'
-                '</div>',
+                "</div>",
                 200,
             )
     except Exception as exc:
@@ -53,13 +54,14 @@ def migrate_style_guide_route():
         migrate_url = url_for("guidelines.migrate_style_guide_route")
         return (
             f'<div id="style-guide-migrate-section" class="text-xs text-red-400">'
-            f'Migration failed: {exc}. Check logs for details.'
+            f"Migration failed: {exc}. Check logs for details."
             f'<button type="button" hx-post="{migrate_url}" '
             f'hx-target="#style-guide-migrate-section" hx-swap="outerHTML" '
             f'class="ml-2 text-xs text-violet-400 hover:text-violet-300">Retry</button>'
-            f'</div>',
+            f"</div>",
             200,
         )
+
 
 @guidelines_bp.route("/preview-guidelines-merge", methods=["POST"], strict_slashes=False)
 def preview_guidelines_merge():
@@ -83,11 +85,7 @@ def preview_guidelines_merge():
         config = current_app.config.get("JF_CONFIG", {})
         db_path = current_app.config["DB_PATH"]
         conn = get_db(db_path)
-        model = (
-            config.get("scoring", {})
-            .get("models", {})
-            .get("sonnet", DEFAULT_MODEL_SONNET)
-        )
+        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
 
         result = merge_guidelines_into_guide(
             guidelines_text=guidelines_text,
@@ -114,8 +112,20 @@ def preview_guidelines_merge():
             label = FIELD_LABELS.get(field, field)
 
             # Stringify lists/dicts for comparison
-            old_str = json.dumps(old_val, ensure_ascii=False) if isinstance(old_val, (list, dict)) else str(old_val) if old_val else ""
-            new_str = json.dumps(new_val, ensure_ascii=False) if isinstance(new_val, (list, dict)) else str(new_val) if new_val else ""
+            old_str = (
+                json.dumps(old_val, ensure_ascii=False)
+                if isinstance(old_val, (list, dict))
+                else str(old_val)
+                if old_val
+                else ""
+            )
+            new_str = (
+                json.dumps(new_val, ensure_ascii=False)
+                if isinstance(new_val, (list, dict))
+                else str(new_val)
+                if new_val
+                else ""
+            )
 
             if old_str == new_str:
                 diff_rows.append(
@@ -194,6 +204,7 @@ def preview_guidelines_merge():
             200,
         )
 
+
 @guidelines_bp.route("/apply-guidelines-merge", methods=["POST"], strict_slashes=False)
 def apply_guidelines_merge():
     """Apply the stashed merged style guide result (from preview) without a second Sonnet call."""
@@ -214,7 +225,11 @@ def apply_guidelines_merge():
         # Also persist the guidelines text to docs/resume_generation_guidelines.md if provided
         guidelines_text = request.form.get("guidelines_text", "").strip()
         if guidelines_text:
-            guidelines_path = Path(__file__).resolve().parent.parent.parent.parent / "docs" / "resume_generation_guidelines.md"
+            guidelines_path = (
+                Path(__file__).resolve().parent.parent.parent.parent
+                / "docs"
+                / "resume_generation_guidelines.md"
+            )
             guidelines_path.write_text(guidelines_text, encoding="utf-8")
             logger.info("apply_guidelines_merge: updated resume_generation_guidelines.md")
 

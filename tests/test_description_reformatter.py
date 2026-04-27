@@ -12,17 +12,17 @@ Tests cover:
 - run_description_reformat_pass returns count of reformatted jobs
 """
 
-import json
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_anthropic_client():
@@ -42,6 +42,7 @@ def mock_anthropic_client():
     mock_client = MagicMock()
     mock_client.messages.create.return_value = mock_response
     return mock_client
+
 
 @pytest.fixture
 def temp_db_path():
@@ -80,6 +81,7 @@ def temp_db_path():
     if os.path.exists(path):
         os.remove(path)
 
+
 @pytest.fixture
 def db_with_unformatted_jobs(temp_db_path):
     """DB with 3 jobs: 2 unformatted (reformatted=0) and 1 already formatted (reformatted=1)."""
@@ -115,6 +117,7 @@ def db_with_unformatted_jobs(temp_db_path):
     conn.close()
     return temp_db_path
 
+
 @pytest.fixture
 def db_with_null_description(temp_db_path):
     """DB with one job that has NULL description."""
@@ -128,9 +131,11 @@ def db_with_null_description(temp_db_path):
     conn.close()
     return temp_db_path
 
+
 # ---------------------------------------------------------------------------
 # Tests for reformat_description
 # ---------------------------------------------------------------------------
+
 
 class TestReformatDescription:
     def test_reformat_description_calls_haiku_and_returns_sectioned_text(
@@ -143,7 +148,9 @@ class TestReformatDescription:
 
         with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
             mock_call.return_value = (
-                {"text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"},
+                {
+                    "text": "About the Role\n\nBuild ML models.\n\nResponsibilities\n\n- Deploy pipelines"
+                },
                 0.0002,
             )
             result = reformat_description(pipe_description)
@@ -153,9 +160,7 @@ class TestReformatDescription:
         assert result is not None
         assert isinstance(result, str)
 
-    def test_reformat_description_returns_original_on_haiku_failure(
-        self, mock_anthropic_client
-    ):
+    def test_reformat_description_returns_original_on_haiku_failure(self, mock_anthropic_client):
         """reformat_description returns original description when Haiku call fails."""
         from job_finder.web.description_reformatter import reformat_description
 
@@ -201,9 +206,7 @@ class TestReformatDescription:
         mock_call.assert_not_called()
         assert result == already_formatted
 
-    def test_reformat_description_with_conn_records_cost(
-        self, temp_db_path
-    ):
+    def test_reformat_description_with_conn_records_cost(self, temp_db_path):
         """reformat_description records cost via call_claude when conn provided."""
         from job_finder.web.description_reformatter import reformat_description
 
@@ -234,9 +237,11 @@ class TestReformatDescription:
         mock_call.assert_called_once()
         conn.close()
 
+
 # ---------------------------------------------------------------------------
 # Tests for run_description_reformat_pass
 # ---------------------------------------------------------------------------
+
 
 class TestRunDescriptionReformatPass:
     def test_processes_only_unformatted_jobs(self, db_with_unformatted_jobs):
@@ -277,9 +282,7 @@ class TestRunDescriptionReformatPass:
         # Verify the flags are set in DB
         conn = sqlite3.connect(db_with_unformatted_jobs)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT dedup_key, description_reformatted FROM jobs"
-        ).fetchall()
+        rows = conn.execute("SELECT dedup_key, description_reformatted FROM jobs").fetchall()
         conn.close()
 
         # All jobs should now have description_reformatted=1
@@ -309,8 +312,7 @@ class TestRunDescriptionReformatPass:
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         reformatted_text = (
-            "About the Role\n\nReformatted description.\n\n"
-            "Responsibilities\n\n- Build models"
+            "About the Role\n\nReformatted description.\n\nResponsibilities\n\n- Build models"
         )
 
         with patch("job_finder.web.description_reformatter.call_claude") as mock_call:
@@ -374,13 +376,19 @@ class TestReformatDescriptionCascade:
     _RAW = "Build ML models | Deploy pipelines | Monitor performance"
 
     def test_uses_call_model_when_providers_configured(
-        self, migrated_db, cascade_config_haiku, make_model_result,
+        self,
+        migrated_db,
+        cascade_config_haiku,
+        make_model_result,
     ):
         from job_finder.web.description_reformatter import reformat_description
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
-             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.description_reformatter.call_model") as mock_cm,
+            patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
+        ):
             mock_cm.return_value = make_model_result(
                 {"text": "About the Role\n\nBuild models.\n\nResponsibilities\n\n- Deploy"}
             )
@@ -394,10 +402,13 @@ class TestReformatDescriptionCascade:
 
     def test_uses_call_claude_when_no_providers(self, migrated_db):
         from job_finder.web.description_reformatter import reformat_description
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
-             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.description_reformatter.call_model") as mock_cm,
+            patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = ({"text": "About the Role\n\nReformatted content"}, 0.0002)
             result = reformat_description(self._RAW, conn=conn, config={})
 
@@ -406,14 +417,19 @@ class TestReformatDescriptionCascade:
         assert result.startswith("About the Role")
 
     def test_cascade_exhausted_falls_back_to_cli(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.description_reformatter import reformat_description
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
-             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.description_reformatter.call_model") as mock_cm,
+            patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = ({"text": "CLI fallback reformatted text"}, 0.0002)
             result = reformat_description(self._RAW, conn=conn, config=cascade_config_haiku)
@@ -423,14 +439,19 @@ class TestReformatDescriptionCascade:
         assert result == "CLI fallback reformatted text"
 
     def test_cascade_and_cli_both_fail_returns_original(
-        self, migrated_db, cascade_config_haiku,
+        self,
+        migrated_db,
+        cascade_config_haiku,
     ):
         from job_finder.web.description_reformatter import reformat_description
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
+
         _path, conn = migrated_db
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
-             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.description_reformatter.call_model") as mock_cm,
+            patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
+        ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
             result = reformat_description(self._RAW, conn=conn, config=cascade_config_haiku)
@@ -443,8 +464,10 @@ class TestReformatDescriptionCascade:
         the direct call_claude path regardless of providers config."""
         from job_finder.web.description_reformatter import reformat_description
 
-        with patch("job_finder.web.description_reformatter.call_model") as mock_cm, \
-             patch("job_finder.web.description_reformatter.call_claude") as mock_cc:
+        with (
+            patch("job_finder.web.description_reformatter.call_model") as mock_cm,
+            patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
+        ):
             mock_cc.return_value = ({"text": "Reformatted via CLI"}, 0.0002)
             result = reformat_description(self._RAW, conn=None, config=cascade_config_haiku)
 

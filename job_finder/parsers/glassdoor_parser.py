@@ -36,7 +36,6 @@ inspect a recent email and update the class constants below.
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
@@ -44,6 +43,8 @@ from bs4 import BeautifulSoup
 from job_finder.models import Job
 from job_finder.parsers._common import (
     is_meta_email as _is_meta_email,
+)
+from job_finder.parsers._common import (
     looks_like_salary_range,
     parse_salary_range,
 )
@@ -63,16 +64,16 @@ _TABLE_LOCATION_CLASS = "gd-56kyx5"
 _TABLE_SALARY_CLASS = "gd-1af37x6"
 
 # Positional format: rating pattern (e.g. "3.6 ★" or "4.1 ★")
-_RATING_RE = re.compile(r'^\s*\d+\.\d+\s*\u2605?\s*$')
+_RATING_RE = re.compile(r"^\s*\d+\.\d+\s*\u2605?\s*$")
 
 # Positional format: age/recency pattern (e.g. "Just posted", "17h", "1d", "5d")
-_AGE_RE = re.compile(r'^(Just posted|\d+[hd]?)$', re.IGNORECASE)
+_AGE_RE = re.compile(r"^(Just posted|\d+[hd]?)$", re.IGNORECASE)
 
 # Company-follow / review digest: Glassdoor brand-views pixel URL is unique to these
 _BRAND_VIEWS_RE = re.compile(r"glassdoor\.com/brand-views")
 
 
-def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> list[Job]:
+def parse_glassdoor_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a Glassdoor job alert email body (HTML) into Job objects.
 
     Args:
@@ -117,7 +118,7 @@ def parse_glassdoor_alert(body: str, email_date: Optional[datetime] = None) -> l
     return jobs
 
 
-def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
+def _parse_job_card(link_tag, email_date: datetime | None) -> Job | None:
     """Parse a single job card from a Glassdoor alert.
 
     Tries CSS-class extraction first (pre-2026 format). Falls back to
@@ -174,7 +175,7 @@ def _parse_job_card(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
     )
 
 
-def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
+def _parse_job_card_positional(link_tag, email_date: datetime | None) -> Job | None:
     """Parse a single job card using positional extraction (2026+ classless format).
 
     In the new Glassdoor format, all CSS classes are absent. Company name and
@@ -231,7 +232,7 @@ def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Opti
         return None
 
     # Among remaining p tags after title: classify location, salary, age
-    for p in all_ps[title_idx + 1:]:
+    for p in all_ps[title_idx + 1 :]:
         text = p.get_text(strip=True)
         if not text:
             continue
@@ -258,7 +259,7 @@ def _parse_job_card_positional(link_tag, email_date: Optional[datetime]) -> Opti
     )
 
 
-def _parse_job_card_table_span(link_tag, email_date: Optional[datetime]) -> Optional[Job]:
+def _parse_job_card_table_span(link_tag, email_date: datetime | None) -> Job | None:
     """Parse a single job card using table/span extraction (2026 v2 format).
 
     In this format each job has two matching <a> tags: a logo link (img only)
@@ -284,7 +285,7 @@ def _parse_job_card_table_span(link_tag, email_date: Optional[datetime]) -> Opti
     if company_span:
         raw = company_span.get_text(strip=True)
         # Strip trailing visual separator Glassdoor appends (e.g. "·-·" or "–")
-        company = re.sub(r'[\u00b7\u2013\u2014\-\s]+$', '', raw).strip() or "Unknown"
+        company = re.sub(r"[\u00b7\u2013\u2014\-\s]+$", "", raw).strip() or "Unknown"
 
     location_span = link_tag.find("span", class_=_TABLE_LOCATION_CLASS)
     location = location_span.get_text(strip=True) if location_span else "Unknown"
@@ -328,7 +329,7 @@ def _extract_listing_id(url: str) -> str:
         return ""
 
 
-def _parse_salary(text: str) -> tuple[Optional[int], Optional[int]]:
+def _parse_salary(text: str) -> tuple[int | None, int | None]:
     """Parse salary from Glassdoor format: '$178K - $250K (Employer est.)'
 
     Delegates to the shared ``parse_salary_range`` in ``_common.py``.

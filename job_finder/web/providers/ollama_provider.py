@@ -13,11 +13,11 @@ kwarg without leaking state across calls.
 
 Health check on init prevents silent failures when Ollama is not running.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 import requests
 
@@ -54,7 +54,7 @@ def _schema_to_example(schema: dict) -> str:
             items = s.get("items", {})
             return [_build(items)]
         # Use first enum value as example instead of generic placeholder
-        if "enum" in s and s["enum"]:
+        if s.get("enum"):
             return s["enum"][0]
         return _TYPE_PLACEHOLDERS.get(typ, "...")
 
@@ -114,6 +114,8 @@ def _schema_to_field_instructions(schema: dict, indent: int = 0) -> str:
             lines.append(f'{pad}"{key}": <{typ}>,{comment}')
 
     return "\n".join(lines)
+
+
 _DEFAULT_TIMEOUT = 300.0
 _HEALTH_CHECK_TIMEOUT = 2.0
 

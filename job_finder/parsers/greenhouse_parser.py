@@ -13,7 +13,6 @@ format lists jobs as:
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
 from job_finder.models import Job
 from job_finder.parsers._common import is_meta_email
@@ -34,9 +33,7 @@ _FOOTER_RE = re.compile(
 )
 
 
-def parse_greenhouse_alert(
-    body: str, email_date: Optional[datetime] = None
-) -> list[Job]:
+def parse_greenhouse_alert(body: str, email_date: datetime | None = None) -> list[Job]:
     """Parse a Greenhouse job alert email body into Job objects.
 
     Args:
@@ -55,7 +52,7 @@ def parse_greenhouse_alert(
 
     # Truncate at footer
     footer_match = _FOOTER_RE.search(body)
-    search_body = body[:footer_match.start()] if footer_match else body
+    search_body = body[: footer_match.start()] if footer_match else body
 
     jobs = []
     seen_ids: set[str] = set()
@@ -80,26 +77,27 @@ def parse_greenhouse_alert(
         if not title:
             continue
 
-        jobs.append(Job(
-            title=title,
-            company=company or _slug_to_company(company_slug),
-            location="Unknown",
-            source="greenhouse",
-            source_url=source_url,
-            source_id=job_id,
-            posted_date=email_date,
-        ))
+        jobs.append(
+            Job(
+                title=title,
+                company=company or _slug_to_company(company_slug),
+                location="Unknown",
+                source="greenhouse",
+                source_url=source_url,
+                source_id=job_id,
+                posted_date=email_date,
+            )
+        )
 
     if not jobs and GREENHOUSE_URL_RE.search(body):
         logger.warning(
-            "Greenhouse parser: URLs found but no jobs extracted. "
-            "Email format may have changed."
+            "Greenhouse parser: URLs found but no jobs extracted. Email format may have changed."
         )
 
     return jobs
 
 
-def _extract_title_before_url(body: str, url_start: int) -> Optional[str]:
+def _extract_title_before_url(body: str, url_start: int) -> str | None:
     """Find the job title in lines preceding the URL."""
     # Get text before the URL, split into lines, work backwards
     before = body[:url_start]
@@ -113,17 +111,24 @@ def _extract_title_before_url(body: str, url_start: int) -> Optional[str]:
         if len(line) < 3 or len(line) > 150:
             continue
         # Skip common preamble text
-        if any(phrase in line.lower() for phrase in (
-            "here's your", "weekly update", "new roles",
-            "good fit", "apply early", "stand out",
-        )):
+        if any(
+            phrase in line.lower()
+            for phrase in (
+                "here's your",
+                "weekly update",
+                "new roles",
+                "good fit",
+                "apply early",
+                "stand out",
+            )
+        ):
             continue
         return line
 
     return None
 
 
-def _extract_company_after_url(body: str, url_end: int) -> Optional[str]:
+def _extract_company_after_url(body: str, url_end: int) -> str | None:
     """Find the company name in lines following the URL."""
     after = body[url_end:]
     lines = [line.strip() for line in after.split("\n") if line.strip()]
@@ -136,10 +141,17 @@ def _extract_company_after_url(body: str, url_end: int) -> Optional[str]:
         if len(line) < 2 or len(line) > 80:
             continue
         # Skip footer-like content
-        if any(phrase in line.lower() for phrase in (
-            "we'll send", "sincerely", "greenhouse",
-            "search my", "unsubscribe", "\u00a9",
-        )):
+        if any(
+            phrase in line.lower()
+            for phrase in (
+                "we'll send",
+                "sincerely",
+                "greenhouse",
+                "search my",
+                "unsubscribe",
+                "\u00a9",
+            )
+        ):
             continue
         return line
 

@@ -26,6 +26,7 @@ from job_finder.web.profile_schema import load_profile, save_profile, validate_p
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def valid_profile():
     """A minimal profile dict that should produce no validation warnings."""
@@ -47,6 +48,7 @@ def valid_profile():
         "resume_preferences": {"summary_style": "concise", "emphasis": ["causal inference"]},
     }
 
+
 @pytest.fixture
 def tmp_profile_path():
     """Temp file path for profile JSON (cleaned up after test)."""
@@ -57,9 +59,11 @@ def tmp_profile_path():
     if os.path.exists(path):
         os.remove(path)
 
+
 # ---------------------------------------------------------------------------
 # validate_profile — warning detection tests
 # ---------------------------------------------------------------------------
+
 
 class TestValidateProfile:
     def test_position_with_no_achievements_raises_warning(self):
@@ -147,9 +151,11 @@ class TestValidateProfile:
         messages = [w["message"] for w in warnings]
         assert any("TestCo" in m and "no skills tagged" in m for m in messages)
 
+
 # ---------------------------------------------------------------------------
 # load_profile / save_profile
 # ---------------------------------------------------------------------------
+
 
 class TestLoadSaveProfile:
     def test_load_profile_returns_empty_structure_when_file_missing(self, tmp_profile_path):
@@ -166,7 +172,7 @@ class TestLoadSaveProfile:
         save_profile(valid_profile, tmp_profile_path)
         assert os.path.exists(tmp_profile_path)
 
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             loaded = json.load(f)
 
         assert loaded["positions"][0]["company"] == "Acme Corp"
@@ -181,7 +187,6 @@ class TestLoadSaveProfile:
         3. Assert the original file is unchanged.
         4. Assert a warning was logged (empty-overwrite guard triggered).
         """
-        import logging
         from job_finder.web.profile_schema import EMPTY_PROFILE
 
         # Populate the temp file with real data
@@ -219,7 +224,7 @@ class TestLoadSaveProfile:
 
         # Confirm the file was written correctly before the guard test
         assert os.path.exists(tmp_profile_path)
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             before = json.load(f)
         assert len(before["positions"]) == 3
         assert len(before["skills"]) == 5
@@ -229,7 +234,7 @@ class TestLoadSaveProfile:
             save_profile(EMPTY_PROFILE, tmp_profile_path)
 
         # File must be UNCHANGED
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             after = json.load(f)
         assert after["positions"] == before["positions"], (
             "save_profile silently overwrote populated profile with empty data"
@@ -285,7 +290,7 @@ class TestLoadSaveProfile:
         save_profile(EMPTY_PROFILE, tmp_profile_path)
         assert os.path.exists(tmp_profile_path)
 
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             saved = json.load(f)
         assert saved["positions"] == []
         assert saved["skills"] == []
@@ -300,19 +305,39 @@ class TestLoadSaveProfile:
 
         save_profile(updated, tmp_profile_path)
 
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             saved = json.load(f)
         assert saved["skills"] == ["Python", "SQL", "Spark"]
 
     def test_save_profile_refuses_suspicious_reduction(self, tmp_profile_path):
         """save_profile blocks saves where both positions AND skills shrink (wipe signal)."""
-        import logging
 
         populated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
-                {"title": "B", "company": "Co2", "start_date": "", "end_date": None, "achievements": ["x2"], "skills": ["Q"]},
-                {"title": "C", "company": "Co3", "start_date": "", "end_date": None, "achievements": ["x3"], "skills": ["R"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
+                {
+                    "title": "B",
+                    "company": "Co2",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x2"],
+                    "skills": ["Q"],
+                },
+                {
+                    "title": "C",
+                    "company": "Co3",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x3"],
+                    "skills": ["R"],
+                },
             ],
             "skills": ["P", "Q", "R", "S", "T"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -321,7 +346,14 @@ class TestLoadSaveProfile:
 
         reduced = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
             ],
             "skills": ["P", "Q"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -331,7 +363,7 @@ class TestLoadSaveProfile:
             save_profile(reduced, tmp_profile_path)
 
         # File must be unchanged
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             after = json.load(f)
         assert len(after["positions"]) == 3, "Suspicious reduction was not blocked"
         assert len(after["skills"]) == 5
@@ -341,9 +373,30 @@ class TestLoadSaveProfile:
         """save_profile with force=True allows intentional reduction."""
         populated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
-                {"title": "B", "company": "Co2", "start_date": "", "end_date": None, "achievements": ["x2"], "skills": ["Q"]},
-                {"title": "C", "company": "Co3", "start_date": "", "end_date": None, "achievements": ["x3"], "skills": ["R"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
+                {
+                    "title": "B",
+                    "company": "Co2",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x2"],
+                    "skills": ["Q"],
+                },
+                {
+                    "title": "C",
+                    "company": "Co3",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x3"],
+                    "skills": ["R"],
+                },
             ],
             "skills": ["P", "Q", "R", "S", "T"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -352,14 +405,21 @@ class TestLoadSaveProfile:
 
         reduced = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
             ],
             "skills": ["P", "Q"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
         }
         save_profile(reduced, tmp_profile_path, force=True)
 
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             after = json.load(f)
         assert len(after["positions"]) == 1
         assert len(after["skills"]) == 2
@@ -368,8 +428,22 @@ class TestLoadSaveProfile:
         """Reducing positions but increasing skills is allowed (not suspicious)."""
         populated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
-                {"title": "B", "company": "Co2", "start_date": "", "end_date": None, "achievements": ["x2"], "skills": ["Q"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
+                {
+                    "title": "B",
+                    "company": "Co2",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x2"],
+                    "skills": ["Q"],
+                },
             ],
             "skills": ["P", "Q"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -379,14 +453,21 @@ class TestLoadSaveProfile:
         # Fewer positions but more skills — legitimate edit
         updated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
             ],
             "skills": ["P", "Q", "R", "S"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
         }
         save_profile(updated, tmp_profile_path)
 
-        with open(tmp_profile_path, "r", encoding="utf-8") as f:
+        with open(tmp_profile_path, encoding="utf-8") as f:
             after = json.load(f)
         assert len(after["positions"]) == 1
         assert len(after["skills"]) == 4
@@ -395,7 +476,14 @@ class TestLoadSaveProfile:
         """POST /profile/save with stale _mtime returns 409."""
         populated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
             ],
             "skills": ["P"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -405,16 +493,24 @@ class TestLoadSaveProfile:
 
         # Simulate external modification: write the file again
         import time
+
         time.sleep(0.05)
         save_profile(populated, tmp_profile_path)
 
-        from job_finder.web import create_app
         import job_finder.web.blueprints.profile as profile_mod
+        from job_finder.web import create_app
 
         test_config = {
             "db": {"path": ":memory:"},
             "scoring": {"min_score_threshold": 40},
-            "profile": {"target_titles": [], "target_locations": [], "min_salary": 0, "industries": [], "exclusions": {"title_keywords": [], "companies": []}, "skills": []},
+            "profile": {
+                "target_titles": [],
+                "target_locations": [],
+                "min_salary": 0,
+                "industries": [],
+                "exclusions": {"title_keywords": [], "companies": []},
+                "skills": [],
+            },
             "sources": {},
             "output": {"default_format": "cli", "max_results": 50},
         }
@@ -426,7 +522,16 @@ class TestLoadSaveProfile:
         try:
             client = app.test_client()
             payload = {
-                "positions": [{"title": "B", "company": "Co2", "start_date": "", "end_date": None, "achievements": [], "skills": []}],
+                "positions": [
+                    {
+                        "title": "B",
+                        "company": "Co2",
+                        "start_date": "",
+                        "end_date": None,
+                        "achievements": [],
+                        "skills": [],
+                    }
+                ],
                 "skills": ["P"],
                 "resume_preferences": {"summary_style": "", "emphasis": []},
                 "_mtime": str(original_mtime),  # stale!
@@ -444,7 +549,14 @@ class TestLoadSaveProfile:
         """POST /profile/save with fresh _mtime succeeds."""
         populated = {
             "positions": [
-                {"title": "A", "company": "Co1", "start_date": "", "end_date": None, "achievements": ["x1"], "skills": ["P"]},
+                {
+                    "title": "A",
+                    "company": "Co1",
+                    "start_date": "",
+                    "end_date": None,
+                    "achievements": ["x1"],
+                    "skills": ["P"],
+                },
             ],
             "skills": ["P"],
             "resume_preferences": {"summary_style": "", "emphasis": []},
@@ -452,13 +564,20 @@ class TestLoadSaveProfile:
         save_profile(populated, tmp_profile_path)
         current_mtime = os.path.getmtime(tmp_profile_path)
 
-        from job_finder.web import create_app
         import job_finder.web.blueprints.profile as profile_mod
+        from job_finder.web import create_app
 
         test_config = {
             "db": {"path": ":memory:"},
             "scoring": {"min_score_threshold": 40},
-            "profile": {"target_titles": [], "target_locations": [], "min_salary": 0, "industries": [], "exclusions": {"title_keywords": [], "companies": []}, "skills": []},
+            "profile": {
+                "target_titles": [],
+                "target_locations": [],
+                "min_salary": 0,
+                "industries": [],
+                "exclusions": {"title_keywords": [], "companies": []},
+                "skills": [],
+            },
             "sources": {},
             "output": {"default_format": "cli", "max_results": 50},
         }
@@ -470,7 +589,16 @@ class TestLoadSaveProfile:
         try:
             client = app.test_client()
             payload = {
-                "positions": [{"title": "B", "company": "Co2", "start_date": "", "end_date": None, "achievements": ["x2"], "skills": ["Q"]}],
+                "positions": [
+                    {
+                        "title": "B",
+                        "company": "Co2",
+                        "start_date": "",
+                        "end_date": None,
+                        "achievements": ["x2"],
+                        "skills": ["Q"],
+                    }
+                ],
                 "skills": ["P", "Q"],
                 "resume_preferences": {"summary_style": "", "emphasis": []},
                 "_mtime": str(current_mtime),  # fresh
@@ -512,9 +640,11 @@ class TestLoadSaveProfile:
         assert loaded["education"][0]["degree"] == "M.S. Statistics"
         assert loaded["education"][1]["institution"] == "MIT"
 
+
 # ---------------------------------------------------------------------------
 # Profile Editor routes
 # ---------------------------------------------------------------------------
+
 
 class TestProfileEditorRoutes:
     def test_get_profile_returns_200(self, client):
@@ -554,6 +684,7 @@ class TestProfileEditorRoutes:
         try:
             # Monkeypatch the profile path used by the blueprint
             import job_finder.web.blueprints.profile as profile_mod
+
             original_path = profile_mod._PROFILE_PATH
             profile_mod._PROFILE_PATH = tmp_path
 
@@ -573,9 +704,11 @@ class TestProfileEditorRoutes:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+
 # ---------------------------------------------------------------------------
 # PDF Upload routes
 # ---------------------------------------------------------------------------
+
 
 class TestPdfUpload:
     """Tests for POST /profile/upload-pdf route."""
@@ -588,10 +721,10 @@ class TestPdfUpload:
     @pytest.fixture
     def app_with_uploads(self, tmp_db_path, tmp_path, monkeypatch):
         """Test app with temp DB and temp upload directory."""
-        from job_finder.web import create_app
-
         # Point data/resume_uploads to a temp dir by monkeypatching Path in resume_review module
         import job_finder.web.blueprints.resume_review as resume_review_mod
+        from job_finder.web import create_app
+
         monkeypatch.setattr(resume_review_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
 
         test_config = {
@@ -630,9 +763,7 @@ class TestPdfUpload:
         doc.close = MagicMock()
         return doc
 
-    def test_upload_pdf_extracts_text_and_redirects(
-        self, app_with_uploads, monkeypatch
-    ):
+    def test_upload_pdf_extracts_text_and_redirects(self, app_with_uploads, monkeypatch):
         """POST /profile/upload-pdf with valid text PDF inserts DB row and redirects."""
         import io
         import sqlite3
@@ -640,7 +771,9 @@ class TestPdfUpload:
         long_text = "A" * 500  # Well above the 200-char threshold
 
         mock_doc = self._make_mock_doc(long_text)
-        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr(
+            "job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc
+        )
 
         client = app_with_uploads.test_client()
         data = {
@@ -667,11 +800,10 @@ class TestPdfUpload:
         assert row["review_status"] == "pending"
         assert long_text in row["raw_text"]
 
-    def test_upload_pdf_archives_file(
-        self, app_with_uploads, monkeypatch, tmp_path
-    ):
+    def test_upload_pdf_archives_file(self, app_with_uploads, monkeypatch, tmp_path):
         """POST /profile/upload-pdf archives the PDF bytes to the upload directory."""
         import io
+
         import job_finder.web.blueprints.resume_review as resume_review_mod
 
         upload_dir = str(tmp_path / "resume_uploads")
@@ -679,7 +811,9 @@ class TestPdfUpload:
 
         long_text = "B" * 500
         mock_doc = self._make_mock_doc(long_text)
-        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr(
+            "job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc
+        )
 
         client = app_with_uploads.test_client()
         data = {
@@ -693,6 +827,7 @@ class TestPdfUpload:
 
         # At least one file should exist in the upload dir
         import os
+
         files = os.listdir(upload_dir) if os.path.exists(upload_dir) else []
         assert len(files) >= 1
         assert any("archive_test.pdf" in f for f in files)
@@ -704,7 +839,9 @@ class TestPdfUpload:
         short_text = "A" * 50  # Below the 200-char threshold
 
         mock_doc = self._make_mock_doc(short_text)
-        monkeypatch.setattr("job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc)
+        monkeypatch.setattr(
+            "job_finder.web.blueprints.resume_review.fitz.open", lambda mode, data: mock_doc
+        )
 
         data = {
             "pdf_file": (io.BytesIO(b"%PDF-scanned"), "scanned.pdf", "application/pdf"),
@@ -741,9 +878,11 @@ class TestPdfUpload:
         messages = [msg for category, msg in flashes]
         assert any("no file" in msg.lower() or "please select" in msg.lower() for msg in messages)
 
+
 # ---------------------------------------------------------------------------
 # Conflict review routes (Plan 17-02)
 # ---------------------------------------------------------------------------
+
 
 class TestConflictReview:
     """Tests for GET /profile/review/<id> and POST /profile/save-conflicts/<id>."""
@@ -768,9 +907,9 @@ class TestConflictReview:
     @pytest.fixture
     def app_with_upload_row(self, tmp_db_path, tmp_path, monkeypatch):
         """Test app with a pre-inserted resume_upload_reviews row."""
-        from job_finder.web import create_app
         import sqlite3
-        from job_finder.web.db_migrate import run_migrations
+
+        from job_finder.web import create_app
 
         test_config = {
             "db": {"path": tmp_db_path},
@@ -808,6 +947,7 @@ class TestConflictReview:
     def _mock_compare_conflicts(self, monkeypatch, conflicts=None):
         """Monkeypatch _compare_conflicts to return canned conflicts."""
         import job_finder.web.blueprints.resume_review as resume_review_mod
+
         if conflicts is None:
             conflicts = self.CANNED_CONFLICTS
 
@@ -822,6 +962,7 @@ class TestConflictReview:
         self._mock_compare_conflicts(monkeypatch)
         # Monkeypatch profile path to avoid reading real experience_profile.json
         import job_finder.web.blueprints.resume_review as resume_review_mod
+
         tmp_profile = str(tmp_path / "profile.json")
         monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
@@ -867,7 +1008,7 @@ class TestConflictReview:
             "conflicts": self.CANNED_CONFLICTS,
             "decisions": [
                 {"conflict_index": 0, "action": "accept"},  # new_skill: Apache Spark
-                {"conflict_index": 1, "action": "skip"},    # achievement: skip
+                {"conflict_index": 1, "action": "skip"},  # achievement: skip
             ],
         }
         resp = client.post(
@@ -886,11 +1027,19 @@ class TestConflictReview:
     ):
         """POST /profile/save-conflicts updates resume_upload_reviews.review_status to 'reviewed'."""
         import sqlite3
+
         import job_finder.web.blueprints.resume_review as resume_review_mod
         from job_finder.web.profile_schema import save_profile
 
         tmp_profile = str(tmp_path / "profile.json")
-        save_profile({"positions": [], "skills": [], "resume_preferences": {"summary_style": "", "emphasis": []}}, tmp_profile)
+        save_profile(
+            {
+                "positions": [],
+                "skills": [],
+                "resume_preferences": {"summary_style": "", "emphasis": []},
+            },
+            tmp_profile,
+        )
         monkeypatch.setattr(resume_review_mod, "_PROFILE_PATH", tmp_profile)
 
         client = app_with_upload_row.test_client()
@@ -910,9 +1059,7 @@ class TestConflictReview:
         # Verify review_status updated
         conn = sqlite3.connect(app_with_upload_row._test_db_path)
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT review_status FROM resume_upload_reviews WHERE id=1"
-        ).fetchone()
+        row = conn.execute("SELECT review_status FROM resume_upload_reviews WHERE id=1").fetchone()
         conn.close()
         assert row["review_status"] == "reviewed"
 
@@ -951,9 +1098,11 @@ class TestConflictReview:
         assert "Apache Spark" not in updated_profile["skills"]
         assert updated_profile["skills"] == ["Python", "SQL"]
 
+
 # ---------------------------------------------------------------------------
 # import_markdown route template variable completeness (Plan 18-01 regression)
 # ---------------------------------------------------------------------------
+
 
 class TestImportMarkdown:
     """Regression tests: POST /profile/import passes uploads and style_guide to template."""
@@ -1003,19 +1152,21 @@ class TestImportMarkdown:
         from unittest.mock import patch
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        with patch(
-            "job_finder.web.blueprints.profile.extract_profile_from_markdown",
-            return_value=self._MINIMAL_PROFILE,
-        ):
-            with patch(
+        with (
+            patch(
+                "job_finder.web.blueprints.profile.extract_profile_from_markdown",
+                return_value=self._MINIMAL_PROFILE,
+            ),
+            patch(
                 "job_finder.web.resume_style_guide.load_style_guide",
                 return_value={"bullet_style": "dashes"},
-            ):
-                resp = import_client.post(
-                    "/profile/import",
-                    data={"markdown_file": (io.BytesIO(b"# Test"), "test.md", "text/markdown")},
-                    content_type="multipart/form-data",
-                )
+            ),
+        ):
+            resp = import_client.post(
+                "/profile/import",
+                data={"markdown_file": (io.BytesIO(b"# Test"), "test.md", "text/markdown")},
+                content_type="multipart/form-data",
+            )
 
         assert resp.status_code == 200
         assert b"style-guide-section" in resp.data
@@ -1026,26 +1177,30 @@ class TestImportMarkdown:
         from unittest.mock import patch
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-        with patch(
-            "job_finder.web.blueprints.profile.extract_profile_from_markdown",
-            return_value=self._MINIMAL_PROFILE,
-        ):
-            with patch(
+        with (
+            patch(
+                "job_finder.web.blueprints.profile.extract_profile_from_markdown",
+                return_value=self._MINIMAL_PROFILE,
+            ),
+            patch(
                 "job_finder.web.resume_style_guide.load_style_guide",
                 return_value={},
-            ):
-                resp = import_client.post(
-                    "/profile/import",
-                    data={"markdown_file": (io.BytesIO(b"# Test"), "test.md", "text/markdown")},
-                    content_type="multipart/form-data",
-                )
+            ),
+        ):
+            resp = import_client.post(
+                "/profile/import",
+                data={"markdown_file": (io.BytesIO(b"# Test"), "test.md", "text/markdown")},
+                content_type="multipart/form-data",
+            )
 
         assert resp.status_code == 200
         assert b"upload-pdf-form" in resp.data
 
+
 # ---------------------------------------------------------------------------
 # Phase 17 activity instrumentation (Plan 19-03)
 # ---------------------------------------------------------------------------
+
 
 class TestPhase17ActivityInstrumentation:
     """Verify Phase 17 profile routes call log_activity()."""
@@ -1067,8 +1222,9 @@ class TestPhase17ActivityInstrumentation:
     @pytest.fixture
     def instrumented_app(self, tmp_db_path, tmp_path, monkeypatch):
         """Test app with temp DB, temp upload dir, and test DB path stashed."""
-        from job_finder.web import create_app
         import job_finder.web.blueprints.resume_review as resume_review_mod
+        from job_finder.web import create_app
+
         monkeypatch.setattr(resume_review_mod, "_UPLOAD_DIR", str(tmp_path / "resume_uploads"))
         cfg = dict(self._TEST_CONFIG)
         cfg["db"] = {"path": tmp_db_path}
@@ -1115,10 +1271,13 @@ class TestPhase17ActivityInstrumentation:
         assert mock_log.called, "log_activity was not called in upload_pdf"
         call_action = mock_log.call_args[0][1]
         from job_finder.web.activity_tracker import ACTION_UPLOAD_RESUME_PDF
+
         assert call_action == ACTION_UPLOAD_RESUME_PDF
 
     @patch("job_finder.web.blueprints.resume_review.log_activity")
-    def test_conflict_review_logs_activity(self, mock_log, instrumented_app, monkeypatch, tmp_path):
+    def test_conflict_review_logs_activity(
+        self, mock_log, instrumented_app, monkeypatch, tmp_path
+    ):
         """conflict_review route calls log_activity with ACTION_CONFLICT_REVIEW."""
         import job_finder.web.blueprints.resume_review as resume_review_mod
 
@@ -1137,6 +1296,7 @@ class TestPhase17ActivityInstrumentation:
         assert mock_log.called, "log_activity was not called in conflict_review"
         call_action = mock_log.call_args[0][1]
         from job_finder.web.activity_tracker import ACTION_CONFLICT_REVIEW
+
         assert call_action == ACTION_CONFLICT_REVIEW
 
     @patch("job_finder.web.blueprints.resume_review.log_activity")
@@ -1163,6 +1323,7 @@ class TestPhase17ActivityInstrumentation:
         assert mock_log.called, "log_activity was not called in save_conflicts"
         call_action = mock_log.call_args[0][1]
         from job_finder.web.activity_tracker import ACTION_SAVE_CONFLICTS
+
         assert call_action == ACTION_SAVE_CONFLICTS
 
     @patch("job_finder.web.blueprints.resume_review.log_activity")
@@ -1187,7 +1348,9 @@ class TestPhase17ActivityInstrumentation:
         assert mock_log.called, "log_activity was not called in extract_style"
         call_action = mock_log.call_args[0][1]
         from job_finder.web.activity_tracker import ACTION_EXTRACT_STYLE
+
         assert call_action == ACTION_EXTRACT_STYLE
+
 
 # ---------------------------------------------------------------------------
 # Profile recommendation routes (Plan 43-02)
@@ -1218,6 +1381,7 @@ _CANNED_REC_RESULT = {
     ]
 }
 
+
 class TestProfileRecommendations:
     """Tests for GET /profile/recommendation, POST /profile/recommendations-all,
     and POST /profile/apply-fix routes."""
@@ -1225,9 +1389,9 @@ class TestProfileRecommendations:
     @pytest.fixture
     def rec_app(self, tmp_db_path, tmp_path, monkeypatch):
         """Test app for recommendation tests with a temp profile file."""
-        from job_finder.web import create_app
         import job_finder.web.blueprints.profile as profile_mod
         import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
+        from job_finder.web import create_app
 
         # Create a temp profile with known warnings (no achievements on a position)
         tmp_profile = str(tmp_path / "profile.json")
@@ -1273,14 +1437,13 @@ class TestProfileRecommendations:
     def test_single_recommendation_route(self, rec_client, monkeypatch):
         """GET /profile/recommendation returns Haiku guidance for a warning."""
         import job_finder.web.blueprints.profile_recommendations as profile_recs_mod
+
         monkeypatch.setattr(
             profile_recs_mod,
             "call_claude",
             lambda **kwargs: (_CANNED_REC_RESULT, 0.001),
         )
-        resp = rec_client.get(
-            "/profile/recommendation?field=skills&message=Missing%20skill"
-        )
+        resp = rec_client.get("/profile/recommendation?field=skills&message=Missing%20skill")
         assert resp.status_code == 200
         html = resp.data.decode()
         assert "Add Python to your skills." in html

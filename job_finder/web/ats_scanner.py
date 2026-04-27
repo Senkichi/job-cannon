@@ -23,9 +23,8 @@ import logging
 import sqlite3
 import time
 from datetime import datetime
-from typing import Optional
 
-import requests
+import requests  # noqa: F401 — re-exported for test patching of requests.get
 
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.dedup_normalizer import normalize_company
@@ -54,50 +53,53 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Re-exports from ats_detection and ats_prober for backward compatibility
-from job_finder.web.ats_detection import extract_ats_from_urls, derive_slug_candidates  # noqa: E402
-from job_finder.web.ats_prober import (  # noqa: E402
-    probe_single_company,
-    _probe_lever_with_result,
-    _probe_lever,
-    _probe_greenhouse,
-    _probe_ashby,
-    _probe_workday,
-    _probe_smartrecruiters,
-    _compute_retry_after,
-    _is_transient_error,
-    _handle_scan_error,
-    _reset_retry_state,
-    _PROBE_STATUS_PRECEDENCE,
-    _BACKOFF_HOURS,
-    _MAX_RETRIES,
-    _TRANSIENT_CODES,
-    _PERMANENT_MISS_CODES,
-    _PROBE_TIMEOUT,
+from job_finder.web.ats_detection import (
+    derive_slug_candidates,
+    extract_ats_from_urls,
 )
 
 # Canonical scanner implementations live in ats_platforms.py.
 # Re-exported here for backward compatibility with existing callers
 # (careers_scraper, enrichment_tiers, run_ats_scan loop, tests/test_ats_scanner.py).
-from job_finder.web.ats_platforms import (  # noqa: E402, F401
+from job_finder.web.ats_platforms import (  # noqa: F401
     _title_matches,
     scan_ashby,
     scan_greenhouse,
     scan_lever,
+)
+from job_finder.web.ats_prober import (  # noqa: F401
+    _BACKOFF_HOURS,
+    _MAX_RETRIES,
+    _PERMANENT_MISS_CODES,
+    _PROBE_STATUS_PRECEDENCE,
+    _PROBE_TIMEOUT,
+    _TRANSIENT_CODES,
+    _compute_retry_after,
+    _handle_scan_error,
+    _is_transient_error,
+    _probe_ashby,
+    _probe_greenhouse,
+    _probe_lever,
+    _probe_lever_with_result,
+    _probe_smartrecruiters,
+    _probe_workday,
+    _reset_retry_state,
+    probe_single_company,
 )
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def upsert_company(
     conn: sqlite3.Connection,
     name: str,
-    ats_platform: Optional[str] = None,
-    ats_slug: Optional[str] = None,
+    ats_platform: str | None = None,
+    ats_slug: str | None = None,
     ats_probe_status: str = "pending",
-    homepage_url: Optional[str] = None,
-) -> Optional[int]:
+    homepage_url: str | None = None,
+) -> int | None:
     """Create or update a company record in the companies table.
 
     Looks up by normalized company name. If the company exists, updates
@@ -186,6 +188,7 @@ def upsert_company(
     except Exception as e:
         logger.warning("upsert_company failed for '%s' (non-fatal): %s", name, e)
         return None
+
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
     """Probe ATS APIs speculatively for companies with pending probe status.
@@ -374,12 +377,15 @@ def promote_ats_from_source_urls(db_path: str, config: dict) -> dict:
             summary["promoted"] += 1
             logger.info(
                 "promote_ats: %s -> %s:%s (from job source_urls)",
-                company["name"], platform, slug,
+                company["name"],
+                platform,
+                slug,
             )
 
     logger.info(
         "promote_ats_from_source_urls: checked=%d, promoted=%d",
-        summary["checked"], summary["promoted"],
+        summary["checked"],
+        summary["promoted"],
     )
     return summary
 
@@ -432,7 +438,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     profile = config.get("profile", {})
     target_titles = profile.get("target_titles", [])
     exclusions_cfg = profile.get("exclusions", {})
-    title_exclusions = exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    title_exclusions = (
+        exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    )
 
     summary = {
         "companies_scanned": 0,
@@ -482,12 +490,16 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     job_dicts = scan_ashby(slug, target_titles, title_exclusions)
                 elif platform == "workday":
                     from job_finder.web.ats_platforms import scan_workday
+
                     job_dicts = scan_workday(slug, target_titles, title_exclusions)
                 elif platform == "smartrecruiters":
                     from job_finder.web.ats_platforms import scan_smartrecruiters
+
                     job_dicts = scan_smartrecruiters(slug, target_titles, title_exclusions)
                 else:
-                    logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
+                    logger.warning(
+                        "Unknown ATS platform '%s' for company '%s'", platform, company_name
+                    )
                     job_dicts = []
 
                 company_jobs_found = len(job_dicts)
@@ -503,12 +515,18 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             # First-seen salary wins: only set salary if job is new
                             # (no existing salary data). Check existing record first.
                             from job_finder.models import Job
-                            candidate_dedup_key = Job.normalized_dedup_key(company_name, job_dict["title"])
+
+                            candidate_dedup_key = Job.normalized_dedup_key(
+                                company_name, job_dict["title"]
+                            )
                             existing_row = conn.execute(
                                 "SELECT salary_min, salary_max FROM jobs WHERE dedup_key = ?",
                                 (candidate_dedup_key,),
                             ).fetchone()
-                            if existing_row and (existing_row["salary_min"] is not None or existing_row["salary_max"] is not None):
+                            if existing_row and (
+                                existing_row["salary_min"] is not None
+                                or existing_row["salary_max"] is not None
+                            ):
                                 # Existing job has salary — preserve it (first-seen wins)
                                 salary_min = None
                                 salary_max = None
@@ -520,7 +538,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                 title=job_dict["title"],
                                 company=company_name,
                                 location=job_dict.get("location") or "",
-                                source=job_dict["company_source"],  # 'Lever', 'Greenhouse', 'Ashby'
+                                source=job_dict[
+                                    "company_source"
+                                ],  # 'Lever', 'Greenhouse', 'Ashby'
                                 source_url=job_dict.get("source_url") or "",
                                 salary_min=salary_min,
                                 salary_max=salary_max,
@@ -531,7 +551,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                             # Promote ATS description to jd_full (DQ-03)
                             # Strip HTML to prevent CSS soup from inflating AI scores
                             raw_desc = job_dict.get("description") or ""
-                            clean_desc = strip_html_to_text(raw_desc) if "<" in raw_desc else raw_desc
+                            clean_desc = (
+                                strip_html_to_text(raw_desc) if "<" in raw_desc else raw_desc
+                            )
                             if len(clean_desc) > 200:
                                 try:
                                     conn.execute(
@@ -540,7 +562,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                     )
                                     conn.commit()
                                 except Exception as e:
-                                    logger.warning("Failed to promote ATS description to jd_full for %s: %s", job.dedup_key, e)
+                                    logger.warning(
+                                        "Failed to promote ATS description to jd_full for %s: %s",
+                                        job.dedup_key,
+                                        e,
+                                    )
 
                             if is_new:
                                 summary["jobs_new"] += 1
@@ -556,7 +582,11 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                                         )
                                         conn.commit()
                                     except Exception as e:
-                                        logger.warning("Failed to store comp_data_json for %s: %s", job.dedup_key, e)
+                                        logger.warning(
+                                            "Failed to store comp_data_json for %s: %s",
+                                            job.dedup_key,
+                                            e,
+                                        )
 
                         except Exception as job_err:
                             error_msg = f"{company_name} job error: {job_err}"
@@ -591,7 +621,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     try:
                         _handle_scan_error(conn, company_id, company_name, str(company_err), now)
                     except Exception as retry_err:
-                        logger.warning("Failed to update retry state for '%s': %s", company_name, retry_err)
+                        logger.warning(
+                            "Failed to update retry state for '%s': %s", company_name, retry_err
+                        )
 
                 # Still log the failed scan attempt
                 try:
@@ -602,7 +634,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     )
                     conn.commit()
                 except Exception:
-                    logger.debug("failed to insert error scan log for %s", company_name, exc_info=True)
+                    logger.debug(
+                        "failed to insert error scan log for %s", company_name, exc_info=True
+                    )
 
             # Polite delay between companies (0.5s)
             time.sleep(0.5)
@@ -671,7 +705,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
 
                     # Step 2: Scrape careers page for keyword-matched jobs
                     scraped_jobs = scrape_careers_page(
-                        careers_url, target_titles, title_exclusions,
+                        careers_url,
+                        target_titles,
+                        title_exclusions,
                         conn=conn,
                         config=config,
                     )
@@ -768,7 +804,9 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         job_row = dict(row)
 
                         result = score_and_persist_job(
-                            job_row, conn, config,
+                            job_row,
+                            conn,
+                            config,
                         )
                         if result is None:
                             continue
@@ -780,7 +818,8 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                     except Exception as job_err:
                         logger.warning(
                             "ATS scoring error for '%s': %s -- continuing",
-                            dedup_key, job_err,
+                            dedup_key,
+                            job_err,
                         )
 
                 summary["scored"] = scored_count
@@ -818,4 +857,3 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         summary.get("classified_reject", 0),
     )
     return summary
-

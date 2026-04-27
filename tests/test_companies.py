@@ -11,7 +11,7 @@ Covers all eight routes:
 - POST /companies/<id>/retry      -- retry (400 if not retryable, 404 if missing)
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +19,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def companies_app(migrated_db):
@@ -56,11 +57,13 @@ def companies_app(migrated_db):
 
     yield application, db_path, conn
 
+
 @pytest.fixture
 def companies_client(companies_app):
     """Return (test_client, db_path, conn) for companies blueprint tests."""
     app, db_path, conn = companies_app
     return app.test_client(), db_path, conn
+
 
 def _insert_company(
     conn,
@@ -94,9 +97,11 @@ def _insert_company(
     conn.commit()
     return cursor.lastrowid
 
+
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/ (index)
 # ---------------------------------------------------------------------------
+
 
 class TestIndexRoute:
     def test_index_returns_200(self, companies_client):
@@ -148,9 +153,11 @@ class TestIndexRoute:
         response = client.get("/companies/?sort_by=malicious; DROP TABLE companies;--")
         assert response.status_code == 200
 
+
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/<id>/expand
 # ---------------------------------------------------------------------------
+
 
 class TestExpandRoute:
     def test_expand_returns_200(self, companies_client):
@@ -174,9 +181,11 @@ class TestExpandRoute:
         assert response.status_code == 200
         assert b"ExpandCorp" in response.data
 
+
 # ---------------------------------------------------------------------------
 # Tests: GET /companies/<id>/collapse
 # ---------------------------------------------------------------------------
+
 
 class TestCollapseRoute:
     def test_collapse_returns_200(self, companies_client):
@@ -192,9 +201,11 @@ class TestCollapseRoute:
         response = client.get("/companies/99999/collapse")
         assert response.status_code == 404
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/add
 # ---------------------------------------------------------------------------
+
 
 class TestAddRoute:
     def test_add_redirects_to_index(self, companies_client):
@@ -204,12 +215,8 @@ class TestAddRoute:
         ats_scanner module level to suppress any real side effects.
         """
         client, db_path, conn = companies_client
-        with patch(
-            "job_finder.web.ats_scanner.upsert_company", return_value=1
-        ):
-            response = client.post(
-                "/companies/add", data={"company_name": "NewCorp"}
-            )
+        with patch("job_finder.web.ats_scanner.upsert_company", return_value=1):
+            response = client.post("/companies/add", data={"company_name": "NewCorp"})
         assert response.status_code == 302
 
     def test_add_empty_name_redirects_with_flash(self, companies_client):
@@ -218,9 +225,11 @@ class TestAddRoute:
         response = client.post("/companies/add", data={"company_name": ""})
         assert response.status_code == 302
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/toggle
 # ---------------------------------------------------------------------------
+
 
 class TestToggleRoute:
     def test_toggle_returns_200(self, companies_client):
@@ -256,9 +265,11 @@ class TestToggleRoute:
         response = client.post("/companies/99999/toggle")
         assert response.status_code == 404
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/update-slug
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateSlugRoute:
     def test_update_slug_returns_200(self, companies_client):
@@ -304,9 +315,11 @@ class TestUpdateSlugRoute:
         response = client.post("/companies/99999/update-slug")
         assert response.status_code == 404
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/scan
 # ---------------------------------------------------------------------------
+
 
 class TestScanRoute:
     def test_scan_returns_200(self, companies_client):
@@ -326,18 +339,18 @@ class TestScanRoute:
         assert response.status_code == 200
         assert len(response.data) > 0
 
+
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/<id>/retry
 # ---------------------------------------------------------------------------
+
 
 class TestRetryRoute:
     def test_retry_error_company_returns_200(self, companies_client):
         """POST retry on error-state company returns 200 and calls probe_single_company."""
         client, db_path, conn = companies_client
         company_id = _insert_company(conn, ats_probe_status="error")
-        with patch(
-            "job_finder.web.blueprints.companies.probe_single_company"
-        ) as mock_probe:
+        with patch("job_finder.web.blueprints.companies.probe_single_company") as mock_probe:
             response = client.post(f"/companies/{company_id}/retry")
         assert response.status_code == 200
         assert mock_probe.called
@@ -345,12 +358,8 @@ class TestRetryRoute:
     def test_retry_unreachable_miss_returns_200(self, companies_client):
         """POST retry on unreachable-miss company returns 200 and calls probe_single_company."""
         client, db_path, conn = companies_client
-        company_id = _insert_company(
-            conn, ats_probe_status="miss", miss_reason="unreachable"
-        )
-        with patch(
-            "job_finder.web.blueprints.companies.probe_single_company"
-        ) as mock_probe:
+        company_id = _insert_company(conn, ats_probe_status="miss", miss_reason="unreachable")
+        with patch("job_finder.web.blueprints.companies.probe_single_company") as mock_probe:
             response = client.post(f"/companies/{company_id}/retry")
         assert response.status_code == 200
         assert mock_probe.called
@@ -372,9 +381,7 @@ class TestRetryRoute:
     def test_retry_regular_miss_returns_400(self, companies_client):
         """POST retry on regular miss (no miss_reason) returns 400 (not retryable)."""
         client, db_path, conn = companies_client
-        company_id = _insert_company(
-            conn, ats_probe_status="miss", miss_reason=None
-        )
+        company_id = _insert_company(conn, ats_probe_status="miss", miss_reason=None)
         response = client.post(f"/companies/{company_id}/retry")
         assert response.status_code == 400
 
@@ -389,6 +396,7 @@ class TestRetryRoute:
 # Tests: Pagination (Fix 8)
 # ---------------------------------------------------------------------------
 
+
 class TestIndexPagination:
     """Tests for companies index pagination."""
 
@@ -396,6 +404,7 @@ class TestIndexPagination:
         """With 60 companies, index returns at most 50 rows."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -410,6 +419,7 @@ class TestIndexPagination:
         body = resp.data.decode()
         # Count outer company wrapper divs (id="company-<digit>", not "company-row-")
         import re as _re
+
         row_count = len(_re.findall(r'id="company-\d+"', body))
         assert row_count == 50
 
@@ -417,6 +427,7 @@ class TestIndexPagination:
         """Page 2 with 60 companies returns the remaining 10 rows."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -430,6 +441,7 @@ class TestIndexPagination:
         assert resp.status_code == 200
         body = resp.data.decode()
         import re as _re
+
         row_count = len(_re.findall(r'id="company-\d+"', body))
         assert row_count == 10
 
@@ -437,6 +449,7 @@ class TestIndexPagination:
         """With 60 companies, HTMX request to page 1 includes infinite-scroll sentinel."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -455,6 +468,7 @@ class TestIndexPagination:
         """With 10 companies (< 50), HTMX request has no infinite-scroll sentinel."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(10):
             conn.execute(
@@ -473,6 +487,7 @@ class TestIndexPagination:
         """Exactly 50 companies produces no sentinel (no phantom next-page request)."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(50):
             conn.execute(
@@ -491,6 +506,7 @@ class TestIndexPagination:
         """total_count in the full-page response matches the actual company count."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -509,6 +525,7 @@ class TestIndexPagination:
         """Infinite scroll sentinel URL includes sort_by param to preserve sort order."""
         client, db_path, conn = companies_client
         from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -518,9 +535,7 @@ class TestIndexPagination:
             )
         conn.commit()
 
-        resp = client.get(
-            "/companies/?sort_by=last_scanned_at", headers={"HX-Request": "true"}
-        )
+        resp = client.get("/companies/?sort_by=last_scanned_at", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "sort_by=last_scanned_at" in body
@@ -533,8 +548,9 @@ class TestIndexPagination:
         outerHTML swap doesn't nest containers inside the page-1 wrapper.
         """
         client, db_path, conn = companies_client
-        from datetime import datetime
         import re as _re
+        from datetime import datetime
+
         now = datetime.now().isoformat()
         for i in range(60):
             conn.execute(
@@ -562,6 +578,7 @@ class TestIndexPagination:
 # Tests: Health card (Fix 14)
 # ---------------------------------------------------------------------------
 
+
 class TestIndexHealthCard:
     """Tests for companies index health card visibility."""
 
@@ -579,6 +596,7 @@ class TestIndexHealthCard:
         """Health card displays last scan age as '<N>d' not a raw ISO timestamp."""
         client, db_path, conn = companies_client
         from datetime import datetime, timedelta
+
         company_id = _insert_company(conn, name="ScanAgeCo")
         recent = (datetime.now() - timedelta(days=2)).isoformat()
         conn.execute(
@@ -598,6 +616,7 @@ class TestIndexHealthCard:
         """Scan age >7 days renders the red-400 CSS class as staleness warning."""
         client, db_path, conn = companies_client
         from datetime import datetime, timedelta
+
         company_id = _insert_company(conn, name="StaleScanCo")
         old_scan = (datetime.now() - timedelta(days=10)).isoformat()
         conn.execute(
@@ -649,8 +668,7 @@ class TestCompanyResearchRoutes:
         client, db_path, conn = companies_client
         company_id = _insert_company(conn)
 
-        from datetime import timezone
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -668,8 +686,7 @@ class TestCompanyResearchRoutes:
         client, db_path, conn = companies_client
         company_id = _insert_company(conn)
 
-        from datetime import timezone
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, research_json, requested_at, completed_at) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -688,8 +705,9 @@ class TestCompanyResearchRoutes:
         client, db_path, conn = companies_client
         company_id = _insert_company(conn)
 
-        from datetime import timezone, timedelta
-        old = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+        from datetime import timedelta
+
+        old = (datetime.now(UTC) - timedelta(minutes=15)).isoformat()
         conn.execute(
             "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
             (company_id, "generating", old),

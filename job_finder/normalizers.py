@@ -8,7 +8,6 @@ creating an upward dependency from the foundation layer into the web layer.
 import html
 import re
 
-
 # ---------------------------------------------------------------------------
 # Company name deterministic cleanup regexes
 # ---------------------------------------------------------------------------
@@ -131,8 +130,8 @@ def normalize_company(company: str) -> str:
     # 4. Strip leading numeric prefix junk only when remainder is non-empty
     #    e.g. "1. Acme Corp" -> "Acme Corp", but "100" stays "100"
     m = _LEADING_NUMERIC_JUNK_RE.match(normalized)
-    if m and normalized[m.end():].strip():
-        normalized = normalized[m.end():]
+    if m and normalized[m.end() :].strip():
+        normalized = normalized[m.end() :]
     # 5. Strip and lowercase (original behavior)
     normalized = normalized.strip().lower()
     # 6. Strip legal suffixes repeatedly (e.g. "Acme Corp. Inc." -> "acme")

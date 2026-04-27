@@ -22,7 +22,7 @@ Exports:
 
 import logging
 import re
-from typing import Optional, Any
+from typing import Any
 
 from job_finder.config import DEFAULT_MODEL_HAIKU
 from job_finder.web.claude_client import call_claude
@@ -77,11 +77,12 @@ _SYSTEM_PROMPT = (
     "in the 'text' field."
 )
 
+
 def reformat_description(
-    description: Optional[str],
+    description: str | None,
     conn: Any = None,
-    config: Optional[dict] = None,
-) -> Optional[str]:
+    config: dict | None = None,
+) -> str | None:
     """Use Haiku to reformat a job description into section/paragraph style.
 
     Takes raw description text (pipe-separated, bullet lists, or messy formatting)
@@ -112,11 +113,7 @@ def reformat_description(
     if header_count >= _ALREADY_FORMATTED_THRESHOLD:
         return description
 
-    model = (
-        config.get("scoring", {})
-        .get("models", {})
-        .get("haiku", DEFAULT_MODEL_HAIKU)
-    )
+    model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
 
     # call_model() requires a non-None conn for cost recording (_ensure_usage_current
     # + _maybe_record_cost). When conn is None (e.g. single-shot callers not
@@ -181,9 +178,10 @@ def reformat_description(
         logger.warning("reformat_description failed (returning original): %s", e)
         return description
 
+
 def run_description_reformat_pass(
     db_path: str,
-    config: Optional[dict] = None,
+    config: dict | None = None,
 ) -> int:
     """One-time background pass to reformat all job descriptions.
 
@@ -210,7 +208,6 @@ def run_description_reformat_pass(
 
     try:
         with standalone_connection(db_path) as conn:
-
             rows = conn.execute(
                 "SELECT dedup_key, description FROM jobs "
                 "WHERE description_reformatted = 0 AND description IS NOT NULL"
@@ -223,9 +220,7 @@ def run_description_reformat_pass(
                 original = row["description"]
 
                 try:
-                    reformatted = reformat_description(
-                        original, conn=conn, config=config
-                    )
+                    reformatted = reformat_description(original, conn=conn, config=config)
 
                     if reformatted != original and reformatted is not None:
                         # Text changed — update both description and flag

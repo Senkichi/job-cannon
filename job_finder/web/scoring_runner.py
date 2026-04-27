@@ -7,27 +7,26 @@ Plan 4 Commit E.
 """
 
 import logging
-import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from job_finder.db import JOBS_ALL_COLUMNS, persist_job_expiry_state, update_pipeline_status
-from job_finder.web.expiry_checker import check_job_liveness, EXPIRED as _EXPIRED
-from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.exclusion_filter import should_exclude
+from job_finder.web.expiry_checker import EXPIRED as _EXPIRED
+from job_finder.web.expiry_checker import check_job_liveness
 from job_finder.web.scoring_orchestrator import (
-    load_scoring_profile,
     score_and_persist_job,
 )
 
 try:
-    from job_finder.web.data_enricher import enrich_job
     from job_finder.web.company_enricher import enrich_company_info
+    from job_finder.web.data_enricher import enrich_job
 except ImportError:
     enrich_job = None  # type: ignore[assignment]
     enrich_company_info = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
 
 def run_scoring(
     new_job_keys: list[str],
@@ -98,7 +97,9 @@ def run_scoring(
                 if excluded:
                     if (job.get("pipeline_status") or "discovered") == "discovered":
                         update_pipeline_status(
-                            conn, dedup_key, "dismissed",
+                            conn,
+                            dedup_key,
+                            "dismissed",
                             source="run_scoring_exclusion",
                             evidence=reason or "matched exclusion filter",
                         )
@@ -109,7 +110,7 @@ def run_scoring(
                 # Sonnet path. Expired rows get the standard archive update
                 # and are counted as skipped_dead.
                 liveness = check_job_liveness(job)
-                now_iso = datetime.now(timezone.utc).isoformat()
+                now_iso = datetime.now(UTC).isoformat()
                 persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
                 if liveness == _EXPIRED:
                     logger.info(
@@ -118,7 +119,9 @@ def run_scoring(
                         job.get("company"),
                     )
                     update_pipeline_status(
-                        conn, dedup_key, "archived",
+                        conn,
+                        dedup_key,
+                        "archived",
                         source="run_scoring_liveness",
                         evidence="quick_liveness_check expired",
                     )

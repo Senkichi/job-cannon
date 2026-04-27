@@ -7,10 +7,12 @@ Uses a tempfile DB with full migrations, and TESTING=True to skip the background
 import os
 import sqlite3
 import tempfile
+from datetime import UTC
 
 import pytest
 
 from job_finder.web.db_migrate import run_migrations
+
 
 class TestAsyncSync:
     """Tests for async sync start/status routes and duplicate guard."""
@@ -24,12 +26,14 @@ class TestAsyncSync:
         os.close(fd)
         run_migrations(db_path)
 
-        app = create_app(config={
-            "TESTING": True,
-            "db": {"path": db_path},
-            "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
-            "polling": {"interval_minutes": 30},
-        })
+        app = create_app(
+            config={
+                "TESTING": True,
+                "db": {"path": db_path},
+                "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
+                "polling": {"interval_minutes": 30},
+            }
+        )
         # Set Flask's native TESTING flag so routes skip background threads.
         app.config["TESTING"] = True
 
@@ -92,17 +96,18 @@ class TestAsyncSync:
 
     def test_sync_status_running_returns_progress_fragment(self, app_with_db):
         """GET /dashboard/sync/status/{id} for a running session returns progress with hx-trigger."""
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         app, db_path = app_with_db
 
         # Use a recent timestamp to avoid triggering the 30-minute timeout
-        recent_time = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        recent_time = datetime.now(UTC).replace(tzinfo=None).isoformat()
 
         conn = sqlite3.connect(db_path)
         conn.execute(
             "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
             "VALUES ('sync', 'running', 0, 0, ?)",
-            (recent_time,)
+            (recent_time,),
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -163,15 +168,16 @@ class TestAsyncSync:
         app, db_path = app_with_db
 
         # Insert a session started 35 minutes ago (beyond the 30-minute timeout)
-        from datetime import datetime, timedelta, timezone
-        old_time = (datetime.now(timezone.utc) - timedelta(minutes=35)).replace(tzinfo=None).isoformat()
+        from datetime import datetime, timedelta
+
+        old_time = (datetime.now(UTC) - timedelta(minutes=35)).replace(tzinfo=None).isoformat()
 
         conn = sqlite3.connect(db_path)
         conn.execute(
             "INSERT INTO batch_score_sessions "
             "(session_type, status, total, scored, started_at) "
             "VALUES ('sync', 'running', 0, 0, ?)",
-            (old_time,)
+            (old_time,),
         )
         conn.commit()
         session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
