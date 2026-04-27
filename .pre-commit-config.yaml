@@ -1,0 +1,66 @@
+# Defines which checks run before every commit (and on commit messages).
+# Install once per clone: git config core.hooksPath .githooks
+# Update hook versions: uv run pre-commit autoupdate
+# Run against all files: uv run pre-commit run --all-files
+
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+# GSD planning artifacts and review tool working directories are excluded —
+# they're machine-generated metadata where formatting/whitespace diffs add noise.
+exclude: |
+  (?x)^(
+    \.planning/.*|
+    \.reviews/.*|
+    \.nit/.*|
+    \.nit-supreme/.*|
+    \.superpowers/.*|
+    \.playwright-mcp/.*|
+    eval_results/.*|
+    logs/.*|
+    data/.*|
+    reports/.*
+  )$
+
+repos:
+  # ── Guardrails ──────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-ast
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # ── Secret Scanning ─────────────────────────────────────────
+  # Catches accidental commits of API keys (Anthropic, SerpAPI, Thordata, Google).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.22.1
+    hooks:
+      - id: gitleaks
+
+  # ── Linting + Formatting ────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # ── Commit Message Validation ───────────────────────────────
+  # Enforces conventional commits (feat/fix/refactor/etc.) so release.yml
+  # can auto-generate changelogs and bump versions.
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.1.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]

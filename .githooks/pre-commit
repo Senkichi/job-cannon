@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Master pre-commit hook: runs the pre-commit framework (ruff, gitleaks, etc.).
+#
+# This project pushes directly to master, so there is no main-branch block
+# and no branch-name validation — those checks are inappropriate here.
+#
+# Installed by: git config core.hooksPath .githooks
+
+if command -v pre-commit &> /dev/null; then
+    pre-commit run --hook-stage pre-commit || exit 1
+elif uv run pre-commit --version &> /dev/null 2>&1; then
+    uv run pre-commit run --hook-stage pre-commit || exit 1
+else
+    echo "  WARN: pre-commit is not installed. Skipping hooks."
+    echo "        Install with: uv pip install pre-commit"
+fi

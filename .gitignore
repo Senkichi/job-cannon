@@ -18,6 +18,10 @@ __pycache__/
 .venv/
 *.egg-info/
 
+# uv lock — project uses requirements.txt as canonical dep manifest;
+# pyproject.toml exists only for tooling config (ruff, commitizen, pytest).
+uv.lock
+
 # Reports
 reports/
 eval_results/
