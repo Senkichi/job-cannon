@@ -1618,7 +1618,7 @@ class TestHTMLJobsScoring:
 
         captured_keys = []
 
-        def capture_haiku_scoring(conn, job_row, *args, **kwargs):
+        def capture_haiku_scoring(job_row, conn, *args, **kwargs):
             captured_keys.append(job_row.get("dedup_key"))
             return None
 

@@ -311,3 +311,161 @@ class TestUnifiedRouteShape:
             conn.close()
             if os.path.exists(path):
                 os.remove(path)
+
+
+# ---------------------------------------------------------------------------
+# Real-orchestrator integration: catch wrong-args contract drift between
+# _run_batch_bg and score_and_persist_job. The shallower tests above patch
+# `score_and_persist_job` directly and therefore never exercise its argument
+# contract — that is exactly how the v3 ship-day bug
+# (`score_and_persist_job(conn, job_row, config, profile)` — args swapped)
+# slipped past the suite. This test patches one layer deeper, at
+# `job_finder.web.job_scorer.score_job`, so the full orchestrator path
+# (signature, dedup_key extraction, persist_job_assessment, conn.commit)
+# runs against the real DB.
+# ---------------------------------------------------------------------------
+
+def _insert_unscored_job_with_jd(conn, dedup_key, title="Engineer", company="Acme",
+                                  jd_full="Required: SQL, Python. Build dashboards."):
+    """Insert a job with classification IS NULL AND jd_full populated.
+
+    The existing _insert_unscored_job helper leaves jd_full empty, which causes
+    score_job to short-circuit at the precondition check and return
+    ScoringResult(status='skipped'). For the real-orchestrator integration
+    test we need a job that actually flows into the persist branch.
+    """
+    from job_finder.json_utils import utc_now_iso
+    now = utc_now_iso()
+    conn.execute(
+        "INSERT OR IGNORE INTO jobs (dedup_key, title, company, location, jd_full, "
+        "first_seen, last_seen) VALUES (?, ?, ?, 'Remote', ?, ?, ?)",
+        (dedup_key, title, company, jd_full, now, now),
+    )
+    conn.commit()
+
+
+class TestBatchScoringEndToEnd:
+    """Integration: real score_and_persist_job → real persist_job_assessment.
+
+    These tests would have caught the v3.0 ship-day P0 bug where
+    `_run_batch_bg` called the orchestrator with positional args in the
+    wrong order. The class-level mocks elsewhere in this file replace
+    `score_and_persist_job` with a MagicMock that accepts any signature,
+    so a wrong-args call always succeeded in those tests.
+    """
+
+    def _make_score_job_mock(self, sub_scores=None):
+        """Return a mock for job_scorer.score_job that emits a real ScoringResult."""
+        from job_finder.web.job_scorer import ScoringResult
+        from job_finder.db import JobAssessment
+
+        if sub_scores is None:
+            sub_scores = {
+                "title_fit": 4, "location_fit": 5, "comp_fit": 4,
+                "domain_match": 4, "seniority_match": 4, "skills_match": 4,
+            }
+        assessment = JobAssessment(
+            sub_scores=sub_scores,
+            classification="",  # overwritten by derive_classification at persist time
+            rationale={
+                "strengths": ["Strong remote culture"],
+                "gaps": [],
+                "talking_points": ["Mention SQL background"],
+                "resume_priority_skills": ["SQL", "Python"],
+            },
+            provider="test_provider",
+        )
+        result = ScoringResult(
+            status="ok", data=assessment, provider="test_provider",
+        )
+        return MagicMock(return_value=result)
+
+    def test_run_batch_bg_persists_classification_via_real_orchestrator(self):
+        """End-to-end: _run_batch_bg → real score_and_persist_job → DB classification.
+
+        Patches at job_scorer.score_job (one layer below the orchestrator) so
+        the orchestrator's argument contract is exercised. If _run_batch_bg
+        ever again calls score_and_persist_job with swapped args, the real
+        orchestrator will raise on `job.get(...)` and this test will fail.
+        """
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
+
+        path, conn = _make_db()
+        try:
+            _insert_unscored_job_with_jd(
+                conn, "job-e2e-1",
+                title="Senior Data Engineer",
+                jd_full="Build pipelines. Required: Python, SQL, AWS. 5+ years experience.",
+            )
+            session_id = _insert_session(
+                conn, status="running", session_type="scoring", total=1,
+            )
+
+            score_job_mock = self._make_score_job_mock()
+
+            # Patch the LLM-touching scorer ONE LEVEL BELOW score_and_persist_job.
+            # The orchestrator imports score_job lazily via:
+            #   from job_finder.web.job_scorer import score_job as _default_scorer
+            # so we patch at the source module.
+            with patch("job_finder.web.job_scorer.score_job", score_job_mock), \
+                 patch(_LOAD_PROFILE_PATCH, return_value={}), \
+                 patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")), \
+                 patch("job_finder.web.activity_tracker.log_activity"):
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
+
+            # Real persist_job_assessment must have written classification + sub_scores.
+            row = conn.execute(
+                "SELECT classification, sub_scores_json, scoring_provider "
+                "FROM jobs WHERE dedup_key = ?",
+                ("job-e2e-1",),
+            ).fetchone()
+            assert row is not None, "job-e2e-1 row vanished"
+            assert row["classification"] is not None, (
+                "classification is NULL — score_and_persist_job did not persist. "
+                "Likely cause: arg-order mismatch between _run_batch_bg call site "
+                "and score_and_persist_job(job, conn, config) signature."
+            )
+            assert row["classification"] in ("apply", "consider", "skip", "reject"), (
+                f"Unexpected classification value: {row['classification']!r}"
+            )
+            assert row["sub_scores_json"] is not None, "sub_scores_json not persisted"
+            assert row["scoring_provider"] == "test_provider"
+
+            # And the session row should reflect a successful score.
+            sess = _get_session(conn, session_id)
+            assert sess["status"] == "done", f"Expected status=done, got {sess['status']}"
+            assert sess["scored"] == 1, (
+                f"Expected scored=1 (real orchestrator path); got scored={sess['scored']} "
+                f"skipped={sess['skipped']}. If skipped=1, the orchestrator likely "
+                f"raised AttributeError swallowed by the worker's try/except — that "
+                f"is the wrong-args symptom we want this test to catch."
+            )
+            assert sess["skipped"] == 0, (
+                f"Expected skipped=0; got {sess['skipped']}. Any 'skipped' from a "
+                f"job that has jd_full + ok scorer mock indicates an exception was "
+                f"swallowed inside score_and_persist_job."
+            )
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_orchestrator_arg_contract_explicit(self):
+        """Belt-and-suspenders: directly assert score_and_persist_job's contract.
+
+        If the signature ever drifts again, this test pinpoints the contract
+        independently of the worker, so the failure message is easier to
+        diagnose than a downstream assertion in _run_batch_bg.
+        """
+        import inspect
+        from job_finder.web.scoring_orchestrator import score_and_persist_job
+
+        sig = inspect.signature(score_and_persist_job)
+        params = list(sig.parameters)
+        # First three positionals MUST be (job, conn, config) — _run_batch_bg
+        # depends on this order.
+        assert params[:3] == ["job", "conn", "config"], (
+            f"score_and_persist_job signature drift: positional args are {params[:3]!r}, "
+            f"expected ['job', 'conn', 'config']. Update batch_scoring._run_batch_bg "
+            f"(and scoring_runner.run_scoring, and any other callers) accordingly."
+        )

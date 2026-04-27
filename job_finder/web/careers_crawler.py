@@ -1188,10 +1188,7 @@ def _score_new_jobs(
     counters replace haiku_scored / sonnet_evaluated.
     """
     try:
-        from job_finder.web.scoring_orchestrator import (
-            load_scoring_profile,
-            score_and_persist_job,
-        )
+        from job_finder.web.scoring_orchestrator import score_and_persist_job
     except ImportError:
         logger.debug("scoring_orchestrator not available — skipping scoring")
         return
@@ -1218,8 +1215,6 @@ def _score_new_jobs(
     if not tier_has_configured_provider("scoring", config, _scoring_client):
         logger.debug("No routable scoring provider — skipping careers_crawl scoring")
         return
-
-    profile = load_scoring_profile(config)
 
     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
 
@@ -1257,7 +1252,7 @@ def _score_new_jobs(
                         )
 
                 result = score_and_persist_job(
-                    conn, job_row, config, profile,
+                    job_row, conn, config,
                 )
                 if result is None:
                     continue
