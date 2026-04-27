@@ -3249,7 +3249,7 @@ class TestCompositeScoreCell:
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
-        cell = html[idx : idx + 1500]
+        cell = html[idx : idx + 2500]
         assert "Deep platform experience aligns with infra-heavy stack" in cell
 
     def test_tooltip_includes_top_gap(self, scored_client):
@@ -3257,7 +3257,7 @@ class TestCompositeScoreCell:
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
-        cell = html[idx : idx + 1500]
+        cell = html[idx : idx + 2500]
         assert "No published Kubernetes operator work" in cell
 
     def test_tooltip_omits_strength_when_empty(self, scored_client):

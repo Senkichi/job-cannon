@@ -65,18 +65,18 @@
     {# Tooltip: hidden by default, revealed on parent <td>.group hover. #}
     <div class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-100
                 absolute z-30 left-full ml-2 top-1/2 -translate-y-1/2
-                w-72 p-2 rounded border border-slate-700 bg-slate-900 shadow-lg
+                w-64 p-2.5 rounded border border-slate-700 bg-slate-900 shadow-lg
                 text-xs text-slate-200 text-left whitespace-normal pointer-events-none">
-      <div class="font-mono text-slate-300">
-        Title {{ sub_scores.get('title_fit', 0) }} ·
-        Location {{ sub_scores.get('location_fit', 0) }} ·
-        Comp {{ sub_scores.get('comp_fit', 0) }} ·
-        Domain {{ sub_scores.get('domain_match', 0) }} ·
-        Seniority {{ sub_scores.get('seniority_match', 0) }} ·
-        Skills {{ sub_scores.get('skills_match', 0) }}
+      <div class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 font-mono">
+        <span class="text-slate-400">Title</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('title_fit', 0) }}</span>
+        <span class="text-slate-400">Location</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('location_fit', 0) }}</span>
+        <span class="text-slate-400">Comp</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('comp_fit', 0) }}</span>
+        <span class="text-slate-400">Domain</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('domain_match', 0) }}</span>
+        <span class="text-slate-400">Seniority</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('seniority_match', 0) }}</span>
+        <span class="text-slate-400">Skills</span><span class="text-slate-100 text-right tabular-nums">{{ sub_scores.get('skills_match', 0) }}</span>
       </div>
       {% if top_strength %}
-        <div class="mt-1"><span class="text-green-400 font-semibold">Strength:</span> {{ top_strength }}</div>
+        <div class="mt-2 pt-2 border-t border-slate-700"><span class="text-green-400 font-semibold">Strength:</span> {{ top_strength }}</div>
       {% endif %}
       {% if top_gap %}
         <div class="mt-1"><span class="text-red-400 font-semibold">Gap:</span> {{ top_gap }}</div>
