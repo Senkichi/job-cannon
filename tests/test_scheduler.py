@@ -293,6 +293,67 @@ class TestSchedulerAtsScan:
         job_ids_kw = [call[1].get("id") for call in mock_sched.add_job.call_args_list]
         assert "ats_scan" in job_ids_kw
 
+    def test_ats_scan_extract_metadata_reads_correct_summary_keys(self):
+        """extract_metadata callback for ats_scan must read keys actually returned
+        by run_ats_scan (jobs_discovered + jobs_new), not the legacy jobs_found.
+
+        Regression: prior to the fix, the callback read r.get("jobs_found") which
+        does not exist in run_ats_scan's summary, causing user_activity rows to
+        always report jobs_found=0 even when company_scan_log totaled 1000+ jobs.
+        """
+        from job_finder.web.scheduler import reset_scheduler
+
+        reset_scheduler()
+
+        mock_app = MagicMock()
+        mock_app.config.get.side_effect = lambda key, default=None: {
+            "TESTING": False,
+        }.get(key, default)
+
+        with patch("job_finder.web.scheduler.os.environ.get", return_value=None):
+            with patch("job_finder.web.scheduler.BackgroundScheduler") as mock_scheduler_cls:
+                mock_sched = MagicMock()
+                mock_scheduler_cls.return_value = mock_sched
+
+                from job_finder.web.scheduler import init_scheduler
+                init_scheduler(mock_app)
+
+        ats_call = next(
+            call for call in mock_sched.add_job.call_args_list
+            if call[1].get("id") == "ats_scan"
+        )
+        wrapper = ats_call[0][0]
+        closure_vars = {
+            cell_name: cell.cell_contents
+            for cell_name, cell in zip(wrapper.__code__.co_freevars, wrapper.__closure__ or ())
+        }
+        extract_metadata = closure_vars["extract_metadata"]
+
+        realistic_summary = {
+            "companies_scanned": 599,
+            "jobs_discovered": 1304,
+            "jobs_new": 87,
+            "scored": 87,
+            "classified_apply": 5,
+            "classified_consider": 12,
+            "classified_skip": 60,
+            "classified_reject": 10,
+            "html_scraped": 0,
+            "homepages_discovered": 0,
+            "errors": [],
+        }
+
+        metadata = extract_metadata(realistic_summary)
+
+        assert metadata["companies_scanned"] == 599
+        assert metadata["jobs_found"] == 1304, (
+            "jobs_found must surface jobs_discovered (raw match count); "
+            "reading the wrong key was the original always-zero bug"
+        )
+        assert metadata["jobs_new"] == 87, (
+            "jobs_new must be surfaced so dashboard meta.jobs_new render path lights up"
+        )
+
     def test_scheduler_registers_ats_slug_probe_job(self):
         """init_scheduler registers 'ats_slug_probe' CronTrigger job (Mon/Wed hour=7 min=30)."""
         from job_finder.web.scheduler import reset_scheduler

@@ -531,7 +531,8 @@ def init_scheduler(app) -> None:
                 import_action=_import_ats_scan_action,
                 extract_metadata=lambda r: {
                     "companies_scanned": r.get("companies_scanned", 0),
-                    "jobs_found": r.get("jobs_found", 0),
+                    "jobs_found": r.get("jobs_discovered", 0),
+                    "jobs_new": r.get("jobs_new", 0),
                 },
                 guard=lambda config: config.get("ats", {}).get("scan_enabled", True),
             ),
@@ -686,22 +687,52 @@ def init_scheduler(app) -> None:
         # -- Enrichment backfill (1 hour after each ingestion run: 1am, 9am, 5pm Pacific) --
 
         def _run_enrichment_backfill():
-            """Backfill enrichment for jobs that were missed or prematurely exhausted."""
+            """Backfill enrichment + score the freshly-enriched rows.
+
+            Stage 1 fills jd_full / salary_min via the cost-ordered tier
+            pipeline. Stage 2 scores every row that now has jd_full but no
+            classification (capped at 500/run to keep the cron cycle short).
+            Without Stage 2 the v3.0 multi-stage pipeline leaks: ingestion-
+            time scoring sees empty jd_full and skips, and nothing else
+            picks the row up after enrichment lands.
+            """
             with app.app_context():
                 config = get_config_snapshot(app)
                 db_path = app.config.get("DB_PATH", "jobs.db")
                 try:
                     from job_finder.web.data_enricher import run_enrichment_backfill
                     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
-                    result = run_enrichment_backfill(
+                    enriched = run_enrichment_backfill(
                         db_path,
                         serpapi_key=serpapi_key,
                         config=config,
                         limit=200,
                     )
-                    logger.info("Enrichment backfill: %s", result)
+                    logger.info("Enrichment backfill: %s", enriched)
                 except Exception as e:
                     logger.error("Enrichment backfill failed: %s", e)
+                    return
+
+                try:
+                    from job_finder.web.scoring_runner import run_scoring
+                    from job_finder.web.db_helpers import standalone_connection
+                    with standalone_connection(db_path) as score_conn:
+                        rows = score_conn.execute(
+                            "SELECT dedup_key FROM jobs "
+                            "WHERE jd_full IS NOT NULL AND jd_full != '' "
+                            "AND classification IS NULL "
+                            "AND (pipeline_status IS NULL "
+                            "     OR pipeline_status NOT IN ('archived', 'dismissed')) "
+                            "LIMIT 500"
+                        ).fetchall()
+                    dedup_keys = [r[0] for r in rows]
+                    if not dedup_keys:
+                        logger.info("Post-enrichment scoring: nothing to score")
+                        return
+                    summary = run_scoring(dedup_keys, config, db_path)
+                    logger.info("Post-enrichment scoring: %s", summary)
+                except Exception as e:
+                    logger.error("Post-enrichment scoring failed: %s", e)
 
         scheduler.add_job(
             _run_enrichment_backfill,
