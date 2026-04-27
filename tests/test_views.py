@@ -3169,3 +3169,57 @@ class TestCompositeScoreCell:
                 assert old_badge not in cell, (
                     f"Old badge class {old_badge} still present in score cell {dk}"
                 )
+
+    # --- Packed data-sort-score key (rank * 100 + composite) ---
+
+    def test_apply_max_packed_sort_score_is_430(self, scored_client):
+        """Apply (rank 4) with sum 30 -> data-sort-score='430'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="430"' in cell
+
+    def test_apply_min_packed_sort_score_is_418(self, scored_client):
+        """Apply (rank 4) with sum 18 -> data-sort-score='418'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cmin-apply%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="418"' in cell
+
+    def test_consider_packed_sort_score_is_322(self, scored_client):
+        """Consider (rank 3) with sum 22 -> data-sort-score='322'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cconsider-22%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="322"' in cell
+
+    def test_skip_packed_sort_score_is_222(self, scored_client):
+        """Skip (rank 2) with sum 22 -> data-sort-score='222'.
+
+        Demonstrates why packing matters: a 22 Skip has the same sum as a 22
+        Consider, but rank floor places it below.
+        """
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cskip-22%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="222"' in cell
+
+    def test_reject_packed_sort_score_is_106(self, scored_client):
+        """Reject (rank 1) with sum 6 -> data-sort-score='106'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Creject-6%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="106"' in cell
+
+    def test_unscored_packed_sort_score_is_0(self, scored_client):
+        """NULL classification -> data-sort-score='0'."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Cunscored%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="0"' in cell
