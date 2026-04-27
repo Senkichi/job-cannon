@@ -1858,6 +1858,149 @@ def jd_full_client(app_with_jd_full_job):
     return app_with_jd_full_job.test_client()
 
 
+@pytest.fixture
+def app_with_scored_jobs(tmp_db_path):
+    """App with one job per scoring state for score-cell rendering tests.
+
+    Each row exercises a distinct (classification, sub_scores) combination so
+    tests can assert color/value/tooltip rendering per state without ambiguity.
+    """
+    import sqlite3
+
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40},
+        "profile": {
+            "target_titles": ["ML Engineer"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    app = create_app(config=test_config)
+    app.config["TESTING"] = True
+
+    rows = [
+        # (dedup_key, title, classification, sub_scores_json, fit_analysis)
+        # Apply, max sum 30 (all 5s)
+        (
+            "ax|max-apply|remote",
+            "Max Apply Role",
+            "apply",
+            '{"title_fit": 5, "location_fit": 5, "comp_fit": 5, "domain_match": 5, "seniority_match": 5, "skills_match": 5}',
+            '{"strengths": ["Deep platform experience aligns with infra-heavy stack"], "gaps": ["No published Kubernetes operator work"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Apply, min sum 18 (all 3s)
+        (
+            "ax|min-apply|remote",
+            "Min Apply Role",
+            "apply",
+            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
+            '{"strengths": ["Adequate match"], "gaps": ["Borderline fit"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Consider, sum 22
+        (
+            "ax|consider-22|remote",
+            "Consider Role",
+            "consider",
+            '{"title_fit": 4, "location_fit": 3, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 3}',
+            '{"strengths": ["Strong technical match"], "gaps": ["Comp below target"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Skip, sum 22 (one axis at 2)
+        (
+            "ax|skip-22|remote",
+            "Skip Role",
+            "skip",
+            '{"title_fit": 5, "location_fit": 5, "comp_fit": 2, "domain_match": 5, "seniority_match": 5, "skills_match": 0}',
+            '{"strengths": [], "gaps": ["Compensation well below market"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Reject, sum 6 (all 1s would auto-reject; legitimacy_note also rejects)
+        (
+            "ax|reject-6|remote",
+            "Reject Role",
+            "reject",
+            '{"title_fit": 1, "location_fit": 1, "comp_fit": 1, "domain_match": 1, "seniority_match": 1, "skills_match": 1}',
+            '{"strengths": [], "gaps": ["Multiple critical mismatches"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Unscored: classification + sub_scores_json + fit_analysis all NULL
+        ("ax|unscored|remote", "Unscored Role", None, None, None),
+        # Apply with no fit_analysis (rationale-missing edge case)
+        (
+            "ax|apply-no-rationale|remote",
+            "Apply No Rationale",
+            "apply",
+            '{"title_fit": 5, "location_fit": 4, "comp_fit": 5, "domain_match": 4, "seniority_match": 5, "skills_match": 4}',
+            None,
+        ),
+        # Apply with empty strengths/gaps lists
+        (
+            "ax|apply-empty-lists|remote",
+            "Apply Empty Lists",
+            "apply",
+            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
+            '{"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Apply with very long strength (truncation test)
+        (
+            "ax|apply-long-strength|remote",
+            "Apply Long Strength",
+            "apply",
+            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
+            '{"strengths": ["'
+            + ("A" * 200)
+            + '"], "gaps": ["'
+            + ("B" * 200)
+            + '"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+    ]
+
+    conn = sqlite3.connect(tmp_db_path)
+    for dk, title, cls, subs, fit in rows:
+        conn.execute(
+            """INSERT INTO jobs
+                (dedup_key, title, company, location, sources, source_urls,
+                 source_id, salary_min, salary_max, description,
+                 first_seen, last_seen, score, score_breakdown, pipeline_status,
+                 classification, sub_scores_json, fit_analysis)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                dk,
+                title,
+                "TestCo",
+                "Remote",
+                '["test"]',
+                '["https://test/jobs/1"]',
+                dk,
+                100000,
+                200000,
+                "desc",
+                "2026-04-27T10:00:00",
+                "2026-04-27T10:00:00",
+                0.0,
+                "{}",
+                "discovered",
+                cls,
+                subs,
+                fit,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    return app
+
+
+@pytest.fixture
+def scored_client(app_with_scored_jobs):
+    return app_with_scored_jobs.test_client()
+
+
 # ---------------------------------------------------------------------------
 # UX Polish tests (Phase 15)
 # ---------------------------------------------------------------------------
