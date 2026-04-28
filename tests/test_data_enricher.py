@@ -6,8 +6,6 @@ synthesis-free enrich_job pipeline introduced in Phase 2b sub-fix RC4.
 Existing test classes preserved:
 - TestSearchSerpapi
 - TestSearchDuckDuckGo
-- TestExtractWithHaiku   — exercises enrichment_tiers.extract_with_haiku
-                            directly; deleted in Phase 2b sub-fix 2b.4
 - TestEnrichCompanyInfo
 
 Phase 2b cascade tests:
@@ -282,76 +280,10 @@ class TestSearchDuckDuckGo:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# Tests for extract_with_haiku (from enrichment_tiers)
-# ---------------------------------------------------------------------------
-
-
-class TestExtractWithHaiku:
-    def test_extract_with_haiku_sends_search_text_to_haiku(self, mock_anthropic_client, temp_db):
-        """extract_with_haiku calls Haiku with search_text and job context."""
-        from job_finder.web.enrichment_tiers import extract_with_haiku
-
-        job_row = {
-            "dedup_key": "acme|ds|remote",
-            "title": "Data Scientist",
-            "company": "Acme Corp",
-        }
-        search_text = "Data Scientist at Acme Corp builds ML models."
-        config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
-
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"jd_full": "Build ML models.", "salary_min": 140000},
-                0.0001,
-            )
-            result = extract_with_haiku(search_text, job_row, temp_db, config)
-
-        mock_call.assert_called_once()
-        call_kwargs = mock_call.call_args[1]
-        assert "haiku" in call_kwargs.get("model", "").lower()
-
-    def test_extract_with_haiku_returns_dict_with_job_fields(self, mock_anthropic_client, temp_db):
-        """extract_with_haiku returns dict with extracted job fields."""
-        from job_finder.web.enrichment_tiers import extract_with_haiku
-
-        job_row = {
-            "dedup_key": "acme|ds|remote",
-            "title": "Data Scientist",
-            "company": "Acme Corp",
-        }
-        search_text = "Data Scientist at Acme Corp."
-        config = {"scoring": {"models": {"haiku": "claude-haiku-4-5"}}}
-
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
-            mock_call.return_value = (
-                {"jd_full": "Build ML models at Acme.", "salary_min": 140000},
-                0.0001,
-            )
-            result = extract_with_haiku(search_text, job_row, temp_db, config)
-
-        assert "jd_full" in result and "salary_min" in result
-        # Should return whatever was extracted (non-None fields only)
-
-    def test_extract_with_haiku_returns_empty_dict_on_failure(
-        self, mock_anthropic_client, temp_db
-    ):
-        """extract_with_haiku returns empty dict when Haiku call fails."""
-        from job_finder.web.enrichment_tiers import extract_with_haiku
-
-        job_row = {
-            "dedup_key": "acme|ds|remote",
-            "title": "Data Scientist",
-            "company": "Acme Corp",
-        }
-        search_text = "Some search text."
-        config = {}
-
-        with patch("job_finder.web.enrichment_tiers.call_claude") as mock_call:
-            mock_call.side_effect = Exception("API error")
-            result = extract_with_haiku(search_text, job_row, temp_db, config)
-
-        assert result == {}
+# Tests for extract_with_haiku/extract_with_sonnet were removed in Phase 2b
+# sub-fix RC4 — both functions were deleted from enrichment_tiers.py because
+# the synthesis tiers fabricated short pseudo-JDs and blocked escalation to
+# real fetch tiers.
 
 
 # ---------------------------------------------------------------------------
