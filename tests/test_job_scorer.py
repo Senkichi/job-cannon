@@ -351,6 +351,30 @@ class TestSchemaContract:
         assert assessment.sub_scores["title_fit"] == 5
         assert isinstance(assessment.sub_scores["title_fit"], int)
 
+    def test_coerce_unwraps_d2_evidence_score_pairs(self):
+        """Variant v4d2 wraps each axis as {evidence, score}; coerce extracts the int."""
+        data = _good_response_data()
+        # Wrap each axis as the D2 variant emits it.
+        for key in (
+            "title_fit",
+            "location_fit",
+            "comp_fit",
+            "domain_match",
+            "seniority_match",
+            "skills_match",
+        ):
+            data[key] = {"evidence": f"<jd-quote-for-{key}>", "score": data[key]}
+        assessment = _coerce_assessment(data, provider="ollama")
+        assert assessment.sub_scores == {
+            "title_fit": 5,
+            "location_fit": 4,
+            "comp_fit": 4,
+            "domain_match": 3,
+            "seniority_match": 5,
+            "skills_match": 4,
+        }
+        assert all(isinstance(v, int) for v in assessment.sub_scores.values())
+
 
 # ---------------------------------------------------------------------------
 # Tests: module-level invariants
