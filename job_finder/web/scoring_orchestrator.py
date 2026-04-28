@@ -75,11 +75,18 @@ def score_and_persist_job(
     config: dict,
     client: Any | None = None,
     scorer_fn: Callable | None = None,
+    candidate_context: str | None = None,
 ):
     """Unified v3.0 scoring entry point.
 
     - scorer_fn: defaults to job_scorer.score_job. Injection point preserved
       for tests — pass your own reference to support mock injection.
+    - candidate_context: Optional prompt-ready candidate-context block built
+      by ``build_candidate_context``. Forwarded to scorer_fn so the scoring
+      system prompt can splice it per spec D-2.1. Defaults to None for
+      callers that have not yet been wired (Phase 2a sub-fix 3/3 wires
+      batch_scoring; other call sites remain default-safe pending the
+      relevant blueprint update).
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model.
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
@@ -99,7 +106,7 @@ def score_and_persist_job(
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
-    result = scorer_fn(job, conn, config, client=client)
+    result = scorer_fn(job, conn, config, client=client, candidate_context=candidate_context)
 
     if result is None:
         logger.info("score_and_persist_job: no result for dedup_key=%s", dedup_key)

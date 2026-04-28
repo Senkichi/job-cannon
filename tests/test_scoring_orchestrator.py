@@ -134,7 +134,7 @@ class TestScoreAndPersistJob:
         conn, _ = db_conn
         assessment = _make_assessment(provider="ollama")
 
-        def stub_scorer(job, conn_arg, cfg, client=None):
+        def stub_scorer(job, conn_arg, cfg, client=None, candidate_context=None):
             return ScoringResult(status="ok", data=assessment, provider="ollama")
 
         so.score_and_persist_job(
@@ -208,7 +208,7 @@ class TestScoreAndPersistJob:
         conn, _ = db_conn
         called_args = {}
 
-        def fake_score_job(job, c, cfg, client=None):
+        def fake_score_job(job, c, cfg, client=None, candidate_context=None):
             called_args["job"] = job
             called_args["config"] = cfg
             return ScoringResult(
@@ -238,7 +238,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
+            scorer_fn=lambda j, c, cfg, client=None, candidate_context=None: ScoringResult(
                 status="skipped",
                 data=None,
             ),
@@ -265,7 +265,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
+            scorer_fn=lambda j, c, cfg, client=None, candidate_context=None: ScoringResult(
                 status="error",
                 data=None,
                 error="synthetic failure",
@@ -288,7 +288,7 @@ class TestScoreAndPersistJob:
             {"dedup_key": "nonexistent"},
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
+            scorer_fn=lambda j, c, cfg, client=None, candidate_context=None: ScoringResult(
                 status="ok",
                 data=_make_assessment(),
                 provider="ollama",
@@ -316,7 +316,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, client=None: ScoringResult(
+            scorer_fn=lambda j, c, cfg, client=None, candidate_context=None: ScoringResult(
                 status="ok",
                 data=_make_assessment(),
                 provider="ollama",
