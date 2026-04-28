@@ -76,6 +76,15 @@ FIELD_TIER_CEILINGS = {
     "salary_max": "ddg",
 }
 
+# Minimum acceptable jd_full length when accepting a fetched JD from the
+# agentic tier. Real fetched job postings are virtually always >= 200 chars;
+# anything shorter is residual auth-wall noise that slipped past
+# is_short_auth_page() (which uses < 2000 chars + signal-keyword detection).
+# Apply ONLY to the agentic branch — earlier tiers have their own length
+# guards (fetch_ddg_jds requires >= 200 chars, fetch_direct_jd is unbounded
+# but already filters auth walls).
+MIN_FETCH_JD_CHARS = 200
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -251,17 +260,24 @@ def enrich_job(
         # ---------------------------------------------------------------
         # Tier 3: agentic — Ollama-driven query + Playwright fetch
         # ---------------------------------------------------------------
-        # Agentic only runs if JD is still missing. Wired in Phase 2b sub-fix 2/2
-        # via enrich_one_job() in agentic_enricher.
+        # Agentic only runs if JD is still missing. Calls into the per-job
+        # entry point in agentic_enricher (Playwright + Ollama; expensive).
         jd_still_missing = not (
             job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
 
         if start_idx <= TIER_ORDER.index("agentic") and jd_still_missing:
-            # Placeholder: actual call wired in 2b.3. Branch is left in place so the
-            # tier ordering and persistence semantics are stable while the per-job
-            # entry point (agentic_enricher.enrich_one_job) is being extracted.
-            pass
+            try:
+                from job_finder.web.agentic_enricher import enrich_one_job
+
+                agentic_result = enrich_one_job(job_row, conn, config)
+                jd = agentic_result.get("jd_full")
+                if jd and len(jd) >= MIN_FETCH_JD_CHARS:
+                    enriched = {"jd_full": jd}
+                    _persist(conn, job_row, enriched, "agentic")
+                    return enriched
+            except Exception as e:
+                logger.debug("Agentic tier failed for '%s': %s", title, e)
 
         # All tiers exhausted
         _persist(conn, job_row, {}, "exhausted")
@@ -280,8 +296,9 @@ def run_enrichment_backfill(
 ) -> int:
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
 
-    Queries jobs where enrichment_tier IS NULL or in a resumable state
-    (not 'exhausted', 'serpapi', or 'sonnet' — those are already done).
+    Queries jobs where enrichment_tier IS NULL or in a resumable state.
+    Skips terminal tiers ('exhausted', 'serpapi', 'agentic') and the
+    legacy synthesis tier ('sonnet') — none of these can advance further.
     Processes up to `limit` jobs per call.
 
     Args:
@@ -306,10 +323,14 @@ def run_enrichment_backfill(
         # rows — and enrich_job() returns {} for each, leaving the real
         # backlog unreached. ORDER BY first_seen DESC further prioritises the
         # freshest rows, which are the ones users are actively viewing.
+        # Terminal tiers: 'serpapi' (got JD), 'agentic' (got JD via Playwright),
+        # 'exhausted' (all tiers tried and failed). 'sonnet' is the legacy
+        # synthesis terminal tier, kept in the skip list for back-compat with
+        # rows enriched before Phase 2b sub-fix RC4.
         rows = conn.execute(
             """SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
-                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet'))
+                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'sonnet'))
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
                ORDER BY first_seen DESC
                LIMIT ?""",

@@ -15,11 +15,16 @@ Requires: Ollama running locally, Playwright + Chromium installed.
 Usage:
     from job_finder.web.agentic_enricher import run_agentic_backfill
     count = run_agentic_backfill("jobs.db", config, limit=50)
+
+    # Single-job entry point (used by data_enricher.enrich_job's agentic tier):
+    from job_finder.web.agentic_enricher import enrich_one_job
+    result = enrich_one_job(job_row, conn, config)  # -> {"jd_full": "..."} or {}
 """
 
 import logging
 import re
 import time
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +461,77 @@ def enrich_single_job(
         return best_text[:_MAX_JD_CHARS]
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Single-job entry point (used by data_enricher.enrich_job's agentic tier)
+# ---------------------------------------------------------------------------
+
+
+def enrich_one_job(
+    job_row: dict,
+    conn: Any,
+    config: dict,
+    model: str = "qwen2.5:14b",
+) -> dict:
+    """Single-job entry point for the agentic enricher.
+
+    Spins up Ollama + Playwright on each call, runs the agentic loop for
+    one job, returns a dict suitable for splatting into a jobs-table UPDATE.
+    Caller is responsible for persisting (atomically with enrichment_tier).
+
+    Costs: Playwright launches a Chromium instance and Ollama loads a model
+    on first call. This is significantly more expensive per-row than the
+    batch path (run_agentic_backfill), so the synchronous cascade in
+    data_enricher.enrich_job() should only invoke this for jobs that have
+    truly exhausted cheaper tiers (free → ddg → serpapi).
+
+    Args:
+        job_row: Job dict — must have 'title' and 'company'.
+        conn: SQLite connection. Currently unused (caller persists), but
+            accepted so the call signature mirrors other tier helpers and
+            future callers can record cost/telemetry into the same DB.
+        config: Application config dict. Read by OllamaProvider for
+            providers.ollama.base_url (default: localhost:11434).
+        model: Ollama model tag for query gen + page validation.
+
+    Returns:
+        Dict with 'jd_full' on success, empty dict on any failure
+        (Ollama unavailable, Playwright unavailable, no URLs found,
+        no high-confidence match). Never raises.
+    """
+    title = job_row.get("title")
+    company = job_row.get("company")
+    if not title or not company:
+        return {}
+
+    # Lazy imports + provider/browser setup. Match run_agentic_backfill's
+    # guards exactly: ImportError covers missing playwright/ollama packages,
+    # RuntimeError covers Ollama service unreachable.
+    try:
+        from playwright.sync_api import sync_playwright
+
+        from job_finder.web.providers.ollama_provider import OllamaProvider
+
+        provider = OllamaProvider(config=config)
+    except (ImportError, RuntimeError) as exc:
+        logger.warning("enrich_one_job: prerequisites unavailable: %s", exc)
+        return {}
+
+    try:
+        with sync_playwright() as pw:
+            browser, page = _create_browser(pw)
+            try:
+                jd = enrich_single_job(job_row, page, model=model, provider=provider)
+            finally:
+                browser.close()
+    except Exception as exc:
+        logger.warning("enrich_one_job: agentic loop failed: %s", exc)
+        return {}
+
+    if jd:
+        return {"jd_full": jd}
+    return {}
 
 
 # ---------------------------------------------------------------------------
