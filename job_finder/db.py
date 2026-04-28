@@ -54,31 +54,55 @@ class JobAssessment:
     provider: str | None = None
 
 
-def derive_classification(sub_scores: dict, legitimacy_note: str | None) -> str:
-    """Python-derived 4-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
+def derive_classification(
+    sub_scores: dict,
+    legitimacy_note: str | None,
+    enrichment_tier: str | None = None,
+    jd_full_length: int = 0,
+    low_signal_threshold: int = 1500,
+) -> str:
+    """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
 
-    Rule (exact CONTEXT D-06 order):
-      1. legitimacy_note truthy  -> "reject"
-      2. any sub-score == 1      -> "reject"
-      3. all sub-scores >= 3     -> "apply"
-      4. all sub-scores >= 2     -> "consider"
-      5. otherwise               -> "skip"
+    Rule precedence (per spec D-2.5, Phase 2d sub-fix 2/4):
+      1. legitimacy_note truthy            -> "reject"
+      2. enrichment exhausted + short jd   -> "low_signal"
+      3. any sub-score == 1                -> "reject"
+      4. all sub-scores >= 3               -> "apply"
+      5. all sub-scores >= 2               -> "consider"
+      6. otherwise                         -> "skip"
 
-    Note: for integer 1-5 sub-scores, branch 5 ("skip") is effectively unreachable —
-    any value below 2 is 1, which already triggered reject at branch 2. The branch
-    remains for defense-in-depth against future sub-score domain changes (e.g.,
-    0 added as a sentinel).
+    The low_signal branch surfaces genuinely-no-signal jobs (enrichment cascade
+    exhausted AND jd_full below threshold) honestly instead of rolling them
+    into apply/consider/skip via unreliable rubric outputs. The branch sits
+    BEFORE the any-axis-1 reject check on purpose: a job with insufficient JD
+    text cannot be confidently rejected on rubric outputs (the 1 itself may be
+    a hallucination from the model scoring against an empty prompt).
+
+    For integer 1-5 sub-scores, branch 6 ("skip") is effectively unreachable —
+    any value below 2 is 1, which already triggered reject at branch 3. The
+    branch remains for defense-in-depth against future sub-score domain changes
+    (e.g., 0 added as a sentinel).
 
     Args:
         sub_scores: dict of the 6 ordinal sub-scores (1-5 integers).
         legitimacy_note: value of the jobs.legitimacy_note column; truthy means
             ingestion-time scam/exclusion detection flagged this row.
+        enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'haiku'
+            | 'serpapi' | 'sonnet' | 'exhausted' | None). Only 'exhausted'
+            participates in the low_signal rule; other tiers are still
+            re-enrichment candidates.
+        jd_full_length: character length of jobs.jd_full (0 when NULL).
+        low_signal_threshold: jd_full_length below this triggers low_signal
+            when enrichment is exhausted. Configurable via
+            scoring.low_signal_jd_chars.
 
     Returns:
-        One of "reject", "apply", "consider", "skip".
+        One of "reject", "low_signal", "apply", "consider", "skip".
     """
     if legitimacy_note:
         return "reject"
+    if enrichment_tier == "exhausted" and jd_full_length < low_signal_threshold:
+        return "low_signal"
     if any(v == 1 for v in sub_scores.values()):
         return "reject"
     if all(v >= 3 for v in sub_scores.values()):
@@ -301,6 +325,8 @@ def persist_job_assessment(
     assessment: JobAssessment,
     provider: str | None = None,
     model: str | None = None,
+    *,
+    config: dict | None = None,
 ) -> None:
     """Persist a v3.0 JobAssessment. Replaces persist_haiku_score + persist_sonnet_score.
 
@@ -314,6 +340,12 @@ def persist_job_assessment(
     the authoritative classification — any classification field on the passed
     assessment is ignored (anti-pattern 3 defense).
 
+    Phase 2d sub-fix 2-3/4: also reads enrichment_tier and LENGTH(jd_full) from
+    the row so derive_classification can compute the low_signal verdict. The
+    threshold (default 1500 chars) is sourced from config.scoring.low_signal_jd_chars
+    when config is provided; callers that pass config=None get the default,
+    preserving back-compat with direct test/script invocations.
+
     No-op on missing dedup_key (SQLite UPDATE with no matching row is a silent
     no-op; we also short-circuit before the UPDATE to avoid COALESCE no-ops).
 
@@ -323,15 +355,37 @@ def persist_job_assessment(
         assessment: JobAssessment with sub_scores + rationale.
         provider: Cascade-attribution string; None preserves the existing value.
         model: Model identifier (e.g., "qwen2.5:14b"); None preserves existing.
+        config: Optional application config dict. When provided, reads
+            scoring.low_signal_jd_chars to set the low_signal threshold;
+            otherwise the default (1500 chars) is used.
     """
     cur = conn.cursor()
-    cur.execute("SELECT legitimacy_note FROM jobs WHERE dedup_key = ?", (dedup_key,))
+    cur.execute(
+        "SELECT legitimacy_note, enrichment_tier, COALESCE(LENGTH(jd_full), 0) AS jd_len "
+        "FROM jobs WHERE dedup_key = ?",
+        (dedup_key,),
+    )
     row = cur.fetchone()
     if row is None:
         # Silent no-op matches SQLite UPDATE-no-match semantics.
         return
-    legitimacy_note = row[0]
-    final_classification = derive_classification(assessment.sub_scores, legitimacy_note)
+    legitimacy_note, enrichment_tier, jd_full_length = row[0], row[1], row[2] or 0
+
+    # Resolve low_signal threshold from config (Phase 2d sub-fix 3/4). Default
+    # 1500 chars matches scoring.low_signal_jd_chars.example. None config keeps
+    # backwards compatibility for tests/scripts that call directly.
+    threshold = 1500
+    if config is not None:
+        scoring_cfg = config.get("scoring") or {}
+        threshold = int(scoring_cfg.get("low_signal_jd_chars", 1500))
+
+    final_classification = derive_classification(
+        assessment.sub_scores,
+        legitimacy_note,
+        enrichment_tier=enrichment_tier,
+        jd_full_length=jd_full_length,
+        low_signal_threshold=threshold,
+    )
 
     # Serialize sub_scores with stable key order for diff-friendliness.
     ordered_sub_scores = {
