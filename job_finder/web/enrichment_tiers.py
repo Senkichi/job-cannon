@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 from ddgs import DDGS
 
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
+from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,25 @@ _AUTH_WALL_SIGNATURES = [
 
 # Timeout for external API calls (seconds)
 _TIMEOUT = 10
+
+# Minimum jd_full length before parse_structured_fields will spend a Haiku call.
+# Matches data_enricher.MIN_FETCH_JD_CHARS — anything shorter is residual
+# auth-wall noise that wouldn't yield reliable salary/location signal.
+_MIN_STRUCTURED_PARSE_JD_CHARS = 200
+
+# JSON schema for the post-fetch structured-field extraction call.
+# DELIBERATELY EXCLUDES jd_full so the model cannot summarize the description
+# back into the description field (the bug the deleted Haiku/Sonnet synthesis
+# tiers had — they fabricated short pseudo-JDs from search snippets).
+_STRUCTURED_FIELDS_SCHEMA: dict = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "salary_min": {"type": "integer"},
+        "salary_max": {"type": "integer"},
+        "location": {"type": "string"},
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Tier implementations
@@ -380,6 +400,82 @@ def search_duckduckgo(query: str) -> str | None:
     except Exception as e:
         logger.debug("DuckDuckGo search failed for '%s': %s", query, e)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Post-fetch structured-field extraction (Phase 2c)
+# ---------------------------------------------------------------------------
+
+
+def parse_structured_fields(
+    jd_full: str,
+    job_row: dict,
+    conn: Any,
+    config: dict,
+) -> dict:
+    """Extract salary and location from a fully-fetched jd_full.
+
+    Runs ONCE post-cascade, on the actual fetched description (no
+    fragment truncation). Schema deliberately excludes jd_full so the
+    model cannot summarize the description back into itself — that was
+    the bug the deleted Haiku/Sonnet synthesis tiers had.
+
+    Args:
+        jd_full: The full job description text (post-fetch).
+        job_row: Job record dict; uses 'dedup_key', 'title', 'company'.
+        conn: Open SQLite connection (for cost recording in call_model).
+        config: Application config dict (for provider routing).
+
+    Returns:
+        Dict containing only fields the model populated. None values
+        are omitted. Returns {} on short jd_full, missing data, or any
+        exception.
+    """
+    if not jd_full or len(jd_full) < _MIN_STRUCTURED_PARSE_JD_CHARS:
+        return {}
+
+    title = job_row.get("title", "")
+    company = job_row.get("company", "")
+    job_id = job_row.get("dedup_key")
+
+    system_prompt = (
+        "You extract structured fields from a job description. "
+        "Return ONLY a JSON object with optional fields: "
+        "salary_min (integer USD annual), salary_max (integer USD annual), "
+        "location (string). Omit fields that cannot be determined. "
+        "Do not invent data."
+    )
+    user_prompt = (
+        f"Job: {title} at {company}\n\n"
+        f"Description:\n{jd_full}\n\n"
+        f"Extract structured fields as JSON. Include only fields explicitly mentioned."
+    )
+
+    try:
+        result = call_model(
+            tier="haiku",  # cheap; structured-extraction task
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+            conn=conn,
+            config=config,
+            output_schema=_STRUCTURED_FIELDS_SCHEMA,
+            job_id=job_id,
+            purpose="parse_structured_fields",
+            max_tokens=256,
+        )
+    except Exception as exc:
+        logger.warning("parse_structured_fields: error for %s: %s", job_id, exc)
+        return {}
+
+    if not result.data or not result.schema_valid:
+        return {}
+
+    out = {}
+    for k in ("salary_min", "salary_max", "location"):
+        v = result.data.get(k)
+        if v is not None:
+            out[k] = v
+    return out
 
 
 # ---------------------------------------------------------------------------
