@@ -21,6 +21,8 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+from job_finder.web.scoring_types import format_salary_range
+
 VALID_CLASSIFICATIONS: tuple[str, ...] = (
     "apply",
     "consider",
@@ -65,6 +67,7 @@ def _print_context(row: sqlite3.Row) -> None:
     print(f"Title:    {row['title']}")
     print(f"Company:  {row['company']}")
     print(f"Location: {row['location']}")
+    print(f"Comp:     {format_salary_range(row['salary_min'], row['salary_max'])}")
     print(f"Sources:  {row['sources']}")
     print(f"\nCurrent model classification: {row['classification']}")
     print(f"Current model sub-scores: {row['sub_scores_json']}")
@@ -79,6 +82,7 @@ def label_one(db_path: str, dedup_key: str) -> None:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT title, company, location, jd_full, sources, "
+            "       salary_min, salary_max, "
             "       classification, sub_scores_json "
             "FROM jobs WHERE dedup_key = ?",
             (dedup_key,),
