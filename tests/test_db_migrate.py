@@ -24,6 +24,14 @@ def test_migration_43_adds_gold_columns(tmp_db_path):
     assert "gold_labeled_at" in cols
 
 
+def test_migration_44_adds_gold_no_signal_axes(tmp_db_path):
+    """Migration 44 adds gold_no_signal_axes (nullable JSON) to jobs."""
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    assert "gold_no_signal_axes" in cols
+
+
 def test_migration_43_user_version_advances(tmp_db_path):
     """After running migrations on a fresh DB, user_version is at least 43."""
     run_migrations(tmp_db_path)
