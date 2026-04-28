@@ -26,6 +26,7 @@ from datetime import datetime
 
 import requests  # noqa: F401 — re-exported for test patching of requests.get
 
+from job_finder.db import derive_classification
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.dedup_normalizer import normalize_company
 from job_finder.web.description_formatter import strip_html_to_text
@@ -811,10 +812,13 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
                         if result is None:
                             continue
                         scored_count += 1
-                        cls = result.get("classification")
-                        if cls in ("apply", "consider", "skip", "reject"):
-                            key = f"classified_{cls}"
-                            summary[key] = summary.get(key, 0) + 1
+                        if getattr(result, "status", None) != "ok" or result.data is None:
+                            continue
+                        cls = derive_classification(
+                            result.data.sub_scores, job_row.get("legitimacy_note")
+                        )
+                        key = f"classified_{cls}"
+                        summary[key] = summary.get(key, 0) + 1
                     except Exception as job_err:
                         logger.warning(
                             "ATS scoring error for '%s': %s -- continuing",
