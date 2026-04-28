@@ -313,11 +313,17 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
     """
     try:
         from job_finder.web.scoring_orchestrator import (
+            build_candidate_context,
             load_scoring_profile,
             score_and_persist_job,
         )
 
-        load_scoring_profile(config)
+        # Phase 2a sub-fix 3/3 (RC1, RC2): stop discarding the loaded profile.
+        # Build the candidate-context block once per batch and forward it on
+        # every per-job scoring call so the v3 system prompt sees who the
+        # candidate is. Spec D-2.1, D-2.2.
+        profile = load_scoring_profile(config)
+        candidate_context = build_candidate_context(config, profile)
     except ImportError as e:
         _mark_session_error(db_path, session_id, f"Import error: {e}")
         return
@@ -374,7 +380,12 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                     continue
 
                 try:
-                    result = score_and_persist_job(job_row, conn, config)
+                    result = score_and_persist_job(
+                        job_row,
+                        conn,
+                        config,
+                        candidate_context=candidate_context,
+                    )
                     if result is not None:
                         scored_count += 1
                     else:
