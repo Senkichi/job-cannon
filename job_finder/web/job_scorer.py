@@ -32,6 +32,7 @@ from job_finder.web.scoring_prompts.v3_scoring_prompt import (
     FIELD_REINFORCEMENT,
     JOB_ASSESSMENT_SCHEMA,
     V3_SCORING_PROMPT,
+    V3_SCORING_PROMPT_HEADER,
 )
 
 log = logging.getLogger(__name__)
@@ -75,12 +76,31 @@ class ScoringResult:
     error: str | None = None
 
 
-def _build_system_prompt() -> str:
-    """Assemble the full system prompt from the frozen v3 modules.
+def _build_system_prompt(candidate_context: str | None = None) -> str:
+    """Assemble the full system prompt from the v3 modules.
 
-    Concatenates V3_SCORING_PROMPT + FEWSHOT_EXAMPLES + FIELD_REINFORCEMENT.
+    When ``candidate_context`` is provided (Phase 2a, spec D-2.1), splices it
+    between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES so the model reads:
+        rubric/dimensions header -> field reinforcement -> candidate context ->
+        few-shot calibration examples.
+
+    When ``candidate_context`` is None, falls back to the legacy aggregate
+    (V3_SCORING_PROMPT + FEWSHOT_EXAMPLES + FIELD_REINFORCEMENT) preserving
+    byte-for-byte the pre-Phase-2a system prompt for callers that have not
+    yet been wired to pass profile context.
+
     No caching — the assembly cost is negligible vs the model call.
     """
+    if candidate_context:
+        return (
+            V3_SCORING_PROMPT_HEADER
+            + "\n\n"
+            + FIELD_REINFORCEMENT
+            + "\n\n"
+            + candidate_context
+            + "\n\n"
+            + FEWSHOT_EXAMPLES
+        )
     return V3_SCORING_PROMPT + "\n\n" + FEWSHOT_EXAMPLES + "\n\n" + FIELD_REINFORCEMENT
 
 
@@ -147,6 +167,7 @@ def score_job(
     conn: sqlite3.Connection,
     config: dict,
     client: Any | None = None,
+    candidate_context: str | None = None,
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
 
@@ -165,6 +186,12 @@ def score_job(
         config: Application config dict.
         client: Optional pre-constructed client for tests. Defaults to None,
             which lets call_model build one via resolve_provider_config.
+        candidate_context: Optional prompt-ready candidate-context block built
+            by ``scoring_orchestrator.build_candidate_context``. When provided,
+            the system prompt is assembled with the context spliced between
+            FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES per spec D-2.1. When None,
+            the legacy aggregate prompt is used (preserves pre-Phase-2a bytes
+            for callers not yet wired to pass profile data).
 
     Returns:
         ScoringResult envelope.
@@ -180,7 +207,7 @@ def score_job(
         )
         return ScoringResult(status="skipped", data=None)
 
-    system = _build_system_prompt()
+    system = _build_system_prompt(candidate_context=candidate_context)
     user_content = _build_user_message(job)
 
     try:
