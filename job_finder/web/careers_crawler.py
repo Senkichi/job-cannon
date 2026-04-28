@@ -26,6 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
+from job_finder.db import derive_classification
 from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.enrichment_tiers import _HEADERS, _TIMEOUT
@@ -1359,10 +1360,11 @@ def _score_new_jobs(
                 if result is None:
                     continue
                 summary["scored"] = summary.get("scored", 0) + 1
-                cls = result.get("classification")
-                if cls in ("apply", "consider", "skip", "reject"):
-                    key = f"classified_{cls}"
-                    summary[key] = summary.get(key, 0) + 1
+                if getattr(result, "status", None) != "ok" or result.data is None:
+                    continue
+                cls = derive_classification(result.data.sub_scores, job_row.get("legitimacy_note"))
+                key = f"classified_{cls}"
+                summary[key] = summary.get(key, 0) + 1
             except Exception as e:
                 logger.warning(
                     "careers_crawl scoring error for '%s': %s",
