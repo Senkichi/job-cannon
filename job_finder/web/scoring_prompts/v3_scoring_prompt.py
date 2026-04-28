@@ -170,7 +170,13 @@ Output:
 """.strip()
 
 
-V3_SCORING_PROMPT: str = (
+# V3_SCORING_PROMPT_HEADER: the rubric + dimensions + rationale-structure block
+# only. Phase 2a sub-fix (D-2.1, supersedes the freeze rule for splice-point
+# necessity): exposed as a separate constant so job_scorer can splice
+# candidate_context between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES. The legacy
+# V3_SCORING_PROMPT aggregate below remains byte-identical to its pre-refactor
+# value, so the no-context code path is unchanged.
+V3_SCORING_PROMPT_HEADER: str = (
     # System prompt header
     "You are a job-fit assessor. You read a job description (JD) and a candidate "
     "profile and emit six ordinal ratings plus a structured rationale.\n\n"
@@ -220,8 +226,16 @@ V3_SCORING_PROMPT: str = (
     "  - resume_priority_skills: up to 6 skills (short tokens) to emphasize on the resume\n\n"
     "## Legitimacy note\n\n"
     "Emit 'legitimacy_note' as a string ONLY if the JD shows red flags (scam signals, MLM pitch, "
-    "unrealistic compensation, non-professional contact channels). Otherwise emit null.\n\n"
-    + FIELD_REINFORCEMENT
-    + "\n\n"
-    + FEWSHOT_EXAMPLES
+    "unrealistic compensation, non-professional contact channels). Otherwise emit null."
+)
+
+
+# V3_SCORING_PROMPT: legacy aggregate (header + FIELD_REINFORCEMENT +
+# FEWSHOT_EXAMPLES) preserved byte-identical for any caller that imports it
+# directly. job_scorer._build_system_prompt() now assembles its own ordering
+# when candidate_context is provided (header + FIELD_REINFORCEMENT + context +
+# FEWSHOT_EXAMPLES per D-2.1) and falls back to this constant + FEWSHOT +
+# FIELD_REINFORCEMENT otherwise.
+V3_SCORING_PROMPT: str = (
+    V3_SCORING_PROMPT_HEADER + "\n\n" + FIELD_REINFORCEMENT + "\n\n" + FEWSHOT_EXAMPLES
 )
