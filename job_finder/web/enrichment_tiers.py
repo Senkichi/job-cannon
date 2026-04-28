@@ -1,10 +1,15 @@
 """Individual enrichment tier implementations for job data extraction.
 
 Each function implements a single data source: direct URL fetch, ATS API,
-careers page scraping, DuckDuckGo search, SerpAPI search, Haiku extraction,
-and Sonnet deep extraction.
+careers page scraping, DuckDuckGo search, SerpAPI search.
 
 These are called by data_enricher.enrich_job() in cost order.
+
+Phase 2b sub-fix RC4 removed the LLM-synthesis tiers (extract_with_haiku,
+extract_with_sonnet) — they fabricated short pseudo-JDs from search-result
+fragments and blocked escalation to fetch tiers that actually retrieved
+the real JD. Structured fields (salary, location) are now extracted
+post-fetch from jd_full via parse_structured_fields() (Phase 2c).
 """
 
 import logging
@@ -16,50 +21,10 @@ import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
-from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_SONNET
-from job_finder.web.claude_client import call_claude
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
-from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
 
-
-# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
-# SDK. AnthropicProvider forwards this to call_claude(), which ignores
-# client and routes through the CLI — OAuth/subscription billing is preserved.
-class _CLIClientStub:
-    api_key = "cli-managed"
-
-
-_CLI_CLIENT_STUB = _CLIClientStub()
-
-# Structured output schemas for the two enrichment call sites. Anthropic
-# parses the "Return ONLY JSON" prompt deterministically; Ollama forces
-# format:"json" regardless and, absent a schema, can invent keys like
-# {"salary": 120000} instead of {"salary_min": ..., "salary_max": ...} —
-# the downstream filter silently drops those, losing data. Explicit schemas
-# + additionalProperties:false engage _sanitize_output's key-stripping and
-# type-coercion so both providers yield the same shape.
-_ENRICH_HAIKU_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "jd_full": {"type": "string"},
-        "salary_min": {"type": "integer"},
-        "salary_max": {"type": "integer"},
-        "location": {"type": "string"},
-    },
-    "additionalProperties": False,
-}
-
-_ENRICH_SONNET_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "jd_full": {"type": "string"},
-        "salary_min": {"type": "integer"},
-        "salary_max": {"type": "integer"},
-    },
-    "additionalProperties": False,
-}
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -303,128 +268,6 @@ def scrape_careers(job_row: dict, conn: Any, config: dict) -> dict:
         return {}
 
 
-def extract_with_sonnet(
-    fragments: dict,
-    job_row: dict,
-    conn: Any,
-    config: dict,
-) -> dict:
-    """Use Sonnet to deep-extract structured data from ALL accumulated fragments.
-
-    Assembles all text fragments from prior tiers into a single context string
-    (budget 4000-6000 chars). Prompts Sonnet to extract jd_full and salary
-    from sparse/fragmented signals.
-
-    Args:
-        fragments: Dict of all text fragments accumulated from prior tiers.
-        job_row: Job row dict for context (title, company).
-        client: Anthropic client instance.
-        conn: SQLite connection for cost recording.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full, salary_min, salary_max. Empty dict on failure.
-    """
-    try:
-        title = job_row.get("title", "")
-        company = job_row.get("company", "")
-
-        # Assemble all fragments into context string (cap at 5000 chars total)
-        context_parts = []
-        for key, text in fragments.items():
-            if text and isinstance(text, str):
-                label = key.replace("_", " ").upper()
-                context_parts.append(f"[{label}]\n{str(text)[:1500]}")
-        context_text = "\n\n".join(context_parts)[:5000]
-
-        if not context_text:
-            context_text = f"Job posting: {title} at {company}"
-
-        system_prompt = (
-            "You are an expert job data extractor. Given fragments of information "
-            "about a job posting (from web searches, ATS APIs, and careers pages), "
-            "extract structured information as a JSON object. "
-            "Extract only what is explicitly stated — do not invent data. "
-            "Return ONLY a JSON object with these optional fields: "
-            "jd_full (string, full job description), "
-            "salary_min (integer, USD annual), "
-            "salary_max (integer, USD annual). "
-            "Omit fields that cannot be determined from the provided text."
-        )
-
-        user_prompt = (
-            f"Job: {title} at {company}\n\n"
-            f"Information fragments from multiple sources:\n{context_text}\n\n"
-            f"Extract job details as JSON. Include only fields that are explicitly mentioned."
-        )
-
-        model = config.get("scoring", {}).get("models", {}).get("sonnet", DEFAULT_MODEL_SONNET)
-
-        job_id = job_row.get("dedup_key")
-
-        use_dispatcher = bool(config.get("providers", {}).get("sonnet"))
-
-        if use_dispatcher:
-            try:
-                model_result = call_model(
-                    tier="sonnet",
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
-                    conn=conn,
-                    config=config,
-                    output_schema=_ENRICH_SONNET_SCHEMA,
-                    job_id=job_id,
-                    purpose="enrich_job_sonnet",
-                    max_tokens=1024,
-                    client=_CLI_CLIENT_STUB,
-                )
-                result = model_result.data
-            except ProviderCascadeExhaustedError:
-                logger.warning(
-                    "enrich_job_sonnet: cascade exhausted for '%s', retrying via CLI",
-                    job_id,
-                )
-                result, _cost = call_claude(
-                    model=model,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
-                    output_schema=_ENRICH_SONNET_SCHEMA,
-                    conn=conn,
-                    job_id=job_id,
-                    purpose="enrich_job_sonnet",
-                    config=config,
-                    max_tokens=1024,
-                )
-        else:
-            result, _cost = call_claude(
-                model=model,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-                output_schema=_ENRICH_SONNET_SCHEMA,
-                conn=conn,
-                job_id=job_id,
-                purpose="enrich_job_sonnet",
-                config=config,
-                max_tokens=1024,
-            )
-
-        if isinstance(result, dict):
-            enriched = {}
-            for key, value in result.items():
-                if value is not None and key in ("jd_full", "salary_min", "salary_max"):
-                    if key in ("salary_min", "salary_max") and isinstance(value, (int, float)):
-                        enriched[key] = int(value)
-                    elif key == "jd_full" and isinstance(value, str) and value.strip():
-                        enriched[key] = value
-            return enriched
-
-        return {}
-
-    except Exception as e:
-        logger.debug("Sonnet extraction failed: %s", e)
-        return {}
-
-
 def search_serpapi(query: str, api_key: str) -> tuple[dict | None, list[str]]:
     """Search Google Jobs via SerpAPI for job details.
 
@@ -537,119 +380,6 @@ def search_duckduckgo(query: str) -> str | None:
     except Exception as e:
         logger.debug("DuckDuckGo search failed for '%s': %s", query, e)
         return None
-
-
-def extract_with_haiku(
-    search_text: str,
-    job_row: dict,
-    conn: Any,
-    config: dict,
-) -> dict:
-    """Use Haiku to extract structured job data from accumulated fragment text.
-
-    Sends search_text to Haiku with a structured extraction prompt to parse
-    out salary range, location, and job description summary.
-
-    Args:
-        search_text: Aggregated text from DDG and other free-tier sources.
-        job_row: Job row dict for context (title, company).
-        client: Anthropic client instance.
-        conn: SQLite connection for cost recording.
-        config: Application config dict.
-
-    Returns:
-        Dict with any of: jd_full, salary_min, salary_max, location.
-        Returns empty dict on failure.
-    """
-    try:
-        title = job_row.get("title", "")
-        company = job_row.get("company", "")
-
-        system_prompt = (
-            "You are a job data extractor. Given text about a job posting, extract "
-            "structured information as a JSON object. Extract only what is explicitly "
-            "stated — do not invent data. Return ONLY a JSON object with these optional "
-            "fields: jd_full (string, job description summary), salary_min (integer, USD), "
-            "salary_max (integer, USD), location (string). Omit fields that are not present."
-        )
-
-        user_prompt = (
-            f"Job: {title} at {company}\n\n"
-            f"Text to extract from:\n{search_text[:2000]}\n\n"
-            f"Extract job details as JSON. Include only fields that are explicitly mentioned."
-        )
-
-        model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
-
-        job_id = job_row.get("dedup_key")
-
-        use_dispatcher = bool(config.get("providers", {}).get("haiku"))
-
-        if use_dispatcher:
-            try:
-                model_result = call_model(
-                    tier="haiku",
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
-                    conn=conn,
-                    config=config,
-                    output_schema=_ENRICH_HAIKU_SCHEMA,
-                    job_id=job_id,
-                    purpose="enrich_job",
-                    max_tokens=512,
-                    client=_CLI_CLIENT_STUB,
-                )
-                result = model_result.data
-            except ProviderCascadeExhaustedError:
-                logger.warning(
-                    "enrich_job: Haiku cascade exhausted for '%s', retrying via CLI",
-                    job_id,
-                )
-                result, _cost = call_claude(
-                    model=model,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": user_prompt}],
-                    output_schema=_ENRICH_HAIKU_SCHEMA,
-                    conn=conn,
-                    job_id=job_id,
-                    purpose="enrich_job",
-                    config=config,
-                    max_tokens=512,
-                )
-        else:
-            result, _cost = call_claude(
-                model=model,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-                output_schema=_ENRICH_HAIKU_SCHEMA,
-                conn=conn,
-                job_id=job_id,
-                purpose="enrich_job",
-                config=config,
-                max_tokens=512,
-            )
-
-        if isinstance(result, dict):
-            # Remove None values and ensure salary fields are integers
-            enriched = {}
-            for key, value in result.items():
-                if value is not None and key in (
-                    "jd_full",
-                    "salary_min",
-                    "salary_max",
-                    "location",
-                ):
-                    if key in ("salary_min", "salary_max") and isinstance(value, (int, float)):
-                        enriched[key] = int(value)
-                    elif isinstance(value, str) and value.strip():
-                        enriched[key] = value
-            return enriched
-
-        return {}
-
-    except Exception as e:
-        logger.debug("Haiku extraction failed: %s", e)
-        return {}
 
 
 # ---------------------------------------------------------------------------

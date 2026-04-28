@@ -39,10 +39,12 @@ def run_homepage_backfill(
         config: Application config (already force_ollama'd to the candidate).
         model: Ollama model tag (for attribution).
         n: Target sample size (D-07: n≥15 for extraction sites).
-        site_call: Optional test-injectable callable
+        site_call: Required test-injectable callable
             site_call(row, config, conn) -> {"extracted": dict, "retries": int,
                                               "valid": bool}. When absent,
-            falls back to the enrichment_tiers.extract_with_haiku path.
+            yields an empty 'invalid' result per row (the previous fallback
+            into enrichment_tiers.extract_with_haiku was removed when the
+            synthesis tiers were excised from the cascade — Phase 2b RC4).
 
     Returns:
         {"n": int, "retry_count": int, "hallucination_rate": float,
@@ -65,21 +67,10 @@ def run_homepage_backfill(
             if site_call is not None:
                 site_result = site_call(row_dict, config, conn)
             else:
-                # Fallback: use the enrichment_tiers path as a homepage backfill
-                # analog when no explicit site_call is provided.
-                from job_finder.web.enrichment_tiers import extract_with_haiku
-
-                source = (
-                    f"{row_dict.get('title', '')} at {row_dict.get('company', '')}. "
-                    f"Location: {row_dict.get('location', '')}. "
-                    f"{(row_dict.get('jd_full') or '')[:2000]}"
-                )
-                out = extract_with_haiku(source, row_dict, conn, config)
-                site_result = {
-                    "extracted": out or {},
-                    "retries": 0,
-                    "valid": isinstance(out, dict) and bool(out),
-                }
+                # No fallback: synthesis tiers were removed from the cascade in
+                # Phase 2b sub-fix RC4. Callers that want a homepage-backfill
+                # analog must inject an explicit site_call.
+                site_result = {"extracted": {}, "retries": 0, "valid": False}
         except Exception as exc:
             site_result = {"extracted": {}, "retries": 1, "valid": False, "error": str(exc)}
             retry_count += 1
