@@ -694,3 +694,109 @@ class TestEnrichSingleJobObservability:
         assert any(
             "urls=" in msg and "fetched=" in msg and "auth_wall=" in msg for msg in info_messages
         )
+
+
+# ---------------------------------------------------------------------------
+# enrich_one_job() — single-job entry point used by data_enricher's cascade
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichOneJob:
+    def test_returns_jd_full_when_enrich_single_job_succeeds(self):
+        """Smoke test: provider/Playwright wired up; jd returned in dict."""
+        from job_finder.web.agentic_enricher import enrich_one_job
+
+        job_row = {"title": "Data Scientist", "company": "Acme Corp"}
+        long_jd = "Full JD body for the Data Scientist role at Acme Corp. " * 10
+
+        # Lazy imports inside enrich_one_job: shim them via sys.modules so the
+        # `from playwright.sync_api import sync_playwright` and
+        # `from job_finder.web.providers.ollama_provider import OllamaProvider`
+        # statements pick up our mocks.
+        mock_ollama_mod = MagicMock()
+        mock_ollama_mod.OllamaProvider.return_value = MagicMock()
+
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        mock_pw_ctx.__exit__ = MagicMock(return_value=False)
+
+        mock_playwright_mod = MagicMock()
+        mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                    "playwright.sync_api": mock_playwright_mod,
+                },
+            ),
+            patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+            patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich,
+        ):
+            mock_browser.return_value = (MagicMock(), MagicMock())
+            mock_enrich.return_value = long_jd
+
+            result = enrich_one_job(job_row, conn=None, config={})
+
+        assert result == {"jd_full": long_jd}
+
+    def test_returns_empty_dict_when_no_jd_found(self):
+        """When enrich_single_job returns None, returns empty dict."""
+        from job_finder.web.agentic_enricher import enrich_one_job
+
+        job_row = {"title": "Data Scientist", "company": "Acme Corp"}
+
+        mock_ollama_mod = MagicMock()
+        mock_ollama_mod.OllamaProvider.return_value = MagicMock()
+
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        mock_pw_ctx.__exit__ = MagicMock(return_value=False)
+
+        mock_playwright_mod = MagicMock()
+        mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                    "playwright.sync_api": mock_playwright_mod,
+                },
+            ),
+            patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+            patch("job_finder.web.agentic_enricher.enrich_single_job") as mock_enrich,
+        ):
+            mock_browser.return_value = (MagicMock(), MagicMock())
+            mock_enrich.return_value = None
+
+            result = enrich_one_job(job_row, conn=None, config={})
+
+        assert result == {}
+
+    def test_returns_empty_dict_when_ollama_unreachable(self):
+        """When OllamaProvider raises RuntimeError, returns empty dict cleanly."""
+        from job_finder.web.agentic_enricher import enrich_one_job
+
+        mock_ollama_mod = MagicMock()
+        mock_ollama_mod.OllamaProvider.side_effect = RuntimeError("Ollama unreachable")
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                "playwright.sync_api": MagicMock(),
+            },
+        ):
+            result = enrich_one_job({"title": "DS", "company": "Acme"}, conn=None, config={})
+
+        assert result == {}
+
+    def test_returns_empty_dict_for_missing_title_or_company(self):
+        """Skip immediately if title or company is missing."""
+        from job_finder.web.agentic_enricher import enrich_one_job
+
+        assert enrich_one_job({"title": "", "company": "Acme"}, None, {}) == {}
+        assert enrich_one_job({"title": "DS", "company": ""}, None, {}) == {}
+        assert enrich_one_job({}, None, {}) == {}
