@@ -128,3 +128,79 @@ def score_and_persist_job(
     )
     conn.commit()
     return result
+
+
+def build_candidate_context(config: dict, profile: dict) -> str:
+    """Merge config.yaml [profile] (targeting) and experience_profile.json
+    (resume) into a prompt-ready candidate-context string.
+
+    Returns a structured-text block ~400-500 tokens that gets spliced into
+    the scoring system prompt between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES
+    per spec D-2.1. Output stays under ~600 tokens (~2400 chars) via top-30
+    skills + first-6 positions truncation.
+
+    Args:
+        config: Application config dict. Reads ``config["profile"]`` for
+            targeting fields (target_titles, target_locations, min_salary,
+            industries, exclusions).
+        profile: Experience profile dict (typically loaded via
+            load_scoring_profile). Reads positions, skills, education.
+
+    Returns:
+        A multi-section markdown string with "## Candidate context" header.
+        Always returns a non-empty string even when both inputs are empty
+        (uses "Not specified" / "No positions" sentinels).
+    """
+    cfg_profile = config.get("profile") or {}
+
+    # Targeting block
+    target_titles = cfg_profile.get("target_titles") or []
+    target_locations = cfg_profile.get("target_locations") or []
+    min_salary = cfg_profile.get("min_salary")
+    industries = cfg_profile.get("industries") or []
+    exclusions = cfg_profile.get("exclusions") or {}
+    excl_companies = exclusions.get("companies") or []
+
+    parts: list[str] = ["## Candidate context", "", "### Targeting"]
+    parts.append(
+        f"- Target titles: {', '.join(target_titles) if target_titles else 'Not specified'}"
+    )
+    parts.append(
+        f"- Target locations: {', '.join(target_locations) if target_locations else 'Not specified'}"
+    )
+    parts.append(
+        f"- Compensation floor: ${min_salary:,}"
+        if min_salary
+        else "- Compensation floor: Not specified"
+    )
+    parts.append(
+        f"- Target industries: {', '.join(industries) if industries else 'Not specified'}"
+    )
+    if excl_companies:
+        parts.append(f"- Exclusions: companies {excl_companies}")
+
+    # Resume block
+    parts += ["", "### Background"]
+    positions = profile.get("positions") or []
+    if not positions:
+        parts.append("- No positions in profile")
+    else:
+        for p in positions[:6]:  # cap at 6 most recent
+            title = p.get("title", "?")
+            company = p.get("company", "?")
+            start = p.get("start_date", "?")
+            end = p.get("end_date") or "present"
+            parts.append(f"- {title} @ {company} ({start}-{end})")
+
+    skills = profile.get("skills") or []
+    if skills:
+        parts.append(f"- Top skills: {', '.join(skills[:30])}")
+
+    education = profile.get("education") or []
+    for e in education[:3]:
+        deg = e.get("degree") or "?"
+        inst = e.get("institution") or "?"
+        grad = e.get("graduation") or ""
+        parts.append(f"- {deg} ({inst}{', ' + str(grad) if grad else ''})")
+
+    return "\n".join(parts)
