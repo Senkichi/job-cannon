@@ -25,6 +25,10 @@ uv.lock
 # Reports
 reports/
 eval_results/
+# Phase 5 eval harness reports are intentionally tracked — they're the
+# A/B baseline comparator artifact for prompt variant work.
+!.planning/eval_results/
+!.planning/eval_results/**
 
 # IDE
 .vscode/
