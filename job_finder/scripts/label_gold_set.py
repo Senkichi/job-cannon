@@ -38,8 +38,6 @@ SUB_SCORE_AXES: tuple[str, ...] = (
     "skills_match",
 )
 
-JD_EXCERPT_CHARS = 600
-
 
 def _prompt_classification() -> str:
     while True:
@@ -70,8 +68,8 @@ def _print_context(row: sqlite3.Row) -> None:
     print(f"Sources:  {row['sources']}")
     print(f"\nCurrent model classification: {row['classification']}")
     print(f"Current model sub-scores: {row['sub_scores_json']}")
-    jd_excerpt = (row["jd_full"] or "")[:JD_EXCERPT_CHARS]
-    print(f"\nJD excerpt (first {JD_EXCERPT_CHARS} chars):\n{jd_excerpt}")
+    jd = row["jd_full"] or "(no jd_full)"
+    print(f"\nJD ({len(jd)} chars):\n{jd}")
     print("=" * 70)
 
 
