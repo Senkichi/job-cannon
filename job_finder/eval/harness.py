@@ -300,14 +300,21 @@ def run(
         - Calls the live scoring stack via score_job (unless _score_one is
           monkeypatched in tests).
     """
-    config = config or {}
+    config = dict(config or {})
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     gold_rows = _load_gold_rows(db_path)
-    # Variant must be importable even though we don't currently swap prompts
-    # at scoring time — the import surface is the contract Phase 4 will
-    # extend. Failing fast here is preferable to silently using baseline.
+    # Variant must be importable; failing fast here is preferable to
+    # silently using baseline.
     _load_variant(variant_name)
+
+    # Phase 4: inject variant into the config dict so score_job's
+    # _build_system_prompt and _resolve_schema pick it up. The CLI flag
+    # is the source of truth at eval time and takes precedence over any
+    # value already in config.yaml.
+    scoring_cfg = dict(config.get("scoring") or {})
+    scoring_cfg["prompt_variant"] = variant_name
+    config["scoring"] = scoring_cfg
 
     conn = sqlite3.connect(db_path)
     try:
