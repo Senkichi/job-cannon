@@ -59,7 +59,7 @@ Six-phase plan, executed in order:
 
 | Phase | Deliverable | Compute / Time |
 |---|---|---|
-| 1. Literature survey | `.planning/research/SCORING-LITERATURE-SURVEY.md` covering LLM-as-judge biases, ordinal scoring metrics, rubric design, confidence/abstention, pointwise vs pairwise | ~1 day research, 2-3hr read |
+| 1. Literature survey | `.planning/research/SCORING-LITERATURE-SURVEY.md` — full scientific literature review + research proposal, ~5,000–10,000 words, IEEE-numbered citations, ~30–60 cited sources covering LLM-as-judge biases, ordinal scoring metrics, rubric design, confidence/abstention, pointwise vs pairwise | ~2–3 days research+write, 1–2hr read |
 | 2. Bug fixes | Profile injection + cascade rewrite + `low_signal` classification + backfill | ~3hr core code, ~9hr overnight backfill |
 | 3. Gold set | 40 user-labeled jobs (per-axis 1-5 + classification + optional note), stored as columns on `jobs` | ~60–80 min labeling |
 | 4. Rubric redesign | Variant files in `scoring_prompts/variants/`, A/B'd via the harness, winner committed | ~half a day per iteration cycle |
@@ -72,7 +72,24 @@ The lit survey is **upfront** (informs phases 4 & 5); bug fixes are **before** t
 
 ## Phase 1 — Literature Survey
 
-**Topics**, each with primary-source paper summaries + an "applicable to job-cannon?" verdict:
+A **publication-style scientific literature review and research proposal**, written so the user can learn the field in depth and so the spec's design decisions have explicit grounding in prior work. Not an internal cheat-sheet.
+
+### Document structure
+
+1. **Abstract** (200–300 words) — problem framing, approach, key findings, recommendation
+2. **Introduction** — why scoring calibration is hard for ordinal LLM-as-judge tasks; the four root causes diagnosed in this project as motivating examples; explicit research questions
+3. **Background** — prerequisites for the reader: ordinal scoring fundamentals, LLM-as-judge basics, the candidate-fit task formulation
+4. **Body** — five topical sections (one per topic in the table below), each:
+   - Paper-by-paper synthesis (prose, not bullet lists)
+   - Interactions and contradictions between findings
+   - Inline citations to primary sources
+5. **Discussion** — synthesis across topics; what the literature settles, what it disputes, what gaps remain
+6. **Research Proposal** — application to job-cannon framed as a research proposal: hypotheses (Phase 4 dimensions), methodology (refers to phases 5–6 of this spec), expected outcomes, validity threats
+7. **References** — IEEE-style numbered citations: paper title, authors, venue, year, arXiv ID / DOI / URL
+
+**Target length:** 5,000–10,000 words, ~30–60 cited sources, weighted toward 2023–2026 work but including foundational older papers (ICC, Krippendorff, Likert) where appropriate.
+
+### Topics
 
 | # | Topic | Tied to which root cause / decision |
 |---|---|---|
@@ -82,9 +99,16 @@ The lit survey is **upfront** (informs phases 4 & 5); bug fixes are **before** t
 | 4 | Confidence, abstention, "no signal" handling (verbalized confidence, ECE, explicit abstain codes) | RC3, Phase 4 dimension B |
 | 5 | Pointwise vs pairwise vs listwise scoring | Decision: stay pointwise; document why (parked alternative) |
 
-**Method:** parallel research agents (one per topic, using WebSearch + Exa + WebFetch on primary sources), then synthesized into a single doc with a final "techniques to adopt" table.
+### Method
 
-**Out of scope:** Pre-2023 evaluation work (Likert fundamentals), non-LLM ranking literature, multi-judge ensembles, RAG-eval-specific work.
+- **Parallel research agents** (one per topic) using WebSearch + Exa + WebFetch + Context7 against primary sources (arXiv preferred over secondary blogs)
+- Each agent returns a draft body section with full inline citations and a per-topic reference list
+- **Final synthesis pass**: assemble body sections, write Abstract / Introduction / Background / Discussion / Research Proposal, normalize citation style across the doc, build consolidated References section
+- **Cross-reference check**: every claim in the body cites at least one source; every source in References is cited at least once; broken or paywalled links flagged
+
+### Out of scope
+
+Pre-2023 evaluation work (Likert fundamentals — cite for context, don't deep-dive); non-LLM ranking literature; multi-judge ensembles; RAG-eval-specific work.
 
 ### Decisions
 
@@ -93,6 +117,8 @@ The lit survey is **upfront** (informs phases 4 & 5); bug fixes are **before** t
 | D-1.1 | 5 topic structure tied to known root causes | Every finding has clear "applicable here?" verdict; avoids abstract bibliography |
 | D-1.2 | Parallel research agents, one per topic | Faster than serial; isolates context; matches established pattern from `/gsd-new-project` |
 | D-1.3 | Survey runs **before** any other phase | Findings inform Phase 4 (rubric) and Phase 5 (metrics) |
+| D-1.4 | Output is a publication-style scientific literature review + research proposal, ~5–10k words, IEEE-numbered citations | Forces depth and rigor; serves as personal learning artifact; explicit grounding for design decisions; the spec doc and the lit review become two halves of the same package (the spec says *what we'll do*; the review says *why prior work supports doing it this way*) |
+| D-1.5 | IEEE numbered citation style (not APA, not parenthetical) | Easier to read inline; references section is one consolidated block; standard for applied CS work |
 
 ---
 
