@@ -137,6 +137,10 @@ scoring:
   monthly_budget_usd: 25.0
   # Haiku fast-filter threshold — jobs below this skip Sonnet deep evaluation
   haiku_threshold: 55
+  # Phase 4 rubric variant. 'baseline' uses the production v3 prompt; any
+  # other name resolves to job_finder.web.scoring_prompts.variants.<name>.
+  # The eval-harness CLI overrides this at runtime via --variant.
+  prompt_variant: baseline
   # AI models (defaults are recommended; change only if you know what you're doing)
   models:
     haiku: claude-haiku-4-5

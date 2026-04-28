@@ -27,17 +27,13 @@ from typing import Any
 
 from job_finder.db import JobAssessment
 from job_finder.web.model_provider import call_model
-from job_finder.web.scoring_prompts.v3_scoring_prompt import (
-    FEWSHOT_EXAMPLES,
-    FIELD_REINFORCEMENT,
-    JOB_ASSESSMENT_SCHEMA,
-    V3_SCORING_PROMPT,
-    V3_SCORING_PROMPT_HEADER,
-)
+from job_finder.web.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
 
 log = logging.getLogger(__name__)
 
 # Re-export the schema for callers that need the dispatcher-layer constant.
+# This is the BASELINE schema; per-call schema for variant selection is
+# resolved through _resolve_schema(config).
 __all__ = ["JOB_ASSESSMENT_SCHEMA", "ScoringResult", "score_job"]
 
 # Canonical sub-score keys (matches v3 prompt schema + CONTEXT D-05).
@@ -76,32 +72,71 @@ class ScoringResult:
     error: str | None = None
 
 
-def _build_system_prompt(candidate_context: str | None = None) -> str:
-    """Assemble the full system prompt from the v3 modules.
+def _variant_name(config: dict | None) -> str:
+    """Read scoring.prompt_variant from config; default to 'baseline'."""
+    if not config:
+        return "baseline"
+    return (config.get("scoring") or {}).get("prompt_variant") or "baseline"
 
-    When ``candidate_context`` is provided (Phase 2a, spec D-2.1), splices it
-    between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES so the model reads:
-        rubric/dimensions header -> field reinforcement -> candidate context ->
-        few-shot calibration examples.
 
-    When ``candidate_context`` is None, falls back to the legacy aggregate
-    (V3_SCORING_PROMPT + FEWSHOT_EXAMPLES + FIELD_REINFORCEMENT) preserving
-    byte-for-byte the pre-Phase-2a system prompt for callers that have not
-    yet been wired to pass profile context.
+def _resolve_variant_module(variant_name: str):
+    """Return the prompt module for a named variant.
 
-    No caching — the assembly cost is negligible vs the model call.
+    'baseline' aliases the production v3_scoring_prompt module. Any other
+    name is resolved as ``job_finder.web.scoring_prompts.variants.<name>``.
+    Unknown names raise ImportError mentioning the requested variant — never
+    silently fall back to baseline (silent fallback masks experiment errors).
     """
+    if variant_name == "baseline":
+        from job_finder.web.scoring_prompts import v3_scoring_prompt as mod
+
+        return mod
+    import importlib
+
+    try:
+        return importlib.import_module(f"job_finder.web.scoring_prompts.variants.{variant_name}")
+    except ImportError as exc:
+        raise ImportError(f"Unknown scoring prompt variant: {variant_name!r}") from exc
+
+
+def _resolve_schema(config: dict | None) -> dict:
+    """Resolve the JSON-schema dict for the variant named in config."""
+    return _resolve_variant_module(_variant_name(config)).JOB_ASSESSMENT_SCHEMA
+
+
+def _build_system_prompt(
+    candidate_context: str | None = None,
+    config: dict | None = None,
+) -> str:
+    """Assemble the full system prompt from the resolved variant module.
+
+    Variant selection: ``config["scoring"]["prompt_variant"]`` picks the
+    module. 'baseline' (or absent) loads ``v3_scoring_prompt``; any other
+    name loads ``scoring_prompts.variants.<name>``. Each variant module
+    must export V3_SCORING_PROMPT, FIELD_REINFORCEMENT, FEWSHOT_EXAMPLES,
+    and JOB_ASSESSMENT_SCHEMA (V3_SCORING_PROMPT_HEADER is optional).
+
+    When ``candidate_context`` is provided (Phase 2a, spec D-2.1), splices
+    it between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES so the model reads:
+        rubric/dimensions header -> field reinforcement -> candidate context
+        -> few-shot calibration examples.
+
+    When ``candidate_context`` is None, falls back to the variant's legacy
+    aggregate ordering (V3_SCORING_PROMPT + FEWSHOT + FIELD_REINFORCEMENT)
+    preserving byte-for-byte the pre-Phase-2a system prompt for the
+    baseline module (no context callers).
+    """
+    mod = _resolve_variant_module(_variant_name(config))
+    header = getattr(mod, "V3_SCORING_PROMPT_HEADER", None) or mod.V3_SCORING_PROMPT
+    field_reinforcement = mod.FIELD_REINFORCEMENT
+    fewshot = mod.FEWSHOT_EXAMPLES
+
     if candidate_context:
         return (
-            V3_SCORING_PROMPT_HEADER
-            + "\n\n"
-            + FIELD_REINFORCEMENT
-            + "\n\n"
-            + candidate_context
-            + "\n\n"
-            + FEWSHOT_EXAMPLES
+            header + "\n\n" + field_reinforcement + "\n\n" + candidate_context + "\n\n" + fewshot
         )
-    return V3_SCORING_PROMPT + "\n\n" + FEWSHOT_EXAMPLES + "\n\n" + FIELD_REINFORCEMENT
+    aggregate = mod.V3_SCORING_PROMPT
+    return aggregate + "\n\n" + fewshot + "\n\n" + field_reinforcement
 
 
 def _build_user_message(job: dict) -> str:
@@ -207,8 +242,9 @@ def score_job(
         )
         return ScoringResult(status="skipped", data=None)
 
-    system = _build_system_prompt(candidate_context=candidate_context)
+    system = _build_system_prompt(candidate_context=candidate_context, config=config)
     user_content = _build_user_message(job)
+    output_schema = _resolve_schema(config)
 
     try:
         result = call_model(
@@ -217,7 +253,7 @@ def score_job(
             messages=[{"role": "user", "content": user_content}],
             conn=conn,
             config=config,
-            output_schema=JOB_ASSESSMENT_SCHEMA,
+            output_schema=output_schema,
             job_id=job.get("dedup_key"),
             purpose="score_job",
             max_tokens=2048,
