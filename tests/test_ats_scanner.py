@@ -1208,7 +1208,9 @@ class TestRunAtsScan:
 
     def test_run_ats_scan_increments_classification_counters(self, migrated_db_path):
         """run_ats_scan increments per-classification counters (v3.0 Plan 3)."""
+        from job_finder.db import JobAssessment
         from job_finder.web.ats_scanner import run_ats_scan
+        from job_finder.web.job_scorer import ScoringResult
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
@@ -1238,8 +1240,34 @@ class TestRunAtsScan:
             },
         }
 
-        # Unified scorer returns classification directly.
-        scorer_result = {"classification": "apply", "sub_scores": {}, "rationale": {}}
+        # score_and_persist_job returns a ScoringResult dataclass (status="ok",
+        # data=JobAssessment). All sub-scores ≥3 so derive_classification yields
+        # "apply". Returning a dict here would silently take the skip-branch in
+        # ats_scanner (getattr(dict, "status", None) is None, != "ok") — see
+        # commit c508d76 which fixed the same dict-vs-dataclass pattern.
+        sub_scores = {
+            "title_fit": 4,
+            "location_fit": 4,
+            "comp_fit": 3,
+            "domain_match": 4,
+            "seniority_match": 4,
+            "skills_match": 4,
+        }
+        scorer_result = ScoringResult(
+            status="ok",
+            data=JobAssessment(
+                sub_scores=sub_scores,
+                classification="",
+                rationale={
+                    "strengths": [],
+                    "gaps": [],
+                    "talking_points": [],
+                    "resume_priority_skills": [],
+                },
+                provider="anthropic",
+            ),
+            provider="anthropic",
+        )
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             with patch(

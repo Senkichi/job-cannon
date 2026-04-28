@@ -429,11 +429,13 @@ def test_migration_count_is_thirteen():
     Migration 42 (Phase 2d sub-fix 1/4) extends classification enum vocabulary
     to include 'low_signal' (no-op DDL — column has no CHECK constraint; bumps
     user_version and documents the new allowed value).
+    Migration 43 (Phase 3 task 1/3) adds gold_classification, gold_sub_scores_json,
+    gold_notes, gold_labeled_at columns to jobs for the Phase 5 eval harness.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 42
+    assert len(MIGRATIONS) == 43
 
 
 class TestMigration27:
@@ -1233,8 +1235,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 42 entries (Migration 42: Phase 2d low_signal enum bump)."""
-        assert len(MIGRATIONS) == 42
+        """MIGRATIONS list has exactly 43 entries (Migration 43: Phase 3 gold-set columns)."""
+        assert len(MIGRATIONS) == 43
 
 
 class TestMigration40:
