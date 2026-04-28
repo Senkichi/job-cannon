@@ -180,6 +180,11 @@ def _coerce_assessment(data: dict, provider: str | None) -> JobAssessment:
         raw = data.get(key)
         if raw is None:
             continue
+        # Variant v4d2 emits each axis as {"evidence": "...", "score": <int>}.
+        # Unwrap the score; everything downstream (derive_classification,
+        # persistence) only needs the integer.
+        if isinstance(raw, dict) and "score" in raw:
+            raw = raw["score"]
         try:
             sub_scores[key] = int(raw)
         except (TypeError, ValueError):
