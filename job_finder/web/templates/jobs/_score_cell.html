@@ -37,6 +37,12 @@
 {% elif cls == 'reject' %}
   {% set color_class = 'text-red-400' %}
   {% set rank = 1 %}
+{% elif cls == 'low_signal' %}
+  {# Phase 2d: low_signal = enrichment exhausted + jd_full short. Distinct zinc-500
+     muted color separates these from skip (slate-400) and unscored (slate-600).
+     Sort rank 0 places them at the bottom — they need re-enrichment, not action. #}
+  {% set color_class = 'text-zinc-500' %}
+  {% set rank = 0 %}
 {% else %}
   {% set color_class = 'text-slate-600' %}
   {% set rank = 0 %}

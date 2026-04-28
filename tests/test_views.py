@@ -1928,6 +1928,15 @@ def app_with_scored_jobs(tmp_db_path):
             '{"title_fit": 1, "location_fit": 1, "comp_fit": 1, "domain_match": 1, "seniority_match": 1, "skills_match": 1}',
             '{"strengths": [], "gaps": ["Multiple critical mismatches"], "talking_points": [], "resume_priority_skills": []}',
         ),
+        # Low signal: enrichment exhausted + jd_full short. Sub-scores irrelevant
+        # for color/rank rendering; the template branches solely on classification.
+        (
+            "ax|low-signal-18|remote",
+            "Low Signal Role",
+            "low_signal",
+            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
+            '{"strengths": ["Insufficient JD signal"], "gaps": ["No description available"], "talking_points": [], "resume_priority_skills": []}',
+        ),
         # Unscored: classification + sub_scores_json + fit_analysis all NULL
         ("ax|unscored|remote", "Unscored Role", None, None, None),
         # Apply with no fit_analysis (rationale-missing edge case)
@@ -3144,6 +3153,30 @@ class TestCompositeScoreCell:
         cell = html[idx : idx + 800]
         assert "text-red-400" in cell
         assert ">6<" in cell
+
+    def test_low_signal_row_uses_zinc_color(self, scored_client):
+        """A row with classification='low_signal' renders text-zinc-500 (Phase 2d).
+
+        Distinct from skip's text-slate-400; signals "no actionable signal yet"
+        rather than "explicitly down-ranked by rubric".
+        """
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Clow-signal-18%7Cremote"')
+        assert idx != -1, "score cell for low_signal row not rendered"
+        cell = html[idx : idx + 800]
+        assert "text-zinc-500" in cell, (
+            f"low_signal needs distinct muted zinc-500 color; cell: {cell[:300]}"
+        )
+        assert ">18<" in cell
+
+    def test_low_signal_packed_sort_score_below_skip(self, scored_client):
+        """low_signal (rank 0) sorts below skip (rank 2). 0*100 + 18 = 18."""
+        response = scored_client.get("/jobs")
+        html = response.data.decode()
+        idx = html.find('id="score-ax%7Clow-signal-18%7Cremote"')
+        cell = html[idx : idx + 800]
+        assert 'data-sort-score="18"' in cell
 
     def test_apply_min_renders_composite_18(self, scored_client):
         """Apply with all 3s (boundary) renders '18'."""
