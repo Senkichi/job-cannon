@@ -1,21 +1,27 @@
 """Data enrichment module for sparse job records.
 
-Cost-ordered enrichment pipeline with 7 tiers. Each tier is only attempted
-after all cheaper tiers have been exhausted. Per-job enrichment_tier column
-tracks the highest tier attempted so future calls resume from the next tier.
+Cost-ordered enrichment pipeline with fetch-only tiers. Each tier is only
+attempted after all cheaper tiers have been exhausted. Per-job
+enrichment_tier column tracks the highest tier attempted so future calls
+resume from the next tier.
 
 Enrichment tiers (in order):
-  1. free — Direct URL fetch, ATS API query, HTML careers scrape
-  2. ddg  — DuckDuckGo Instant Answer API (free, no key)
-  3. haiku — Haiku extraction from accumulated fragments
-  4. serpapi — SerpAPI Google Jobs search (paid, optional key)
-  5. sonnet — Sonnet deep extraction from all accumulated fragments
-  6. exhausted — All tiers attempted; never re-enrich
+  1. free      — Direct URL fetch, ATS API query, HTML careers scrape
+  2. ddg       — DuckDuckGo web search + URL fetch (free, no key)
+  3. serpapi   — SerpAPI Google Jobs search (paid, optional key)
+  4. agentic   — Ollama-driven query gen + Playwright fetch (deepest fallback)
+  5. exhausted — All tiers attempted; never re-enrich
 
 Per-field cost ceilings:
-  jd_full:    escalates all the way to sonnet (critical for AI scoring)
-  salary_min: capped at haiku (not worth SerpAPI/Sonnet for salary alone)
-  salary_max: capped at haiku
+  jd_full:    escalates all the way to agentic (critical for AI scoring)
+  salary_min: capped at ddg (extracted post-fetch from jd_full when present)
+  salary_max: capped at ddg
+
+The previous LLM-synthesis tiers (haiku, sonnet) were removed in Phase 2b
+sub-fix RC4: they fabricated short pseudo-JDs from search-result fragments
+and blocked escalation to fetch tiers that actually retrieved the real JD.
+Structured-field extraction (salary, location) now happens post-fetch from
+jd_full via parse_structured_fields() (Phase 2c).
 
 Design principles:
   - Never raises — all errors are caught and logged.
@@ -35,14 +41,11 @@ import json
 import logging
 from typing import Any
 
-from job_finder.web.claude_client import cost_gate
 from job_finder.web.company_enricher import (
     enrich_company_info,  # noqa: F401 (re-exported for callers)
 )
 from job_finder.web.enrichment_sources import merge_apply_urls
 from job_finder.web.enrichment_tiers import (
-    extract_with_haiku,
-    extract_with_sonnet,
     fetch_ddg_jds,
     fetch_direct_jd,
     query_ats_api,
@@ -58,8 +61,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Strict cost ordering: free (URL -> ATS -> careers) -> DDG -> Haiku -> SerpAPI -> Sonnet
-TIER_ORDER = ["free", "ddg", "haiku", "serpapi", "sonnet", "exhausted"]
+# Strict cost ordering: free (URL -> ATS -> careers) -> DDG -> SerpAPI -> agentic
+TIER_ORDER = ["free", "ddg", "serpapi", "agentic", "exhausted"]
 
 # Allowlist of jobs table columns that _persist() may write. Prevents AI-extracted
 # dict keys from injecting arbitrary column names into dynamic SQL SET clauses.
@@ -68,9 +71,9 @@ _ENRICHABLE_COLUMNS = frozenset({"jd_full", "salary_min", "salary_max", "locatio
 # Per-field cost ceilings: highest tier allowed to search for this field.
 # After this tier fails for a field, it is abandoned (not escalated further).
 FIELD_TIER_CEILINGS = {
-    "jd_full": "sonnet",  # worth escalating all the way (critical for scoring)
-    "salary_min": "haiku",  # cap at Haiku — not worth SerpAPI/Sonnet for salary alone
-    "salary_max": "haiku",
+    "jd_full": "agentic",  # escalate all the way — critical for downstream scoring
+    "salary_min": "ddg",  # cap at ddg — extracted post-fetch from jd_full
+    "salary_max": "ddg",
 }
 
 # ---------------------------------------------------------------------------
@@ -219,45 +222,9 @@ def enrich_job(
                 logger.debug("DDG tier failed for '%s': %s", title, e)
 
         # ---------------------------------------------------------------
-        # Tier 2: haiku — Extract structured data from accumulated fragments
+        # Tier 2: serpapi — Google Jobs search (paid)
         # ---------------------------------------------------------------
-        if start_idx <= TIER_ORDER.index("haiku"):
-            try:
-                # Compose search text from all fragments collected so far
-                search_input = _compose_fragment_text(fragments, title, company)
-                haiku_result = extract_with_haiku(search_input, job_row, conn, config)
-                if haiku_result:
-                    for k, v in haiku_result.items():
-                        fragments[k] = v
-
-                # Check what is still missing after Haiku
-                salary_fields = {"salary_min", "salary_max"}
-                enriched_so_far = _resolve_from_fragments(fragments, missing, job_row)
-                still_missing_after_haiku = [f for f in missing if f not in enriched_so_far]
-
-                if not still_missing_after_haiku:
-                    # All fields satisfied — return now
-                    _persist(conn, job_row, enriched_so_far, "haiku")
-                    return enriched_so_far
-
-                # Check salary ceiling: if ONLY salary fields remain missing after Haiku,
-                # stop escalating (salary ceiling is Haiku).
-                if all(f in salary_fields for f in still_missing_after_haiku):
-                    # Only salary remains missing — don't escalate to SerpAPI/Sonnet for salary
-                    _persist(conn, job_row, enriched_so_far if enriched_so_far else {}, "haiku")
-                    return enriched_so_far
-
-                # Otherwise, some non-salary field (jd_full) is still missing —
-                # partial results from Haiku are accumulated in fragments for use by
-                # SerpAPI/Sonnet; continue escalation.
-
-            except Exception as e:
-                logger.debug("Haiku tier failed for '%s': %s", title, e)
-
-        # ---------------------------------------------------------------
-        # Tier 3: serpapi — Google Jobs search (paid)
-        # ---------------------------------------------------------------
-        # SerpAPI only runs if JD is still missing (salary ceiling is Haiku)
+        # SerpAPI only runs if JD is still missing (salary ceiling is ddg)
         jd_still_missing = not (
             job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
@@ -282,27 +249,19 @@ def enrich_job(
                 logger.debug("SerpAPI tier failed for '%s': %s", title, e)
 
         # ---------------------------------------------------------------
-        # Tier 4: sonnet — Deep extraction from all accumulated fragments
+        # Tier 3: agentic — Ollama-driven query + Playwright fetch
         # ---------------------------------------------------------------
-        # Sonnet only runs if JD is still missing
+        # Agentic only runs if JD is still missing. Wired in Phase 2b sub-fix 2/2
+        # via enrich_one_job() in agentic_enricher.
         jd_still_missing = not (
             job_row.get("jd_full") or fragments.get("url_jd") or fragments.get("jd_full")
         )
 
-        if start_idx <= TIER_ORDER.index("sonnet") and jd_still_missing:
-            try:
-                # Check cost gate before calling Sonnet
-                gate_ok = cost_gate(conn, config, "sonnet")
-                if gate_ok:
-                    sonnet_result = extract_with_sonnet(fragments, job_row, conn, config)
-                    if sonnet_result:
-                        enriched = _filter_non_none(sonnet_result)
-                        if enriched:
-                            _persist(conn, job_row, enriched, "sonnet")
-                            return enriched
-
-            except Exception as e:
-                logger.debug("Sonnet tier failed for '%s': %s", title, e)
+        if start_idx <= TIER_ORDER.index("agentic") and jd_still_missing:
+            # Placeholder: actual call wired in 2b.3. Branch is left in place so the
+            # tier ordering and persistence semantics are stable while the per-job
+            # entry point (agentic_enricher.enrich_one_job) is being extracted.
+            pass
 
         # All tiers exhausted
         _persist(conn, job_row, {}, "exhausted")
@@ -436,27 +395,6 @@ def _parse_source_urls(source_urls_json: str | None) -> list:
         return [u for u in urls if isinstance(u, str)]
     except (json.JSONDecodeError, TypeError):
         return []
-
-
-def _compose_fragment_text(fragments: dict, title: str, company: str) -> str:
-    """Compose a single text string from all accumulated fragments.
-
-    Args:
-        fragments: Dict of fragment texts collected from prior tiers.
-        title: Job title for fallback context.
-        company: Company name for fallback context.
-
-    Returns:
-        Aggregated text string for use in Haiku/Sonnet extraction.
-    """
-    parts = []
-    for _key, text in fragments.items():
-        if text and isinstance(text, str):
-            parts.append(str(text)[:1000])
-
-    if parts:
-        return "\n\n".join(parts)
-    return f"Job posting: {title} at {company}"
 
 
 def _resolve_from_fragments(
