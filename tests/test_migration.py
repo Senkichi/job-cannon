@@ -431,11 +431,13 @@ def test_migration_count_is_thirteen():
     user_version and documents the new allowed value).
     Migration 43 (Phase 3 task 1/3) adds gold_classification, gold_sub_scores_json,
     gold_notes, gold_labeled_at columns to jobs for the Phase 5 eval harness.
+    Migration 44 (Phase 3 follow-up) adds gold_no_signal_axes for per-axis
+    "no signal" tagging — distinguishes "scored midpoint" from "couldn't tell".
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 43
+    assert len(MIGRATIONS) == 44
 
 
 class TestMigration27:
@@ -1235,8 +1237,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 43 entries (Migration 43: Phase 3 gold-set columns)."""
-        assert len(MIGRATIONS) == 43
+        """MIGRATIONS list has exactly 44 entries (Migration 44: gold_no_signal_axes)."""
+        assert len(MIGRATIONS) == 44
 
 
 class TestMigration40:
