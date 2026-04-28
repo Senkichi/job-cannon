@@ -179,7 +179,9 @@ def run_batch(
             )
             continue
 
-        persist_job_assessment(conn, key, sr.data, provider=sr.provider, model=model)
+        persist_job_assessment(
+            conn, key, sr.data, provider=sr.provider, model=model, config=config
+        )
 
         results.append(
             {

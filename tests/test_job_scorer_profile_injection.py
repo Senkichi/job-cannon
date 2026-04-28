@@ -179,6 +179,7 @@ def test_orchestrator_passes_candidate_context_through(monkeypatch, tmp_path):
             scoring_provider TEXT,
             scoring_model TEXT,
             legitimacy_note TEXT,
+            enrichment_tier TEXT,
             haiku_score REAL,
             sonnet_score REAL,
             haiku_summary TEXT,

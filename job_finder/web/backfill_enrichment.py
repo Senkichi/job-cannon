@@ -321,6 +321,7 @@ def run_scoring_backfill(
             sr.data,
             provider=sr.provider,
             model=model,
+            config=config,
         )
         scored_count += 1
         if i % 10 == 0 or i == len(rows):

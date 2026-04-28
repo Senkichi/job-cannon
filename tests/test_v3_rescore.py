@@ -49,7 +49,8 @@ def _make_jobs_db(num_rows: int = 40) -> sqlite3.Connection:
             fit_analysis TEXT,
             scoring_provider TEXT,
             scoring_model TEXT,
-            legitimacy_note TEXT
+            legitimacy_note TEXT,
+            enrichment_tier TEXT
         )
         """
     )
