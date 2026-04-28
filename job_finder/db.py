@@ -594,6 +594,7 @@ _CLASSIFICATION_RANK_CASE = (
     "WHEN 'consider' THEN 3 "
     "WHEN 'skip' THEN 2 "
     "WHEN 'reject' THEN 1 "
+    "WHEN 'low_signal' THEN 0 "
     "ELSE 0 END"
 )
 
