@@ -426,11 +426,14 @@ def test_migration_count_is_thirteen():
     Migration 31 adds careers_crawl_last_at to companies.
     Migration 40 adds v3.0 classification/sub_scores_json/scoring_model.
     Migration 41 (Plan 5) drops legacy haiku_score/haiku_summary/sonnet_score.
+    Migration 42 (Phase 2d sub-fix 1/4) extends classification enum vocabulary
+    to include 'low_signal' (no-op DDL — column has no CHECK constraint; bumps
+    user_version and documents the new allowed value).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 41
+    assert len(MIGRATIONS) == 42
 
 
 class TestMigration27:
@@ -1230,8 +1233,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 41 entries (updated for Migration 41: Plan 5 legacy-score column drop)."""
-        assert len(MIGRATIONS) == 41
+        """MIGRATIONS list has exactly 42 entries (Migration 42: Phase 2d low_signal enum bump)."""
+        assert len(MIGRATIONS) == 42
 
 
 class TestMigration40:
