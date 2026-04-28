@@ -132,6 +132,7 @@ def score_and_persist_job(
         assessment,
         provider=provider,
         model=model,
+        config=config,
     )
     conn.commit()
     return result
