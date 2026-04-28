@@ -1,21 +1,21 @@
 """Tests for data_enricher.py — cost-ordered enrichment pipeline.
 
-Tests cover both the existing private helpers (unchanged API) and the new
-tier-ordered enrich_job pipeline introduced in Phase 10.
+Tests cover both the existing private helpers (unchanged API) and the
+synthesis-free enrich_job pipeline introduced in Phase 2b sub-fix RC4.
 
 Existing test classes preserved:
 - TestSearchSerpapi
 - TestSearchDuckDuckGo
-- TestExtractWithHaiku
+- TestExtractWithHaiku   — exercises enrichment_tiers.extract_with_haiku
+                            directly; deleted in Phase 2b sub-fix 2b.4
 - TestEnrichCompanyInfo
 
-New test classes for Phase 10:
-- TestEnrichJobTierOrder — free -> DDG -> Haiku -> SerpAPI -> Sonnet ordering
-- TestFieldCeilings — salary stops at Haiku; JD escalates to Sonnet
-- TestSonnetEnrichment — Sonnet receives all prior fragments, checks cost_gate
+Phase 2b cascade tests:
+- TestEnrichJobTierOrder — free -> DDG -> SerpAPI -> agentic ordering
+- TestFieldCeilings — salary capped at ddg; JD escalates to agentic
 - TestEnrichmentTierPersistence — atomic DB write, resume-from-next-tier, exhausted skip
 - TestEnrichJobBackwardCompat — old call pattern still works
-- TestPipelineIntegration — enrich_job before Haiku in pipeline, migration columns
+- TestPipelineIntegration — enrich_job wiring + migration columns
 """
 
 import inspect
@@ -455,30 +455,8 @@ class TestEnrichJobTierOrder:
 
         mock_ddg.assert_called_once()
 
-    def test_haiku_runs_after_ddg_fails(self, sparse_job_row, mock_anthropic_client):
-        """Haiku extraction only called after DDG fails."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with (
-            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
-            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
-            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
-        ):
-            mock_fetch.return_value = None
-            mock_ddg.return_value = None
-            mock_haiku.return_value = {"jd_full": "Haiku extracted JD."}
-            mock_serp.return_value = None
-
-            result = enrich_job(sparse_job_row)
-
-        mock_haiku.assert_called_once()
-
-    def test_serpapi_runs_after_haiku_for_jd_only(self, sparse_job_row):
-        """SerpAPI only called when JD still missing after Haiku."""
+    def test_serpapi_runs_after_ddg_for_jd(self, sparse_job_row):
+        """SerpAPI only called when JD still missing after DDG."""
         from job_finder.web.data_enricher import enrich_job
 
         sparse_job_row["source_urls"] = "[]"
@@ -489,15 +467,12 @@ class TestEnrichJobTierOrder:
             patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
             patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
         ):
             mock_fetch.return_value = None
             mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
             mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = None
-            # Haiku only found salary, not JD
-            mock_haiku.return_value = {"salary_min": 140000}
             mock_serp.return_value = {"jd_full": "Full JD from SerpAPI."}
 
             result = enrich_job(
@@ -589,10 +564,10 @@ class TestEnrichJobTierOrder:
 
 
 class TestFieldCeilings:
-    """Salary stops at Haiku tier; JD escalates all the way to Sonnet."""
+    """Salary stops at ddg tier; JD escalates all the way to agentic."""
 
-    def test_salary_ceiling_at_haiku(self, sparse_job_row, mock_anthropic_client):
-        """When only salary is missing and Haiku couldn't find it, SerpAPI/Sonnet not called."""
+    def test_salary_ceiling_at_ddg(self, sparse_job_row):
+        """When only salary is missing and ddg fetch fails, SerpAPI is not called."""
         from job_finder.web.data_enricher import enrich_job
 
         # Job has JD but no salary
@@ -603,14 +578,15 @@ class TestFieldCeilings:
 
         with (
             patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
+            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
+            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
-            patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet,
         ):
             mock_fetch.return_value = None
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = None
-            mock_haiku.return_value = {}  # Haiku couldn't find salary
             mock_serp.return_value = None
 
             result = enrich_job(
@@ -618,122 +594,9 @@ class TestFieldCeilings:
                 serpapi_key="test-key",
             )
 
-        # SerpAPI and Sonnet should NOT be called when only salary is missing
+        # SerpAPI should NOT be called when only salary is missing — JD already present,
+        # so jd_still_missing guard prevents SerpAPI/agentic escalation.
         mock_serp.assert_not_called()
-        mock_sonnet.assert_not_called()
-
-    def test_jd_escalates_to_sonnet_when_all_lower_tiers_fail(
-        self, sparse_job_row, mock_anthropic_client
-    ):
-        """JD escalates all the way to Sonnet when prior tiers fail."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with (
-            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
-            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
-            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
-            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
-            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
-            patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet,
-            patch("job_finder.web.data_enricher.cost_gate") as mock_gate,
-        ):
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_jds.return_value = (None, None)
-            mock_ddg.return_value = None
-            mock_haiku.return_value = {}
-            mock_serp.return_value = None
-            mock_gate.return_value = True
-            mock_sonnet.return_value = {"jd_full": "Sonnet extracted the JD."}
-
-            result = enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-            )
-
-        mock_sonnet.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Tests for Sonnet enrichment (Phase 10 — NEW)
-# ---------------------------------------------------------------------------
-
-
-class TestSonnetEnrichment:
-    """Sonnet enrichment uses all prior fragments and checks cost_gate."""
-
-    def test_sonnet_receives_all_fragments(self, sparse_job_row, mock_anthropic_client):
-        """Sonnet enrichment prompt includes ALL text fragments from prior tiers."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with (
-            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
-            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
-            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
-            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
-            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
-            patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet,
-            patch("job_finder.web.data_enricher.cost_gate") as mock_gate,
-        ):
-            mock_fetch.return_value = None
-            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
-            mock_ddg_jds.return_value = (None, None)
-            mock_ddg.return_value = "DDG text about the role"
-            mock_haiku.return_value = {}  # Haiku failed
-            mock_serp.return_value = None  # SerpAPI failed
-            mock_gate.return_value = True
-            mock_sonnet.return_value = {"jd_full": "Sonnet JD."}
-
-            result = enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-            )
-
-        # Sonnet should have been called with fragments dict containing DDG text
-        mock_sonnet.assert_called_once()
-        call_args = mock_sonnet.call_args
-        fragments = call_args[0][0] if call_args[0] else call_args[1].get("fragments", {})
-        # Check that fragments contain DDG content
-        fragments_str = str(fragments)
-        assert "DDG" in fragments_str or "ddg" in fragments_str
-
-    def test_sonnet_checks_cost_gate(self, sparse_job_row, mock_anthropic_client, temp_db):
-        """Sonnet enrichment checks cost_gate('sonnet') before calling API."""
-        from job_finder.web.data_enricher import enrich_job
-
-        sparse_job_row["source_urls"] = "[]"
-        sparse_job_row["company_id"] = None
-
-        with (
-            patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
-            patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
-            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
-            patch("job_finder.web.data_enricher.extract_with_sonnet") as mock_sonnet,
-            patch("job_finder.web.data_enricher.cost_gate") as mock_gate,
-        ):
-            mock_fetch.return_value = None
-            mock_ddg.return_value = None
-            mock_haiku.return_value = {}
-            mock_serp.return_value = None
-            mock_gate.return_value = False  # Budget exceeded
-
-            result = enrich_job(
-                sparse_job_row,
-                serpapi_key="test-key",
-                conn=temp_db,
-            )
-
-        # Sonnet should NOT be called when cost_gate returns False
-        mock_sonnet.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -780,8 +643,8 @@ class TestEnrichmentTierPersistence:
         assert row["jd_full"] == "Full job description from direct URL."
         assert row["enrichment_tier"] == "free"
 
-    def test_resumes_from_next_tier(self, sparse_job_row, mock_anthropic_client, temp_db):
-        """Job with enrichment_tier='ddg' starts at Haiku, not free."""
+    def test_resumes_from_next_tier(self, sparse_job_row, temp_db):
+        """Job with enrichment_tier='ddg' starts at SerpAPI, not free."""
         from job_finder.web.data_enricher import enrich_job
 
         # Job was previously enriched up to DDG tier
@@ -793,13 +656,14 @@ class TestEnrichmentTierPersistence:
             patch("job_finder.web.data_enricher.query_ats_api") as mock_ats,
             patch("job_finder.web.data_enricher.scrape_careers") as mock_scrape,
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
-            patch("job_finder.web.data_enricher.extract_with_haiku") as mock_haiku,
+            patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
         ):
             mock_fetch.return_value = None
-            mock_haiku.return_value = {"jd_full": "Haiku found the JD."}
+            mock_serp.return_value = {"jd_full": "SerpAPI found the JD."}
 
             result = enrich_job(
                 sparse_job_row,
+                serpapi_key="test-key",
                 conn=temp_db,
             )
 
@@ -808,8 +672,8 @@ class TestEnrichmentTierPersistence:
         mock_ats.assert_not_called()
         mock_scrape.assert_not_called()
         mock_ddg.assert_not_called()
-        # Haiku should be called (next tier after DDG)
-        mock_haiku.assert_called_once()
+        # SerpAPI should be called (next tier after DDG in the new cascade)
+        mock_serp.assert_called_once()
 
     def test_exhausted_jobs_skipped(self, sparse_job_row):
         """Job with enrichment_tier='exhausted' returns empty dict immediately."""
@@ -918,22 +782,23 @@ class TestEnrichJobBackwardCompat:
         mock_serpapi.assert_not_called()
 
     def test_tier_order_constant_exported(self):
-        """TIER_ORDER constant is exported from data_enricher."""
+        """TIER_ORDER constant is exported from data_enricher (synthesis-free)."""
         from job_finder.web.data_enricher import TIER_ORDER
 
         assert isinstance(TIER_ORDER, list)
         assert "free" in TIER_ORDER
         assert "ddg" in TIER_ORDER
-        assert "haiku" in TIER_ORDER
         assert "serpapi" in TIER_ORDER
-        assert "sonnet" in TIER_ORDER
+        assert "agentic" in TIER_ORDER
         assert "exhausted" in TIER_ORDER
+        # Synthesis tiers removed in Phase 2b sub-fix RC4
+        assert "haiku" not in TIER_ORDER
+        assert "sonnet" not in TIER_ORDER
         # Verify ordering: each tier before next
         assert TIER_ORDER.index("free") < TIER_ORDER.index("ddg")
-        assert TIER_ORDER.index("ddg") < TIER_ORDER.index("haiku")
-        assert TIER_ORDER.index("haiku") < TIER_ORDER.index("serpapi")
-        assert TIER_ORDER.index("serpapi") < TIER_ORDER.index("sonnet")
-        assert TIER_ORDER.index("sonnet") < TIER_ORDER.index("exhausted")
+        assert TIER_ORDER.index("ddg") < TIER_ORDER.index("serpapi")
+        assert TIER_ORDER.index("serpapi") < TIER_ORDER.index("agentic")
+        assert TIER_ORDER.index("agentic") < TIER_ORDER.index("exhausted")
 
 
 # ---------------------------------------------------------------------------
