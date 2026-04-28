@@ -48,6 +48,7 @@ from job_finder.web.enrichment_sources import merge_apply_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
     fetch_direct_jd,
+    parse_structured_fields,
     query_ats_api,
     scrape_careers,
     search_ddg_web,
@@ -187,6 +188,7 @@ def enrich_job(
                 # Resolve what free tier found
                 enriched = _resolve_from_fragments(fragments, missing, job_row)
                 if enriched:
+                    enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
                     _persist(conn, job_row, enriched, "free")
                     return enriched
 
@@ -202,6 +204,7 @@ def enrich_job(
         )
         if not remaining:
             enriched = _resolve_from_fragments(fragments, missing, job_row)
+            enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
             _persist(conn, job_row, enriched, "free")
             return enriched
 
@@ -251,6 +254,7 @@ def enrich_job(
                         {**fragments, **serpapi_result}, missing, job_row
                     )
                     if enriched:
+                        enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
                         _persist(conn, job_row, enriched, "serpapi")
                         return enriched
 
@@ -274,6 +278,7 @@ def enrich_job(
                 jd = agentic_result.get("jd_full")
                 if jd and len(jd) >= MIN_FETCH_JD_CHARS:
                     enriched = {"jd_full": jd}
+                    enriched = _apply_post_fetch_extraction(enriched, job_row, conn, config)
                     _persist(conn, job_row, enriched, "agentic")
                     return enriched
             except Exception as e:
@@ -446,6 +451,58 @@ def _resolve_from_fragments(
             enriched["jd_full"] = fragments["url_jd"]
 
     return _filter_non_none(enriched)
+
+
+def _apply_post_fetch_extraction(
+    enriched: dict,
+    job_row: dict,
+    conn: Any,
+    config: dict,
+) -> dict:
+    """Augment ``enriched`` with structured fields parsed from the fetched JD.
+
+    Runs ``parse_structured_fields`` exactly once per successful cascade tier
+    when (a) a jd_full is now available (from this tier or already on the row)
+    and (b) at least one of salary_min/salary_max/location is still empty in
+    BOTH ``enriched`` and ``job_row``. Returned values fill ONLY empty fields
+    — never overwrite existing values from the row or from this tier.
+
+    Returns a NEW dict (immutability — does not mutate the input ``enriched``).
+
+    Replaces the salary-extraction side-effect of the deleted Haiku/Sonnet
+    synthesis tiers (Phase 2b sub-fix RC4). See parse_structured_fields()
+    docstring for the no-summarize guarantee.
+    """
+    # Effective jd_full: prefer the freshly-enriched value, fall back to the row
+    effective_jd = enriched.get("jd_full") or job_row.get("jd_full")
+    if not effective_jd or len(effective_jd) < MIN_FETCH_JD_CHARS:
+        return dict(enriched)
+
+    # An "empty" structured field is missing from BOTH enriched and job_row
+    structured_fields = ("salary_min", "salary_max", "location")
+
+    def _is_empty(field: str) -> bool:
+        return enriched.get(field) is None and not job_row.get(field)
+
+    if not any(_is_empty(f) for f in structured_fields):
+        return dict(enriched)
+
+    parsed = parse_structured_fields(
+        jd_full=effective_jd,
+        job_row=job_row,
+        conn=conn,
+        config=config,
+    )
+    if not parsed:
+        return dict(enriched)
+
+    merged = dict(enriched)
+    for field, value in parsed.items():
+        if field not in structured_fields:
+            continue  # ignore unknown keys; schema already restricts
+        if _is_empty(field):  # only fill empty fields — never overwrite
+            merged[field] = value
+    return merged
 
 
 def _persist(conn: Any, job_row: dict, enriched: dict, tier_name: str) -> None:
