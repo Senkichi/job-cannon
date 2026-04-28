@@ -743,6 +743,30 @@ def _migration_41_drop_legacy_scores(conn: sqlite3.Connection) -> None:
 MIGRATIONS.append(_migration_41_drop_legacy_scores)
 
 
+# Migration 42: extend classification enum vocabulary to include 'low_signal'.
+#
+# The jobs.classification column is plain TEXT with no CHECK constraint, so this
+# migration is a no-op DDL change at the schema level — the column already
+# accepts arbitrary strings. The purpose is to bump PRAGMA user_version (so
+# environments at version 41 advance to 42) and to document the new allowed
+# enum value via this comment + the application-layer rule in
+# job_finder.db.derive_classification.
+#
+# Allowed classification values (post-Migration-42):
+#   apply       — all sub-scores ≥ 3 (and no overrides)
+#   consider    — all sub-scores ≥ 2 (and no overrides)
+#   skip        — fallback bucket
+#   reject      — legitimacy_note truthy OR any sub-score == 1
+#   low_signal  — NEW: enrichment_tier='exhausted' AND jd_full short
+#                  (per scoring.low_signal_jd_chars; default 1500). Surfaces
+#                  genuinely-no-signal jobs honestly instead of rolling them
+#                  into apply/consider/skip via unreliable rubric outputs.
+#
+# Phase 2d sub-fix 1/4. Spec D-2.5
+# (docs/superpowers/specs/2026-04-27-scoring-pipeline-recalibration-design.md).
+MIGRATIONS.append(["SELECT 1"])
+
+
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 
