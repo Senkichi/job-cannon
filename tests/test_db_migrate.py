@@ -40,6 +40,35 @@ def test_migration_43_user_version_advances(tmp_db_path):
     assert version >= 43
 
 
+def test_migration_45_creates_eval_runs(tmp_db_path):
+    """Migration 45 creates the eval_runs table with the documented columns."""
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+    expected = {
+        "run_id",
+        "timestamp",
+        "variant_name",
+        "baseline_run_id",
+        "gold_set_version",
+        "n_runs",
+        "config_json",
+        "metrics_json",
+        "per_job_json",
+        "report_path",
+        "notes",
+    }
+    assert expected <= cols
+
+
+def test_migration_45_user_version_advances(tmp_db_path):
+    """After running migrations on a fresh DB, user_version is at least 45."""
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version >= 45
+
+
 def test_migration_43_check_constraint_rejects_invalid_enum(tmp_db_path):
     """gold_classification CHECK constraint rejects values outside the 5-value enum.
 
