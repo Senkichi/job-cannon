@@ -168,6 +168,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.jinja_env.filters["format_description"] = format_description_filter
 
     # --- Blueprint registration ---
+    from job_finder.web.blueprints.admin import admin_bp
     from job_finder.web.blueprints.batch_scoring import batch_scoring_bp
     from job_finder.web.blueprints.companies import companies_bp
     from job_finder.web.blueprints.costs import costs_bp
@@ -200,6 +201,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(profile_recs_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(guidelines_bp)
+    app.register_blueprint(admin_bp)
 
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---
     @app.route("/")
