@@ -65,6 +65,12 @@ _TIMEOUT = 10
 # auth-wall noise that wouldn't yield reliable salary/location signal.
 _MIN_STRUCTURED_PARSE_JD_CHARS = 200
 
+# Minimum text length for fetch_direct_jd to consider a fetch result a real JD.
+# JS-rendered SPA shells (e.g., Workday at malformed URLs) leave only the page
+# <title> after stripping <script>/<style>, producing single-token results like
+# "Workday" that get persisted as fake JDs. Real JDs are far longer than this.
+_MIN_VALID_JD_CHARS = 200
+
 # JSON schema for the post-fetch structured-field extraction call.
 # DELIBERATELY EXCLUDES jd_full so the model cannot summarize the description
 # back into the description field (the bug the deleted Haiku/Sonnet synthesis
@@ -135,7 +141,18 @@ def fetch_direct_jd(url: str) -> str | None:
             logger.debug("Auth-wall detected for '%s', rejecting", url)
             return None
 
-        return text[:_MAX_JD_CHARS] if text.strip() else None
+        stripped = text.strip()
+        if len(stripped) < _MIN_VALID_JD_CHARS:
+            logger.debug(
+                "fetch_direct_jd('%s'): result %d chars (< %d), rejecting "
+                "as SPA-shell or other empty page",
+                url,
+                len(stripped),
+                _MIN_VALID_JD_CHARS,
+            )
+            return None
+
+        return text[:_MAX_JD_CHARS]
 
     except Exception as e:
         logger.debug("Direct fetch failed for '%s': %s", url, e)

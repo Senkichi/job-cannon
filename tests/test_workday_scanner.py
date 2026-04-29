@@ -271,7 +271,7 @@ class TestScanWorkday:
                 {
                     "title": "Data Scientist",
                     "locationsText": "Remote",
-                    "externalPath": "Data-Scientist_R-12345",
+                    "externalPath": "/job/Data-Scientist_R-12345",
                 }
             ],
         }
@@ -376,7 +376,7 @@ class TestFetchWorkdayDescription:
                 {
                     "title": "Senior Data Scientist",
                     "locationsText": "Remote",
-                    "externalPath": "Senior-DS_R-1",
+                    "externalPath": "/job/Senior-DS_R-1",
                 }
             ],
         }

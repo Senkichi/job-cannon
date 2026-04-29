@@ -379,8 +379,12 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
 
             location = posting.get("locationsText", "")
             external_path = posting.get("externalPath", "")
+            # externalPath from the CXS API already begins with "/job/...".
+            # Do NOT prepend another "/job/" — the previous template emitted
+            # "/job//job/..." URLs that 406'd at the API and rendered to a
+            # Workday SPA shell whose only static text is <title>Workday</title>.
             source_url = (
-                f"https://{subdomain}.myworkdayjobs.com/en-US/{board}/job/{external_path}"
+                f"https://{subdomain}.myworkdayjobs.com/en-US/{board}{external_path}"
                 if external_path
                 else ""
             )
@@ -443,9 +447,8 @@ def _fetch_workday_description(subdomain: str, tenant: str, board: str, external
     Returns:
         Plain-text job description (HTML stripped), or "" if fetch failed.
     """
-    detail_url = (
-        f"https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/job/{external_path}"
-    )
+    # external_path begins with "/job/..." — no static "/job/" prefix here.
+    detail_url = f"https://{subdomain}.myworkdayjobs.com/wday/cxs/{tenant}/{board}{external_path}"
     try:
         resp = requests.get(
             detail_url,
