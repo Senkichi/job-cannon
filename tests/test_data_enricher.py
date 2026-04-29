@@ -916,7 +916,14 @@ class TestFetchDirectJd:
 
         from job_finder.web.enrichment_tiers import fetch_direct_jd as _fetch_direct_jd
 
-        html = "<html><body><div id='main'><p>Senior Data Scientist role at Acme.</p></div></body></html>"
+        html = (
+            "<html><body><div id='main'><p>"
+            "Senior Data Scientist role at Acme. We are looking for an experienced data "
+            "scientist to join our growing analytics team. You will build production ML "
+            "models, design and analyze A/B tests, partner with product and engineering "
+            "teams, and present findings to leadership. Strong SQL and Python required."
+            "</p></div></body></html>"
+        )
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = html
@@ -938,7 +945,10 @@ class TestFetchDirectJd:
         html = (
             "<html><head><script>var x=1;</script><style>.cls{color:red}</style></head>"
             "<body><nav>Navigation menu</nav><header>Site Header</header>"
-            "<main><p>Job description content here.</p></main>"
+            "<main><p>Job description content here. We are seeking a Senior Data "
+            "Scientist to join our team and own end-to-end ML projects: data exploration, "
+            "feature engineering, model training, evaluation, and deployment to "
+            "production. Strong SQL, Python, and experimentation experience required.</p></main>"
             "<footer>Footer content</footer></body></html>"
         )
         mock_response = MagicMock()
@@ -1110,7 +1120,10 @@ class TestAuthWallGuard:
             "<html><body>"
             "<h1>Senior Data Scientist</h1>"
             "<p>We are looking for a talented data scientist to join our team. "
-            "You will build ML models, analyze large datasets, and collaborate with engineers.</p>"
+            "You will build ML models, analyze large datasets, and collaborate with "
+            "engineers. The role spans the full ML lifecycle: ideation, prototyping, "
+            "rigorous experimentation, productionization, and ongoing monitoring. We "
+            "value strong technical writing and stakeholder communication skills.</p>"
             "</body></html>"
         )
         mock_resp = self._make_mock_response(html)
@@ -1132,6 +1145,28 @@ class TestAuthWallGuard:
             result = _fetch_direct_jd("https://linkedin.com/jobs/view/uppercase/")
 
         assert result is None, "Expected None even for uppercase auth-wall text"
+
+    def test_rejects_spa_shell_with_only_title(self):
+        """JS-rendered SPA shell where only <title> survives noise-strip -> None.
+
+        Regression test: Workday's user-facing pages return an HTML shell whose
+        only static text is <title>Workday</title>. Before the min-length gate,
+        this got persisted as jd_full="Workday" on 87% of Workday jobs.
+        """
+        from job_finder.web.enrichment_tiers import fetch_direct_jd as _fetch_direct_jd
+
+        html = (
+            "<html><head><title>Workday</title>"
+            "<style>.app-frame { color: red; }</style>"
+            "<script>var __WORKDAY_BOOTSTRAP__ = {};</script></head>"
+            "<body id='vpsBody'></body></html>"
+        )
+        mock_resp = self._make_mock_response(html)
+
+        with patch("job_finder.web.enrichment_tiers.requests.get", return_value=mock_resp):
+            result = _fetch_direct_jd("https://x.wd5.myworkdayjobs.com/en-US/careers/job/Foo")
+
+        assert result is None, "SPA shell with only <title> should be rejected"
 
 
 # ---------------------------------------------------------------------------
