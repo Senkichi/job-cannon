@@ -132,6 +132,30 @@ Output:
   },
   "legitimacy_note": null
 }
+
+Example 7 (apply — target-geography on-site = 5, near-target title = 4):
+Input: "Lead Data Analyst at FinTech Co. SF office, on-site 5 days/week. Owns experimentation and growth analytics for the consumer app. $200K-$240K base. 6+ years required. Required skills: SQL, Python, A/B testing, dashboards." Candidate: analytics-leadership-targeting, target_titles include 'Lead Analyst' (not 'Lead Data Analyst' verbatim), $150K floor, target_locations = ['Remote', 'San Francisco'].
+Output:
+{
+  "title_fit": 4,
+  "location_fit": 5,
+  "comp_fit": 5,
+  "domain_match": 5,
+  "seniority_match": 4,
+  "skills_match": 4,
+  "rationale": {
+    "strengths": ["Direct experimentation/growth analytics scope", "FinTech domain match", "SF on-site is a target-geography match", "Comp $200-240K above $150K floor with margin"],
+    "gaps": ["'Lead Data Analyst' is a near-variant of target title 'Lead Analyst', not exact"],
+    "talking_points": ["Experimentation portfolio", "Lead-level analytics ownership"],
+    "resume_priority_skills": ["Experimentation", "A/B testing", "SQL", "Python"]
+  },
+  "legitimacy_note": null
+}
+
+Notes on this example:
+  - location_fit = 5 because SF is in target_locations; on-site does NOT downgrade when geography matches.
+  - title_fit = 4 because "Lead Data Analyst" is a near-variant of "Lead Analyst" (target list is exemplary, not exhaustive).
+  - All sub-scores >= 3, so this row classifies as "apply" downstream.
 """.strip()
 
 
@@ -159,14 +183,19 @@ PERSONA_CORRECTED_HEADER: str = (
     "  - score of 5: role function is a direct match\n\n"
     "### location_fit — LOCATION / LOGISTICS\n"
     "Does the location policy (remote / hybrid / on-site + geography) match the candidate's constraints?\n"
-    "  - score of 1: on-site in a location the candidate cannot or will not relocate to\n"
-    "  - score of 3: hybrid with feasible partial-commute\n"
-    "  - score of 5: fully remote or on-site in a target geography\n\n"
+    "Cross-check the JD's location against the candidate's target_locations list before scoring.\n"
+    "  - score of 1: on-site in a location NOT in the candidate's target_locations list\n"
+    "  - score of 2: hybrid in a location not in the target list, but commute is feasible\n"
+    "  - score of 3: hybrid in a target location with feasible partial-commute, OR remote with caveats (e.g., 'remote-first but in-person required quarterly')\n"
+    "  - score of 4: hybrid in a target location with light office days, OR remote in a target country/region\n"
+    "  - score of 5: fully remote, OR on-site/hybrid in a location ON the target_locations list (target geography on-site is a 5, not a 2 — geography match overrides on-site penalty)\n\n"
     "### comp_fit — COMPENSATION\n"
     "Does the compensation (listed or inferred) meet the candidate's floor?\n"
-    "  - score of 1: listed and below floor, OR strong below-floor signal (e.g., '$15/hr scrappy startup')\n"
+    "  - score of 1: listed and clearly below floor, OR strong below-floor signal (e.g., '$15/hr scrappy startup')\n"
+    "  - score of 2: listed range straddles or barely reaches the floor (top-end ties the floor; midband below)\n"
     "  - score of 3: not listed; comparable roles at comparable companies typically meet floor\n"
-    "  - score of 5: listed, meets or exceeds floor with margin\n\n"
+    "  - score of 4: listed, meets floor with modest margin\n"
+    "  - score of 5: listed, meets or exceeds floor with clear margin\n\n"
     "### domain_match — INDUSTRY / VERTICAL\n"
     "Does the company's industry/vertical match the candidate's prior experience?\n"
     "  - score of 1: entirely different domain, no transferable context\n"

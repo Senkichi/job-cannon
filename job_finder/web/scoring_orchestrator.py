@@ -173,9 +173,24 @@ def build_candidate_context(config: dict, profile: dict) -> str:
     parts.append(
         f"- Target titles: {', '.join(target_titles) if target_titles else 'Not specified'}"
     )
+    if target_titles:
+        parts.append(
+            "  (These are exemplars of the candidate's role-function intent, not an "
+            "exhaustive whitelist. Near-variants — same role function with adjacent "
+            "wording, e.g. 'Lead Data Analyst' for 'Lead Analyst', or 'Senior/Staff "
+            "Data Scientist' for 'Senior Data Scientist' — count as title matches "
+            "and should score title_fit >= 4. Score 5 only for exact-or-stronger matches.)"
+        )
     parts.append(
         f"- Target locations: {', '.join(target_locations) if target_locations else 'Not specified'}"
     )
+    if target_locations:
+        parts.append(
+            "  (A JD location is a match if it appears in this list, OR if it is "
+            "fully remote when 'Remote' is in the list. On-site/hybrid in a "
+            "listed geography is a match — geography membership overrides on-site "
+            "penalty for location_fit.)"
+        )
     parts.append(
         f"- Compensation floor: ${min_salary:,}"
         if min_salary
