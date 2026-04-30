@@ -3139,12 +3139,14 @@ class TestCompositeScoreCell:
         assert "text-amber-400" in cell
         assert ">22<" in cell
 
-    def test_skip_row_uses_slate_color(self, scored_client):
+    def test_skip_row_uses_amber_color_for_composite_22(self, scored_client):
+        """skip-22 has composite 22 — color is now keyed off the number, so
+        it's amber regardless of classification (≥18 amber threshold)."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cskip-22%7Cremote"')
         cell = html[idx : idx + 800]
-        assert "text-slate-400" in cell
+        assert "text-amber-400" in cell
 
     def test_reject_row_uses_red_color(self, scored_client):
         response = scored_client.get("/jobs")
@@ -3154,24 +3156,19 @@ class TestCompositeScoreCell:
         assert "text-red-400" in cell
         assert ">6<" in cell
 
-    def test_low_signal_row_uses_zinc_color(self, scored_client):
-        """A row with classification='low_signal' renders text-zinc-500 (Phase 2d).
-
-        Distinct from skip's text-slate-400; signals "no actionable signal yet"
-        rather than "explicitly down-ranked by rubric".
-        """
+    def test_low_signal_row_uses_amber_color_for_composite_18(self, scored_client):
+        """low_signal-18 has composite 18 — under threshold-based coloring it's
+        amber (≥18 amber). Classification no longer drives the color."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Clow-signal-18%7Cremote"')
         assert idx != -1, "score cell for low_signal row not rendered"
         cell = html[idx : idx + 800]
-        assert "text-zinc-500" in cell, (
-            f"low_signal needs distinct muted zinc-500 color; cell: {cell[:300]}"
-        )
+        assert "text-amber-400" in cell
         assert ">18<" in cell
 
-    def test_low_signal_packed_sort_score_below_skip(self, scored_client):
-        """low_signal (rank 0) sorts below skip (rank 2). 0*100 + 18 = 18."""
+    def test_low_signal_sort_score_is_composite(self, scored_client):
+        """sort_score is now the raw composite (no rank prefix): 18."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Clow-signal-18%7Cremote"')
@@ -3203,54 +3200,52 @@ class TestCompositeScoreCell:
                     f"Old badge class {old_badge} still present in score cell {dk}"
                 )
 
-    # --- Packed data-sort-score key (rank * 100 + composite) ---
+    # --- data-sort-score equals the raw composite (sum of 6 sub-scores) ---
 
-    def test_apply_max_packed_sort_score_is_430(self, scored_client):
-        """Apply (rank 4) with sum 30 -> data-sort-score='430'."""
+    def test_apply_max_sort_score_is_30(self, scored_client):
+        """Composite 30 -> data-sort-score='30' (no classification prefix)."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmax-apply%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="430"' in cell
+        assert 'data-sort-score="30"' in cell
 
-    def test_apply_min_packed_sort_score_is_418(self, scored_client):
-        """Apply (rank 4) with sum 18 -> data-sort-score='418'."""
+    def test_apply_min_sort_score_is_18(self, scored_client):
+        """Composite 18 -> data-sort-score='18'."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cmin-apply%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="418"' in cell
+        assert 'data-sort-score="18"' in cell
 
-    def test_consider_packed_sort_score_is_322(self, scored_client):
-        """Consider (rank 3) with sum 22 -> data-sort-score='322'."""
+    def test_consider_sort_score_is_22(self, scored_client):
+        """Composite 22 -> data-sort-score='22'."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cconsider-22%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="322"' in cell
+        assert 'data-sort-score="22"' in cell
 
-    def test_skip_packed_sort_score_is_222(self, scored_client):
-        """Skip (rank 2) with sum 22 -> data-sort-score='222'.
-
-        Demonstrates why packing matters: a 22 Skip has the same sum as a 22
-        Consider, but rank floor places it below.
-        """
+    def test_skip_sort_score_is_22(self, scored_client):
+        """skip-22 has composite 22 — same sort key as consider-22 now that
+        classification no longer prefixes the sort. Pure-numeric ordering
+        is what the user wants: a 22 is a 22, regardless of bucket."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cskip-22%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="222"' in cell
+        assert 'data-sort-score="22"' in cell
 
-    def test_reject_packed_sort_score_is_106(self, scored_client):
-        """Reject (rank 1) with sum 6 -> data-sort-score='106'."""
+    def test_reject_sort_score_is_6(self, scored_client):
+        """Composite 6 -> data-sort-score='6'."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Creject-6%7Cremote"')
         cell = html[idx : idx + 800]
-        assert 'data-sort-score="106"' in cell
+        assert 'data-sort-score="6"' in cell
 
-    def test_unscored_packed_sort_score_is_0(self, scored_client):
-        """NULL classification -> data-sort-score='0'."""
+    def test_unscored_sort_score_is_0(self, scored_client):
+        """No sub_scores_json -> data-sort-score='0'."""
         response = scored_client.get("/jobs")
         html = response.data.decode()
         idx = html.find('id="score-ax%7Cunscored%7Cremote"')

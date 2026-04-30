@@ -705,9 +705,12 @@ def get_filtered_jobs(
         sort_by = "score"
     sort_dir = "DESC" if sort_dir.upper() != "ASC" else "ASC"
 
-    # 'score' + 'classification*' collapse to the v3 classification-rank +
-    # sub_score_sum composite ORDER BY (D-17 Commit A).
-    if sort_by == "score" or sort_by in _CLASSIFICATION_SORT_KEYS:
+    # 'score' sorts by raw composite (sum of 6 sub-scores) — no classification
+    # rank prefix. Classification keys preserve the legacy rank+composite order
+    # so downstream callers that explicitly opt in still get the bucketed sort.
+    if sort_by == "score":
+        sort_expr = f"{_SUB_SCORE_SUM_SQL} {sort_dir}"
+    elif sort_by in _CLASSIFICATION_SORT_KEYS:
         sort_expr = _classification_score_order(sort_dir)
     else:
         sort_expr = f"{sort_by} {sort_dir}"

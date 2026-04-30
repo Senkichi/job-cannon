@@ -2,17 +2,19 @@
    plus a Tailwind hover-tooltip showing sub-scores + top strength + top gap.
 
    Variables expected in scope:
-     job              — job object with classification (enum), sub_scores_json,
-                        fit_analysis, dedup_key, first_seen
+     job              — job object with sub_scores_json, fit_analysis,
+                        dedup_key, first_seen (classification still on the row
+                        for back-compat but no longer drives the display)
    Optional:
      oob              — when truthy, adds hx-swap-oob="outerHTML"
      freshness_cutoff — ISO date string; jobs with first_seen >= this get a star
 
-   v3.0 (Phase 34) numeric badge → colored composite number + tooltip.
-   Spec: docs/superpowers/specs/2026-04-27-composite-score-display-design.md
+   Color and sort key are driven purely by the composite (sum of the 6
+   sub-scores, range 6-30). Classification is preserved in the DB but not
+   displayed — see job_finder.db._classification_score_order for the legacy
+   bucketed sort, still reachable via sort_by='classification'.
 #}
 
-{% set cls = job.classification %}
 {% set sub_scores = job.sub_scores_json | from_json if job.sub_scores_json else {} %}
 {% set fit = job.fit_analysis | from_json if job.fit_analysis else {} %}
 {% set is_fresh = job.first_seen is not none and freshness_cutoff is defined and job.first_seen >= freshness_cutoff %}
@@ -25,30 +27,22 @@
                  + (sub_scores.get('seniority_match', 0) | int)
                  + (sub_scores.get('skills_match', 0) | int) %}
 
-{% if cls == 'apply' %}
+{# Color thresholds keyed off composite (mean sub-score):
+     ≥24 (mean ≥4) green, ≥18 (mean ≥3) amber, ≥12 (mean ≥2) slate, >0 red. #}
+{% if composite >= 24 %}
   {% set color_class = 'text-green-400' %}
-  {% set rank = 4 %}
-{% elif cls == 'consider' %}
+{% elif composite >= 18 %}
   {% set color_class = 'text-amber-400' %}
-  {% set rank = 3 %}
-{% elif cls == 'skip' %}
+{% elif composite >= 12 %}
   {% set color_class = 'text-slate-400' %}
-  {% set rank = 2 %}
-{% elif cls == 'reject' %}
+{% elif composite > 0 %}
   {% set color_class = 'text-red-400' %}
-  {% set rank = 1 %}
-{% elif cls == 'low_signal' %}
-  {# Phase 2d: low_signal = enrichment exhausted + jd_full short. Distinct zinc-500
-     muted color separates these from skip (slate-400) and unscored (slate-600).
-     Sort rank 0 places them at the bottom — they need re-enrichment, not action. #}
-  {% set color_class = 'text-zinc-500' %}
-  {% set rank = 0 %}
 {% else %}
   {% set color_class = 'text-slate-600' %}
-  {% set rank = 0 %}
 {% endif %}
 
-{% set sort_score = rank * 100 + composite %}
+{% set sort_score = composite %}
+{% set scored = job.sub_scores_json is not none and job.sub_scores_json != '' %}
 
 {# Tooltip text fragments. Truncate strength/gap at 120 chars (spec). #}
 {% set strengths = fit.get('strengths', []) if fit else [] %}
@@ -66,7 +60,7 @@
     class="px-1 py-1.5 whitespace-nowrap text-right relative group"
     data-sort-score="{{ sort_score }}"
     {% if oob is defined and oob %}hx-swap-oob="outerHTML"{% endif %}>
-  {% if cls %}
+  {% if scored %}
     <span class="font-semibold {{ color_class }} cursor-help">{{ composite }}</span>{% if is_fresh %}<span class="text-amber-400 text-xs ml-0.5" title="Surfaced in last 3 days">*</span>{% endif %}
     {# Tooltip: hidden by default, revealed on parent <td>.group hover. #}
     <div class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity duration-100
