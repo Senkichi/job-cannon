@@ -120,7 +120,7 @@ def main() -> int:
     print("After this completes, run the batch scorer (web UI 'Score all' button or")
     print("POST /dashboard/batch-score/start) to re-score everything.")
     print()
-    print("Estimated re-score time: ~6s/job × N rows ≈ overnight on Ollama qwen2.5:14b.")
+    print("Estimated re-score time: ~6s/job * N rows ~= overnight on Ollama qwen2.5:14b.")
     confirm = input("\nProceed? Type 'yes' to confirm: ").strip()
     nullify_classifications(args.db, dry_run=False, confirm=confirm)
     return 0
