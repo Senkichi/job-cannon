@@ -434,11 +434,13 @@ def test_migration_count_is_thirteen():
     Migration 44 (Phase 3 follow-up) adds gold_no_signal_axes for per-axis
     "no signal" tagging — distinguishes "scored midpoint" from "couldn't tell".
     Migration 45: eval_runs table for the Phase 5 eval harness.
+    Migration 46: heal Workday URL-template bug fallout (repair source_urls,
+    reset enrichment_tier, drop scores derived from "<title>Workday</title>").
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 45
+    assert len(MIGRATIONS) == 46
 
 
 class TestMigration27:
@@ -1238,8 +1240,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has exactly 45 entries (Migration 45: eval_runs table)."""
-        assert len(MIGRATIONS) == 45
+        """MIGRATIONS list has exactly 46 entries (Migration 46: Workday URL heal)."""
+        assert len(MIGRATIONS) == 46
 
 
 class TestMigration40:
