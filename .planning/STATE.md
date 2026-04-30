@@ -21,7 +21,7 @@ progress:
 Phase: 34 — COMPLETE
 Plan: 5 of 5 complete
 Status: v3.0 milestone DELIVERED — single-tier ordinal scorer is the sole code path; no legacy columns, modules, shims, or dual-writes remain in production
-Last activity: 2026-04-23 -- Mig 41 applied to live DB (user_version=41, 3 legacy cols + 1 index dropped); 2408 tests passing; SUMMARY + STATE updated
+Last activity: 2026-04-29 -- Workday URL bug (commit 30ff5e0) verified clean post-Migration 46: 0/70 SPA-shell-signature classifications (was ~106), median Workday jd_full=6991 chars, no /job//job/ URLs remain. Audit: .planning/eval-reports/rescore-audit-2026-04-30T000503Z.md
 
 ## Project Reference
 
