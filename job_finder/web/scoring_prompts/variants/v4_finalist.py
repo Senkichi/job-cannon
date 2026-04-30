@@ -141,7 +141,7 @@ FIELD_REINFORCEMENT: str = PERSONA_CORRECTED_FIELD_REINFORCEMENT + (
 
 _FINALIST_QUOTE_EXAMPLE: str = """
 
-Example 7 (finalist — evidence quotes shown):
+Example 8 (finalist — evidence quotes shown):
 Input: "Director of Product Analytics at HealthCo. Build the experimentation platform serving 10M users. Remote-first. Compensation $220K-$260K base."
 Output:
 {
