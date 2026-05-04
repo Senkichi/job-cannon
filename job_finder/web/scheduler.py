@@ -783,9 +783,14 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        # -- Agentic backfill (nightly 3:30 AM, paused until manual resume) -----
-        # Uses lambda-wrapper pattern matching _import_stale (lines above) to prevent
-        # signature drift if run_agentic_backfill gains new required parameters.
+        # -- Agentic backfill (nightly 4:15 AM) -----
+        # Moved off the 3:30 slot to avoid colliding with day-1 monthly hygiene
+        # jobs (orphan_cleanup at 3:00, registry_hygiene at 3:30) and the tail
+        # of staleness_check (starts 2:00, runs ~2 hours). On May-1 the 3:30
+        # collision DB-locked persist_job_expiry_state 113 times and killed the
+        # agentic run after enriching 1/50 jobs.
+        # 4:15 lands after staleness typically finishes (~4:00) and well before
+        # careers_crawl (5:00).
         # OllamaProvider is instantiated INSIDE run_agentic_backfill, NOT here —
         # the scheduler closure only defers the import.
 
@@ -811,7 +816,7 @@ def init_scheduler(app) -> None:
                 # (jobs_found, jobs_new, jobs_scanned) for consistent dashboard display.
                 extract_metadata=lambda r: {"jobs_enriched": r if isinstance(r, int) else 0},
             ),
-            trigger=CronTrigger(hour=3, minute=30),
+            trigger=CronTrigger(hour=4, minute=15),
             id="agentic_backfill",
             replace_existing=True,
             max_instances=1,
