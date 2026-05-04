@@ -262,7 +262,11 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata, *
                 logger.info("%s: %s", name, result)
                 metadata = extract_metadata(result)
                 metadata["duration_seconds"] = round(_time.time() - t0, 2)
-                metadata["status"] = "success"
+                # status="degraded" when extract_metadata surfaces a non-empty
+                # errors list (e.g., pipeline_detection skipped because Gmail
+                # auth failed). Truthful status lets the dashboard distinguish
+                # "ran clean" from "ran but produced nothing useful".
+                metadata["status"] = "degraded" if metadata.get("errors") else "success"
                 log_activity(db_path, action, metadata=metadata)
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
@@ -454,6 +458,7 @@ def init_scheduler(app) -> None:
                     "emails_scanned": r.get("emails_scanned", 0),
                     "auto_updated": r.get("auto_updated", 0),
                     "queued": r.get("queued", 0),
+                    "errors": r.get("errors", []),
                 },
             ),
             trigger=IntervalTrigger(minutes=30),
@@ -723,23 +728,31 @@ def init_scheduler(app) -> None:
         )
 
         # -- Enrichment backfill (1 hour after each ingestion run: 1am, 9am, 5pm Pacific) --
+        # Two stages: (1) fill jd_full via the cost-ordered tier pipeline,
+        # (2) score every newly-enriched row. Without stage 2 the v3.0
+        # multi-stage pipeline leaks — ingestion-time scoring sees empty
+        # jd_full and skips, and nothing else picks the row up.
+        # Tracked via _make_tracked_job so user_activity captures every run
+        # (the dashboard's scheduler-health view depends on this).
 
-        def _run_enrichment_backfill():
-            """Backfill enrichment + score the freshly-enriched rows.
+        def _import_enrichment_backfill():
+            def _job(db_path, config):
+                from job_finder.web.data_enricher import run_enrichment_backfill
+                from job_finder.web.db_helpers import standalone_connection
+                from job_finder.web.scoring_runner import run_scoring
 
-            Stage 1 fills jd_full / salary_min via the cost-ordered tier
-            pipeline. Stage 2 scores every row that now has jd_full but no
-            classification (capped at 500/run to keep the cron cycle short).
-            Without Stage 2 the v3.0 multi-stage pipeline leaks: ingestion-
-            time scoring sees empty jd_full and skips, and nothing else
-            picks the row up after enrichment lands.
-            """
-            with app.app_context():
-                config = get_config_snapshot(app)
-                db_path = app.config.get("DB_PATH", "jobs.db")
+                result = {
+                    "enriched": 0,
+                    "scored": 0,
+                    "classified_apply": 0,
+                    "classified_consider": 0,
+                    "classified_skip": 0,
+                    "classified_reject": 0,
+                    "errors": [],
+                }
+
+                # Stage 1: enrichment
                 try:
-                    from job_finder.web.data_enricher import run_enrichment_backfill
-
                     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
                     enriched = run_enrichment_backfill(
                         db_path,
@@ -747,15 +760,15 @@ def init_scheduler(app) -> None:
                         config=config,
                         limit=200,
                     )
-                    logger.info("Enrichment backfill: %s", enriched)
+                    result["enriched"] = enriched if isinstance(enriched, int) else 0
+                    logger.info("Enrichment backfill: %s", result["enriched"])
                 except Exception as e:
                     logger.error("Enrichment backfill failed: %s", e)
-                    return
+                    result["errors"].append(f"enrichment: {type(e).__name__}: {e}")
+                    return result
 
+                # Stage 2: post-enrichment scoring
                 try:
-                    from job_finder.web.db_helpers import standalone_connection
-                    from job_finder.web.scoring_runner import run_scoring
-
                     with standalone_connection(db_path) as score_conn:
                         rows = score_conn.execute(
                             "SELECT dedup_key FROM jobs "
@@ -768,14 +781,43 @@ def init_scheduler(app) -> None:
                     dedup_keys = [r[0] for r in rows]
                     if not dedup_keys:
                         logger.info("Post-enrichment scoring: nothing to score")
-                        return
+                        return result
                     summary = run_scoring(dedup_keys, config, db_path)
+                    result["scored"] = summary.get("scored", 0)
+                    result["classified_apply"] = summary.get("classified_apply", 0)
+                    result["classified_consider"] = summary.get("classified_consider", 0)
+                    result["classified_skip"] = summary.get("classified_skip", 0)
+                    result["classified_reject"] = summary.get("classified_reject", 0)
                     logger.info("Post-enrichment scoring: %s", summary)
                 except Exception as e:
                     logger.error("Post-enrichment scoring failed: %s", e)
+                    result["errors"].append(f"post_scoring: {type(e).__name__}: {e}")
+
+                return result
+
+            return _job
+
+        def _import_enrichment_backfill_action():
+            from job_finder.web.activity_tracker import ACTION_SCHEDULED_ENRICHMENT_BACKFILL
+
+            return ACTION_SCHEDULED_ENRICHMENT_BACKFILL
 
         scheduler.add_job(
-            _run_enrichment_backfill,
+            _make_tracked_job(
+                app,
+                "Enrichment backfill",
+                import_func=_import_enrichment_backfill,
+                import_action=_import_enrichment_backfill_action,
+                extract_metadata=lambda r: {
+                    "jobs_enriched": r.get("enriched", 0),
+                    "jobs_scored": r.get("scored", 0),
+                    "classified_apply": r.get("classified_apply", 0),
+                    "classified_consider": r.get("classified_consider", 0),
+                    "classified_skip": r.get("classified_skip", 0),
+                    "classified_reject": r.get("classified_reject", 0),
+                    "errors": r.get("errors", []),
+                },
+            ),
             trigger=CronTrigger(hour="1,9,17"),
             id="enrichment_backfill",
             replace_existing=True,
