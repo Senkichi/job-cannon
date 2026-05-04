@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
@@ -426,17 +427,45 @@ def persist_job_expiry_state(
     the scoring preflight (per-job liveness check) and the nightly batch
     expiry runner.
 
+    Retries on 'database is locked' (3 attempts, exponential backoff).
+    On 2026-05-01 the day-1 monthly hygiene jobs collided with the daily
+    agentic_backfill at 03:30, exhausting the standalone_connection's 30s
+    busy_timeout 113 times in this function and aborting the reconciler
+    mid-batch. The cron decoupling fix (scheduler.py: agentic moved to
+    04:15) is the primary defense; this retry is belt-and-suspenders for
+    any future writer contention spike.
+
     Args:
         conn: Open sqlite3 connection.
         dedup_key: The job's primary key.
         expiry_status: One of 'expired', 'live', or 'inconclusive'.
         checked_at: ISO 8601 timestamp string of when the check ran.
     """
-    conn.execute(
-        "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ? WHERE dedup_key = ?",
-        (expiry_status, checked_at, dedup_key),
-    )
-    conn.commit()
+    last_err: sqlite3.OperationalError | None = None
+    for attempt in range(3):
+        try:
+            conn.execute(
+                "UPDATE jobs SET expiry_status = ?, expiry_checked_at = ? WHERE dedup_key = ?",
+                (expiry_status, checked_at, dedup_key),
+            )
+            conn.commit()
+            return
+        except sqlite3.OperationalError as e:
+            if "database is locked" not in str(e).lower():
+                raise
+            last_err = e
+            # Backoff: 0.5s, 1.0s. busy_timeout (30s) already kicked in inside
+            # sqlite before we got here, so any sleep here is on top of that.
+            if attempt < 2:
+                time.sleep(0.5 * (2**attempt))
+                _log.warning(
+                    "persist_job_expiry_state: database locked, retry %d/2 (dedup_key=%s)",
+                    attempt + 1,
+                    dedup_key,
+                )
+    # Exhausted retries — re-raise so the caller's outer try/except records the error.
+    assert last_err is not None
+    raise last_err
 
 
 def persist_job_archetype(
