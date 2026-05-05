@@ -19,7 +19,12 @@ permissions:
 
 jobs:
   claude:
-    if: contains(github.event.comment.body, '@claude')
+    # Restrict to repo owner only. Single-user repo; without this filter
+    # any GitHub user can burn ANTHROPIC_API_KEY by commenting @claude on
+    # an issue or PR review.
+    if: |
+      github.event.comment.author_association == 'OWNER' &&
+      contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
