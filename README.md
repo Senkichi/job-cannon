@@ -26,7 +26,7 @@ SerpAPI -------+                                                         (localh
 
 1. **Clone the repo**
    ```bash
-   git clone https://github.com/your-username/job-cannon.git
+   git clone https://github.com/Senkichi/job-cannon.git
    cd job-cannon
    ```
 
