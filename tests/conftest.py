@@ -529,3 +529,21 @@ def mock_scheduler_pidfile():
         return_value=True,
     ) as mock:
         yield mock
+
+
+# ---------------------------------------------------------------------------
+# Collection-count sentinel (Reconciliation Plan v1 R2.3)
+# ---------------------------------------------------------------------------
+# Records the number of items pytest collected so test_collection_invariants
+# can assert the suite hasn't silently dropped tests (e.g., a skipif
+# evaluating True when it shouldn't, a fixture-error swallowing a module,
+# a broken import that pytest tolerates with --collect-ignore-glob).
+#
+# This is a defensive sentinel against the F-C1/C1.5/C1.6/C1.7/C2 family of
+# silent-skip findings recurring. The floor is calibrated below the current
+# count with margin, and is updated deliberately when adding/removing tests.
+
+
+def pytest_collection_modifyitems(config, items):
+    """Stash the collected count on the config so the sentinel can read it."""
+    config._collected_count = len(items)
