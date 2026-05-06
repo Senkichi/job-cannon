@@ -1,7 +1,6 @@
 """Tests for the low_signal classification rule (Phase 2d sub-fix).
 
-Spec: docs/superpowers/specs/2026-04-27-scoring-pipeline-recalibration-design.md
-Decision D-2.5 — 5th classification value distinct from apply/consider/skip/reject.
+5th classification value distinct from apply/consider/skip/reject.
 
 Rule precedence in derive_classification:
     1. legitimacy_note truthy           -> 'reject'
