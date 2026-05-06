@@ -18,6 +18,7 @@ import concurrent.futures
 import logging
 import time
 from datetime import datetime
+from typing import Any
 
 import requests  # noqa: F401  — bound here so test_careers_crawler patches resolve
 from playwright.sync_api import sync_playwright
@@ -141,7 +142,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
     )
 
-    summary = {
+    summary: dict[str, Any] = {
         "companies_crawled": 0,
         "jobs_found": 0,
         "jobs_new": 0,
@@ -309,7 +310,7 @@ def _crawl_companies(
 
     # --- Per-worker function (own browser + DB connection) ---
     def _crawl_worker(company_batch: list) -> tuple[dict, list[str]]:
-        local_summary = dict.fromkeys(_SUMMARY_KEYS, 0)
+        local_summary: dict[str, Any] = dict.fromkeys(_SUMMARY_KEYS, 0)
         local_summary["errors"] = []
         local_new_keys: list[str] = []
 
@@ -472,7 +473,7 @@ def _crawl_companies(
     # --- Distribute companies round-robin across workers ---
     batches = [companies[i::max_workers] for i in range(max_workers)]
 
-    merged_summary: dict = dict.fromkeys(_SUMMARY_KEYS, 0)
+    merged_summary: dict[str, Any] = dict.fromkeys(_SUMMARY_KEYS, 0)
     merged_summary["errors"] = []
     all_new_keys: list[str] = []
 
