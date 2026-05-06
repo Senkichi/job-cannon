@@ -10,5 +10,6 @@ Engineering reference for the `job_finder/` codebase. Audience: engineers readin
 | [integrations.md](integrations.md) | Gmail, SerpAPI, Anthropic, OAuth, scheduler, environment config |
 | [testing.md](testing.md) | Test framework, fixtures, mocking, coverage, organization |
 | [concerns.md](concerns.md) | Tech debt, fragile areas, scaling limits, test-coverage gaps |
+| [typecheck.md](typecheck.md) | Type-checking strategy, baseline counts, mypy vs pyright rationale |
 
 For setup and run instructions, see [../SETUP.md](../SETUP.md).
