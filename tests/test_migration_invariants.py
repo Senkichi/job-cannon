@@ -124,3 +124,49 @@ def test_migration_filenames_match_version_numbers():
             f"the filename says {expected_version}. Either rename the file "
             "or fix the version in the Migration constructor."
         )
+
+
+def test_migration_resumes_from_intermediate_version(tmp_db_path):
+    """Resetting PRAGMA user_version mid-chain and re-running picks up where it left off.
+
+    This is the load-bearing idempotency contract for the migration loop
+    itself. Concretely: applying every migration, then rewinding the
+    user_version sentinel to 30, must cause the next `run_migrations` to
+    apply versions 31..max — and those re-applications must complete
+    cleanly (no `duplicate column name` errors leaking past the
+    `_apply_migration` swallow filter, no failed CHECK constraints, etc.).
+
+    Failure of this test indicates a migration that lacks `IF NOT EXISTS` /
+    try-guarded ALTER COLUMN / per-statement idempotency — a real coupling
+    that needs an explicit fix in the offending migration, not in this test.
+    """
+    expected_max = max(_migration_version(m, i) for i, m in enumerate(MIGRATIONS, start=1))
+
+    # Step 1: bring the fresh DB up to the latest version.
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == expected_max
+
+    # Step 2: rewind the version sentinel to mid-chain (30) without touching
+    # the schema. This simulates a database that was at v30, with all the
+    # later columns/tables already present (since we already ran them above).
+    intermediate = 30
+    assert intermediate < expected_max, (
+        "Test precondition: intermediate version must be below the latest"
+    )
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        conn.execute(f"PRAGMA user_version = {intermediate}")
+        conn.commit()
+
+    # Step 3: re-run. The migration loop should apply versions
+    # `intermediate+1` through `expected_max` again. They must be idempotent
+    # against the already-populated schema.
+    run_migrations(tmp_db_path)
+    with closing(sqlite3.connect(tmp_db_path)) as conn:
+        version_after = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version_after == expected_max, (
+        f"After re-running migrations from rewind point {intermediate}, "
+        f"PRAGMA user_version={version_after}, expected {expected_max}. "
+        "A migration in the {intermediate+1}..{expected_max} range likely "
+        "lacks idempotent SQL (missing IF NOT EXISTS, unguarded ALTER, etc.)."
+    )
