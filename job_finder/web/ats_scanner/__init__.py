@@ -1,66 +1,43 @@
-"""ATS (Applicant Tracking System) scanner and company registry module.
+"""ATS (Applicant Tracking System) scanner and company registry package.
 
-Provides:
-- ATS URL extraction from job source_urls (Lever, Greenhouse, Ashby)
-- Company record upsert with ATS info and normalization
-- Speculative ATS slug probing with persistent cache (hit/miss/pending)
-- _title_matches keyword filtering utility shared by Plans 02 and 03
+The package's first-party concerns live in private sibling modules:
+
+- `_upsert.py`   — `upsert_company`: company-table upsert helper.
+- `_probe.py`    — `probe_ats_slugs`: speculative ATS-API probing for
+                   companies with `ats_probe_status='pending'`.
+- `_promote.py`  — `promote_ats_from_source_urls`: source-URL based
+                   promotion of miss/error companies.
+- `_run.py`      — `run_ats_scan`: scan orchestrator + phase helpers.
+
+Sibling-module re-exports preserve the public API contract used by
+tests, scheduler, blueprints/companies, careers_scraper, enrichment_tiers,
+and backfill_companies. The package re-exports symbols from
+`ats_platforms`, `ats_prober`, and `ats_detection` so callers can keep
+importing them from the `ats_scanner` namespace.
 
 Architecture:
-- Thread-safe: probe_ats_slugs() creates own sqlite3 connection (same pattern
-  as stale_detector.py)
-- TESTING guard on probe_ats_slugs to prevent external API calls in tests
-- Never re-probes cached misses; never downgrades confirmed hits to pending
+- Thread-safe: probe_ats_slugs() and run_ats_scan() open their own
+  sqlite3 connections (same pattern as stale_detector.py).
+- TESTING guard on probe_ats_slugs and run_ats_scan to prevent external
+  API calls in tests.
+- Never re-probes cached misses; never downgrades confirmed hits to
+  pending (precedence is hit > pending > miss).
 
-ATS URL patterns (Research Pattern 2):
-- Lever: jobs.lever.co/{slug}/... and api.lever.co/v0/postings/{slug}
-- Greenhouse: boards.greenhouse.io/{slug}/... and boards-api.greenhouse.io/v1/boards/{slug}
-- Ashby: jobs.ashbyhq.com/{slug}/... (case-sensitive slug per Research Pitfall 3)
+ATS URL patterns:
+- Lever:        jobs.lever.co/{slug}/...           and api.lever.co/v0/postings/{slug}
+- Greenhouse:   boards.greenhouse.io/{slug}/...    and boards-api.greenhouse.io/v1/boards/{slug}
+- Ashby:        jobs.ashbyhq.com/{slug}/...        (case-sensitive slug)
 """
 
-import json
-import logging
-import sqlite3
-import time
-from datetime import datetime
+# `requests` is imported eagerly so tests can patch
+# `job_finder.web.ats_scanner.requests.get` — the module-singleton attribute
+# also propagates to every submodule that imports `requests`.
+import requests  # noqa: F401
 
-import requests  # noqa: F401 — re-exported for test patching of requests.get
-
-from job_finder.db import derive_classification
-from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.description_formatter import strip_html_to_text
-
-# Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
-# Uses the centralized orchestrator instead of pipeline_runner's private functions,
-# breaking the bidirectional dependency (ats_scanner <-> pipeline_runner).
-try:
-    from job_finder.web.scoring_orchestrator import score_and_persist_job
-except ImportError:
-    score_and_persist_job = None  # type: ignore[assignment]
-
-# Lazy import of HTML careers scraper (ImportError guard — Plan 03)
-try:
-    from job_finder.web.careers_scraper import find_careers_url, scrape_careers_page
-except ImportError:
-    find_careers_url = None  # type: ignore[assignment]
-    scrape_careers_page = None  # type: ignore[assignment]
-
-# Lazy import of homepage discoverer (ImportError guard — Plan 01)
-try:
-    from job_finder.web.homepage_discoverer import run_homepage_discovery
-except ImportError:
-    run_homepage_discovery = None  # type: ignore[assignment]
-
-logger = logging.getLogger(__name__)
-
-from job_finder.web.ats_detection import (
+from job_finder.web.ats_detection import (  # noqa: F401
     derive_slug_candidates,
     extract_ats_from_urls,
 )
-
-# Canonical scanner implementations live in ats_platforms.py.
-# Re-exported here for backward compatibility with existing callers
-# (careers_scraper, enrichment_tiers, run_ats_scan loop, tests/test_ats_scanner.py).
 from job_finder.web.ats_platforms import (  # noqa: F401
     _title_matches,
     scan_ashby,
@@ -87,22 +64,8 @@ from job_finder.web.ats_prober import (  # noqa: F401
     probe_single_company,
 )
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-# upsert_company lives in ats_scanner._upsert; re-exported below for the
-# established `from job_finder.web.ats_scanner import upsert_company` contract.
-from job_finder.web.ats_scanner._upsert import upsert_company  # noqa: E402,F401
-
-# probe_ats_slugs lives in ats_scanner._probe; re-exported below for the
-# established `from job_finder.web.ats_scanner import probe_ats_slugs` contract.
-from job_finder.web.ats_scanner._probe import probe_ats_slugs  # noqa: E402,F401
-
-# promote_ats_from_source_urls lives in ats_scanner._promote; re-exported below.
-from job_finder.web.ats_scanner._promote import (  # noqa: E402,F401
-    promote_ats_from_source_urls,
-)
-
-# run_ats_scan + its phase helpers live in ats_scanner._run; re-exported below.
-from job_finder.web.ats_scanner._run import run_ats_scan  # noqa: E402,F401
+# First-party concerns moved into private sibling modules during S7c.
+from job_finder.web.ats_scanner._promote import promote_ats_from_source_urls  # noqa: F401
+from job_finder.web.ats_scanner._probe import probe_ats_slugs  # noqa: F401
+from job_finder.web.ats_scanner._run import run_ats_scan  # noqa: F401
+from job_finder.web.ats_scanner._upsert import upsert_company  # noqa: F401

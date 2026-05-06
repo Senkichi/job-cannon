@@ -1526,7 +1526,7 @@ class TestRunAtsScanHtmlFallback:
                 mock_careers_get.side_effect = [mock_find_resp, mock_scrape_resp]
 
                 with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                    with patch("job_finder.web.ats_scanner.time.sleep"):
+                    with patch("job_finder.web.ats_scanner._run.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
         # html_scraped should be in summary
@@ -1548,15 +1548,15 @@ class TestRunAtsScanHtmlFallback:
 
         with (
             patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://startup.co/careers",
             ) as mock_find,
             patch(
-                "job_finder.web.ats_scanner._run.scrape_careers_page", return_value=[]
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=[]
             ) as mock_scrape,
         ):
             with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
+                with patch("job_finder.web.ats_scanner._run.time.sleep"):
                     run_ats_scan(migrated_db_path, config=config)
 
         # Check positional args — keyword args (client, conn, config) also present now
@@ -1585,13 +1585,13 @@ class TestRunAtsScanHtmlFallback:
 
         with (
             patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://startup.co/careers",
             ),
-            patch("job_finder.web.ats_scanner._run.scrape_careers_page", return_value=scraped_jobs),
+            patch("job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=scraped_jobs),
             patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
         ):
-            with patch("job_finder.web.ats_scanner.time.sleep"):
+            with patch("job_finder.web.ats_scanner._run.time.sleep"):
                 result = run_ats_scan(migrated_db_path, config=config)
 
         # Job should be created in DB
@@ -1623,9 +1623,9 @@ class TestRunAtsScanHtmlFallback:
             "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
         }
 
-        with patch("job_finder.web.ats_scanner._run.find_careers_url") as mock_find:
+        with patch("job_finder.web.ats_scanner._run_html.find_careers_url") as mock_find:
             with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
+                with patch("job_finder.web.ats_scanner._run.time.sleep"):
                     result = run_ats_scan(migrated_db_path, config=config)
 
         # find_careers_url should NOT be called (no homepage_url in query)
@@ -1662,15 +1662,15 @@ class TestRunAtsScanHtmlFallback:
 
         with (
             patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://error.co/careers",
             ) as mock_find,
             patch(
-                "job_finder.web.ats_scanner._run.scrape_careers_page", return_value=[]
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=[]
             ) as mock_scrape,
         ):
             with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                with patch("job_finder.web.ats_scanner.time.sleep"):
+                with patch("job_finder.web.ats_scanner._run.time.sleep"):
                     result = run_ats_scan(migrated_db_path, config=config)
 
         # find_careers_url should be called for the error company
@@ -1700,10 +1700,10 @@ class TestRunAtsScanHtmlFallback:
             "profile": {"target_titles": ["data scientist"], "exclusions": {"title_keywords": []}},
         }
 
-        with patch("job_finder.web.ats_scanner._run.find_careers_url", return_value=None):
-            with patch("job_finder.web.ats_scanner._run.scrape_careers_page") as mock_scrape:
+        with patch("job_finder.web.ats_scanner._run_html.find_careers_url", return_value=None):
+            with patch("job_finder.web.ats_scanner._run_html.scrape_careers_page") as mock_scrape:
                 with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                    with patch("job_finder.web.ats_scanner.time.sleep"):
+                    with patch("job_finder.web.ats_scanner._run.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
         # scrape_careers_page should NOT be called when find_careers_url returns None
@@ -1797,17 +1797,17 @@ class TestHTMLJobsScoring:
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             with patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://startup.co/careers",
             ):
                 with patch(
-                    "job_finder.web.ats_scanner._run.scrape_careers_page", return_value=html_jobs
+                    "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=html_jobs
                 ):
                     with patch(
                         "job_finder.web.ats_scanner._run.score_and_persist_job",
                         side_effect=capture_haiku_scoring,
                     ):
-                        with patch("job_finder.web.ats_scanner.time.sleep"):
+                        with patch("job_finder.web.ats_scanner._run.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
         # Scoring must have been called for BOTH jobs (1 from ATS API + 1 from HTML)
@@ -1853,17 +1853,17 @@ class TestHTMLJobsScoring:
 
         with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
             with patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://startup.co/careers",
             ):
                 with patch(
-                    "job_finder.web.ats_scanner._run.scrape_careers_page", return_value=html_jobs
+                    "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=html_jobs
                 ):
                     with patch(
                         "job_finder.web.ats_scanner._run.score_and_persist_job",
                         return_value=scorer_result,
                     ):
-                        with patch("job_finder.web.ats_scanner.time.sleep"):
+                        with patch("job_finder.web.ats_scanner._run.time.sleep"):
                             result = run_ats_scan(migrated_db_path, config=config)
 
         assert result["scored"] == 2, (
@@ -2874,10 +2874,10 @@ class TestHtmlFallbackDescriptionPassthrough:
                 return_value={"companies_checked": 0, "homepages_found": 0, "errors": []},
             ),
             patch(
-                "job_finder.web.ats_scanner._run.find_careers_url",
+                "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://acme.com/careers",
             ),
-            patch("job_finder.web.ats_scanner._run.scrape_careers_page", return_value=scraped_jobs),
+            patch("job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=scraped_jobs),
         ):
             result = run_ats_scan(migrated_db_path, config)
 
