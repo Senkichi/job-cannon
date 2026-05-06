@@ -85,7 +85,7 @@ eval = [
 # guarantees CI and local runs see the same error set, which is the
 # whole point of declaring a type-check baseline.
 dev = [
-    "pytest~=8.0",
+    "pytest>=8,<10",
     "pytest-cov~=7.1",
     "pytest-playwright~=0.7",
     "python-dotenv~=1.0",
