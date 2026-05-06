@@ -17,11 +17,12 @@ the runner bodies (none currently) would patch this module directly.
 """
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict:
+def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, Any]:
     """Run the post-ingestion enrichment backfill, then score new rows.
 
     Stage 1: fill ``jd_full`` via the cost-ordered tier pipeline.
@@ -38,7 +39,7 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict:
     from job_finder.web.db_helpers import standalone_connection
     from job_finder.web.scoring_runner import run_scoring
 
-    result = {
+    result: dict[str, Any] = {
         "enriched": 0,
         "scored": 0,
         "classified_apply": 0,
