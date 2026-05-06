@@ -159,9 +159,10 @@ def _create_browser(playwright):
 def _fetch_page_text(page, url: str, timeout_ms: int = 15000) -> str | None:
     """Fetch a URL with Playwright and return cleaned text content.
 
-    Uses extract_content_from_html() from enrichment_tiers for density-based
-    content extraction (trafilatura), falling back to noise-tag stripping.
-    Auth-wall detection via is_short_auth_page() and is_chrome_or_login_page().
+    Uses extract_content_from_html() from enrichment_tiers, which strips
+    noise tags (script, style, nav, etc.) via BeautifulSoup and returns
+    cleaned text. Auth-wall detection via is_short_auth_page() and
+    is_chrome_or_login_page().
 
     LinkedIn URLs are tried with the lightweight fetch_linkedin_jd() extractor
     first (no Playwright needed). Falls through to Playwright if that fails.
