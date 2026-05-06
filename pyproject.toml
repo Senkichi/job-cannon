@@ -1,12 +1,85 @@
-# Project metadata is intentionally minimal — job-cannon installs from
-# requirements.txt, not pyproject.toml. This file exists for tooling config
-# (ruff, commitizen, pytest, coverage) only.
+# pyproject.toml is the canonical install + tooling surface. The legacy
+# requirements.txt was retired in S2 (portfolio cleanup) — anyone running
+# `uv sync` (with optional extras as needed) gets a working install.
 
 [project]
 name = "job-cannon"
 version = "3.0.0"
 description = "Personal job search command center — Flask, Gmail ingestion, AI scoring, pipeline tracking"
 requires-python = ">=3.13"
+authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = [
+    "job-search",
+    "flask",
+    "anthropic",
+    "claude",
+    "htmx",
+    "ai-scoring",
+    "gmail-api",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+dependencies = [
+    # Google APIs
+    "google-api-python-client~=2.100",
+    "google-auth-httplib2~=0.2",
+    "google-auth-oauthlib~=1.2",
+    "google-genai>=1.0.0",
+    # Web + parsing
+    "beautifulsoup4~=4.12",
+    "pyyaml~=6.0",
+    "requests~=2.31",
+    "Flask~=3.1",
+    "APScheduler>=3.11,<4.0",
+    "psutil>=5.9,<7",
+    # AI
+    "anthropic~=0.84",
+    # Scoring
+    "thefuzz[speedup]~=0.22",
+    # Multi-provider routing
+    "jsonschema>=4.0.0",
+    # Search / discovery — used by enrichment_tiers + agentic_enricher to
+    # look up career pages when neither a known ATS slug nor a sitemap-
+    # derived URL is available.
+    "ddgs~=9.12",
+]
+
+[project.optional-dependencies]
+# Eval harness + shootout statistics. Move to extra so a vanilla install
+# of the Flask app doesn't pull numpy + scipy. CI installs this extra to
+# keep tests/test_shootout_lib.py importing.
+eval = [
+    "numpy~=2.4",
+    "scipy~=1.17",
+]
+# Test + tooling deps. ruff/pre-commit/commitizen are intentionally not
+# pinned here — ruff runs via `uvx ruff` (no install needed) and the
+# pre-commit framework is managed by .pre-commit-config.yaml. Adding
+# pinned versions here would surprise contributors with conflicting
+# global installs.
+dev = [
+    "pytest~=8.0",
+    "pytest-cov~=7.1",
+    "pytest-playwright~=0.7",
+    "python-dotenv~=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Senkichi/job-cannon"
+Repository = "https://github.com/Senkichi/job-cannon"
+Issues = "https://github.com/Senkichi/job-cannon/issues"
 
 
 # ── Ruff (Linting + Formatting) ──────────────────────────────
@@ -14,13 +87,6 @@ requires-python = ">=3.13"
 target-version = "py313"
 line-length = 99
 extend-exclude = [
-    ".planning",
-    ".reviews",
-    ".nit",
-    ".nit-supreme",
-    ".superpowers",
-    ".playwright-mcp",
-    "eval_results",
     "logs",
     "data",
     "reports",
@@ -78,7 +144,11 @@ quote-style = "double"
 # ── Pytest ────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short -m 'not integration'"
+markers = [
+    "e2e: end-to-end browser tests (require Playwright)",
+    "integration: end-to-end integration tests requiring live external services (Ollama, network APIs); opt-in via -m integration",
+]
 
 
 # ── Coverage ──────────────────────────────────────────────────
