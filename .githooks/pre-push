@@ -31,7 +31,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # remote's default branch instead.
     if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
         base=$(git merge-base "$local_sha" "refs/remotes/$remote/HEAD" 2>/dev/null \
-            || git merge-base "$local_sha" "refs/remotes/$remote/master" 2>/dev/null \
+            || git merge-base "$local_sha" "refs/remotes/$remote/main" 2>/dev/null \
             || echo "")
         if [ -z "$base" ]; then
             # No common ancestor we can find — skip size check.
@@ -52,7 +52,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ':!*.jpg' \
         ':!*.svg' \
         ':!.planning/**' \
-        ':!.reviews/**' \
         ':!eval_results/**' \
         ':!logs/**' \
         ':!data/**' \

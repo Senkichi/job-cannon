@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Master pre-commit hook: runs the pre-commit framework (ruff, gitleaks, etc.).
 #
-# This project pushes directly to master, so there is no main-branch block
-# and no branch-name validation — those checks are inappropriate here.
+# This project pushes directly to main, so there is no protected-branch
+# block and no branch-name validation — those checks are inappropriate
+# here.
 #
 # Installed by: git config core.hooksPath .githooks
 
