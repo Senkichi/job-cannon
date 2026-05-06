@@ -9,8 +9,6 @@ import json
 import subprocess
 import sys
 
-import pytest
-
 from scripts.v3_rescore_validate import (
     evaluate_report,
     gate_g1_completeness,
@@ -230,18 +228,24 @@ def test_g3_threshold_uniform_across_batches():
 
 
 def test_g3_fail_when_r_below_noise_floor():
-    # Build an essentially uncorrelated sequence (random) to fail the floor.
+    # Build an essentially uncorrelated sequence (deterministic) to fail the floor.
+    # Reconciliation R2.1 (F-C1.7): seed=11 used to produce r=0.269 ~30% of the
+    # time, causing a silent skip. seed=3 deterministically produces r ~= -0.012
+    # (verified by sweeping seeds 0-49 with the same uniform sampling), which is
+    # comfortably below the 0.20 noise-floor threshold.
     import random
 
-    rng = random.Random(11)
+    rng = random.Random(3)
     rows = []
     for _i in range(50):
-        legacy = rng.uniform(0, 100)
+        legacy = int(rng.uniform(0, 100))  # _row's legacy param is int per its signature
         mean = rng.uniform(1, 5)
         rows.append(_row(legacy, mean))
     verdict, evidence = gate_g3_correlation(_report(rows, 2), batch_number=2)
-    if evidence["r"] >= 0.20:
-        pytest.skip(f"random sample produced r={evidence['r']}; not low enough to test")
+    assert evidence["r"] < 0.20, (
+        f"seed drift: r={evidence['r']} unexpectedly >= 0.20 noise floor; "
+        "re-sweep seeds (R2.1 picked 3 from a sweep of 0-49)."
+    )
     assert verdict == "fail"
 
 
