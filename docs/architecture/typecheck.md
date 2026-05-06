@@ -177,3 +177,29 @@ re-applied successfully here. None of the new scheduler modules
 introduced type errors of their own.
 
 Reproducing block unchanged. The S5 raw-output anchor remains immutable.
+
+## Session 7b re-measurement (commit `fd21ed2`, 2026-05-06)
+
+After the pipeline_detector-package split (`pipeline_detector.py` →
+`pipeline_detector/__init__.py` + 5 sibling modules: `_constants`,
+`_gmail`, `_signals`, `_db`, `_processing`), the type-check baseline
+holds at the S7a-close numbers. The +5 source files are the new
+package modules; zero new errors were introduced by the split.
+
+| Tool   | Errors    | Files     | Source files checked | Δ errors |
+|--------|-----------|-----------|----------------------|----------|
+| mypy   | 121 (=)   | 38 (=)    | 173 (+5)             | 0        |
+| pyright| 45 (=)    | —         | (job_finder include) | 0        |
+
+No closure → top-level promotion happened in S7b (every extracted
+function was already top-level in the legacy monolith), so the latent-
+issue lesson from S7a (the `dict[str, Any]` annotation needed for the
+runners' result dict) did not recur. The seven `_signals.py` functions,
+the four `_db.py` helpers, and `_processing.py:_process_email` are all
+mypy-clean from the start.
+
+The S6 migrations pattern + S7a scheduler pattern is now the canonical
+shape for 7-series module splits: lifecycle-only `__init__.py` +
+focused private modules + re-exports for the test contract.
+
+Reproducing block unchanged. The S5 raw-output anchor remains immutable.
