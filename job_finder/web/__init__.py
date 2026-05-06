@@ -110,10 +110,6 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         app.config["TESTING"] = cfg["TESTING"]
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
-    # Activate cross-project API telemetry, budget enforcement, and key injection.
-    # Replaces the old JF_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY env var promotion.
-    # Key now sourced from ~/.anthropic-telemetry/config.toml (never in os.environ).
-
     # --- Database setup ---
     run_migrations(app.config["DB_PATH"])
     app.teardown_appcontext(close_db)
