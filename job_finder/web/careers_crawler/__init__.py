@@ -17,7 +17,6 @@ Architecture:
 import concurrent.futures
 import json
 import logging
-import re
 import time
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
@@ -30,6 +29,17 @@ from job_finder.db import derive_classification
 from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
+
+# Title hygiene + URL-path navigation filters — extracted to _title_filters.
+# Re-imported here so the public surface (job_finder.web.careers_crawler.X)
+# is preserved for tests/test_careers_crawler.py and for any downstream
+# code that imports these names.
+from job_finder.web.careers_crawler._title_filters import (
+    _CITY_SUFFIX_RE,
+    _LOCATION_SUFFIX_RE,
+    _NAV_PATH_PREFIXES,
+    _clean_title,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,74 +56,6 @@ _POLITE_DELAY = 1.0  # Seconds between companies
 # Below this, the page is likely JS-heavy and needs Playwright.
 _STATIC_TEXT_RATIO = 0.02
 _STATIC_MIN_TEXT_LEN = 500
-
-# Links with these path prefixes are navigation, not job listings
-_NAV_PATH_PREFIXES = (
-    "/about",
-    "/contact",
-    "/blog",
-    "/news",
-    "/press",
-    "/privacy",
-    "/terms",
-    "/legal",
-    "/login",
-    "/signup",
-    "/register",
-    "/faq",
-    "/help",
-    "/support",
-    "/accessibility",
-    "/sitemap",
-    "/cookie",
-    "/search",
-    "/events",
-)
-
-# Regex to strip trailing location text from concatenated title+location
-_LOCATION_SUFFIX_RE = re.compile(
-    r"\s*[-–—|·•]\s*(?:Remote|Hybrid|On-?site|Anywhere|Multiple|Worldwide).*$",
-    re.IGNORECASE,
-)
-
-# Broader location suffix: city/state/country patterns at end of title
-# Matches: "- New York, NY", "- San Francisco, CA", "- United States", etc.
-_CITY_SUFFIX_RE = re.compile(
-    r"\s*[-–—|·•]\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)*(?:,\s*[A-Z]{2,})?\s*$",
-)
-
-
-# ---------------------------------------------------------------------------
-# Title cleaning
-# ---------------------------------------------------------------------------
-
-
-def _clean_title(tag, raw_text: str) -> str:
-    """Extract clean job title from a link tag, stripping appended location.
-
-    Strategy:
-    1. If the <a> has child elements (span/div), use the first text-bearing
-       child as the title (common pattern: title span + location span).
-    2. Otherwise, strip known location suffix patterns from the raw text.
-
-    Args:
-        tag: BeautifulSoup <a> tag.
-        raw_text: Full text from tag.get_text(strip=True).
-
-    Returns:
-        Cleaned title string.
-    """
-    # Strategy 1: Check for structured children (span, div, h2, h3, p)
-    title_children = tag.find_all(["span", "div", "h2", "h3", "h4", "p"], recursive=False)
-    if title_children:
-        first_text = title_children[0].get_text(strip=True)
-        if first_text and len(first_text) >= 5:
-            return first_text
-
-    # Strategy 2: Regex stripping of location suffixes
-    cleaned = _LOCATION_SUFFIX_RE.sub("", raw_text)
-    cleaned = _CITY_SUFFIX_RE.sub("", cleaned)
-    return cleaned.strip() or raw_text
 
 
 # ---------------------------------------------------------------------------
