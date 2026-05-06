@@ -443,74 +443,14 @@ _INTERACTION_DELAY_S = 0.5  # Delay between intra-company requests
 
 
 # ---------------------------------------------------------------------------
-# API cache helpers
+# API cache helpers — extracted to _api_cache.py
 # ---------------------------------------------------------------------------
 
-
-def _try_cached_api(
-    api_endpoint: str,
-    target_titles: list[str],
-    exclusions: list[str],
-) -> list[dict] | None:
-    """Try fetching jobs from a previously discovered API endpoint.
-
-    Returns:
-        list[dict] — jobs found (may be empty but endpoint is working)
-        None — endpoint is broken/unreachable (caller should clear cache)
-    """
-    from job_finder.web.careers_page_interactions import parse_api_response
-
-    try:
-        resp = requests.get(api_endpoint, timeout=_TIMEOUT, headers=_HEADERS)
-        if resp.status_code >= 400:
-            logger.debug(
-                "Cached API endpoint returned %d: %s",
-                resp.status_code,
-                api_endpoint,
-            )
-            return None
-
-        data = resp.json()
-        return parse_api_response(data, target_titles, exclusions)
-
-    except Exception as e:
-        logger.debug("Cached API endpoint failed: %s — %s", api_endpoint, e)
-        return None
-
-
-def _cache_api_endpoint(
-    db_path: str,
-    company_id: int,
-    api_endpoint: str,
-) -> None:
-    """Store a discovered API endpoint for future fast-path access."""
-    try:
-        with standalone_connection(db_path) as conn:
-            conn.execute(
-                "UPDATE companies SET careers_api_endpoint = ? WHERE id = ?",
-                (api_endpoint, company_id),
-            )
-            conn.commit()
-        logger.info(
-            "Cached API endpoint for company %d: %s",
-            company_id,
-            api_endpoint,
-        )
-    except Exception as e:
-        logger.debug("Failed to cache API endpoint: %s", e)
-
-
-def _clear_api_cache(db_path: str, company_id: int) -> None:
-    """Clear a stale cached API endpoint."""
-    try:
-        with standalone_connection(db_path) as conn:
-            conn.execute(
-                "UPDATE companies SET careers_api_endpoint = NULL WHERE id = ?",
-                (company_id,),
-            )
-            conn.commit()
-    except Exception as e:
-        logger.debug("Failed to clear API cache: %s", e)
+from job_finder.web.careers_crawler._api_cache import (  # noqa: E402
+    _cache_api_endpoint,
+    _clear_api_cache,
+    _try_cached_api,
+)
 
 
 # ---------------------------------------------------------------------------
