@@ -47,17 +47,29 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      # Use a uv-managed venv (instead of `--system`) so we don't depend on
-      # a system 3.13 install being present on the runner. setup-uv brings
-      # 3.13 via uv; `uv venv` creates `.venv/` against that Python; the
-      # subsequent `uv run` resolves to it on both Linux and Windows.
-      - name: Create venv and install dependencies
-        run: |
-          uv venv
-          uv pip install -r requirements.txt
+      # `uv sync` resolves against pyproject.toml + uv.lock and installs
+      # into a uv-managed .venv/ — no system Python 3.13 needed. The
+      # --extra flags pull in dev (pytest, pytest-cov, pytest-playwright,
+      # python-dotenv) and eval (numpy, scipy) groups so tests/test_shootout_lib
+      # imports keep working.
+      - name: Install dependencies
+        run: uv sync --extra dev --extra eval
+
+      # Playwright Python is installed by --extra dev (pytest-playwright
+      # depends on it), but the browser binaries are NOT — they live
+      # outside the package wheels. tests/e2e/test_smoke.py launches a
+      # real Chromium, so without this step the e2e tier errors out
+      # with "Executable doesn't exist".
+      - name: Install Playwright browsers
+        run: uv run playwright install chromium
 
       - name: Run tests
-        run: uv run pytest -q --tb=short
+        run: uv run pytest --cov=job_finder --cov-report=xml -q --tb=short
+
+      - uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
 
   # ── Pre-commit Validation ────────────────────────────────────
