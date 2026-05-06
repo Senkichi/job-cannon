@@ -387,3 +387,71 @@ uv run --active pyright            # 45 errors
 
 The new private sub-modules in `job_finder/db/` are scanned the same way
 as any other package member; no special configuration was added in S7d.
+
+## Reconciliation R4 re-measurement (`portfolio/r4-typecheck-reconciled`, 2026-05-06)
+
+R4 closed Findings F-D1 through F-D5 from `.planning/PORTFOLIO_RECONCILIATION_PLAN.md`.
+Three small surface changes — none touched runtime behavior — net out
+to the largest mypy reduction since S5:
+
+| Tool | After S7d-close (originally documented) | After R4-close (clean-cache 1.20.2) | Delta |
+|---|---|---|---|
+| `mypy job_finder` | 106 errors / 36 files / 191 source files | **96 errors / 31 files / 191 source files** | **−10 errors, −5 files, ±0 source files** |
+| `pyright` | 45 errors | **44 errors** | **−1 error** |
+
+A complementary clean-cache anchor: at the s7d tag (and at R0 / pre-R4
+HEAD), `mypy 1.20.2` reports **114 / 40 / 191** — F-D1.5's mypy-version
+drift accounts for the gap against the originally-documented 106. From
+that consistent-tooling anchor, R4 is **−18 errors / −9 files**.
+
+### What R4 changed
+
+R4.2 — `pyproject.toml [tool.mypy].exclude` extended to include `backups/`.
+The exclude pattern now covers `tests/`, `scripts/`, `build/`, `dist/`,
+and `backups/`. This makes `mypy job_finder` and `mypy .` produce
+identical counts on machines that have user-data backups checked out
+(F-D2 closed).
+
+R4.3 — `types-requests~=2.32` added to `[project.optional-dependencies.dev]`
+(and `uv.lock` regenerated). The careers_crawler split (S7e) had multiplied
+the `[import-untyped] Library stubs not installed for "requests"` warning
+across every sub-module that imports `requests` directly. Installing the
+stubs silences all of them and additionally resolves the same warning in
+non-careers-crawler modules (e.g. `enrichment_tiers.py`,
+`backfill_companies.py`, parsers/, sources/) — accounting for the
+−15 / −8 reduction (significantly larger than the F-D3-predicted −4).
+F-D3 closed.
+
+R4.4 — three `summary`-shaped dicts in `job_finder/web/careers_crawler/__init__.py`
+annotated as `dict[str, Any]`, mirroring the S7a pattern in
+`scheduler/_runners.py:42`. The dicts mix integer counters with an
+`errors: list[str]` slot; without the explicit annotation, mypy infers
+the value type as `object` and rejects `.extend(...)` / `.append(...)`
+on the list slot. Sites annotated:
+
+- `crawl_careers_batch.summary` (line 144) — outer literal.
+- `_crawl_worker.local_summary` (line 312) — from `dict.fromkeys(_SUMMARY_KEYS, 0)`.
+- `_crawl_companies.merged_summary` (line 475) — tightened from bare `: dict` for consistency.
+
+F-D4 closed.
+
+### What R4 deferred
+
+R4.5 — the pre-commit hook stays at `--hook-stage manual`. F-D5 remains
+open and is scoped to S9 (Lint Cleanup). At 96 mypy errors the per-commit
+cost is still material (~10–20s for `mypy job_finder` from a cold cache),
+and there is no CI mypy gate today, so promoting to `pre-push` would have
+been bounded gain at material cost. S9 is the right place for this when
+combined with `mypy --baseline` so contributors aren't gated by
+pre-existing errors.
+
+### Reproducing for R4
+
+```powershell
+uv run --active mypy job_finder    # 96 errors / 31 files / 191 source files
+uv run --active pyright            # 44 errors
+```
+
+Clean-cache discipline (`Remove-Item .mypy_cache -Recurse -Force` before
+the run) recommended for any cross-tag bisect; in normal use the cache
+is fine.
