@@ -148,8 +148,9 @@ Job state transitions are tracked in the database:
 ## Entry Points
 
 **Main Web App:**
-- Location: `run.py` (CLI entry) → `job_finder/web/__init__.py:create_app()` (factory)
-- Triggers: `python run.py` starts Flask development server on localhost:5000
+- Location: `job_finder/__main__.py` (canonical CLI entry, `main()`) → `job_finder/web/__init__.py:create_app()` (factory). `run.py` is a backward-compat shim that imports the same `main`.
+- Triggers: `uv run job-cannon` (console script registered via `[project.scripts]`), `python -m job_finder`, or `python run.py` — all start the Flask development server on localhost:5000
+- Config path resolution: `job_finder.config.resolve_config_path` looks at `$JOB_CANNON_CONFIG` → `./config.yaml` → user-config dir, in order
 - Responsibilities:
   - Load config.yaml
   - Run database migrations

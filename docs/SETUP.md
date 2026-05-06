@@ -15,22 +15,42 @@ This guide walks you through setting up Job Cannon from a fresh clone to a runni
 
 Clone the repo and install dependencies (with [uv](https://docs.astral.sh/uv/)):
 
-```bash
+```powershell
 git clone https://github.com/Senkichi/job-cannon.git
 cd job-cannon
 uv sync --extra dev --extra eval
 ```
 
-`uv sync` creates a `.venv/` and installs the project plus the dev/eval
-optional extras. To run anything in the venv: `uv run <cmd>` (e.g.
-`uv run python run.py`, `uv run pytest`).
+`uv sync` creates a `.venv/`, installs the project plus the dev/eval
+optional extras, and registers the `job-cannon` console script. To run
+anything in the venv: `uv run <cmd>` (e.g. `uv run job-cannon`,
+`uv run pytest`).
 
-Copy the config templates:
+Copy the config templates. **Critical: do NOT run these if `config.yaml` or
+`.env` already exist — you'll lose your settings.**
 
-```bash
-cp config.example.yaml config.yaml
-cp .env.example .env
+```powershell
+if (-not (Test-Path config.yaml)) { Copy-Item config.example.yaml config.yaml }
+if (-not (Test-Path .env))        { Copy-Item .env.example .env }
 ```
+
+### Where Job Cannon looks for `config.yaml`
+
+`job-cannon` resolves `config.yaml` in this order — the first hit wins:
+
+1. `$JOB_CANNON_CONFIG` environment variable.
+   If set but the path doesn't exist, the app errors out (it does **not**
+   silently fall through — naming a config and getting a different one is
+   wrong UX).
+2. `./config.yaml` in the current working directory.
+3. User config directory:
+   - Windows: `%APPDATA%\job-cannon\config.yaml`
+   - Unix:    `~/.config/job-cannon/config.yaml`
+
+Run from the project root for the simplest case (option 2). Once the app
+is installed (`uv run job-cannon` works), you can launch it from any
+directory by either `cd`-ing into the repo, setting `$JOB_CANNON_CONFIG`,
+or copying `config.yaml` into the user config directory.
 
 ---
 
@@ -175,8 +195,15 @@ The profile is not required to start the app -- it is only used for Sonnet deep 
 
 Once config.yaml is set up and OAuth is done:
 
-```bash
-python run.py
+```powershell
+uv run job-cannon
+```
+
+Equivalent invocations (any of these works):
+
+```powershell
+uv run python -m job_finder      # module entry
+uv run python run.py             # legacy entry, still supported
 ```
 
 Open your browser and go to http://localhost:5000.
@@ -223,7 +250,7 @@ The error message tells you exactly which file is missing. The app fails fast at
 - Make sure `JF_ANTHROPIC_API_KEY` is set in `.env` (not just `.env.example`)
 - The key should start with `sk-ant-`
 - The app starts without the key, but AI scoring will not work
-- Check the console output when you start `python run.py` -- it warns if the key is missing
+- Check the console output when you start `uv run job-cannon` -- it warns if the key is missing
 
 ---
 
