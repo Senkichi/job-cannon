@@ -143,3 +143,37 @@ exclude is a Session 8 / Session 9 lint-cleanup item.
 The S6 measurement is recorded in this file only — the baseline
 artifacts are regeneratable per the reproducing block above and don't
 need a snapshot for every session.
+
+## Session 7a re-measurement (commit `9cecbc4`, 2026-05-06)
+
+After the scheduler-package split (`scheduler.py` → `scheduler/__init__.py`
++ 6 sibling modules: `_pidfile`, `_ollama`, `_factories`, `_jobs`,
+`_runners`, `_sync`), the type-check baseline holds at the S6-close
+numbers. The +6 source files are the new package modules; zero new errors
+were introduced by the split.
+
+| Tool   | Errors    | Files     | Source files checked | Δ errors |
+|--------|-----------|-----------|----------------------|----------|
+| mypy   | 121 (=)   | 38 (=)    | 168 (+6)             | 0        |
+| pyright| 45 (=)    | —         | (job_finder include) | 0        |
+
+One latent type issue surfaced during the split and was fixed in the
+same session:
+
+- `scheduler/_runners.py:run_enrichment_backfill_two_stage` returns a
+  dict that mixes `int` and `list` values. When the body lived as a
+  closure nested two levels deep inside `init_scheduler`, mypy's nested-
+  function relaxation skipped the strict inference. Promoted to a top-
+  level function, mypy infers `dict[str, object]` and trips on
+  `result["errors"].append(...)` with `[attr-defined]`. Annotating
+  `result: dict[str, Any]` (and the function return type) restores the
+  baseline. Recorded as a refactor-surface for similar latent issues
+  in S7b–7e: a closure→top-level extraction can surface mypy errors
+  that runtime never saw.
+
+The migrations-package decomposition pattern from S6 (private modules
+under a package directory + re-exports from `__init__.py`) was
+re-applied successfully here. None of the new scheduler modules
+introduced type errors of their own.
+
+Reproducing block unchanged. The S5 raw-output anchor remains immutable.
