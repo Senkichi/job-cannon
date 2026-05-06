@@ -1,12 +1,13 @@
 # Job Cannon
 
-![job_cannon(3)](https://github.com/user-attachments/assets/bbf703cf-b916-4c21-b6fd-8e5db4f932ef)
+![Job Cannon](docs/assets/banner.svg)
 
 > A personal job-search command center: aggregates listings from Gmail
 > alerts and SERP APIs, scores them with a two-tier Claude AI pipeline,
 > and tracks application state. Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Senkichi/job-cannon/graph/badge.svg)](https://codecov.io/gh/Senkichi/job-cannon)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
