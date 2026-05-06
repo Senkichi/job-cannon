@@ -505,94 +505,11 @@ from job_finder.web.careers_crawler._ai_nav_tier import _try_ai_navigation  # no
 from job_finder.web.careers_crawler._tier_cache import _try_cached_tier  # noqa: E402, F401
 
 
-def _upsert_and_log(
-    jobs: list[dict],
-    company_id: int,
-    company_name: str,
-    now: str,
-    db_path: str,
-    summary: dict,
-    all_new_job_keys: list[str],
-    tier_used: str,
-) -> None:
-    """Upsert discovered jobs and update company timestamps."""
-    from job_finder.db import upsert_job
-    from job_finder.models import Job
-
-    company_jobs_found = len(jobs)
-    company_jobs_new = 0
-    summary["jobs_found"] += company_jobs_found
-
-    with standalone_connection(db_path) as upsert_conn:
-        for scraped_job in jobs:
-            try:
-                job = Job(
-                    title=scraped_job["title"],
-                    company=company_name,
-                    location="",
-                    source="careers_crawl",
-                    source_url=scraped_job.get("url") or "",
-                    salary_min=None,
-                    salary_max=None,
-                    description=scraped_job.get("description", ""),
-                )
-                is_new = upsert_job(upsert_conn, job)
-                if is_new:
-                    summary["jobs_new"] += 1
-                    company_jobs_new += 1
-                    all_new_job_keys.append(job.dedup_key)
-            except Exception as job_err:
-                error_msg = f"{company_name} job error: {job_err}"
-                summary["errors"].append(error_msg)
-                logger.warning("careers_crawler job error: %s", error_msg)
-
-    with standalone_connection(db_path) as ts_conn:
-        ts_conn.execute(
-            """UPDATE companies
-               SET careers_crawl_last_at = ?,
-                   last_scanned_at = ?,
-                   careers_crawl_tier = ?,
-                   jobs_found_total = (
-                       SELECT COUNT(*) FROM jobs WHERE company_id = ?
-                   )
-               WHERE id = ?""",
-            (now, now, tier_used, company_id, company_id),
-        )
-        ts_conn.execute(
-            """INSERT INTO company_scan_log
-               (company_id, scanned_at, jobs_found, jobs_matched)
-               VALUES (?, ?, ?, ?)""",
-            (company_id, now, company_jobs_new, company_jobs_found),
-        )
-        ts_conn.commit()
-
-    summary["companies_crawled"] += 1
-
-    if company_jobs_found:
-        logger.info(
-            "careers_crawler: %s — %d jobs found (%d new) [%s]",
-            company_name,
-            company_jobs_found,
-            company_jobs_new,
-            tier_used,
-        )
-
-
-def _update_timestamp_on_error(
-    db_path: str,
-    company_id: int,
-    now: str,
-) -> None:
-    """Update crawl timestamp on error so company doesn't block the queue."""
-    try:
-        with standalone_connection(db_path) as err_conn:
-            err_conn.execute(
-                "UPDATE companies SET careers_crawl_last_at = ? WHERE id = ?",
-                (now, company_id),
-            )
-            err_conn.commit()
-    except Exception:
-        pass
+# Persistence helpers — extracted to _persistence.py and re-exported.
+from job_finder.web.careers_crawler._persistence import (  # noqa: E402, F401
+    _update_timestamp_on_error,
+    _upsert_and_log,
+)
 
 
 def _score_new_jobs(
