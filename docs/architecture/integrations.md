@@ -37,17 +37,25 @@ SENDER_PARSERS = {
 
 ## AI & Evaluation
 
-**Anthropic Claude API:**
-- Service: Anthropic - Haiku, Sonnet, Opus models
-- Authentication: API key via `ANTHROPIC_API_KEY` environment variable
-- Usage:
-  - Haiku (claude-haiku-4-5): Fast job filtering (0-100 score)
-  - Sonnet (claude-sonnet-4-6): Deep fit analysis and qualitative assessment
-  - Opus (claude-opus-4-6): Profile extraction from experience documents
-- Implementation: `job_finder/web/claude_client.py`
-  - Cost calculation: per-million-token pricing table
-  - Budget gating: Monthly cap enforced before Sonnet/Opus calls
-  - Cost tracking: Recorded in `scoring_costs` table
+**Multi-provider cascade dispatcher (`call_model()`):**
+
+The `'scoring'` tier dispatches through `job_finder/web/model_provider.py:call_model()`, which resolves the per-tier provider chain from `config.yaml` and tries each link in order. Schema-validation failure or rate-limit responses fall through to the next provider.
+
+| Provider | SDK / Transport | Auth | Usage |
+|---|---|---|---|
+| Ollama (local) | `httpx` direct to `http://localhost:11434` | None (local service) | Production scoring primary; auto-started by scheduler |
+| Groq | `httpx` direct to Groq REST API | `GROQ_API_KEY` env var | Free-tier scoring fallback |
+| Cerebras | `httpx` direct to Cerebras REST API | `CEREBRAS_API_KEY` env var | Free-tier scoring fallback |
+| Gemini | `google-genai` package | `GEMINI_API_KEY` env var | Free-tier scoring fallback |
+| Anthropic | `anthropic` SDK | `ANTHROPIC_API_KEY` env var | Paid fallback at cascade bottom; also handles vestigial non-scoring tiers (`'haiku'`, `'sonnet'`, `'opus'`) |
+
+**Anthropic Claude API (paid fallback path):**
+- Implementation: `job_finder/web/claude_client.py` (Anthropic-specific cost recording, budget gating, fallback adapter)
+- Cost calculation: per-million-token pricing table
+- Budget gating: monthly cap enforced on Anthropic-fallback calls only — free-provider hops never trigger the gate
+- Cost tracking: recorded in `scoring_costs` table with provider attribution
+
+**Per-provider clients:** `job_finder/web/providers/{anthropic,gemini,ollama}_provider.py` (other providers dispatched via `httpx` directly inside `model_provider.py`).
 
 ## Data Storage
 
@@ -142,7 +150,7 @@ SENDER_PARSERS = {
 - `sources.jsearch.enabled` - Enable JSearch (not yet implemented)
 - `sources.jsearch.rapidapi_key` - RapidAPI key for JSearch
 - `scoring.monthly_budget_usd` - Monthly Claude budget cap (default: $25.00)
-- `scoring.haiku_threshold` - Score threshold for promoting jobs to Sonnet evaluation (default: 55)
+- `scoring.haiku_threshold` - Vestigially-named candidate-score threshold gating full v3 scoring evaluation (default: 55). The name predates v3.0; the value is still active but no longer "promote to Sonnet" — it gates the cascade entry.
 
 **Secrets Location:**
 - `.env` file (gitignored) - Contains ANTHROPIC_API_KEY

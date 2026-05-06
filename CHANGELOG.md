@@ -64,16 +64,30 @@ this project follows [Semantic Versioning](https://semver.org/).
 
 The v3.0 ordinal-scoring milestone. Highlights:
 
-- **Two-tier AI scoring** with a six-axis ordinal rubric. Classification
-  (`apply | consider | skip | reject`) is derived in Python from the
-  numeric sub-scores — never emitted by the LLM — to prevent
-  classification drift across model upgrades.
+- **Single-tier ordinal scoring** with a six-axis rubric (Plan 4
+  Commit E collapsed the legacy haiku→sonnet two-tier into one
+  `'scoring'` tier). Classification (`apply | consider | skip | reject`)
+  is derived in Python from the numeric sub-scores — never emitted by
+  the LLM — to prevent classification drift across model swaps.
+- **Multi-provider cascade routing.** The `'scoring'` tier tries
+  providers in order — Ollama (qwen2.5:14b, the Phase 33 shootout
+  winner) → Groq → Cerebras → Gemini → Anthropic. Anthropic is the
+  paid fallback; production typically resolves on the first or second
+  hop at zero cost.
 - **Eval harness** with paired MAE + BCa bootstrap 95% CIs for
-  prompt-variant A/B testing across model providers.
-- **Phase 33 model shootout** finalized `qwen2.5:14b` as the local
-  fallback; `claude-haiku-4-5` and `claude-sonnet-4-6` are the production
-  cloud models.
-- Migration 40 introduced the v3.0 ordinal scoring schema.
+  prompt-variant A/B testing across the full provider matrix.
+- Migration 40 introduced the v3.0 ordinal scoring schema; Migration
+  41 dropped the legacy `haiku_score` / `haiku_summary` / `sonnet_score`
+  columns.
+
+> **Naming note:** the strings `'haiku'`, `'sonnet'`, and `'opus'`
+> persist in `_TIER_DEFAULTS`, in `providers.*` config keys, and in
+> the `enrichment_tier` DB column as **vestigial routing labels** for
+> non-scoring callers (enrichment, careers scrape, AI navigator,
+> company research, description reformat). They no longer mean
+> Anthropic models — `'haiku'` means cheap-fast, `'sonnet'` means
+> balanced-deep, `'opus'` means heavy-reasoning. A future refactor
+> will rename them to `'low' / 'mid' / 'high'`.
 
 ## Earlier history
 

@@ -58,7 +58,7 @@ or copying `config.yaml` into the user config directory.
 
 Edit `.env` and fill in your keys. There are two variables:
 
-- **`JF_ANTHROPIC_API_KEY`** (required): Your Anthropic API key. Get one at https://console.anthropic.com/settings/keys. The key starts with `sk-ant-`.
+- **`JF_ANTHROPIC_API_KEY`** (required): Your Anthropic API key. Get one at https://console.anthropic.com/settings/keys. The key starts with `sk-ant-`. Anthropic is the paid fallback at the bottom of the scoring cascade — production runs typically resolve on free providers first (Ollama, Groq, Cerebras, Gemini), but the key is required so the cascade can complete on rare exhaustion. See `config.example.yaml` (the commented `providers.scoring` block) for the cascade configuration.
 
 - **`FLASK_SECRET_KEY`** (optional): Generate one with:
   ```bash
@@ -176,7 +176,7 @@ The experience profile is used by the AI to personalize job fit scoring.
    - `skills`: Your full skills list
    - `education`: Degrees with institution and graduation year
 
-The profile is not required to start the app -- it is only used for Sonnet deep evaluation to tailor fit scoring.
+The profile is not required to start the app -- it is only used by the `'scoring'` tier prompt to tailor fit scoring with your real career history.
 
 ---
 
@@ -185,7 +185,9 @@ The profile is not required to start the app -- it is only used for Sonnet deep 
 | API | What it does | Required? |
 |-----|-------------|-----------|
 | Gmail API | Reads job alert emails from your inbox (read-only, never modifies or deletes) | Yes (for Gmail source) |
-| Anthropic API | Powers AI scoring (Haiku fast filter, Sonnet deep evaluation) | Yes (for scoring) |
+| Anthropic API | Paid fallback at the bottom of the scoring cascade. Required so the cascade can always complete, but rarely invoked in practice — free providers (Ollama, Groq, Cerebras, Gemini) handle most scoring traffic. | Yes (cascade safety net) |
+| Ollama (local) | Production scoring primary (`qwen2.5:14b`, Phase 33 shootout winner). Auto-started by the scheduler if the binary is on PATH or at `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` (override via `$env:OLLAMA_EXE`). | Recommended for $0 scoring; optional |
+| Groq / Cerebras / Gemini | Free-tier API providers in the cascade between Ollama and Anthropic. Each gated by per-day request limits. | Optional |
 | SerpAPI | Searches Google Jobs for additional listings (free tier: 100 searches/month) | No |
 | JSearch / Thordata / DataForSEO | Alternate SERP-based job sources, all opt-in | No |
 
