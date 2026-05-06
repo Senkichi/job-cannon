@@ -95,3 +95,51 @@ uv run --active pyright
 
 The numbers in the table above should match (within drift from
 upstream stub releases).
+
+## Session 6 re-measurement (commit `3b2c796`, 2026-05-06)
+
+After the migrations split (`db_migrate.py` → `db_migrate.py` + the
+`migrations/` package with 53 files), the mypy file count
+redistributed as expected.
+
+| Tool   | Errors    | Files     | Source files checked | Δ errors |
+|--------|-----------|-----------|----------------------|----------|
+| mypy   | 121 (-2)  | 38 (-1)   | 162 (+54)            | -2       |
+| pyright| 45 (-1)   | —         | (job_finder include) | -1       |
+
+Both tools came in cleaner post-S6:
+
+- **mypy** lost 2 errors when `db_migrate.py` shrank from a 1099-line
+  monolith to a 76-line driver. The inline MIGRATIONS list contained
+  `Migration` entries that mypy couldn't fully infer; replacing them
+  with imports from per-file modules collapsed the type surface
+  enough that two `[arg-type]` errors disappeared. The new
+  `migrations/_runner.py`, `_gate.py`, `_post_hooks.py`, and the 48
+  `m{NNN}_*.py` files all came in mypy-clean from the start (the S6
+  refactor was opportunistic about adding annotations on the new
+  surfaces).
+- **pyright** lost 1 error from the same simplification.
+
+Source-files checked grew by 54 (the per-version migration modules + the
+new test files), which is the expected redistribution. With the
+typed `Migration` dataclass in place, future migrations will produce
+fewer untyped-call warnings than the legacy list-of-list-or-callable
+shape.
+
+### Cross-check note: `mypy .` vs `mypy job_finder`
+
+The S5 baseline reproduces with `mypy job_finder` (scoped). Running
+`mypy .` from the repo root picks up `backups/` (operator-managed
+backup directory not on `.gitignore`'s exclude list nor in `[tool.mypy]
+exclude`), which adds 4 unrelated `[var-annotated]` errors in a stale
+investigative-script copy from April. These are not S6 regressions and
+are out of scope for this session — adding `backups/` to the mypy
+exclude is a Session 8 / Session 9 lint-cleanup item.
+
+### Raw outputs
+
+`.planning/portfolio-cleanup/mypy-baseline.txt` and
+`pyright-baseline.txt` retain the S5 outputs as the immutable anchor.
+The S6 measurement is recorded in this file only — the baseline
+artifacts are regeneratable per the reproducing block above and don't
+need a snapshot for every session.
