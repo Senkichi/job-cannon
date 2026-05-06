@@ -15,6 +15,7 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 class ConfigNotFoundError(FileNotFoundError):
     """Raised when config.yaml cannot be located via the documented lookup order."""
 
+
 # --- Server defaults ---
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 5000
@@ -147,9 +148,7 @@ def resolve_config_path() -> str:
         appdata = os.environ.get("APPDATA", "")
         user_config = os.path.join(appdata, "job-cannon", "config.yaml")
     else:
-        user_config = os.path.join(
-            os.path.expanduser("~"), ".config", "job-cannon", "config.yaml"
-        )
+        user_config = os.path.join(os.path.expanduser("~"), ".config", "job-cannon", "config.yaml")
     if os.path.exists(user_config):
         return user_config
 
