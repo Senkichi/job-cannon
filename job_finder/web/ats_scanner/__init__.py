@@ -28,7 +28,6 @@ import requests  # noqa: F401 — re-exported for test patching of requests.get
 
 from job_finder.db import derive_classification
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.dedup_normalizer import normalize_company
 from job_finder.web.description_formatter import strip_html_to_text
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
@@ -92,103 +91,9 @@ from job_finder.web.ats_prober import (  # noqa: F401
 # Public API
 # ---------------------------------------------------------------------------
 
-
-def upsert_company(
-    conn: sqlite3.Connection,
-    name: str,
-    ats_platform: str | None = None,
-    ats_slug: str | None = None,
-    ats_probe_status: str = "pending",
-    homepage_url: str | None = None,
-) -> int | None:
-    """Create or update a company record in the companies table.
-
-    Looks up by normalized company name. If the company exists, updates
-    ats_platform, ats_slug, and ats_probe_status only when the new info
-    is better (hit > pending > miss — never downgrade from hit to pending).
-
-    Args:
-        conn: Open SQLite connection with Migration 7 schema applied.
-        name: Raw company name string (will be normalized for lookup).
-        ats_platform: ATS platform name ('lever', 'greenhouse', 'ashby', or None).
-        ats_slug: ATS slug string, or None if not yet known.
-        ats_probe_status: Probe status ('pending', 'hit', or 'miss').
-        homepage_url: Company homepage URL, or None.
-
-    Returns:
-        The company_id (integer) for the upserted record, or None on error.
-    """
-    now = datetime.now().isoformat()
-    normalized_name = normalize_company(name)
-
-    try:
-        # Look up by normalized name
-        existing = conn.execute(
-            "SELECT id, ats_probe_status FROM companies WHERE name = ?",
-            (normalized_name,),
-        ).fetchone()
-
-        if existing is None:
-            # INSERT new company
-            cursor = conn.execute(
-                """INSERT INTO companies
-                   (name, name_raw, homepage_url, ats_platform, ats_slug,
-                    ats_probe_status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    normalized_name,
-                    name,
-                    homepage_url,
-                    ats_platform,
-                    ats_slug,
-                    ats_probe_status,
-                    now,
-                    now,
-                ),
-            )
-            conn.commit()
-            return cursor.lastrowid
-        else:
-            # UPDATE only if new info is better
-            company_id = existing[0]
-            current_status = existing[1] or "pending"
-            current_rank = _PROBE_STATUS_PRECEDENCE.get(current_status, 0)
-            new_rank = _PROBE_STATUS_PRECEDENCE.get(ats_probe_status, 0)
-
-            # Only update ATS fields if new status is higher precedence
-            if new_rank >= current_rank:
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_platform = COALESCE(?, ats_platform),
-                           ats_slug = COALESCE(?, ats_slug),
-                           ats_probe_status = ?,
-                           homepage_url = COALESCE(?, homepage_url),
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (
-                        ats_platform,
-                        ats_slug,
-                        ats_probe_status,
-                        homepage_url,
-                        now,
-                        company_id,
-                    ),
-                )
-            else:
-                # Still update non-ATS fields (homepage, timestamp)
-                conn.execute(
-                    """UPDATE companies
-                       SET homepage_url = COALESCE(?, homepage_url),
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (homepage_url, now, company_id),
-                )
-            conn.commit()
-            return company_id
-
-    except Exception as e:
-        logger.warning("upsert_company failed for '%s' (non-fatal): %s", name, e)
-        return None
+# upsert_company lives in ats_scanner._upsert; re-exported below for the
+# established `from job_finder.web.ats_scanner import upsert_company` contract.
+from job_finder.web.ats_scanner._upsert import upsert_company  # noqa: E402,F401
 
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
