@@ -25,10 +25,6 @@ uv.lock
 # Reports
 reports/
 eval_results/
-# Phase 5 eval harness reports are intentionally tracked — they're the
-# A/B baseline comparator artifact for prompt variant work.
-!.planning/eval_results/
-!.planning/eval_results/**
 
 # IDE
 .vscode/
@@ -65,29 +61,11 @@ docs/superpowers/
 *.db-wal
 *.db.bak*
 
-# Ephemeral session artifacts
-.planning/CHECKPOINT_*.md
+# Internal planning + working notes — NEVER tracked, with one exception.
+/.planning/
 
-# GSD planning artifacts (codebase/ docs are retained separately in clean export)
-.planning/STATE.md
-.planning/ROADMAP.md
-.planning/REQUIREMENTS.md
-.planning/PROJECT.md
-.planning/SHARING-READINESS-SPEC.md
-.planning/CHANGELOG.md
-.planning/MILESTONES.md
-.planning/RETROSPECTIVE.md
-.planning/config.json
-.planning/phases/
-.planning/milestones/
-.planning/research/
-.planning/reviews/
-.planning/scoring_evaluation/
-.planning/todos/
-.planning/debug/
-
-# Phase 33 shootout runtime artifacts (logs, pid files — not reproducibility artifacts)
-.planning/research/shootout/_*.log
-.planning/research/shootout/_*.txt
-.planning/research/shootout/_stdout*
-.planning/research/shootout/_stderr*
+# Eval-harness baseline reports — tracked as portfolio artifacts. The
+# eval harness writes new reports here by default; only files explicitly
+# checked in are version-controlled.
+!/.planning/eval_results/
+!/.planning/eval_results/**
