@@ -53,12 +53,12 @@ jobs:
           uv pip install --system -r requirements.txt
 
       - name: Run tests
-        # Invoke pytest via `python -m` so the runner doesn't need pytest on
-        # PATH. On Windows runners `uv pip install --system` puts pytest in
-        # a Scripts/ dir that isn't on PATH inside the action's PowerShell
-        # shell, and on Windows the bare `pytest` name also collides with
-        # the AppInstaller stub.
-        run: python -m pytest -q --tb=short
+        # Invoke pytest via `uv run` so the action's uv-managed Python is
+        # used (the same one `uv pip install --system` installed pytest
+        # into). Bare `python` on Windows runners points at a pre-installed
+        # Python that has no project deps; bare `pytest` collides with the
+        # AppInstaller stub. `uv run` resolves both.
+        run: uv run pytest -q --tb=short
 
 
   # ── Pre-commit Validation ────────────────────────────────────
