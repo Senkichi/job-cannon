@@ -37,10 +37,9 @@ _DDG_API_URL = "https://api.duckduckgo.com/"
 # SerpAPI Google Jobs endpoint
 _SERPAPI_URL = "https://serpapi.com/search.json"
 
-# HTTP headers for external requests
-_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (compatible; JobFinder/1.0; +https://github.com/job-finder)")
-}
+# HTTP request headers + timeout — shared with careers_crawler.py and
+# careers_page_interactions.py via the central _http_constants module.
+from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 
 # Tags to strip from HTML before extracting text
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
@@ -56,9 +55,6 @@ _AUTH_WALL_SIGNATURES = [
     "please verify you are a human",
     "access denied",
 ]
-
-# Timeout for external API calls (seconds)
-_TIMEOUT = 10
 
 # Minimum jd_full length before parse_structured_fields will spend a Haiku call.
 # Matches data_enricher.MIN_FETCH_JD_CHARS — anything shorter is residual
