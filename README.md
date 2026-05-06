@@ -3,22 +3,24 @@
 ![job_cannon(3)](https://github.com/user-attachments/assets/bbf703cf-b916-4c21-b6fd-8e5db4f932ef)
 
 
-A local job search command center that aggregates listings from Gmail alerts and APIs, scores them with AI, tracks your application pipeline, and generates tailored resumes.
+A local job search command center that aggregates listings from Gmail alerts and SERP APIs, scores them with Claude AI, and tracks your application pipeline.
 
 ## What It Does
 
-- Pulls jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter) and SerpAPI
+- Pulls jobs from Gmail alerts (LinkedIn, Glassdoor, Indeed, ZipRecruiter) and optional SERP APIs (SerpAPI, JSearch, Thordata, DataForSEO)
 - Two-tier AI scoring: Haiku fast filter then Sonnet deep evaluation
-- Application pipeline tracking (applied, interview, offer, rejected)
-- Resume generation via Google Docs
+- Application pipeline tracking (applied, interview, offer, rejected) via drag-and-drop kanban
+- Company research and ATS-coverage tooling for direct-source discovery
 - Single-user, runs on localhost — your data stays on your machine
 
 ## Architecture
 
 ```
 Gmail Alerts --+
-               +-> Parser -> SQLite DB -> Haiku Filter -> Sonnet Eval -> Dashboard
-SerpAPI -------+                                                         (localhost:5000)
+SerpAPI -------+
+JSearch -------+-> Parser -> SQLite DB -> Haiku Filter -> Sonnet Eval -> Dashboard
+Thordata ------+                                                         (localhost:5000)
+DataForSEO ----+
 ```
 
 ## Quick Start
@@ -67,7 +69,7 @@ SerpAPI -------+                                                         (localh
 
    Go to http://localhost:5000
 
-For detailed setup instructions including Google OAuth, config options, and troubleshooting, see [docs/SETUP.md](docs/SETUP.md).
+For detailed setup instructions including Gmail OAuth, config options, and troubleshooting, see [docs/SETUP.md](docs/SETUP.md).
 
 ## Gmail Alert Setup
 
@@ -89,13 +91,12 @@ Job Cannon uses Claude AI models for scoring. The costs are low, but here is wha
 |------|------|------|
 | Haiku fast filter | ~$0.01-0.02 per job | Every new job found |
 | Sonnet deep evaluation | ~$0.05-0.15 per job | Jobs above the Haiku threshold (42 by default) |
-| Opus profile extraction | ~$0.10-0.20 one-time | When you update your experience profile |
 
-**Typical monthly cost:** $2-10 for moderate job searching (50-200 new jobs/month)
+**Typical monthly cost:** $1-5 for moderate job searching (50-200 new jobs/month)
 
 A configurable budget cap prevents runaway spending. The default is $25/month, set in `config.yaml` under `scoring.monthly_budget_usd`. The app stops AI scoring when the cap is reached and resumes the next month.
 
-**SerpAPI:** Optional Google Jobs search source. Free tier gives 100 searches/month.
+**Optional SERP sources:** SerpAPI, JSearch, Thordata, and DataForSEO are all opt-in. Each has its own pricing tier — see `config.example.yaml` for details.
 
 ## Platform Compatibility
 
@@ -108,9 +109,9 @@ A configurable budget cap prevents runaway spending. The default is $25/month, s
 
 ```
 job_finder/
-|-- web/                    # Flask app (blueprints, templates, AI clients)
-|-- parsers/                # Email parsers (LinkedIn, Glassdoor, ZipRecruiter)
-|-- sources/                # Data sources (Gmail API, SerpAPI)
+|-- web/                    # Flask app (11 blueprints, templates, AI clients)
+|-- parsers/                # Email parsers (LinkedIn, Glassdoor, ZipRecruiter, Indeed stub)
+|-- sources/                # Data sources (Gmail, SerpAPI, JSearch, Thordata, DataForSEO)
 |-- models.py               # Job dataclass
 |-- config.py               # YAML config loader
 `-- db.py                   # SQLite database
@@ -120,6 +121,8 @@ config.example.yaml         # Config template (copy to config.yaml)
 .env.example                # Environment variable template (copy to .env)
 experience_profile.example.json  # Career profile template
 ```
+
+The 11 blueprints: `admin`, `batch_scoring`, `companies`, `costs`, `dashboard`, `detections`, `jobs`, `pipeline`, `profile`, `settings`, `sync`.
 
 ## Running Tests
 

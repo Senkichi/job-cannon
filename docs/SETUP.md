@@ -16,7 +16,7 @@ This guide walks you through setting up Job Cannon from a fresh clone to a runni
 Clone the repo and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/job-cannon.git
+git clone https://github.com/Senkichi/job-cannon.git
 cd job-cannon
 python -m venv .venv
 source .venv/bin/activate    # macOS/Linux
@@ -61,14 +61,10 @@ This takes about 10 minutes and you only do it once.
 4. Give it a name (e.g., "Job Cannon") -- the name is just for your reference
 5. Click **Create** and wait for it to finish
 
-### Step 2: Enable the Required APIs
+### Step 2: Enable the Gmail API
 
 1. In the left sidebar, go to **APIs & Services > Library**
 2. Search for **Gmail API**, click it, then click **Enable**
-3. Go back to the Library
-4. Search for **Google Drive API**, click it, then click **Enable**
-
-Both APIs need to be enabled. The Drive API is needed for resume export.
 
 ### Step 3: Configure the OAuth Consent Screen
 
@@ -82,7 +78,6 @@ Both APIs need to be enabled. The Drive API is needed for resume export.
 5. Click **Save and Continue**
 6. On the **Scopes** page, click **Add or Remove Scopes** and add:
    - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/drive.file`
 7. Click **Update**, then **Save and Continue**
 8. On the **Test Users** page, click **Add Users** and add your Gmail address
 9. Click **Save and Continue**, then **Back to Dashboard**
@@ -106,11 +101,10 @@ Adding yourself as a test user is required. Without it, the OAuth flow will be b
 python -m job_finder.gmail_auth
 ```
 
-This opens a browser window. Sign in with your Gmail account and accept the permissions (Gmail read access + Drive file access). After you accept:
+This opens a browser window. Sign in with your Gmail account and accept the Gmail read-only permission. After you accept:
 
 - `token.json` is saved in the project root -- do not commit this file, it contains your credentials
-- The script prints a scope checklist confirming both permissions were granted
-- A Google Drive folder ("Job Finder Resumes") is auto-created for resume exports
+- The script prints a scope checklist confirming the Gmail permission was granted
 
 ### Note: "App Not Verified" Warning
 
@@ -133,12 +127,10 @@ Here is what each section controls:
 | Section | What it does |
 |---------|-------------|
 | `profile:` | Your job search targets -- titles, locations, minimum salary, industries, skills, and exclusion rules |
-| `sources:` | Enable/disable Gmail, SerpAPI, and JSearch as job sources |
+| `sources:` | Enable/disable Gmail, SerpAPI, JSearch, Thordata, and DataForSEO as job sources |
 | `scoring:` | AI model weights, monthly budget cap, and score thresholds |
 | `output:` | Default format and max results per run |
 | `db:` | SQLite database file path (created automatically) |
-| `drive:` | Google Drive folder for resume export (auto-filled by gmail_auth) |
-| `notifications:` | Desktop notification preferences (Windows only) |
 | `ats:` | ATS scan schedule (days and time) |
 | `server:` | Flask host, port, and debug mode |
 | `filters:` | Additional company names to auto-exclude |
@@ -151,7 +143,7 @@ After running `python -m job_finder.gmail_auth`, set `sources.gmail.enabled: tru
 
 ## 5. Experience Profile Setup
 
-The experience profile is used by the AI for resume generation and to personalize job fit scoring.
+The experience profile is used by the AI to personalize job fit scoring.
 
 1. Copy the example to your profile file:
    ```bash
@@ -162,9 +154,8 @@ The experience profile is used by the AI for resume generation and to personaliz
    - `positions`: Array of job roles with title, company, dates, achievements, and skills
    - `skills`: Your full skills list
    - `education`: Degrees with institution and graduation year
-   - `resume_preferences`: How you want resumes styled (summary style, emphasis areas)
 
-The profile is not required to start the app -- it is only used for resume generation and Sonnet deep evaluation.
+The profile is not required to start the app -- it is only used for Sonnet deep evaluation to tailor fit scoring.
 
 ---
 
@@ -173,9 +164,9 @@ The profile is not required to start the app -- it is only used for resume gener
 | API | What it does | Required? |
 |-----|-------------|-----------|
 | Gmail API | Reads job alert emails from your inbox (read-only, never modifies or deletes) | Yes (for Gmail source) |
-| Google Drive API | Exports generated resumes as Google Docs (drive.file scope -- only accesses files it creates) | Yes (for resume export) |
-| Anthropic API | Powers AI scoring (Haiku fast filter, Sonnet deep evaluation) and resume generation | Yes (for scoring) |
+| Anthropic API | Powers AI scoring (Haiku fast filter, Sonnet deep evaluation) | Yes (for scoring) |
 | SerpAPI | Searches Google Jobs for additional listings (free tier: 100 searches/month) | No |
+| JSearch / Thordata / DataForSEO | Alternate SERP-based job sources, all opt-in | No |
 
 ---
 
@@ -214,7 +205,6 @@ The error message tells you exactly which file is missing. The app fails fast at
   python -m job_finder.gmail_auth
   ```
 - If you see "Access blocked: This app's request is invalid" -- go back to the OAuth consent screen setup and make sure you added your Gmail address as a test user (Step 3, Step 8 above)
-- If the token is from an older setup that only had Gmail scope, running `python -m job_finder.gmail_auth` again will detect and upgrade it automatically
 
 ---
 
@@ -231,7 +221,7 @@ The error message tells you exactly which file is missing. The app fails fast at
 
 - Make sure `JF_ANTHROPIC_API_KEY` is set in `.env` (not just `.env.example`)
 - The key should start with `sk-ant-`
-- The app starts without the key, but AI scoring and resume generation will not work
+- The app starts without the key, but AI scoring will not work
 - Check the console output when you start `python run.py` -- it warns if the key is missing
 
 ---
