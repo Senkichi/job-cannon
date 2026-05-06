@@ -27,7 +27,7 @@ uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
 
 # Dependencies
-uv pip install -r requirements.txt
+uv sync --extra dev --extra eval                  # Install pyproject deps + dev/eval extras
 ```
 
 ## Git Workflow

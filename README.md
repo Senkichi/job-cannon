@@ -31,41 +31,35 @@ DataForSEO ----+
    cd job-cannon
    ```
 
-2. **Create a virtual environment**
+2. **Install dependencies (with [uv](https://docs.astral.sh/uv/))**
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate   # macOS/Linux
-   # or on Windows:
-   # .venv\Scripts\activate
+   uv sync --extra dev --extra eval
    ```
+   Creates a `.venv/` and installs the project plus dev/eval extras
+   from `pyproject.toml` + `uv.lock`.
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Copy the config files**
+3. **Copy the config files**
    ```bash
    cp config.example.yaml config.yaml
    cp .env.example .env
    ```
 
-5. **Add your Anthropic API key to `.env`**
+4. **Add your Anthropic API key to `.env`**
    ```
    JF_ANTHROPIC_API_KEY=sk-ant-your-key-here
    ```
    Get your key at: https://console.anthropic.com/settings/keys
 
-6. **Set up Gmail OAuth** (so the app can read your job alert emails)
+5. **Set up Gmail OAuth** (so the app can read your job alert emails)
 
    See [docs/SETUP.md](docs/SETUP.md) for a step-by-step walkthrough.
 
-7. **Start the app**
+6. **Start the app**
    ```bash
    python run.py
    ```
 
-8. **Open your browser**
+7. **Open your browser**
 
    Go to http://localhost:5000
 

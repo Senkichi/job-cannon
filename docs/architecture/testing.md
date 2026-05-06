@@ -5,9 +5,10 @@ This document describes the testing approach, fixtures, and conventions used in 
 ## Test Framework
 
 **Runner:**
-- pytest 7+ (version not pinned in requirements.txt, but pytest is a dev dependency)
-- Config: No `pytest.ini` or `pyproject.toml` config file present
-- Run tests: `pytest tests/` (default discovery)
+- pytest ~=8.0 (pinned in `pyproject.toml` under `[project.optional-dependencies.dev]`)
+- Coverage via pytest-cov ~=7.1 (same dev extras group); config in `[tool.coverage]`
+- Config: `[tool.pytest.ini_options]` in `pyproject.toml` (testpaths, addopts, markers)
+- Run tests: `uv run pytest` (or `uv run --active pytest` from inside an active venv)
 
 **Assertion Library:**
 - Built-in `assert` statements (pytest's assertion rewriting)

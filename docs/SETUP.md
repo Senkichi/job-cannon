@@ -13,16 +13,17 @@ This guide walks you through setting up Job Cannon from a fresh clone to a runni
 
 ## 1. Environment Setup
 
-Clone the repo and install dependencies:
+Clone the repo and install dependencies (with [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 git clone https://github.com/Senkichi/job-cannon.git
 cd job-cannon
-python -m venv .venv
-source .venv/bin/activate    # macOS/Linux
-# .venv\Scripts\activate     # Windows
-pip install -r requirements.txt
+uv sync --extra dev --extra eval
 ```
+
+`uv sync` creates a `.venv/` and installs the project plus the dev/eval
+optional extras. To run anything in the venv: `uv run <cmd>` (e.g.
+`uv run python run.py`, `uv run pytest`).
 
 Copy the config templates:
 
