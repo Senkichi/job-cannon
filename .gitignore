@@ -54,6 +54,9 @@ AUDIT_LOG.md
 .superpowers/
 .playwright-mcp/
 
+# Archived planning docs (kept on disk for reference, not for distribution)
+docs/superpowers/
+
 # Screenshots from exploration/testing sessions
 *.png
 

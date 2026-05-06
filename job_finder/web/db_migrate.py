@@ -762,8 +762,6 @@ MIGRATIONS.append(_migration_41_drop_legacy_scores)
 #                  genuinely-no-signal jobs honestly instead of rolling them
 #                  into apply/consider/skip via unreliable rubric outputs.
 #
-# Phase 2d sub-fix 1/4. Spec D-2.5
-# (docs/superpowers/specs/2026-04-27-scoring-pipeline-recalibration-design.md).
 MIGRATIONS.append(["SELECT 1"])
 
 
@@ -780,8 +778,6 @@ MIGRATIONS.append(["SELECT 1"])
 # {"title_fit": 4, "location_fit": 5, ...}; validation lives in the labeling
 # CLI, not the schema.
 #
-# Phase 3 task 1/3. Spec D-3.3
-# (docs/superpowers/specs/2026-04-27-scoring-pipeline-recalibration-design.md).
 MIGRATIONS.append(
     [
         """ALTER TABLE jobs ADD COLUMN gold_classification TEXT

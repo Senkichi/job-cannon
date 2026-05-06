@@ -9,8 +9,6 @@ Usage:
     uv run python -m job_finder.scripts.label_gold_set
     uv run python -m job_finder.scripts.label_gold_set \\
         --manifest .planning/gold_set_manifest_low_signal.json
-
-Spec D-3.4 (docs/superpowers/specs/2026-04-27-scoring-pipeline-recalibration-design.md).
 """
 
 from __future__ import annotations

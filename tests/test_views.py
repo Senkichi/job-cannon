@@ -2592,8 +2592,7 @@ class TestCompositeScoreCell:
     """v3.0 composite-score display: number + color + tooltip + packed sort key.
 
     Replaces the classification-badge rendering with a colored composite number
-    (sum of 6 sub-scores, range 6-30). See spec
-    docs/superpowers/specs/2026-04-27-composite-score-display-design.md.
+    (sum of 6 sub-scores, range 6-30).
     """
 
     def test_apply_row_renders_composite_30(self, scored_client):
