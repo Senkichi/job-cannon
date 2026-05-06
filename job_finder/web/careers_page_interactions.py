@@ -25,7 +25,7 @@ from bs4 import BeautifulSoup
 
 from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.careers_scraper import _ATS_DOMAINS
-from job_finder.web.enrichment_tiers import _HEADERS, _TIMEOUT
+from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 
 logger = logging.getLogger(__name__)
 
