@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Note: Dependabot's pip ecosystem reads pyproject.toml but does NOT
+    # regenerate uv.lock. Each PR will need a manual `uv lock` amend
+    # before merge — preferred over auto-running uv-lock in CI because
+    # it forces a human to look at the dep update.
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
