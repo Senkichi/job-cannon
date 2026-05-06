@@ -1,6 +1,6 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-03-17
+This document catalogs known tech debt, fragile areas, scaling limits, and test-coverage gaps in `job_finder/` for engineers reading the source. Items marked `Resolution:` were closed out before this audit was migrated. For setup and run instructions, see [docs/SETUP.md](../SETUP.md).
 
 ## Tech Debt
 
@@ -47,14 +47,6 @@
 - Status: Documented in `.planning/debug/ats-scan-pending-after-complete.md` as resolved-by-documentation. Root cause confirmed March 12, 2026
 - **Resolution:** Resolved by documentation (2026-03-12). Root cause confirmed and documented. Probe-then-scan is by-design behavior; manual scan only works for already-probed companies.
 
-**Possible Resume File Overwrite Risk (Edge Case):**
-- Symptoms: If resume generation starts for job A and job B simultaneously (different threads), and both target the same Google Drive folder with same filename pattern, one file could be overwritten
-- Files: `job_finder/web/resume_generator.py` (lines 30-40 for Drive upload), `job_finder/web/drive_uploader.py`
-- Trigger: Rare in practice (single-user app, sequential manual clicks), but theoretically possible if APScheduler background job runs while user manually triggers generation
-- Impact: Silent overwrite, user loses the first version
-- Mitigation: Drive upload uses job_id in filename, so collisions unlikely. But concurrent thread safety is not explicitly guaranteed
-- Fix approach: Add mutual exclusion flag to prevent concurrent resume generation for same job, or use atomic Drive operations with retry logic
-
 ## Security Considerations
 
 **API Key Configuration Pattern (Acceptable Risk for Single-User Local App):**
@@ -65,13 +57,13 @@
 
 **SQL Injection Guard for Dedup Key Normalization (Well-Protected):**
 - Risk: `job_finder/web/dedup_normalizer.py` uses dynamically-built SQLite queries on FK tables during retroactive dedup
-- Files: `job_finder/web/dedup_normalizer.py` (lines 31-38 allowlist, _update_fk_tables function)
-- Current mitigation: Explicit whitelist of allowed FK tables (`pipeline_events`, `resume_generations`, `pipeline_detections`, etc.) prevents arbitrary table injection. Column names not interpolated (only table names checked against allowlist)
+- Files: `job_finder/web/dedup_normalizer.py` (`ALLOWED_FK_TABLES` allowlist near the top of the module)
+- Current mitigation: Explicit allowlist of FK tables (`pipeline_events`, `pipeline_detections`, `scoring_costs`) prevents arbitrary table injection. Column names not interpolated (only table names checked against the allowlist)
 - Assessment: SAFE — Pattern is correct and well-documented
 
 **Anthropic API Request Validation (Good Practice):**
 - Risk: Structured output schema validation relies on Anthropic's `json_schema` validation. Malformed schema could cause parsing failures
-- Files: `job_finder/web/haiku_scorer.py`, `job_finder/web/sonnet_evaluator.py`, `job_finder/web/resume_generator.py`, `job_finder/web/interview_prep.py`
+- Files: `job_finder/web/haiku_scorer.py`, `job_finder/web/sonnet_evaluator.py`
 - Current mitigation: All schemas follow same pattern (required fields, additionalProperties=False). API validates server-side
 - Assessment: ACCEPTABLE — Anthropic SDK handles validation. Responses that don't match schema raise exceptions caught at call sites
 
@@ -90,7 +82,7 @@
 - Files: `job_finder/web/pipeline_runner.py` (lines 148-150, _run_haiku_scoring)
 - Cause: Sequential design is intentional — keeps budget predictable and avoids overwhelming Anthropic API rate limits
 - Impact: If ingestion finds 50 new jobs, Haiku scoring takes 50+ seconds (assuming 1 token-second latency per call). Blocking foreground operation
-- Improvement path: Use ThreadPoolExecutor with max_workers=3 for parallel Haiku scoring. Already used in resume_generator.py for multi-version synthesis (lines 31, example pattern at line 290+)
+- Improvement path: Use ThreadPoolExecutor with max_workers=3 for parallel Haiku scoring, with bounded backoff on 429 responses
 - Priority: Medium — affects UX (ingestion latency) but acceptable for background scheduler job
 
 **Dedup Normalizer String Operations on Large Company Lists (Very Low Priority):**
@@ -154,19 +146,13 @@
 - Assessment: Not observed in practice. Current ingestion on 100-200 emails per run takes ~30 seconds total
 - Mitigation: Scheduler config (lines 215-238 in `scheduler.py`) has `max_instances=1` which prevents pile-up
 
-**Concurrent Resume Generation Thread Pool (ThreadPoolExecutor):**
-- Current capacity: resume_generator.py uses ThreadPoolExecutor with default max_workers (2x CPU cores, typically 4-8)
-- Limit: 4 concurrent Sonnet calls would consume API rate limits. Budget gate prevents over-spend but doesn't prevent rate-limit hits
-- Scaling path: Reduce max_workers to 2, add exponential backoff for 429 responses, use SemaphoreToken pattern
-- Assessment: Low priority for single-user app (unlikely to trigger 4 resume generations simultaneously)
-
 ## Dependencies at Risk
 
 **APScheduler 3.11.x Pinning (Minor Risk):**
 - Risk: Version 3.x is aging (last release 2020). Version 4.x has breaking async changes. Pinning prevents updates but limits security/stability improvements
 - Files: `requirements.txt` (line with APScheduler<4.0)
 - Impact: If future CVE found in APScheduler 3.11.x, only option is to migrate to 4.x (large effort)
-- Migration plan: Monitor APScheduler 4.x adoption. When stable, create isolated test environment and validate scheduler behavior with async API. Plan effort at next major release cycle (Phase 5+)
+- Migration plan: Monitor APScheduler 4.x adoption. When stable, create isolated test environment and validate scheduler behavior with async API
 - Priority: Low — single-user local app, limited attack surface
 
 **BeautifulSoup4 Email Parsing (Low Risk but Subtle):**
@@ -193,7 +179,7 @@
 **Per-Email Parsing Granularity (Enhancement, Lower Priority):**
 - Problem: email_parse_log table tracks runs but not individual emails within a run. If one email parses to 0 jobs, we don't know which email failed
 - Blocks: Detailed parsing audit trail
-- Approach: Add email_id column to pipeline_detections and resume_generations tables, log message_id alongside job_id
+- Approach: Add email_id column to pipeline_detections, log message_id alongside job_id
 - Priority: Medium — useful for debugging but not blocking
 
 ## Test Coverage Gaps
@@ -213,20 +199,9 @@
 - Recommendation: Add sample emails from archive to test suite. Run detector against 50+ real emails and verify signal counts match expectations
 - Priority: Medium
 
-**Resume Generation Drive Upload (Partially Tested):**
-- What's not tested: Actual Google Drive interaction (tests mock it). Concurrent generation edge case
-- Files: `tests/test_resume_generator.py` (uses mocked drive_uploader)
-- Risk: Real Drive upload might fail silently (e.g., quota exceeded, permission revoked)
-- Recommendation: Integration test with real Google Drive (requires test credentials). Add concurrent generation stress test with ThreadPoolExecutor
-- Priority: Medium — Low frequency operation, user can retry manually if needed
-
 **Database Migration Idempotence (Good, but Could Add Negative Tests):**
 - What's not tested: Migration behavior when columns/tables already exist (negative case)
 - Files: `tests/test_db_migrate.py`
 - Risk: Re-running migration with duplicate columns could silently skip statements without error handling
 - Recommendation: Add test that runs migration twice and verifies second run completes without errors and schema is unchanged
 - Priority: Low — Pattern is working, but test would improve confidence
-
----
-
-*Concerns audit: 2026-03-17*
