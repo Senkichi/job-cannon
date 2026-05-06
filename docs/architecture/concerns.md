@@ -6,9 +6,9 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 
 **Bare Exception Handlers (Low Priority but Present):**
 - Issue: Multiple modules catch `except Exception:` without specific error classification, silently swallowing exceptions and returning empty defaults
-- Files: `job_finder/db.py` (lines 356-357, 622-623, 653-654), `job_finder/main.py` (line 57), `job_finder/web/activity_tracker.py` (fault-tolerant by design)
+- Files: `job_finder/db/_queries.py` (`get_distinct_sources` JSON-decode try/except), `job_finder/main.py` (line 57), `job_finder/web/activity_tracker.py` (fault-tolerant by design). Note: post-S7d the original `job_finder/db.py` is now a package; the bare-except sites moved with the functions.
 - Impact: Failures are logged at DEBUG level only and never propagate. In single-user local app this is acceptable for non-critical operations like activity logging (which is designed to be fault-tolerant), but makes debugging harder when legitimate errors occur
-- Fix approach: Keep activity_tracker's design (intentionally swallows all exceptions at DEBUG level per design). For db.py query failures, consider logging at WARNING level for visibility while maintaining graceful fallback returns
+- Fix approach: Keep activity_tracker's design (intentionally swallows all exceptions at DEBUG level per design). For DB-package query failures, consider logging at WARNING level for visibility while maintaining graceful fallback returns
 
 **Indeed Email Parser Plain-Text Mismatch (BLOCKING):**
 - Issue: `job_finder/parsers/indeed_parser.py` expects HTML structure (BeautifulSoup parsing, looking for `<a>` tags), but `job_finder/sources/gmail_source.py` delivers PLAIN TEXT bodies (prefers text/plain over text/html)
@@ -20,7 +20,7 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 
 **JSON Field Deserialization Fragility (Medium Priority):**
 - Issue: Multiple modules deserialize JSON from SQLite `TEXT` columns without try/except validation
-- Files: `job_finder/web/haiku_scorer.py` (lines 80-92), `job_finder/web/ats_scanner.py` (multiple locations), `job_finder/db.py` (lines 107-121 in upsert_job)
+- Files: `job_finder/web/haiku_scorer.py` (lines 80-92), `job_finder/web/ats_scanner/` (multiple locations), `job_finder/db/_jobs.py` (`upsert_job` JSON merge logic)
 - Impact: If a JSON field is corrupted or NULL, the code may crash with `JSONDecodeError` or `TypeError`. Currently mitigated by defensive checks but no universal pattern
 - Fix approach: Create utility function `safe_json_load(field, default={})` in `job_finder/web/db_helpers.py` and use throughout codebase. Already done partially in `haiku_scorer.py._build_comp_context()` (lines 86-89) — extend pattern
 - **Resolution:** Fixed in Phase 34 (v1.5, 2026-03-17). `safe_json_load()` utility created in `job_finder/web/db_helpers.py` and adopted at all JSON deserialization call sites. See `.planning/phases/34-data-quality/34-01-SUMMARY.md`.
@@ -70,8 +70,8 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 ## Performance Bottlenecks
 
 **Large File Description Merging (Low Priority - Only on Duplicates):**
-- Problem: When a job appears multiple times (from different sources), `job_finder/db.py._merge_description()` appends new description to existing with "\n\n---\n\n" separator (lines 12-39)
-- Files: `job_finder/db.py` (lines 12-39)
+- Problem: When a job appears multiple times (from different sources), `job_finder/db/_jobs.py::merge_description()` appends new description to existing with "\n\n---\n\n" separator
+- Files: `job_finder/db/_jobs.py` (`merge_description` function)
 - Cause: Substring comparison on every update, string concatenation accumulates over multiple upserts
 - Impact: For jobs seen 5+ times from different sources, description field grows large. No hard limit, but TEXT field in SQLite has practical limits
 - Improvement path: Cap merged description at 50KB, truncate oldest entries if exceeded. Or: store descriptions separately (description_v1, description_v2) and render selected version. Current approach works for typical job lifetime (not expected to see same job >10 times)
@@ -205,3 +205,57 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 - Risk: Re-running migration with duplicate columns could silently skip statements without error handling
 - Recommendation: Add test that runs migration twice and verifies second run completes without errors and schema is unchanged
 - Priority: Low — Pattern is working, but test would improve confidence
+
+## DB Layer Architecture (post-S7d)
+
+The CLI-era DB layer was previously a single 845-LOC module (`job_finder/db.py`).
+S7d (2026-05-06) split it into a package while preserving the public import
+surface. Engineers reading downstream code do not need to update any
+`from job_finder.db import X` paths — the package re-exports every name the
+old module exposed.
+
+**Package layout (`job_finder/db/`):**
+- `__init__.py` (~66 LOC) — lifecycle + re-exports only. No module-level
+  functions live here.
+- `_classification.py` — `JobAssessment`, `derive_classification`,
+  `_SUB_SCORE_KEYS`. Pure scoring-rule logic. Zero DB side-effects.
+- `_persistence.py` — write paths: `log_run`, `persist_job_assessment`
+  (depends on `_classification`), `persist_job_expiry_state`,
+  `persist_job_archetype`, `update_pipeline_status`.
+- `_jobs.py` — job CRUD: `upsert_job` (still D=21 — complexity reduction is
+  out of scope for S7d), `get_job`, `merge_description`, `load_job_context`.
+  Owns the canonical `JOBS_ALL_COLUMNS` projection re-imported by
+  `_queries.py`.
+- `_queries.py` — read filters: `get_filtered_jobs` (D=26), `get_distinct_sources`,
+  legacy-shim helpers (`_classifications_for_min_score`/`_max_score`),
+  classification-rank SQL fragments.
+
+**Dual-path with `web/db_helpers.py` (preserved by design):** the package
+above is the original CLI-era surface — every function takes an open
+`sqlite3.Connection`. `job_finder/web/db_helpers.py` is the web-era
+per-request `g.db` pattern used by Flask blueprints. They coexist; S7d did
+not collapse them. Sibling modules `job_finder/db_pipeline.py` and
+`job_finder/db_queries.py` (NOT inside the new package) are also
+re-exported by `db/__init__.py` so callers continue to use a single import
+path for any DB-layer name.
+
+### sort_by Allowlist Co-location (Security-Critical Invariant)
+
+CLAUDE.md documents the rule: `sort_by` is validated against a Python
+allowlist before SQL interpolation, because SQLite does not support
+parameterized column names in `ORDER BY`. The allowlist set literal
+(`allowed_sort_cols` inside `get_filtered_jobs`) and the f-string composer
+that interpolates `sort_by` into the query MUST stay in the same lexical
+scope. A future split that promotes the allowlist to a module-level
+constant in a separate file re-introduces SQL-injection surface even when
+existing tests still pass.
+
+- File: `job_finder/db/_queries.py` (the `get_filtered_jobs` function body
+  carries a `SECURITY-CRITICAL` comment block at the entry).
+- Sentinel: `tests/test_db_public_surface.py::test_malicious_sort_by_does_not_drop_table`
+  asserts that a malicious `sort_by` value (`id; DROP TABLE jobs; --`) does
+  not drop the jobs table. This sentinel ran on every intermediate S7d
+  commit, not just the final one — bisectable proof.
+- Rule for future maintainers: if `get_filtered_jobs` ever needs to relocate,
+  move the WHOLE function (signature + allowlist + composer + WHERE-clause
+  builder) as a single unit. Do not split pieces of it across files.
