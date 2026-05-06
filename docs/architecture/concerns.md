@@ -20,9 +20,9 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 
 **JSON Field Deserialization Fragility (Medium Priority):**
 - Issue: Multiple modules deserialize JSON from SQLite `TEXT` columns without try/except validation
-- Files: `job_finder/web/haiku_scorer.py` (lines 80-92), `job_finder/web/ats_scanner/` (multiple locations), `job_finder/db/_jobs.py` (`upsert_job` JSON merge logic)
+- Files (legacy locations): `job_finder/web/haiku_scorer.py` (deleted in v3.0; logic now in `job_finder/web/job_scorer.py`), `job_finder/web/ats_scanner/` (multiple locations), `job_finder/db/_jobs.py` (`upsert_job` JSON merge logic)
 - Impact: If a JSON field is corrupted or NULL, the code may crash with `JSONDecodeError` or `TypeError`. Currently mitigated by defensive checks but no universal pattern
-- Fix approach: Create utility function `safe_json_load(field, default={})` in `job_finder/web/db_helpers.py` and use throughout codebase. Already done partially in `haiku_scorer.py._build_comp_context()` (lines 86-89) — extend pattern
+- Fix approach: Create utility function `safe_json_load(field, default={})` in `job_finder/web/db_helpers.py` and use throughout codebase. Already done partially in the legacy `haiku_scorer._build_comp_context()` — extend pattern
 - **Resolution:** Fixed in Phase 34 (v1.5, 2026-03-17). `safe_json_load()` utility created in `job_finder/web/db_helpers.py` and adopted at all JSON deserialization call sites. See `.planning/phases/34-data-quality/34-01-SUMMARY.md`.
 
 **APScheduler Version Lock Risk (Low Priority):**
@@ -63,9 +63,9 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 
 **Anthropic API Request Validation (Good Practice):**
 - Risk: Structured output schema validation relies on Anthropic's `json_schema` validation. Malformed schema could cause parsing failures
-- Files: `job_finder/web/haiku_scorer.py`, `job_finder/web/sonnet_evaluator.py`
-- Current mitigation: All schemas follow same pattern (required fields, additionalProperties=False). API validates server-side
-- Assessment: ACCEPTABLE — Anthropic SDK handles validation. Responses that don't match schema raise exceptions caught at call sites
+- Files: `job_finder/web/job_scorer.py` (post-v3.0 single-tier; `JOB_ASSESSMENT_SCHEMA`), per-provider clients in `job_finder/web/providers/`. Pre-v3.0 location was `haiku_scorer.py` + `sonnet_evaluator.py` (deleted).
+- Current mitigation: All schemas follow same pattern (required fields, additionalProperties=False). Each provider validates server-side or via the local `jsonschema` validator in `model_provider.py`. Schema-validation failure on a provider falls through to the next link in the cascade rather than failing the whole call.
+- Assessment: ACCEPTABLE — multi-provider cascade with per-link schema validation gives defense-in-depth.
 
 ## Performance Bottlenecks
 
@@ -78,12 +78,12 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 - Priority: Low — affects small percentage of jobs
 
 **Batch AI Scoring Without Parallel Processing (Design Trade-off):**
-- Problem: pipeline_runner._run_haiku_scoring() scores jobs sequentially (one Haiku call per new job)
-- Files: `job_finder/web/pipeline_runner.py` (lines 148-150, _run_haiku_scoring)
-- Cause: Sequential design is intentional — keeps budget predictable and avoids overwhelming Anthropic API rate limits
-- Impact: If ingestion finds 50 new jobs, Haiku scoring takes 50+ seconds (assuming 1 token-second latency per call). Blocking foreground operation
-- Improvement path: Use ThreadPoolExecutor with max_workers=3 for parallel Haiku scoring, with bounded backoff on 429 responses
-- Priority: Medium — affects UX (ingestion latency) but acceptable for background scheduler job
+- Problem: scoring runs jobs sequentially through the cascade (one `score_job()` call per new job)
+- Files: `job_finder/web/pipeline_runner.py`, `job_finder/web/scoring_orchestrator.py`
+- Cause: Sequential design is intentional — keeps budget predictable, avoids overwhelming free-tier per-day quotas, and lets schema-validation fall-through happen per-job rather than blast-radius across a parallel batch
+- Impact: 50 new jobs → 50 sequential cascade calls. Local Ollama is fast (~1–3s each), so ingestion latency is ~1–2 minutes for a typical batch. Higher when free providers exhaust and the cascade walks deeper
+- Improvement path: Pool-parallel local Ollama (the only provider not subject to per-day request quotas) for the batch and serialize the rest. Or accept current latency since ingestion is a background scheduler job
+- Priority: Medium — acceptable for background scheduler job
 
 **Dedup Normalizer String Operations on Large Company Lists (Very Low Priority):**
 - Problem: `job_finder/web/dedup_normalizer.py` applies regex patterns to company names in retroactive dedup loop. ~30 regex operations per company
@@ -117,12 +117,12 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 - Risk: Parser could silently return 0 jobs for new Indeed email format. Mitigation: log warning when parser finds 0 jobs, surface to user in activity log
 - **Resolution:** Fixed in Phase 14 (v1.1, 2026-03-13). Plain-text parser is now primary strategy. HTML fallback retained as secondary. Test coverage added with real email samples.
 
-**Sonnet Evaluator Budget Gating (Gate is Checked but Error Can Be Deferred):**
-- Files: `job_finder/web/sonnet_evaluator.py` (lines 100-160, evaluate_job_sonnet)
-- Why fragile: cost_gate() returns bool, caller decides whether to raise BudgetExceededError. If caller forgets to check, Sonnet call proceeds without budget validation
-- Safe modification: Use decorator pattern or context manager to enforce budget gating at call site. Currently pattern is: `if not cost_gate(...): raise BudgetExceededError(...)`. Could be: `@budget_gate("sonnet") def evaluate_job_sonnet():`
-- Test coverage: Good — tests in `tests/test_sonnet_evaluator.py` verify budget gating behavior
-- Risk: Accidental over-budget spend if budget gate is forgotten in new code. Mitigation: code review, test coverage for new callers
+**Anthropic Paid-Fallback Budget Gating (Gate is Checked but Error Can Be Deferred):**
+- Files: `job_finder/web/claude_client.py` (cost_gate, BudgetExceededError), `job_finder/web/model_provider.py` (cascade dispatch — only the Anthropic link is gated)
+- Why fragile: `cost_gate()` returns bool, caller decides whether to raise. If a new caller routes directly to the Anthropic provider without first calling `cost_gate(...)`, budget is bypassed. Free-provider hops in the cascade are exempt by design.
+- Safe modification: Use decorator/context manager to enforce gating at the Anthropic-provider call site so it's structurally impossible to bypass. Currently: `if not cost_gate(...): raise BudgetExceededError(...)`.
+- Test coverage: Good — tests in `tests/test_claude_client.py` and `tests/test_costs.py` verify budget gating behavior
+- Risk: Accidental over-budget spend if budget gate is forgotten in a new Anthropic-direct caller. Mitigation: code review; structurally we'd prefer all Anthropic dispatch funnel through `model_provider.call_model()` rather than direct `claude_client.call_claude()` calls.
 
 ## Scaling Limits
 
@@ -130,7 +130,7 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 - Current capacity: $100/month default (configurable in `config.yaml`)
 - Limit: Claude API calls stop when monthly_spend >= budget_cap
 - Files: `job_finder/web/claude_client.py` (lines 101-138, cost_gate function)
-- Scaling path: If monthly spend approaches cap, increase budget in config. At 50 new jobs/month with 2-tier scoring (Haiku + Sonnet), typical spend is $5-15/month, well under default $100. Scaling up to 500 jobs/month would increase spend to $50-75/month
+- Scaling path: production cascade resolves on free providers in the typical case (Ollama → Groq → Cerebras → Gemini), so monthly spend is usually ~$0. The cap matters only when free providers all exhaust and the cascade falls through to Anthropic. At 50 new jobs/month with the cascade, typical spend is $0–2/month; a worst-case all-Anthropic month at 500 jobs would land around $50–75. Increase budget in config if the Anthropic-fallback path activates regularly.
 - Assessment: ADEQUATE for current use case
 
 **SQLite Database File Size (Write-Amplification from WAL Mode):**

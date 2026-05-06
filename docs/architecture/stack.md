@@ -103,15 +103,34 @@ This document describes the runtime, frameworks, and dependencies that make up J
 
 ## AI Models
 
-**Anthropic Claude:**
-- claude-haiku-4-5 - Fast filtering ($1.00/$5.00 per million input/output tokens)
-- claude-sonnet-4-6 - Deep evaluation ($3.00/$15.00 per million input/output tokens)
-- claude-opus-4-6 - Profile extraction ($5.00/$25.00 per million input/output tokens)
+**Production scoring path (multi-provider cascade):**
+
+The `'scoring'` tier (v3.0 single-tier ordinal scoring) routes through a configurable provider cascade. The default chain — see the commented `providers.scoring` block in `config.example.yaml` — tries each in order until one returns valid output:
+
+| Order | Provider | Model | Cost |
+|---|---|---|---|
+| 1 | Ollama (local) | `qwen2.5:14b` (Phase 33 shootout winner) | $0 |
+| 2 | Groq (free tier) | `llama-3.3-70b-versatile` | $0 (per-day request limit) |
+| 3 | Cerebras (free tier) | `llama3.3-70b` | $0 (per-day request limit) |
+| 4 | Gemini (free tier) | `gemini-2.0-flash` | $0 (per-day request limit) |
+| 5 | Anthropic (paid fallback) | `claude-sonnet-4-6` | ~$0.05–$0.15 per job |
+
+Schema-validation failures or rate-limit responses on a provider fall through to the next link in the chain.
+
+**Anthropic Claude (paid-fallback only, plus vestigial non-scoring tiers):**
+
+The Anthropic SDK is required (`ANTHROPIC_API_KEY`) so the cascade can always complete, but it's invoked only when every free provider is exhausted. Pricing context for the cap calculation:
+
+- `claude-haiku-4-5` — $1.00 / $5.00 per million input/output tokens
+- `claude-sonnet-4-6` — $3.00 / $15.00 per million input/output tokens
+- `claude-opus-4-6` — $5.00 / $25.00 per million input/output tokens
+
+**Vestigial tier names** (`'haiku'`, `'sonnet'`, `'opus'` in `_TIER_DEFAULTS`, `providers.*` config, and `enrichment_tier` DB column) are routing classes for non-scoring callers (enrichment, careers scrape, AI navigator, company research, description reformat). They predate the multi-provider cascade and no longer mean Anthropic models — `'haiku'` means cheap-fast, `'sonnet'` means balanced-deep, `'opus'` means heavy-reasoning. A future refactor will rename to `'low' / 'mid' / 'high'`.
 
 **Cost Tracking:**
-- Stored in `scoring_costs` table with cost_usd, model, purpose, tokens
-- Budget gating: monthly cap (default $25.00 USD)
-- Haiku always allowed; Sonnet/Opus blocked at budget cap
+- Stored in `scoring_costs` table with cost_usd, provider, model, purpose, tokens
+- Free-provider calls record `cost_usd=0`; only the Anthropic-fallback path produces real spend
+- Budget gating: monthly cap (default $25.00 USD) applies to Anthropic-fallback usage only — free providers are never gated
 
 ## Platform Requirements
 

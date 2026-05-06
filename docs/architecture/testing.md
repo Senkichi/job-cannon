@@ -208,19 +208,24 @@ def migrated_db_with_jobs():
 # tests/test_db.py (lines 36-52)
 def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
                 location="Remote", pipeline_status="discovered",
-                sonnet_score=None, haiku_score=None):
-    """Insert a minimal job row for testing."""
+                v3_score=None):
+    """Insert a minimal job row for testing.
+
+    Note: legacy haiku_score / sonnet_score / haiku_summary columns were
+    dropped by Migration 41 when v3.0 ordinal scoring shipped. Tests
+    that hand-craft the v3 score rows use the per-axis sub-score columns
+    instead (see job_finder/db/_classification.py for the schema).
+    """
     now = datetime.now().isoformat()
     conn.execute(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
              pipeline_status, first_seen, last_seen, score, score_breakdown,
-             user_interest, sonnet_score, haiku_score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             user_interest)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (dedup_key, title, company, location, '["test"]',
          f'["https://example.com/{dedup_key}"]',
-         pipeline_status, now, now, 7.0, '{}', 'unreviewed',
-         sonnet_score, haiku_score),
+         pipeline_status, now, now, 7.0, '{}', 'unreviewed'),
     )
     conn.commit()
 ```
@@ -237,7 +242,7 @@ def _insert_job(conn, dedup_key, title="Test Job", company="Test Co",
 - No pytest-cov or coverage.py configuration
 - Coverage not automated or tracked in CI
 
-**Status:** 266+ tests passing as of 2026-03 (per user documentation)
+**Status:** 2110+ tests passing as of 2026-05 (CI matrix: Ubuntu + Windows × Python 3.13)
 
 ## Test Types
 

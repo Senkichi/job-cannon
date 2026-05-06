@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, and DataForSEO, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), and tracks application pipeline status.
+Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, DataForSEO, and live ATS scanners (Greenhouse / Lever / Ashby / Workday / SmartRecruiters), scores them through a single-tier ordinal rubric routed through a multi-provider cascade (Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic paid fallback), and tracks application pipeline status.
 
 **Single-user, local-only app. No deployment, no Docker, no CI/CD.**
 
@@ -12,7 +12,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 - **Frontend**: HTMX 2.x, Tailwind CSS (CDN), SortableJS, vanilla JS only
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
-- **AI**: Anthropic API — Haiku for fast scoring, Sonnet for deep evaluation
+- **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b, Phase 33 winner); cascade falls through Groq, Cerebras, Gemini before reaching Anthropic as paid fallback. Anthropic SDK still required as the safety net.
 - **APIs**: Gmail API v1 (OAuth 2.0, read-only); SerpAPI / Thordata / DataForSEO / portal-search aggregator (all optional)
 
 ## Key Commands
@@ -45,9 +45,11 @@ job_finder/
 │   ├── __init__.py              # Flask app factory (create_app)
 │   ├── blueprints/              # 11 blueprints: admin, batch_scoring, companies, costs, dashboard, detections, jobs, pipeline, profile, settings, sync
 │   ├── templates/               # 36 Jinja2 templates (base.html + partials)
-│   ├── claude_client.py         # Anthropic wrapper with cost tracking + budget gating
-│   ├── haiku_scorer.py          # Fast-filter scoring
-│   ├── sonnet_evaluator.py      # Deep evaluation with fit analysis
+│   ├── claude_client.py         # Anthropic SDK wrapper + cost tracking + budget gating (paid-fallback path)
+│   ├── model_provider.py        # Multi-provider cascade dispatcher (call_model + tier resolution)
+│   ├── providers/               # Per-provider implementations (anthropic, gemini, ollama)
+│   ├── job_scorer.py            # Single-tier v3.0 ordinal scoring (replaces deleted haiku_scorer / sonnet_evaluator)
+│   ├── scoring_orchestrator.py  # Per-run orchestration, retry, attribution
 │   ├── pipeline_detector.py     # Multi-signal email classification for pipeline state
 │   ├── pipeline_runner.py       # Orchestrates ingestion + scoring + detection
 │   ├── scheduler.py             # APScheduler background jobs
@@ -89,9 +91,14 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - `conftest.py` has fixtures for app factory, test DB, mock Claude
 
 **Scoring**:
-- cost_gate returns bool — callers decide whether to raise BudgetExceededError
-- Sonnet skips if jd_full absent (no cost without full JD)
-- Batch score skips already-scored jobs (haiku_score IS NOT NULL)
+- v3.0 single tier: `'scoring'` tier (Plan 4 Commit E) replaces the legacy Haiku-then-Sonnet two-tier. Output is a six-axis ordinal rubric; classification is **Python-derived** from the sub-scores in `job_finder.db._classification.derive_classification` — never emitted by the LLM.
+- Cascade order (configurable in `config.yaml > providers.scoring.fallback_chain`): Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic. Each provider can be disabled or rate-limited independently.
+- cost_gate returns bool — callers decide whether to raise BudgetExceededError. Only Anthropic-fallback usage counts against `scoring.monthly_budget_usd`; free-provider calls are never gated.
+- Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
+- Rescoring skips already-scored jobs unless `force=True` (manual rescore).
+
+**Tier-name vestigial labels (IMPORTANT):**
+The strings `'haiku'`, `'sonnet'`, and `'opus'` in `_TIER_DEFAULTS` (`model_provider.py:33-43`), `providers.haiku/sonnet/opus` config keys, and the `enrichment_tier` DB column are **vestigial labels from the v1/v2 architecture**. They no longer mean Anthropic models — they mean cheap-fast (`'haiku'`), balanced-deep (`'sonnet'`), and heavy-reasoning (`'opus'`) routing classes for non-scoring callers (enrichment_tiers, careers_scraper, ai_career_navigator, company_research, description_reformatter). A future refactor will rename these to `'low' / 'mid' / 'high'`. Until then: do **not** assume "haiku" means an Anthropic model in code or docs. The `'scoring'` tier is the only post-v3.0 tier name that means what it says.
 
 ## Planning Documentation
 
@@ -157,7 +164,7 @@ These files contain personal data and API keys. They are `.gitignore`d and must 
 | File | Template | Purpose |
 |------|----------|---------|
 | `config.yaml` | `config.example.yaml` | App config, API keys, profile targets |
-| `experience_profile.json` | `experience_profile.example.json` | Career history (positions / skills / education) for Sonnet fit-scoring personalization |
+| `experience_profile.json` | `experience_profile.example.json` | Career history (positions / skills / education) for fit-scoring personalization in the `'scoring'` tier prompt |
 
 **config.yaml must ONLY be modified with the Edit tool (surgical string replacement), NEVER with the Write tool (full-file overwrite).** This file has been accidentally wiped 3 times by full-file rewrites that intended to change a single value. The settings save route (`_write_config`) is safe because it reads→merges→writes. The risk is Claude/GSD execution doing full-file writes.
 

@@ -8,7 +8,7 @@ This document describes the layered architecture, data flow, and key abstraction
 
 Job Finder follows a classic 3-tier architecture:
 1. **Ingestion Layer** — Data fetching and parsing (Gmail, SerpAPI)
-2. **Scoring Layer** — Two-tier AI evaluation (Haiku fast-filter → Sonnet deep-eval)
+2. **Scoring Layer** — Single-tier ordinal scoring (six-axis rubric) routed through a multi-provider cascade
 3. **Web Layer** — Flask blueprints with HTMX-driven interactivity and per-request database access
 
 **Key Characteristics:**
@@ -16,8 +16,8 @@ Job Finder follows a classic 3-tier architecture:
 - Background APScheduler ingestion every 30 minutes (separate SQLite connection)
 - Per-request SQLite connections via Flask g.db context variable
 - Raw SQL (no ORM) with parameterized queries and composite indexes
-- Two-tier AI scoring: Haiku handles volume fast (~$0.01/job), Sonnet for deep eval (~$0.05/job for selected jobs)
-- Budget gating: Sonnet and Opus blocked when monthly cap is reached (Haiku always allowed)
+- Cascade scoring: every job runs through one `'scoring'` tier with a six-axis ordinal rubric. The cascade tries Ollama (qwen2.5:14b) → Groq → Cerebras → Gemini → Anthropic in order; production typically resolves on the first or second hop at $0 cost
+- Budget gating: only the Anthropic paid-fallback path counts against the monthly cap; free-provider calls are never gated
 - Deduplication by company+title (location intentionally excluded)
 
 ## Layers
@@ -37,11 +37,11 @@ Job Finder follows a classic 3-tier architecture:
 - Used by: All blueprints, pipeline_runner, background jobs
 
 **Scoring Layer:**
-- Purpose: Two-tier AI evaluation with cost tracking and budget gating
-- Location: `job_finder/web/haiku_scorer.py`, `job_finder/web/sonnet_evaluator.py`, `job_finder/web/claude_client.py`
-- Contains: Score computation, structured output schemas, budget tracking
-- Depends on: Anthropic SDK, Claude models
-- Used by: `pipeline_runner.py`, Dashboard UI for manual rescoring
+- Purpose: Single-tier ordinal scoring with cascade-routed model dispatch, cost tracking, and budget gating on the Anthropic fallback path
+- Location: `job_finder/web/job_scorer.py` (single-tier `score_job()`), `job_finder/web/scoring_orchestrator.py` (per-run orchestration), `job_finder/web/model_provider.py` (cascade dispatcher and tier resolution), `job_finder/web/providers/` (per-provider clients: anthropic, gemini, ollama), `job_finder/web/claude_client.py` (Anthropic-specific cost tracking, budget gating, fallback-of-last-resort path)
+- Contains: Six-axis rubric prompt, structured output schema (`JOB_ASSESSMENT_SCHEMA`), provider-cascade dispatch, daily rate-limit tracking
+- Depends on: Anthropic SDK + google-genai + httpx (Ollama/Groq/Cerebras over plain HTTP)
+- Used by: `pipeline_runner.py` (auto-scoring), Dashboard UI (manual rescore)
 
 **Web/Request Layer:**
 - Purpose: HTTP endpoints, form processing, template rendering, user interactions
@@ -75,25 +75,19 @@ Job Finder follows a classic 3-tier architecture:
    - Call `JobDB.upsert_job(job)` → returns True if new, False if updated
    - Merge sources, locations (Remote/Hybrid first), descriptions (keep longer or append)
 
-4. **Haiku Scoring (First Tier):**
-   - For NEW jobs only (skip if haiku_score IS NOT NULL)
-   - Call `score_job_haiku(job_row, profile)` with structured output schema
-   - Returns: score (0-100), summary, title_fit, location_fit, salary_meets_floor
-   - Cost: ~$0.005-$0.02 per job
-   - Cost recorded to `scoring_costs` table with purpose="haiku_score"
+4. **Cascade Scoring (single tier):**
+   - For NEW jobs that have `jd_full` populated (skip if score already present unless force-rescore)
+   - Call `score_job(conn, job_row, config, profile)` (single entry point, dispatches via `model_provider.call_model(tier="scoring", ...)`)
+   - The cascade resolves in order: Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic. First provider that returns valid schema-conformant output wins
+   - Returns: six-axis ordinal sub-scores + Python-derived classification (`apply | consider | skip | reject`) + structured fit analysis
+   - Skipped if `jd_full` is missing (jobs without full JD route to enrichment first)
+   - Cost: $0 in the typical case (free-provider hop). Anthropic fallback path costs ~$0.05–$0.15 per job and is gated by `scoring.monthly_budget_usd`
+   - Cost recorded to `scoring_costs` table with provider attribution (`scoring_costs.provider`, `scoring_costs.model`)
 
-5. **Sonnet Evaluation (Second Tier):**
-   - For jobs with haiku_score >= haiku_threshold AND jd_full present
-   - Call `evaluate_job_sonnet(job_row, profile)` (budget-gated)
-   - Returns: score (0-100), summary, fit_analysis (strengths, gaps, talking_points, resume_priority_skills)
-   - Skipped if jd_full is missing (no cost without full JD)
-   - Skipped if monthly budget cap reached (returns None, not an error)
-   - Cost: ~$0.04-$0.08 per job
-
-6. **Summary returned to scheduler:**
+5. **Summary returned to scheduler:**
    - gmail_fetched, gmail_errors, serpapi_fetched, serpapi_errors
    - jobs_new, jobs_updated, jobs_scored, job_errors
-   - haiku_scored, sonnet_queued, sonnet_evaluated
+   - scoring_attempted, scoring_succeeded, scoring_skipped (jd_full missing or budget exhausted)
 
 **User Interaction (Request/Response):**
 
@@ -102,8 +96,8 @@ Job Finder follows a classic 3-tier architecture:
 3. Fragment routes (HTMX): GET /jobs/_table?filters=... → returns rows only
 4. User clicks expand → GET /jobs/{dedup_key}/detail → shows full description + AI analysis
 5. User changes status dropdown → POST /jobs/{dedup_key}/status?value=applied → updates DB + logs pipeline event
-6. User pastes full JD → POST /jobs/{dedup_key}/paste-jd → stores jd_full + triggers Sonnet rescoring
-7. User rescores manually → POST /jobs/{dedup_key}/rescore → calls Haiku + Sonnet (budget-gated)
+6. User pastes full JD → POST /jobs/{dedup_key}/paste-jd → stores jd_full + triggers cascade rescoring
+7. User rescores manually → POST /jobs/{dedup_key}/rescore → re-runs the `'scoring'` cascade (paid-fallback path budget-gated)
 
 **State Management:**
 
@@ -128,10 +122,13 @@ Job state transitions are tracked in the database:
 - Instance method initialization deprecated in favor of function-based API
 
 **Scoring Abstractions:**
-- `call_claude()` — Anthropic API wrapper with cost recording
-- `score_job_haiku()` — Fast-filter scoring returning structured output
-- `evaluate_job_sonnet()` — Deep evaluation with fit analysis
-- Pattern: Takes (job_row: dict, profile: dict, config: dict) → returns dict or None (on budget limit)
+- `score_job(conn, job_row, config, profile)` (`job_finder/web/job_scorer.py`) — single-tier scoring entry point; dispatches through the cascade
+- `call_model(tier, ...)` (`job_finder/web/model_provider.py`) — provider-cascade dispatcher; resolves per-tier provider from config and tries fallback chain on schema-validation or rate-limit failures
+- `derive_classification(...)` (`job_finder/db/_classification.py`) — Python-side derivation of `apply | consider | skip | reject` from numeric sub-scores
+- `call_claude()` (`job_finder/web/claude_client.py`) — Anthropic-only adapter, used as the bottom of the cascade and for legacy non-scoring tiers
+- Pattern: Returns `ScoringResult` dataclass (or `JobAssessment`) — never None on success; raises on hard failure
+
+**Tier-name vestigial labels:** the `'haiku' | 'sonnet' | 'opus'` tiers in `_TIER_DEFAULTS` are non-scoring routing classes (cheap-fast / balanced-deep / heavy-reasoning), kept for back-compat with `enrichment_tiers`, `careers_scraper`, `ai_career_navigator`, `company_research`, and `description_reformatter`. They no longer mean Anthropic models. A future refactor will rename to `'low' | 'mid' | 'high'`.
 
 **Flask Blueprints:**
 - Purpose: Modular route groups
@@ -165,7 +162,7 @@ Job state transitions are tracked in the database:
   - Fetch from Gmail and SerpAPI
   - Parse emails
   - Deduplicate and persist
-  - Score with Haiku and Sonnet
+  - Score through the cascade (`'scoring'` tier)
   - Track costs
 
 **Manual Ingestion (Batch):**
@@ -197,10 +194,11 @@ Job state transitions are tracked in the database:
 - Archive failures: Bad email bodies saved to `data/parse_failures/` for later inspection
 
 **Scoring Layer:**
-- `BudgetExceededError` raised by `call_claude()` when monthly cap reached
-- Callers (pipeline_runner, manual rescore) handle this and skip remaining Sonnet calls
-- Haiku always allowed (never budget-gated); Sonnet/Opus gated
-- Returned None (not error) when jd_full absent for Sonnet
+- `BudgetExceededError` raised by `call_claude()` when monthly Anthropic budget cap reached
+- Callers (pipeline_runner, manual rescore) handle this and skip remaining Anthropic-path calls
+- Free providers (Ollama, Groq, Cerebras, Gemini) are never budget-gated; only Anthropic-fallback usage counts against the cap
+- `'scoring'` returns None / skips when `jd_full` is absent (jobs route to enrichment first)
+- Cascade resilience: schema-validation failure on a provider falls through to the next provider in the chain rather than failing the whole call
 
 **Web Layer (Request Handling):**
 - HTMX fragment routes check `HX-Request` header, return full page if missing (for direct browser access)
@@ -228,9 +226,9 @@ Job state transitions are tracked in the database:
 - Gmail OAuth 2.0 for API access only (not user auth)
 
 **Cost Tracking:**
-- Every Claude call recorded to `scoring_costs` table (job_id, purpose, model, tokens, cost_usd, timestamp)
-- Aggregated by purpose/model for dashboard display
-- Monthly budget gating applied only to Sonnet/Opus (not Haiku)
+- Every model call recorded to `scoring_costs` table (job_id, purpose, provider, model, tokens, cost_usd, timestamp). Free-provider calls record `cost_usd=0`.
+- Aggregated by provider/model/purpose for dashboard display
+- Monthly budget gating applies to the Anthropic paid-fallback path only; all free-provider hops in the cascade are exempt
 
 **Activity Tracking:**
 - User actions logged to `activity_log` table (action, job_id, metadata, timestamp)

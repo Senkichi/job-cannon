@@ -5,9 +5,9 @@ This document describes the coding conventions used across `job_finder/` for eng
 ## Naming Patterns
 
 **Files:**
-- snake_case for all Python files (e.g., `haiku_scorer.py`, `pipeline_detector.py`)
+- snake_case for all Python files (e.g., `job_scorer.py`, `pipeline_detector.py`)
 - Descriptive names aligned with functionality (not generic like `utils.py`)
-- Web module files grouped by feature: `claude_client.py`, `haiku_scorer.py`, `sonnet_evaluator.py`, `pipeline_detector.py`
+- Web module files grouped by feature: `claude_client.py`, `model_provider.py`, `job_scorer.py`, `scoring_orchestrator.py`, `pipeline_detector.py`
 - Test files use `test_<module>.py` pattern (e.g., `test_scoring.py`, `test_pipeline_detector.py`)
 
 **Functions:**
@@ -69,13 +69,12 @@ from typing import Any
 
 from job_finder.config import DEFAULT_MONTHLY_BUDGET_USD
 
-# job_finder/web/haiku_scorer.py
+# job_finder/web/job_scorer.py
 import logging
-import re
 from typing import Any
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
-from job_finder.web.claude_client import call_claude, BudgetExceededError
+from job_finder.web.model_provider import call_model
+from job_finder.web.claude_client import BudgetExceededError
 ```
 
 **Path Aliases:**
@@ -91,24 +90,24 @@ from job_finder.web.claude_client import call_claude, BudgetExceededError
 
 **Pattern: Try-Except with Specific Exceptions**
 ```python
-# job_finder/web/haiku_scorer.py (lines 86-88)
+# job_finder/web/db_helpers.py — safe_json_load utility
 try:
-    comp = _json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
+    parsed = json.loads(value) if isinstance(value, str) else value
 except (ValueError, TypeError):
-    return None
+    return default
 ```
 
 **Pattern: Custom Exception for Budget Limits**
-- `BudgetExceededError` raised when Sonnet/Opus calls exceed monthly budget
+- `BudgetExceededError` raised when Anthropic paid-fallback calls would exceed the monthly cap (free-provider cascade hops are never budget-gated)
 - Defined in `job_finder/web/claude_client.py` (line 34)
 - Caught in calling code to decide whether to re-run or skip enrichment
 
 **Pattern: Return None on Parsing Failure**
 ```python
-# job_finder/web/haiku_scorer.py
+# job_finder/web/job_scorer.py
 def _build_comp_context(job_row: dict) -> str | None:
     """..."""
-    comp = _json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
+    comp = json.loads(comp_data_raw) if isinstance(comp_data_raw, str) else comp_data_raw
     if not comp or not isinstance(comp, dict):
         return None  # Safe default for optional data
 ```
@@ -130,13 +129,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def score_job_haiku(...) -> dict | None:
+def score_job(...) -> ScoringResult:
     """..."""
-    logger.info(f"Scoring job {job_id} with Haiku")
+    logger.info(f"Scoring job {job_id} via cascade")
     try:
         ...
     except BudgetExceededError as e:
-        logger.warning(f"Budget exceeded: {e}")
+        logger.warning(f"Anthropic paid-fallback budget exceeded: {e}")
         return None
 ```
 

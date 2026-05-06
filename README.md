@@ -3,8 +3,10 @@
 ![Job Cannon](docs/assets/banner.svg)
 
 > A personal job-search command center: aggregates listings from Gmail
-> alerts and SERP APIs, scores them with a two-tier Claude AI pipeline,
-> and tracks application state. Single-user, runs on localhost.
+> alerts, SERP APIs, and live ATS scanners; scores them with a
+> cascade-routed AI pipeline (free local + free cloud providers, with
+> Anthropic as paid fallback); and tracks application state.
+> Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/Senkichi/job-cannon/graph/badge.svg)](https://codecov.io/gh/Senkichi/job-cannon)
@@ -14,12 +16,16 @@
 
 ## Engineering Highlights
 
-- **Two-tier AI scoring with Python-derived classification.** Haiku 4.5
-  fast-filters every job (~$0.01); Sonnet 4.6 deep-evaluates the top
-  tier (~$0.10). Classification (`apply | consider | skip | reject`)
-  is **derived in Python from a six-axis ordinal rubric — never
-  emitted by the LLM** — which prevents classification drift across
-  model upgrades.
+- **Single-tier ordinal scoring through a multi-provider cascade.**
+  Every job runs through one `'scoring'` tier with a six-axis ordinal
+  rubric. The cascade tries free providers first
+  (Ollama local → Groq → Cerebras → Gemini) and falls through to
+  Anthropic only when all free options are exhausted or rate-limited.
+  Phase 33 shootout selected `qwen2.5:14b` (Ollama) as the production
+  primary; typical monthly cost is ~$0. Classification
+  (`apply | consider | skip | reject`) is **derived in Python from
+  the numeric sub-scores — never emitted by the LLM** — which
+  prevents classification drift across model swaps.
 - **Schema-versioned SQLite migrations.** 48 idempotent migrations
   applied via `pragma user_version`. Migration 41 introduces a
   backup-recency preflight that refuses destructive schema changes
@@ -38,8 +44,8 @@
   the long-tail of custom-built career sites (iCIMS, Phenom, UKG,
   bespoke).
 - **Eval harness with paired MAE + BCa bootstrap 95% CIs** for
-  prompt-variant A/B testing across model providers (Anthropic +
-  Ollama-local).
+  prompt-variant A/B testing across the full provider matrix
+  (Ollama-local, Groq, Cerebras, Gemini, Anthropic).
 - **Cost-gated execution.** Configurable monthly budget cap; the
   cost-gate returns a bool and lets callers decide whether to
   fail-open or raise — the orchestrator and the scheduler choose
@@ -75,10 +81,11 @@ flowchart LR
   JSearch --> Parser
   Thordata --> Parser
   DataForSEO --> Parser
+  ATS[ATS Scanners<br/>Greenhouse / Lever / Ashby / Workday / SmartRecruiters] --> Parser
   Parser[Source Parsers<br/>+ Normalize] --> DB[(SQLite + WAL)]
-  DB --> Haiku[Haiku Fast Filter<br/>~$0.01/job]
-  Haiku -->|score >= threshold| Sonnet[Sonnet Deep Eval<br/>+ Six-axis rubric]
-  Sonnet --> Classify[Python-derived<br/>classification]
+  DB --> Score[Cascade Scoring<br/>six-axis ordinal rubric]
+  Score -->|tries in order| Cascade{{Ollama qwen2.5:14b<br/>→ Groq → Cerebras<br/>→ Gemini → Anthropic}}
+  Cascade --> Classify[Python-derived<br/>classification]
   Classify --> Dashboard[Flask + HTMX<br/>localhost:5000]
   DB --> Pipeline[Application<br/>Pipeline Tracker]
   Pipeline --> Dashboard
@@ -93,7 +100,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 | Runtime | Python 3.13, Flask 3.1, APScheduler 3.x |
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
-| AI | Anthropic SDK (Claude Haiku + Sonnet); optional Ollama for local fallback |
+| AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Groq → Cerebras → Gemini → Anthropic SDK (paid fallback) |
 | Sources | Gmail API v1 (OAuth), SerpAPI, JSearch, Thordata, DataForSEO |
 | Tooling | uv (canonical), ruff, pre-commit, gitleaks, commitizen, pytest |
 | CI | GitHub Actions (Ubuntu + Windows matrix), Codecov upload |
@@ -105,7 +112,7 @@ job_finder/
 |-- web/                    # Flask app (11 blueprints, scheduler, AI clients, ATS)
 |-- parsers/                # Email parsers (LinkedIn, Glassdoor, ZipRecruiter, Indeed stub)
 |-- sources/                # Data sources (Gmail, SerpAPI, JSearch, Thordata, DataForSEO)
-|-- scoring/                # Two-tier scoring + six-axis rubric helpers
+|-- scoring/                # Single-tier ordinal scoring + six-axis rubric helpers
 |-- eval/                   # Eval harness + bootstrap CIs
 |-- models.py               # Job dataclass with dedup_key
 |-- config.py               # YAML config loader + path discovery
@@ -123,18 +130,20 @@ The 11 blueprints: `admin`, `batch_scoring`, `companies`, `costs`,
 
 ## Cost Estimates
 
-Job Cannon uses Claude AI for scoring. The costs are low but worth
-calling out:
+The cascade tries free providers first, so typical monthly AI cost is
+**~$0**. Anthropic only enters the picture as a paid fallback when
+every free provider in the chain is exhausted or rate-limited.
 
-| What | Cost | When |
+| Provider | Cost | When |
 |------|------|------|
-| Haiku fast filter | ~$0.01–0.02 per job | Every new job found |
-| Sonnet deep evaluation | ~$0.05–0.15 per job | Jobs above the Haiku threshold (42 by default) |
+| Ollama (qwen2.5:14b local) | $0 | Primary — runs locally |
+| Groq / Cerebras / Gemini free tiers | $0 | Each gated by per-day request limits |
+| Anthropic (paid fallback) | ~$0.05–0.15 per job scored | Only when all free providers exhausted |
 
-**Typical monthly cost:** $1–5 for 50–200 new jobs. A configurable
-budget cap (default $25/mo, set in `config.yaml` under
-`scoring.monthly_budget_usd`) prevents runaway. The app stops AI
-scoring when the cap is reached and resumes the next month.
+A configurable budget cap (default $25/mo, set in `config.yaml` under
+`scoring.monthly_budget_usd`) limits the Anthropic fallback if it
+ever activates. The app stops paid scoring when the cap is reached
+and resumes the next month.
 
 **Optional SERP sources:** SerpAPI, JSearch, Thordata, and DataForSEO
 are all opt-in. Each has its own pricing tier — see
