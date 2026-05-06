@@ -2,7 +2,7 @@
 
 import logging
 import time as _time
-from datetime import UTC, datetime
+from datetime import datetime
 
 from flask import (
     Blueprint,
@@ -40,7 +40,7 @@ def _get_stale_count(conn) -> int:
     return row[0] if row else 0
 
 
-from job_finder.web.blueprints import PIPELINE_STATUSES, trigger_interview_prep_if_applied
+from job_finder.web.blueprints import PIPELINE_STATUSES
 from job_finder.web.db_helpers import get_db
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,6 @@ def expand(dedup_key: str):
         return "", 404
 
     job = ctx["job"]
-    prep_row = ctx["prep_row"]
 
     try:
         log_activity(
@@ -243,7 +242,6 @@ def expand(dedup_key: str):
         "jobs/_row_expanded.html",
         job=job,
         pipeline_statuses=PIPELINE_STATUSES,
-        prep_row=prep_row,
     )
 
 
@@ -279,15 +277,6 @@ def update_status(dedup_key: str):
     old_status = old_job.get("pipeline_status") if old_job else None
 
     update_pipeline_status(conn, dedup_key, new_status, source="manual")
-
-    # Trigger interview prep generation in background when status moves to "applied"
-    trigger_interview_prep_if_applied(
-        dedup_key,
-        new_status,
-        current_app.config["DB_PATH"],
-        current_app.config.get("JF_CONFIG", {}),
-        testing=current_app.config.get("TESTING", False),
-    )
 
     job = get_job(conn, dedup_key)
     if job is None:
@@ -377,7 +366,6 @@ def paste_jd(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="Please provide a job description.",
-            prep_row=ctx["prep_row"],
         )
 
     # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
@@ -434,7 +422,6 @@ def paste_jd(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         error=error,
-        prep_row=ctx["prep_row"],
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
@@ -461,7 +448,6 @@ def rescore(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="No JD available for re-scoring. Paste a JD first.",
-            prep_row=ctx["prep_row"],
         )
 
     # Capture old classification before re-evaluation
@@ -539,7 +525,6 @@ def rescore(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         error=error,
-        prep_row=ctx["prep_row"],
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
@@ -554,79 +539,6 @@ def score_cell(dedup_key: str):
     if job is None:
         return "", 404
     return render_template("jobs/_score_cell.html", job=job)
-
-
-@jobs_bp.route("/<path:dedup_key>/interview-prep/status", strict_slashes=False)
-def interview_prep_status(dedup_key: str):
-    """HTMX poll endpoint -- returns current interview prep state for a job.
-
-    Called every 2s by hx-trigger="every 2s" in _interview_prep_generating.html.
-    Returns:
-    - _interview_prep_generating.html (with hx-trigger) while status='generating'
-    - _interview_prep.html (static, no hx-trigger -- stops polling) when status='done'
-    - error fragment when status='error'
-    - empty string (200) if no prep row exists yet
-    """
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
-
-    job = get_job(conn, dedup_key)
-    if job is None:
-        return "", 404
-
-    prep_row = conn.execute(
-        "SELECT id, status, company_brief, predicted_questions, gap_mitigation, "
-        "questions_to_ask, error_msg, generated_at "
-        "FROM interview_preps WHERE job_id = ? ORDER BY id DESC LIMIT 1",
-        (dedup_key,),
-    ).fetchone()
-
-    if prep_row is None:
-        return "", 200
-
-    status = prep_row["status"] if prep_row else None
-
-    # Timeout safety net: auto-error if generating for >15 minutes
-    if status == "generating":
-        try:
-            generated_at = datetime.fromisoformat(dict(prep_row).get("generated_at", ""))
-            elapsed_min = (
-                datetime.now(UTC).replace(tzinfo=None) - generated_at
-            ).total_seconds() / 60
-            if elapsed_min > 15:
-                logger.warning(
-                    "Interview prep for %s timed out after %.1f min", dedup_key, elapsed_min
-                )
-                conn.execute(
-                    "UPDATE interview_preps SET status='error', error_msg=? WHERE id=? AND status='generating'",
-                    ("Timed out (>15 min)", prep_row["id"]),
-                )
-                conn.commit()
-                return (
-                    '<div class="text-xs text-red-400 p-3">Interview prep error: Timed out (&gt;15 min)</div>',
-                    200,
-                )
-        except (ValueError, TypeError, KeyError):
-            pass
-
-        return render_template(
-            "jobs/_interview_prep_generating.html",
-            job=job,
-        )
-    elif status == "done":
-        return render_template(
-            "jobs/_interview_prep.html",
-            job=job,
-            prep=prep_row,
-        )
-    elif status == "error":
-        error_msg = prep_row["error_msg"] or "Interview prep failed."
-        return (
-            f'<div class="text-xs text-red-400 p-3">Interview prep error: {error_msg}</div>',
-            200,
-        )
-
-    return "", 200
 
 
 @jobs_bp.route("/<path:dedup_key>/save-jd", methods=["POST"], strict_slashes=False)
@@ -647,7 +559,6 @@ def save_jd(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="Please provide a job description.",
-            prep_row=ctx["prep_row"],
         )
 
     # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
@@ -680,7 +591,6 @@ def save_jd(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         jd_saved=True,
-        prep_row=ctx["prep_row"],
     )
 
 

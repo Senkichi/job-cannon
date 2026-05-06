@@ -210,15 +210,6 @@ db:
   # SQLite database file path (created automatically on first run)
   path: jobs.db
 
-# --- Desktop notifications (Windows only, requires win11toast) ---
-notifications:
-  # Notify when a job scores above the haiku_threshold
-  high_score: true
-  # Notify when pipeline status changes (rejection, interview invite, etc.)
-  pipeline_change: true
-  # Notify when monthly API budget reaches 80% or 100%
-  budget_alert: true
-
 # --- Careers page crawler ---
 careers_crawl:
   enabled: true

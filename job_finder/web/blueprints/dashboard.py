@@ -1,9 +1,8 @@
 """Dashboard blueprint — overview stats, activity feed, pipeline summary."""
 
-import logging
 import time
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, redirect, render_template, request, url_for
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import (
@@ -18,8 +17,6 @@ from job_finder.web.claude_client import get_cost_stats
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_scorable
 from job_finder.web.model_provider import tier_has_configured_provider
-
-logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
@@ -54,30 +51,6 @@ def _get_ats_context(conn):
         "last_scan": last_scan,
         "company_count": (counts["total"] or 0) if counts else 0,
         "ats_tracked_count": (counts["ats_tracked"] or 0) if counts else 0,
-    }
-
-
-def _get_rejection_context(conn):
-    """Query rejection insights context for the Dashboard.
-
-    Returns dict with latest_report (sqlite3.Row or None) and
-    unreviewed_rejection_count (int).
-    Handles missing table gracefully (pre-migration or error cases).
-    """
-    try:
-        latest_report = conn.execute(
-            "SELECT id, report_text, rejections_analyzed, generated_at, cost_usd "
-            "FROM rejection_reports ORDER BY generated_at DESC LIMIT 1"
-        ).fetchone()
-        unreviewed_count = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE pipeline_status='rejected' AND rejection_reviewed=0"
-        ).fetchone()[0]
-    except Exception:
-        latest_report = None
-        unreviewed_count = 0
-    return {
-        "latest_report": latest_report,
-        "unreviewed_rejection_count": unreviewed_count,
     }
 
 
@@ -224,7 +197,6 @@ def index():
     pipeline_summary = get_pipeline_summary(conn)
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
-    rejection_ctx = _get_rejection_context(conn)
 
     return render_template(
         "dashboard/index.html",
@@ -235,8 +207,6 @@ def index():
         pipeline_summary=pipeline_summary,
         pending_detections=pending_detections,
         pipeline_events=pipeline_events,
-        latest_report=rejection_ctx["latest_report"],
-        unreviewed_rejection_count=rejection_ctx["unreviewed_rejection_count"],
     )
 
 
@@ -283,29 +253,3 @@ def cost_detail():
         cost_stats=cost_stats,
         budget_cap=budget_cap,
     )
-
-
-@dashboard_bp.route("/rejection-analysis", methods=["POST"], strict_slashes=False)
-def rejection_analysis():
-    """On-demand rejection analysis trigger.
-
-    Calls run_rejection_analysis synchronously and flashes a result message.
-    Redirects back to the Dashboard index.
-    """
-    from job_finder.web.rejection_analyzer import run_rejection_analysis
-
-    db_path = current_app.config["DB_PATH"]
-    config = current_app.config.get("JF_CONFIG", {})
-    try:
-        result = run_rejection_analysis(db_path, config)
-        count = result.get("rejections_analyzed", 0)
-        if result.get("budget_exceeded"):
-            flash("Rejection analysis skipped: monthly budget cap reached.", "warning")
-        elif count == 0:
-            flash("No unreviewed rejections to analyze.", "info")
-        else:
-            flash(f"Rejection analysis complete: {count} rejections analyzed.", "success")
-    except Exception as e:
-        logger.error("On-demand rejection analysis failed: %s", e)
-        flash(f"Rejection analysis failed: {e}", "error")
-    return redirect(url_for("dashboard.index"))

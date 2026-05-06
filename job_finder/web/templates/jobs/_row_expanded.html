@@ -361,18 +361,6 @@
 
     </div>{# end left column grid #}
 
-    {# Right column: interview prep (shown only for applied jobs with prep data) #}
-    {% if prep_row and prep_row['status'] in ('generating', 'done') %}
-    <div class="w-[800px] flex-shrink-0 hidden lg:block border-l border-slate-700/50 pl-4">
-      {% if prep_row['status'] == 'generating' %}
-        {% include "jobs/_interview_prep_generating.html" %}
-      {% elif prep_row['status'] == 'done' %}
-        {% set prep = prep_row %}
-        {% include "jobs/_interview_prep.html" %}
-      {% endif %}
-    </div>
-    {% endif %}
-
     </div>{# end flex outer #}
 
   </td>

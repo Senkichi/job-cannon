@@ -377,11 +377,14 @@ def test_migration_count_is_thirteen():
     reset enrichment_tier, drop scores derived from "<title>Workday</title>").
     Migration 47 (public-repo cleanup): drop resume_generations,
     resume_preferences_detected, resume_upload_reviews tables.
+    Migration 48 (public-repo cleanup): drop interview_preps,
+    rejection_reports, rejection_pattern_reports tables and the
+    jobs.rejection_reviewed column.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 47
+    assert len(MIGRATIONS) == 48
 
 
 class TestMigration27:
@@ -410,16 +413,6 @@ class TestMigration27:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
         assert "job_archetype" in cols, "job_archetype column missing from jobs"
-
-    def test_migration28_adds_reusable_stories_json(self, tmp_db_path):
-        """Migration 28 adds reusable_stories_json column to interview_preps."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(interview_preps)").fetchall()}
-        conn.close()
-        assert "reusable_stories_json" in cols, (
-            "reusable_stories_json column missing from interview_preps"
-        )
 
     def test_migration27_expiry_status_default_null(self, tmp_db_path):
         """expiry_status defaults to NULL for existing rows."""
@@ -863,56 +856,6 @@ class TestMigration3:
         assert "idx_pipeline_detections_message_id" in index_names
 
 
-class TestMigration5Reporting:
-    """Verify Migration 5 creates required tables and columns for Phase 5 (from test_rejection_analyzer.py)."""
-
-    def test_rejection_reports_table_exists(self, tmp_db_path):
-        """Migration creates rejection_reports table."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        tables = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-        conn.close()
-        assert "rejection_reports" in tables, "rejection_reports table missing after Migration 5"
-
-    def test_rejection_reports_columns(self, tmp_db_path):
-        """rejection_reports table has required columns."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(rejection_reports)").fetchall()}
-        conn.close()
-
-        expected = {"id", "report_text", "rejections_analyzed", "generated_at", "cost_usd"}
-        assert expected.issubset(cols), f"Missing columns in rejection_reports: {expected - cols}"
-
-    def test_jobs_has_rejection_reviewed_column(self, tmp_db_path):
-        """Migration 5 adds rejection_reviewed column to jobs table."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
-        conn.close()
-        assert "rejection_reviewed" in cols, "rejection_reviewed column missing from jobs"
-
-    def test_rejection_reviewed_default_zero(self, tmp_db_path):
-        """rejection_reviewed defaults to 0 for new rows."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
-        conn.execute(
-            """INSERT INTO jobs
-                (dedup_key, title, company, location, first_seen, last_seen)
-            VALUES ('test|job|loc', 'Test Job', 'Test Co', 'Remote',
-                    '2026-03-01', '2026-03-10')"""
-        )
-        conn.commit()
-        row = conn.execute(
-            "SELECT rejection_reviewed FROM jobs WHERE dedup_key='test|job|loc'"
-        ).fetchone()
-        conn.close()
-        assert row[0] == 0, f"Expected rejection_reviewed=0, got {row[0]}"
-
-
 class TestMigration18:
     """Tests for migration 18: provider column on scoring_costs."""
 
@@ -965,8 +908,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 47 entries (Migration 47: public-repo cleanup drops resume tables)."""
-        assert len(MIGRATIONS) == 47
+        """MIGRATIONS list has 48 entries (Migration 48: public-repo cleanup drops rejection + interview_prep tables)."""
+        assert len(MIGRATIONS) == 48
 
 
 class TestMigration40:
