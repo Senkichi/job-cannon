@@ -36,17 +36,7 @@ INFRA_FILES=(
 # Pre-cascade features. Not called during the hot ingestion / scoring path
 # and therefore out of the Ollama cascade plan's scope. Migrate these in a
 # follow-up; do not add new entries without an accompanying plan.
-LEGACY_BYPASS_FILES=(
-    "job_finder/web/blueprints/profile_recommendations.py"
-    "job_finder/web/blueprints/resume_review.py"
-    "job_finder/web/interview_prep.py"
-    "job_finder/web/rejection_analyzer.py"
-    "job_finder/web/resume_feedback.py"
-    "job_finder/web/resume_generator.py"
-    "job_finder/web/resume_multi_version.py"
-    "job_finder/web/resume_style_guide.py"
-    "job_finder/web/resume_validator.py"
-)
+LEGACY_BYPASS_FILES=()
 
 is_exempt() {
     local f="$1"

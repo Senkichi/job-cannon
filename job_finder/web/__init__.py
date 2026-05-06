@@ -175,7 +175,6 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.blueprints.jobs import jobs_bp
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
-    from job_finder.web.blueprints.profile_recommendations import profile_recs_bp
     from job_finder.web.blueprints.settings import settings_bp
     from job_finder.web.blueprints.sync import sync_bp
 
@@ -189,7 +188,6 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(detections_bp)
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(profile_bp)
-    app.register_blueprint(profile_recs_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(admin_bp)
 
