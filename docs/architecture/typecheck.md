@@ -323,3 +323,67 @@ uv run --active pyright            # 45 errors
 
 Both invocations match S5 / S6's invocation conventions: `mypy job_finder`
 (scoped, NOT `mypy .`) so apples-to-apples comparison holds.
+
+## Session 7d re-measurement (`portfolio/s7d-db-split`, 2026-05-06)
+
+S7d split `job_finder/db.py` (845 LOC) into a package
+(`job_finder/db/__init__.py` + `_classification.py` + `_persistence.py` +
+`_jobs.py` + `_queries.py`). Public surface preserved via PEP 484 explicit
+re-export form (`as X`). Anchor: S7e-close numbers above.
+
+| Tool | Before (S7e-close) | After (S7d-close) | Delta |
+|---|---|---|---|
+| `mypy job_finder` | 113 errors / 41 files / 187 source files | **106 errors / 36 files / 191 source files** | **−7 errors, −5 files, +4 source files** |
+| `pyright` | 45 errors | **45 errors** | **unchanged** |
+
+Source-file count rose by 4 because the monolith became a package with
+4 new private modules (`_classification.py`, `_persistence.py`, `_jobs.py`,
+`_queries.py`). The original `db.py` is gone from the count; net `+4`
+matches the four new files.
+
+The mypy −7 / −5 files improvement is concentrated in two effects:
+
+1. **Concentrated type-narrowing.** When a long module containing several
+   distinct concerns is split, mypy's per-function inference no longer has
+   to reconcile broader union types across unrelated call sites. The split
+   makes it easier for mypy to follow narrower types within each
+   sub-module — same effect S7c reported (-9 mypy errors when a slim
+   `__init__.py` reduced cross-concern import surface).
+2. **Drop of one explicit `dict | tuple` ambiguity** in the original
+   `upsert_job` body's `jd_full_value = ()` line: the moved version in
+   `_jobs.py` carries an explicit `jd_full_value: tuple = ()` annotation
+   so mypy no longer re-infers an Any-flavored union when the conditional
+   re-assigns it. (Annotation added at extraction time; not a behavioral
+   change.)
+
+Pyright unchanged: the `as X` re-export form silences `reportUnusedImport`
+on every re-export site in `db/__init__.py`, neutralizing what would
+otherwise have been ~25 new pyright complaints from the multi-file
+re-export pattern. The pre-existing 45-error baseline (concentrated in
+`gemini_provider`, `companies` blueprint, `pipeline_runner`, etc.) held
+exactly.
+
+### Raw output excerpts (S7d)
+
+mypy tail:
+```
+job_finder\web\pipeline_runner.py:185: error: Unsupported left operand type for + ("object")  [operator]
+job_finder\web\backfill_companies.py:419: error: Incompatible types in assignment (expression has type "int | None", variable has type "int")  [assignment]
+Found 106 errors in 36 files (checked 191 source files)
+```
+
+pyright tail:
+```
+c:\Users\senki\repos\job-cannon\job_finder\web\scoring_orchestrator.py:131:9 - error: Argument of type "Unknown | None" cannot be assigned to parameter "dedup_key" of type "str" in function "persist_job_assessment"
+45 errors, 0 warnings, 0 informations
+```
+
+### Reproducing for S7d
+
+```powershell
+uv run --active mypy job_finder    # 106 errors / 36 files / 191 source files
+uv run --active pyright            # 45 errors
+```
+
+The new private sub-modules in `job_finder/db/` are scanned the same way
+as any other package member; no special configuration was added in S7d.
