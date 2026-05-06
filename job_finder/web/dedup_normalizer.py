@@ -30,10 +30,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_FK_TABLES: frozenset = frozenset(
     {
         "pipeline_events",
-        "resume_generations",
         "pipeline_detections",
-        "interview_preps",
-        "resume_preferences_detected",
         "scoring_costs",
     }
 )
@@ -214,7 +211,7 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
     3. For each group with >1 row: keeps the earliest first_seen row as canonical
     4. Merges sources, source_urls, location, description, notes, salary, scores,
        and pipeline_status from all duplicates into the canonical row
-    5. Updates all FK tables (pipeline_events, resume_generations, etc.)
+    5. Updates all FK tables (pipeline_events, pipeline_detections, scoring_costs)
     6. Inserts merge_log entries for each merge
     7. Updates canonical row's dedup_key to the normalized format
     8. Deletes duplicate rows
@@ -591,10 +588,7 @@ def _update_fk_tables(
     """
     fk_tables = [
         ("pipeline_events", "job_id"),
-        ("resume_generations", "job_id"),
         ("pipeline_detections", "job_id"),
-        ("interview_preps", "job_id"),
-        ("resume_preferences_detected", "job_id"),
         ("scoring_costs", "job_id"),
     ]
     for table, column in fk_tables:

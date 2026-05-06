@@ -5,15 +5,12 @@ Provides:
     validate_profile(profile) -> list[dict]   -- Returns list of warning dicts
     load_profile(path) -> dict                -- Load JSON file (returns empty structure if missing)
     save_profile(profile, path) -> None       -- Write JSON file with indent=2 (with empty-overwrite guard)
-    extract_profile_from_markdown(text) -> dict  -- Opus-powered extraction from markdown
 """
 
 import json
 import logging
 import re
 from pathlib import Path
-
-from job_finder.config import DEFAULT_MODEL_OPUS
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +31,6 @@ PROFILE_SCHEMA = {
     ],
     "skills": ["str (ordered by priority)"],
     "education": ["dict (opaque passthrough — no form UI, preserved on save)"],
-    "resume_preferences": {
-        "summary_style": "str",
-        "emphasis": ["str"],
-    },
 }
 
 # ---------------------------------------------------------------------------
@@ -48,10 +41,6 @@ EMPTY_PROFILE = {
     "positions": [],
     "skills": [],
     "education": [],
-    "resume_preferences": {
-        "summary_style": "",
-        "emphasis": [],
-    },
 }
 
 # ---------------------------------------------------------------------------
@@ -212,89 +201,3 @@ def save_profile(
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile, f, indent=2, ensure_ascii=False)
-
-
-# ---------------------------------------------------------------------------
-# Opus-powered markdown extraction
-# ---------------------------------------------------------------------------
-
-_EXTRACTION_PROMPT = """\
-You are a professional resume parser. Extract structured experience data from the following resume/markdown text.
-
-Return ONLY valid JSON (no markdown code fences, no explanation) matching this exact schema:
-{
-  "positions": [
-    {
-      "title": "Job Title",
-      "company": "Company Name",
-      "start_date": "MMM YYYY",
-      "end_date": "MMM YYYY or null if current",
-      "achievements": ["Bullet 1", "Bullet 2"],
-      "skills": ["Skill1", "Skill2"]
-    }
-  ],
-  "skills": ["Ordered list of all skills, most important first"],
-  "resume_preferences": {
-    "summary_style": "professional summary extracted or inferred from the document",
-    "emphasis": ["Key theme 1", "Key theme 2"]
-  }
-}
-
-Rules:
-- Extract ALL positions from the document, most recent first
-- For achievements, use the actual bullet text verbatim where possible
-- For skills in each position, infer from the achievements/context
-- For top-level skills, aggregate all unique skills ordered by how frequently they appear
-- Do not fabricate information; only extract what's present
-- If a field is not found, use an empty string or empty array
-
-Resume/markdown to extract from:
-"""
-
-
-def extract_profile_from_markdown(markdown_text: str) -> dict:
-    """Extract a structured profile from markdown text using Claude Opus.
-
-    Args:
-        markdown_text: Raw markdown resume/experience text.
-
-    Returns:
-        Profile dict matching PROFILE_SCHEMA, or an error dict with key 'error'.
-    """
-    try:
-        from job_finder.web.claude_client import _run_oneshot
-
-        envelope = _run_oneshot(
-            model=DEFAULT_MODEL_OPUS,
-            system="You extract structured profiles from resume text. Return valid JSON only.",
-            user_message=_EXTRACTION_PROMPT + markdown_text,
-            timeout=120,
-        )
-
-        response_text = envelope.get("result", "").strip()
-
-        # Strip any accidental code fences
-        if response_text.startswith("```"):
-            lines = response_text.splitlines()
-            response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-        extracted = json.loads(response_text)
-
-        # Ensure required keys exist with proper types
-        if "positions" not in extracted:
-            extracted["positions"] = []
-        if "skills" not in extracted:
-            extracted["skills"] = []
-        if "resume_preferences" not in extracted:
-            extracted["resume_preferences"] = {"summary_style": "", "emphasis": []}
-
-        return extracted
-
-    except Exception as exc:
-        logger.warning("extract_profile_from_markdown failed: %s", exc)
-        return {
-            "error": str(exc),
-            "positions": [],
-            "skills": [],
-            "resume_preferences": {"summary_style": "", "emphasis": []},
-        }

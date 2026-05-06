@@ -145,8 +145,6 @@ scoring:
   models:
     haiku: claude-haiku-4-5
     sonnet: claude-sonnet-4-6
-  # Score threshold for generating multiple resume versions
-  multi_version_threshold: 80
 
 # --- Multi-provider model routing (optional) ---
 # By default, all tiers route to Anthropic using the models specified above.
@@ -211,12 +209,6 @@ output:
 db:
   # SQLite database file path (created automatically on first run)
   path: jobs.db
-
-# --- Google Drive (for resume export) ---
-drive:
-  # Folder ID is auto-created when you run gmail_auth — leave empty initially
-  folder_id: ""
-  convert_to_gdoc: true
 
 # --- Desktop notifications (Windows only, requires win11toast) ---
 notifications:

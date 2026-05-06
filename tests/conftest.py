@@ -336,51 +336,6 @@ def migrated_db_with_jobs():
         os.remove(path)
 
 
-@pytest.fixture
-def sample_resume_data():
-    """Return a structured resume dict for use across resume test classes.
-
-    Contains name, contact_line, summary, skills, positions (2 entries with
-    achievements), and education (1 entry). Reusable across all resume tests.
-    """
-    return {
-        "name": "Jane Doe",
-        "contact_line": "jane@example.com | (555) 555-1234 | linkedin.com/in/janedoe | San Francisco, CA",
-        "summary": (
-            "Data scientist with 8 years of experience building machine learning systems "
-            "at scale. Specializes in experimentation platforms and causal inference."
-        ),
-        "skills": ["Python", "SQL", "Machine Learning", "A/B Testing", "Spark", "dbt"],
-        "positions": [
-            {
-                "title": "Senior Data Scientist",
-                "company": "Acme Corp",
-                "dates": "Jan 2021 - Present",
-                "achievements": [
-                    "Led A/B testing platform serving 10M daily active users",
-                    "Reduced model inference latency by 40% via feature store refactoring",
-                ],
-            },
-            {
-                "title": "Data Scientist",
-                "company": "Beta Inc",
-                "dates": "Mar 2018 - Dec 2020",
-                "achievements": [
-                    "Built customer churn model with 87% AUC, saving $2M annually",
-                    "Mentored 3 junior data scientists and established team best practices",
-                ],
-            },
-        ],
-        "education": [
-            {
-                "degree": "M.S. Statistics",
-                "institution": "Stanford University",
-                "year": "2018",
-            }
-        ],
-    }
-
-
 @pytest.fixture(autouse=True)
 def mock_run_oneshot():
     """Auto-mock _run_oneshot so no test accidentally invokes the real Claude CLI.

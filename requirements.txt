@@ -30,10 +30,6 @@ scipy~=1.17
 # Phase 5: Intelligence
 win11toast~=0.35; sys_platform == "win32"   # Windows-only toast notifications
 
-# Phase 17: Resume Intelligence
-PyMuPDF~=1.24
-python-docx~=1.2
-
 # Telemetry — installed separately: uv pip install -e ../anthropic-telemetry
 
 # Content extraction

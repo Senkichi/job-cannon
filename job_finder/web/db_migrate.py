@@ -899,6 +899,20 @@ MIGRATIONS.append(
 )
 
 
+# Migration 47: drop resume + Drive feedback tables (public-repo cleanup).
+MIGRATIONS.append(
+    [
+        "DROP INDEX IF EXISTS idx_resume_generations_job_id",
+        "DROP INDEX IF EXISTS idx_resume_generations_status",
+        "DROP INDEX IF EXISTS idx_prefs_detected_job_id",
+        "DROP INDEX IF EXISTS idx_prefs_detected_accepted",
+        "DROP TABLE IF EXISTS resume_generations",
+        "DROP TABLE IF EXISTS resume_preferences_detected",
+        "DROP TABLE IF EXISTS resume_upload_reviews",
+    ]
+)
+
+
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 

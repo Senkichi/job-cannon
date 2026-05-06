@@ -22,9 +22,7 @@ from flask import (
     url_for,
 )
 
-from job_finder.web.db_helpers import get_db
 from job_finder.web.profile_schema import (
-    extract_profile_from_markdown,
     load_profile,
     save_profile,
     validate_profile,
@@ -35,7 +33,6 @@ logger = logging.getLogger(__name__)
 profile_bp = Blueprint("profile", __name__, url_prefix="/profile")
 
 _PROFILE_PATH = "experience_profile.json"
-_UPLOAD_DIR = "data/resume_uploads"
 
 
 def _get_all_skills(profile: dict) -> list:
@@ -55,51 +52,14 @@ def _get_all_skills(profile: dict) -> list:
 
 
 def _load_profile_page_extras() -> dict:
-    """Load supplementary variables required by profile/index.html.
-
-    Returns a dict with keys: resume_preferences, uploads, style_guide, profile_mtime.
-    All DB queries degrade gracefully if tables are absent (pre-migration or error).
-    """
-    db_path = current_app.config.get("DB_PATH", "jobs.db")
-    conn = get_db(db_path)
-
-    resume_preferences = []
-    try:
-        rows = conn.execute(
-            "SELECT * FROM resume_preferences_detected "
-            "WHERE accepted=1 AND applied_at IS NULL "
-            "ORDER BY preference_type, detected_at DESC"
-        ).fetchall()
-        resume_preferences = [dict(row) for row in rows]
-    except Exception:
-        pass
-
-    upload_rows = []
-    try:
-        rows = conn.execute(
-            "SELECT id, filename, uploaded_at, review_status "
-            "FROM resume_upload_reviews ORDER BY uploaded_at DESC"
-        ).fetchall()
-        upload_rows = [dict(row) for row in rows]
-    except Exception:
-        pass
-
-    from job_finder.web.resume_style_guide import load_style_guide
-
-    style_guide = load_style_guide()
-
+    """Load supplementary variables required by profile/index.html."""
     profile_mtime = 0
     try:
         profile_mtime = os.path.getmtime(_PROFILE_PATH)
     except OSError:
         pass
 
-    return {
-        "resume_preferences": resume_preferences,
-        "uploads": upload_rows,
-        "style_guide": style_guide,
-        "profile_mtime": profile_mtime,
-    }
+    return {"profile_mtime": profile_mtime}
 
 
 @profile_bp.route("/", strict_slashes=False)
@@ -157,40 +117,6 @@ def save():
     except (ValueError, KeyError) as exc:
         flash(f"Error saving profile: {exc}", "error")
         return redirect(url_for("profile.index"))
-
-
-@profile_bp.route("/import", methods=["POST"], strict_slashes=False)
-def import_markdown():
-    """Accept .md file upload, extract structured profile via Claude Opus."""
-    uploaded = request.files.get("markdown_file")
-    if uploaded is None or uploaded.filename == "":
-        flash("No file uploaded. Please select a .md file.", "error")
-        return redirect(url_for("profile.index"))
-
-    try:
-        markdown_text = uploaded.read().decode("utf-8")
-    except UnicodeDecodeError:
-        flash("Could not read file as UTF-8 text. Please upload a .md file.", "error")
-        return redirect(url_for("profile.index"))
-
-    extracted = extract_profile_from_markdown(markdown_text)
-
-    if "error" in extracted and not extracted.get("positions") and not extracted.get("skills"):
-        flash(f"Extraction failed: {extracted['error']}", "error")
-        return redirect(url_for("profile.index"))
-
-    warnings = validate_profile(extracted)
-    all_skills = _get_all_skills(extracted)
-    extras = _load_profile_page_extras()
-
-    return render_template(
-        "profile/index.html",
-        profile=extracted,
-        warnings=warnings,
-        all_skills=all_skills,
-        import_success=True,
-        **extras,
-    )
 
 
 @profile_bp.route("/reorder-positions", methods=["POST"], strict_slashes=False)
