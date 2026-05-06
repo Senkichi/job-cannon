@@ -12,6 +12,12 @@ if command -v pre-commit &> /dev/null; then
 elif uv run pre-commit --version &> /dev/null 2>&1; then
     uv run pre-commit run --hook-stage pre-commit || exit 1
 else
-    echo "  WARN: pre-commit is not installed. Skipping hooks."
-    echo "        Install with: uv pip install pre-commit"
+    # R5.2 (2026-05-06, finding F-F2): fail closed instead of warn-and-pass.
+    # The prior warn-and-pass behavior caused the S3 incident where the
+    # first commit landed unformatted; pre-commit + commitizen are now
+    # pinned in [project.optional-dependencies.dev] (R5.1) so a clean
+    # `uv sync --extra dev` is sufficient to recover.
+    echo "  ERROR: pre-commit is not installed and 'uv run pre-commit' is not available." >&2
+    echo "         Run: uv sync --extra dev" >&2
+    exit 1
 fi
