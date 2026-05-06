@@ -1,4 +1,19 @@
-"""SQLite persistence layer for job deduplication and run history."""
+"""SQLite persistence layer for job deduplication and run history.
+
+Package layout (post-S7d):
+
+- `_classification.py` — JobAssessment + derive_classification + _SUB_SCORE_KEYS
+  (pure scoring-rule logic, zero DB deps).
+- `_persistence.py` (planned) — write paths (persist_*, update_pipeline_status,
+  log_run).
+- `_jobs.py` (planned) — job CRUD (upsert_job, get_job, merge_description,
+  load_job_context, JOBS_ALL_COLUMNS).
+- `_queries.py` (planned) — read-only filters (get_filtered_jobs +
+  sort_by allowlist co-located, get_distinct_sources).
+
+This `__init__.py` re-exports the public surface so existing
+`from job_finder.db import X` paths continue to work unchanged.
+"""
 
 from __future__ import annotations
 
@@ -7,110 +22,19 @@ import logging
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.models import Job
 
+# v3.0 scoring-rule cluster — pure logic, no DB deps. Re-exported for the
+# public surface (downstream callers in eval/, tests/, web/ import these).
+# PEP 484 explicit re-export form — `as X` makes the re-export contract
+# machine-readable to mypy/pyright and silences reportUnusedImport.
+from ._classification import _SUB_SCORE_KEYS as _SUB_SCORE_KEYS
+from ._classification import JobAssessment as JobAssessment
+from ._classification import derive_classification as derive_classification
+
 _log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# v3.0 ordinal scoring (Phase 34) — JobAssessment + classification rule
-# ---------------------------------------------------------------------------
-
-# Canonical sub-score key order (matches CONTEXT D-05 and the v3 scoring prompt's
-# JSON schema). Used for JSON serialization stability and for derive_classification.
-_SUB_SCORE_KEYS: tuple[str, ...] = (
-    "title_fit",
-    "location_fit",
-    "comp_fit",
-    "domain_match",
-    "seniority_match",
-    "skills_match",
-)
-
-
-@dataclass(frozen=True)
-class JobAssessment:
-    """Unified v3.0 scoring result. Replaces HaikuScore + SonnetScore pair.
-
-    Per CONTEXT D-05 (Phase 34):
-
-      sub_scores: dict[str, int] with 6 keys (title_fit, location_fit, comp_fit,
-          domain_match, seniority_match, skills_match) — each 1-5 integer.
-      classification: one of apply|consider|skip|reject. Typically a sentinel
-          empty string at construction time; derive_classification() at persist
-          time computes the authoritative value (see D-06 rule and D-07 note
-          that legitimacy_note is read from the jobs row, not from the LLM).
-      rationale: dict with keys strengths, gaps, talking_points,
-          resume_priority_skills (each a list[str]); serialized to the reused
-          fit_analysis column per D-08.
-      provider: cascade-attribution string (e.g., "ollama", "anthropic") or None.
-    """
-
-    sub_scores: dict
-    classification: str
-    rationale: dict
-    provider: str | None = None
-
-
-def derive_classification(
-    sub_scores: dict,
-    legitimacy_note: str | None,
-    enrichment_tier: str | None = None,
-    jd_full_length: int = 0,
-    low_signal_threshold: int = 1500,
-) -> str:
-    """Python-derived 5-way classification — NOT LLM-emitted (CONTEXT D-06, anti-pattern 3).
-
-    Rule precedence (per spec D-2.5, Phase 2d sub-fix 2/4):
-      1. legitimacy_note truthy            -> "reject"
-      2. enrichment exhausted + short jd   -> "low_signal"
-      3. any sub-score == 1                -> "reject"
-      4. all sub-scores >= 3               -> "apply"
-      5. all sub-scores >= 2               -> "consider"
-      6. otherwise                         -> "skip"
-
-    The low_signal branch surfaces genuinely-no-signal jobs (enrichment cascade
-    exhausted AND jd_full below threshold) honestly instead of rolling them
-    into apply/consider/skip via unreliable rubric outputs. The branch sits
-    BEFORE the any-axis-1 reject check on purpose: a job with insufficient JD
-    text cannot be confidently rejected on rubric outputs (the 1 itself may be
-    a hallucination from the model scoring against an empty prompt).
-
-    For integer 1-5 sub-scores, branch 6 ("skip") is effectively unreachable —
-    any value below 2 is 1, which already triggered reject at branch 3. The
-    branch remains for defense-in-depth against future sub-score domain changes
-    (e.g., 0 added as a sentinel).
-
-    Args:
-        sub_scores: dict of the 6 ordinal sub-scores (1-5 integers).
-        legitimacy_note: value of the jobs.legitimacy_note column; truthy means
-            ingestion-time scam/exclusion detection flagged this row.
-        enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'haiku'
-            | 'serpapi' | 'sonnet' | 'exhausted' | None). Only 'exhausted'
-            participates in the low_signal rule; other tiers are still
-            re-enrichment candidates.
-        jd_full_length: character length of jobs.jd_full (0 when NULL).
-        low_signal_threshold: jd_full_length below this triggers low_signal
-            when enrichment is exhausted. Configurable via
-            scoring.low_signal_jd_chars.
-
-    Returns:
-        One of "reject", "low_signal", "apply", "consider", "skip".
-    """
-    if legitimacy_note:
-        return "reject"
-    if enrichment_tier == "exhausted" and jd_full_length < low_signal_threshold:
-        return "low_signal"
-    if any(v == 1 for v in sub_scores.values()):
-        return "reject"
-    if all(v >= 3 for v in sub_scores.values()):
-        return "apply"
-    if all(v >= 2 for v in sub_scores.values()):
-        return "consider"
-    return "skip"
 
 
 # Explicit column lists for high-traffic queries. Avoids SELECT * so that
@@ -828,18 +752,19 @@ def get_filtered_jobs(
 # ---------------------------------------------------------------------------
 # Re-exports for backward compatibility
 # ---------------------------------------------------------------------------
+# Sibling modules `db_pipeline.py` and `db_queries.py` live at the
+# `job_finder/` level, NOT inside this package. Their public functions are
+# re-exported here so existing callers continue to use `from job_finder.db
+# import X` for any DB-layer name. PEP 484 explicit re-export form (`as X`)
+# documents the contract and silences pyright's reportUnusedImport.
 
-from job_finder.db_pipeline import (  # noqa: F401
-    get_pending_detections,
-    get_pipeline_events,
-    resolve_detection,
-)
-from job_finder.db_queries import (  # noqa: F401
-    get_dashboard_stats,
-    get_distinct_locations,
-    get_jobs_by_status,
-    get_pipeline_summary,
-    get_recent_activity,
-    get_recent_pipeline_events,
-    get_recent_runs,
-)
+from job_finder.db_pipeline import get_pending_detections as get_pending_detections
+from job_finder.db_pipeline import get_pipeline_events as get_pipeline_events
+from job_finder.db_pipeline import resolve_detection as resolve_detection
+from job_finder.db_queries import get_dashboard_stats as get_dashboard_stats
+from job_finder.db_queries import get_distinct_locations as get_distinct_locations
+from job_finder.db_queries import get_jobs_by_status as get_jobs_by_status
+from job_finder.db_queries import get_pipeline_summary as get_pipeline_summary
+from job_finder.db_queries import get_recent_activity as get_recent_activity
+from job_finder.db_queries import get_recent_pipeline_events as get_recent_pipeline_events
+from job_finder.db_queries import get_recent_runs as get_recent_runs
