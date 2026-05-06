@@ -91,10 +91,17 @@ def _paired_mae(gold_map: dict, candidate_map: dict) -> tuple[float, int]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.requires_artifacts
 def test_g4_phase33_provenance():
     """qwen2_5_14b shootout MAE for haiku_score (the v3 scoring task) <= 1.0."""
     if not QWEN_CACHE.exists():
-        pytest.skip("Phase 33 qwen2_5_14b.json not present; run /gsd-execute-phase 33 first.")
+        pytest.fail(
+            f"Phase 33 artifact missing: {QWEN_CACHE}. This test guards the v3 production-scoring "
+            "MAE contract (qwen2.5:14b haiku_score MAE <= 1.0). To regenerate the artifact, re-run "
+            "the Phase 33 shootout against qwen2.5:14b and copy the per-site result JSON to the "
+            "expected path. Marked @pytest.mark.requires_artifacts; CI may opt-out with "
+            "`pytest -m 'not requires_artifacts'`."
+        )
     cache = json.loads(QWEN_CACHE.read_text())
     haiku = (cache.get("per_site") or {}).get("haiku_score") or {}
     mae = haiku.get("mae")
@@ -114,20 +121,33 @@ def _first_paired_row() -> tuple[dict, dict]:
     """Return (sample_row, gold_entry) for the first sample row with a valid gold."""
     sample = _iter_sample_rows()
     if not sample:
-        pytest.skip("baseline_sample.json missing dev/holdout rows.")
+        pytest.fail(
+            f"Phase 33 artifact missing or malformed: {BASELINE_SAMPLE} has no dev/holdout rows. "
+            "Regenerate by re-running the Phase 33 baseline-sampling step."
+        )
     gold = json.loads(BASELINE_GOLD.read_text())
     for row in sample:
         key = row.get("dedup_key")
         gold_entry = gold.get(key)
         if gold_entry and not gold_entry.get("_error"):
             return row, gold_entry
-    pytest.skip("no sample row has a valid (non-_error) gold entry.")
+    pytest.fail(
+        f"Phase 33 artifact malformed: no sample row in {BASELINE_SAMPLE} has a valid (non-_error) "
+        f"gold entry in {BASELINE_GOLD}. Regenerate the Phase 33 gold pass against the sample."
+    )
 
 
+@pytest.mark.requires_artifacts
 def test_g4_score_job_production_wiring():
     """score_job + _coerce_assessment preserves gold sub_scores byte-for-byte."""
     if not BASELINE_SAMPLE.exists() or not BASELINE_GOLD.exists():
-        pytest.skip("Phase 33 baseline artifacts not present.")
+        pytest.fail(
+            f"Phase 33 baseline artifacts missing ({BASELINE_SAMPLE} and/or {BASELINE_GOLD}). "
+            "This test guards the production score_job + _coerce_assessment wiring contract: "
+            "the dispatcher MUST preserve gold sub_scores byte-for-byte. Regenerate by re-running "
+            "Phase 33's baseline sampling + gold scoring pass. Marked @pytest.mark.requires_artifacts; "
+            "CI may opt-out with `pytest -m 'not requires_artifacts'`."
+        )
 
     from job_finder.web.job_scorer import score_job
     from job_finder.web.model_provider import ModelResult
@@ -175,7 +195,12 @@ def test_g4_refit_live_ollama():
     from job_finder.web.job_scorer import score_job
 
     if not BASELINE_SAMPLE.exists() or not BASELINE_GOLD.exists():
-        pytest.skip("baseline artifacts missing.")
+        pytest.fail(
+            f"Phase 33 baseline artifacts missing ({BASELINE_SAMPLE} and/or {BASELINE_GOLD}). "
+            "This test runs a live MAE measurement against gold. Regenerate via Phase 33's "
+            "baseline sampling + gold scoring pass. (Already gated by @pytest.mark.integration; "
+            "only fires under `pytest -m integration`.)"
+        )
 
     sample = _iter_sample_rows()
     gold = json.loads(BASELINE_GOLD.read_text())

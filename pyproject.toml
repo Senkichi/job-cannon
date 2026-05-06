@@ -171,6 +171,7 @@ addopts = "-q --tb=short -m 'not integration'"
 markers = [
     "e2e: end-to-end browser tests (require Playwright)",
     "integration: end-to-end integration tests requiring live external services (Ollama, network APIs); opt-in via -m integration",
+    "requires_artifacts: tests that need .planning/research/shootout/ artifacts (qwen2_5_14b.json + baseline_sample.json + baseline_gold.json from Phase 33). Default is to fail loudly when artifacts are missing rather than silently skip; CI may opt-out with `-m 'not requires_artifacts'` if the artifacts are unavailable.",
 ]
 
 
