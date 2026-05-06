@@ -1358,775 +1358,6 @@ class TestCostDetailRoute:
         assert "Projected/mo" in data
 
 
-# ---------------------------------------------------------------------------
-# Profile Editor with Learned Preferences tests (05-UI-01 / UI-05)
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def app_with_preferences(tmp_db_path):
-    """Flask app with a migrated DB containing accepted resume_preferences_detected rows."""
-    import sqlite3
-
-    from job_finder.web import create_app
-
-    test_config = {
-        "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40},
-        "profile": {
-            "target_titles": ["Staff Data Scientist"],
-            "target_locations": ["Remote"],
-            "min_salary": 150000,
-            "industries": [],
-            "exclusions": {"title_keywords": [], "companies": []},
-            "skills": [],
-        },
-        "sources": {},
-        "output": {"default_format": "cli", "max_results": 50},
-    }
-    application = create_app(config=test_config)
-    application.config["TESTING"] = True
-
-    conn = sqlite3.connect(tmp_db_path)
-    # Insert a job row so job_id FK constraint is satisfied
-    conn.execute(
-        """INSERT INTO jobs
-            (dedup_key, title, company, location, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (
-            "pref-test|data-scientist|remote",
-            "Data Scientist",
-            "Pref Test Co",
-            "Remote",
-            "2026-03-01T10:00:00Z",
-            "2026-03-11T10:00:00Z",
-        ),
-    )
-    # Insert accepted preferences (accepted=1, applied_at IS NULL so they show)
-    conn.executemany(
-        """INSERT INTO resume_preferences_detected
-            (job_id, preference_type, preference_text, accepted, detected_at)
-        VALUES (?, ?, ?, ?, ?)""",
-        [
-            (
-                "pref-test|data-scientist|remote",
-                "phrasing",
-                "Use strong action verbs at the start of each bullet",
-                1,
-                "2026-03-10T09:00:00Z",
-            ),
-            (
-                "pref-test|data-scientist|remote",
-                "content_addition",
-                "Always quantify impact with percentages or absolute numbers",
-                1,
-                "2026-03-10T09:05:00Z",
-            ),
-            (
-                "pref-test|data-scientist|remote",
-                "structural",
-                "Move skills section above experience section",
-                0,  # rejected — should NOT appear
-                "2026-03-10T09:10:00Z",
-            ),
-        ],
-    )
-    conn.commit()
-    conn.close()
-
-    return application
-
-
-class TestProfileEditor:
-    """GET /profile renders Learned Preferences section with accepted resume preferences.
-
-    Covers: UI-05 — Profile Editor with accumulated preferences from Drive feedback loop.
-    """
-
-    def test_profile_renders_learned_preferences_heading(self, app_with_preferences):
-        """GET /profile includes a 'Learned Preferences' section heading."""
-        client = app_with_preferences.test_client()
-        response = client.get("/profile")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Learned Preferences" in data, (
-            "Expected 'Learned Preferences' section heading in /profile response"
-        )
-
-    def test_profile_renders_accepted_preference_text(self, app_with_preferences):
-        """GET /profile shows accepted preference text in Learned Preferences section."""
-        client = app_with_preferences.test_client()
-        response = client.get("/profile")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Use strong action verbs" in data, (
-            "Expected accepted phrasing preference text in /profile response"
-        )
-        assert "Always quantify impact" in data, (
-            "Expected accepted content_addition preference text in /profile response"
-        )
-
-    def test_profile_does_not_render_rejected_preference(self, app_with_preferences):
-        """GET /profile omits preferences with accepted=0."""
-        client = app_with_preferences.test_client()
-        response = client.get("/profile")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Move skills section above experience" not in data, (
-            "Rejected preference (accepted=0) should NOT appear in /profile"
-        )
-
-    def test_profile_renders_without_preferences_gracefully(self, app):
-        """GET /profile returns 200 with 'No preferences accumulated yet' when table is empty."""
-        response = app.test_client().get("/profile")
-        assert response.status_code == 200
-        data = response.data.decode()
-        # The profile.py route has try/except for OperationalError — table may not exist
-        # on a fully migrated but empty DB it will exist but return no rows
-        # Either the empty-state message or the section heading must be present
-        assert "Learned Preferences" in data, (
-            "Learned Preferences section must always render (even when empty)"
-        )
-        assert "No preferences accumulated yet" in data, (
-            "Empty state message expected when no preferences exist"
-        )
-
-    def test_profile_degrades_gracefully_when_preferences_query_raises(self, app):
-        """GET /profile returns 200 even when the resume_preferences_detected query
-        raises an OperationalError (graceful degradation via try/except in profile.py)."""
-        import sqlite3
-        from unittest.mock import patch
-
-        # Patch get_db to return a connection whose execute raises OperationalError
-        # when querying resume_preferences_detected — simulates table absent pre-migration5.
-        class FailingConn:
-            def execute(self, sql, *args, **kwargs):
-                if "resume_preferences_detected" in sql:
-                    raise sqlite3.OperationalError("no such table: resume_preferences_detected")
-                # Delegate to a real in-memory connection for other queries
-                real = sqlite3.connect(":memory:")
-                return real.execute(sql, *args, **kwargs)
-
-        with patch("job_finder.web.blueprints.profile.get_db", return_value=FailingConn()):
-            response = app.test_client().get("/profile")
-
-        assert response.status_code == 200, (
-            f"GET /profile should return 200 even when preferences query fails, "
-            f"got {response.status_code}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Drive status UI integration tests (Plan 09-02)
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def app_with_sonnet_job(tmp_db_path):
-    """Flask app with a migrated DB containing a Sonnet-scored job for Drive UI tests."""
-    import sqlite3
-
-    from job_finder.web import create_app
-
-    test_config = {
-        "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40},
-        "profile": {
-            "target_titles": ["Staff Data Scientist"],
-            "target_locations": ["Remote"],
-            "min_salary": 150000,
-            "industries": [],
-            "exclusions": {"title_keywords": [], "companies": []},
-            "skills": [],
-        },
-        "sources": {},
-        "output": {"default_format": "cli", "max_results": 50},
-        "drive": {"folder_id": "test-folder-123"},
-    }
-    application = create_app(config=test_config)
-    application.config["TESTING"] = True
-
-    conn = sqlite3.connect(tmp_db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """INSERT INTO jobs
-            (dedup_key, title, company, location, sources, source_urls,
-             source_id, salary_min, salary_max, description,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
-             classification, sub_scores_json, jd_full)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            "drive-test|data-scientist|remote",
-            "Data Scientist",
-            "Drive Test Co",
-            "Remote",
-            '["linkedin"]',
-            '["https://linkedin.com/jobs/1"]',
-            "job-drive-1",
-            150000,
-            200000,
-            "Build ML models",
-            "2026-03-01T10:00:00",
-            "2026-03-09T10:00:00",
-            8.5,
-            '{"skills": 0.9}',
-            "discovered",
-            "apply",  # v3.0 classification
-            '{"title_fit": 4, "location_fit": 5, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
-            "Senior Data Scientist role at Drive Test Co. Requires 5+ years ML experience.",
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    return application
-
-
-class TestDriveStatusJobsRoutes:
-    """Drive status is wired into expand/paste-jd/rescore routes and affects UI."""
-
-    def test_expand_shows_disabled_buttons_when_drive_not_ok(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with drive_status ok=False shows disabled Generate Resume button."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Generate Resume button must be disabled when Drive is broken
-        assert "disabled" in data
-        assert "cursor-not-allowed" in data
-
-    def test_expand_shows_enabled_buttons_when_drive_ok(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with drive_status ok=True shows enabled Generate Resume for Sonnet job."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Generate Resume button should be active (has hx-post, not disabled)
-        assert "Generate Resume" in data
-        # Should NOT show cursor-not-allowed for the generate button
-        assert "hx-post" in data
-
-    def test_expand_drive_error_shows_no_token_message(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with no_token error shows re-auth command in inline error."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Must show copy-ready re-auth command
-        assert "python -m job_finder.gmail_auth" in data
-
-    def test_expand_drive_broken_hides_quick_apply_button(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with drive_status ok=False does NOT show Quick Apply button."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Quick Apply must be hidden entirely when Drive is broken
-        assert "Quick Apply" not in data
-
-    def test_expand_drive_ok_shows_quick_apply_for_sonnet_job(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with drive_status ok=True shows Quick Apply for Sonnet-scored job."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Quick Apply should be visible for Sonnet-scored jobs when Drive is ok
-        assert "Quick Apply" in data
-
-    def test_expand_missing_scope_shows_reauth_command(self, app_with_sonnet_job):
-        """GET /jobs/<key>/expand with missing_scope error shows re-auth command."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {
-            "ok": False,
-            "error": "Token lacks drive.file scope.",
-            "error_code": "missing_scope",
-        }
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "python -m job_finder.gmail_auth" in data
-
-    def test_paste_jd_response_includes_drive_status(self, app_with_sonnet_job):
-        """POST /jobs/<key>/paste-jd response includes drive_status-dependent content."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.post(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/paste-jd",
-                data={"jd_text": "Senior Data Scientist position requiring 5+ years."},
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Drive status must be visible in the response
-        assert "python -m job_finder.gmail_auth" in data
-
-    def test_rescore_response_includes_drive_status(self, app_with_sonnet_job):
-        """POST /jobs/<key>/rescore response includes drive_status-dependent content."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": False, "error": "Token file not found.", "error_code": "no_token"}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.post(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/rescore",
-            )
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        # Drive status must be visible in the response
-        assert "python -m job_finder.gmail_auth" in data
-
-
-class TestDriveStatusSettingsRoute:
-    """Drive status indicator on Settings page."""
-
-    def test_settings_shows_connected_when_drive_ok(self, client):
-        """GET /settings with drive_status ok=True shows green 'Connected' indicator."""
-        from unittest.mock import patch
-
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch(
-            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
-        ):
-            response = client.get("/settings")
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Connected" in data
-        assert "bg-green-400" in data
-
-    def test_settings_shows_not_connected_when_drive_not_ok(self, client):
-        """GET /settings with drive_status ok=False shows red 'Not connected' indicator."""
-        from unittest.mock import patch
-
-        mock_status = {
-            "ok": False,
-            "error": "Token file not found.",
-            "error_code": "no_token",
-        }
-
-        with patch(
-            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
-        ):
-            response = client.get("/settings")
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Not connected" in data
-        assert "bg-red-400" in data
-
-    def test_settings_not_connected_shows_reauth_command(self, client):
-        """GET /settings with drive_status ok=False shows re-auth command."""
-        from unittest.mock import patch
-
-        mock_status = {
-            "ok": False,
-            "error": "Token file not found.",
-            "error_code": "no_token",
-        }
-
-        with patch(
-            "job_finder.web.blueprints.settings.get_drive_status", return_value=mock_status
-        ):
-            response = client.get("/settings")
-
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "python -m job_finder.gmail_auth" in data
-
-
-# ---------------------------------------------------------------------------
-# Fixtures for UX Polish tests (Phase 15)
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def app_with_jd_full_job(tmp_db_path):
-    """Flask app with a job that has jd_full and haiku_score set."""
-    import sqlite3
-
-    from job_finder.web import create_app
-
-    test_config = {
-        "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40},
-        "profile": {
-            "target_titles": ["ML Engineer"],
-            "target_locations": ["Remote"],
-            "min_salary": 150000,
-            "industries": [],
-            "exclusions": {"title_keywords": [], "companies": []},
-            "skills": [],
-        },
-        "sources": {},
-        "output": {"default_format": "cli", "max_results": 50},
-    }
-    app = create_app(config=test_config)
-    app.config["TESTING"] = True
-
-    conn = sqlite3.connect(tmp_db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """INSERT INTO jobs
-            (dedup_key, title, company, location, sources, source_urls,
-             source_id, salary_min, salary_max, description, jd_full,
-             first_seen, last_seen, score, score_breakdown, pipeline_status,
-             classification)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            "test|jd-full-job|remote",
-            "ML Engineer",
-            "TestCo",
-            "Remote",
-            '["linkedin"]',
-            '["https://linkedin.com/jobs/99"]',
-            "job-99",
-            160000,
-            220000,
-            "Build ML infrastructure",
-            "This is a full job description for testing.\nLine 2 of description.\nRequirements: Python, SQL",
-            "2026-03-01T10:00:00",
-            "2026-03-09T10:00:00",
-            8.0,
-            '{"skills": 0.8}',
-            "discovered",
-            "consider",  # v3 classification replacing legacy haiku_score=72
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    return app
-
-
-@pytest.fixture
-def jd_full_client(app_with_jd_full_job):
-    """Test client for the app with a jd_full job."""
-    return app_with_jd_full_job.test_client()
-
-
-@pytest.fixture
-def app_with_scored_jobs(tmp_db_path):
-    """App with one job per scoring state for score-cell rendering tests.
-
-    Each row exercises a distinct (classification, sub_scores) combination so
-    tests can assert color/value/tooltip rendering per state without ambiguity.
-    """
-    import sqlite3
-
-    from job_finder.web import create_app
-
-    test_config = {
-        "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40},
-        "profile": {
-            "target_titles": ["ML Engineer"],
-            "target_locations": ["Remote"],
-            "min_salary": 150000,
-            "industries": [],
-            "exclusions": {"title_keywords": [], "companies": []},
-            "skills": [],
-        },
-        "sources": {},
-        "output": {"default_format": "cli", "max_results": 50},
-    }
-    app = create_app(config=test_config)
-    app.config["TESTING"] = True
-
-    rows = [
-        # (dedup_key, title, classification, sub_scores_json, fit_analysis)
-        # Apply, max sum 30 (all 5s)
-        (
-            "ax|max-apply|remote",
-            "Max Apply Role",
-            "apply",
-            '{"title_fit": 5, "location_fit": 5, "comp_fit": 5, "domain_match": 5, "seniority_match": 5, "skills_match": 5}',
-            '{"strengths": ["Deep platform experience aligns with infra-heavy stack"], "gaps": ["No published Kubernetes operator work"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Apply, min sum 18 (all 3s)
-        (
-            "ax|min-apply|remote",
-            "Min Apply Role",
-            "apply",
-            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
-            '{"strengths": ["Adequate match"], "gaps": ["Borderline fit"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Consider, sum 22
-        (
-            "ax|consider-22|remote",
-            "Consider Role",
-            "consider",
-            '{"title_fit": 4, "location_fit": 3, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 3}',
-            '{"strengths": ["Strong technical match"], "gaps": ["Comp below target"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Skip, sum 22 (one axis at 2)
-        (
-            "ax|skip-22|remote",
-            "Skip Role",
-            "skip",
-            '{"title_fit": 5, "location_fit": 5, "comp_fit": 2, "domain_match": 5, "seniority_match": 5, "skills_match": 0}',
-            '{"strengths": [], "gaps": ["Compensation well below market"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Reject, sum 6 (all 1s would auto-reject; legitimacy_note also rejects)
-        (
-            "ax|reject-6|remote",
-            "Reject Role",
-            "reject",
-            '{"title_fit": 1, "location_fit": 1, "comp_fit": 1, "domain_match": 1, "seniority_match": 1, "skills_match": 1}',
-            '{"strengths": [], "gaps": ["Multiple critical mismatches"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Low signal: enrichment exhausted + jd_full short. Sub-scores irrelevant
-        # for color/rank rendering; the template branches solely on classification.
-        (
-            "ax|low-signal-18|remote",
-            "Low Signal Role",
-            "low_signal",
-            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
-            '{"strengths": ["Insufficient JD signal"], "gaps": ["No description available"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Unscored: classification + sub_scores_json + fit_analysis all NULL
-        ("ax|unscored|remote", "Unscored Role", None, None, None),
-        # Apply with no fit_analysis (rationale-missing edge case)
-        (
-            "ax|apply-no-rationale|remote",
-            "Apply No Rationale",
-            "apply",
-            '{"title_fit": 5, "location_fit": 4, "comp_fit": 5, "domain_match": 4, "seniority_match": 5, "skills_match": 4}',
-            None,
-        ),
-        # Apply with empty strengths/gaps lists
-        (
-            "ax|apply-empty-lists|remote",
-            "Apply Empty Lists",
-            "apply",
-            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
-            '{"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []}',
-        ),
-        # Apply with very long strength (truncation test)
-        (
-            "ax|apply-long-strength|remote",
-            "Apply Long Strength",
-            "apply",
-            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
-            '{"strengths": ["'
-            + ("A" * 200)
-            + '"], "gaps": ["'
-            + ("B" * 200)
-            + '"], "talking_points": [], "resume_priority_skills": []}',
-        ),
-    ]
-
-    conn = sqlite3.connect(tmp_db_path)
-    for dk, title, cls, subs, fit in rows:
-        conn.execute(
-            """INSERT INTO jobs
-                (dedup_key, title, company, location, sources, source_urls,
-                 source_id, salary_min, salary_max, description,
-                 first_seen, last_seen, score, score_breakdown, pipeline_status,
-                 classification, sub_scores_json, fit_analysis)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                dk,
-                title,
-                "TestCo",
-                "Remote",
-                '["test"]',
-                '["https://test/jobs/1"]',
-                dk,
-                100000,
-                200000,
-                "desc",
-                "2026-04-27T10:00:00",
-                "2026-04-27T10:00:00",
-                0.0,
-                "{}",
-                "discovered",
-                cls,
-                subs,
-                fit,
-            ),
-        )
-    conn.commit()
-    conn.close()
-
-    return app
-
-
-@pytest.fixture
-def scored_client(app_with_scored_jobs):
-    return app_with_scored_jobs.test_client()
-
-
-# ---------------------------------------------------------------------------
-# UX Polish tests (Phase 15)
-# ---------------------------------------------------------------------------
-
-
-class TestUXPolish:
-    """Tests for Phase 15 UX polish: spinners, OOB score, jd_full display."""
-
-    # --- UX-03: jd_full collapsible display ---
-
-    def test_expand_with_jd_full_shows_details(self, jd_full_client):
-        """Expanded row shows <details> section when job has jd_full."""
-        response = jd_full_client.get(
-            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
-        )
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "<details" in data
-        assert "Job Description (full)" in data
-        assert "full job description for testing" in data
-
-    def test_expand_without_jd_full_no_details(self, jobs_client):
-        """Expanded row has no <details> JD section when jd_full is absent."""
-        response = jobs_client.get(
-            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-        )
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Job Description (full)" not in data
-
-    def test_detail_inline_with_jd_full_shows_details(self, jd_full_client):
-        """Detail-inline view shows <details> section when job has jd_full."""
-        response = jd_full_client.get(
-            "/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
-        )
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "<details" in data
-        assert "Full Job Description" in data
-
-    # --- UX-01: Spinner loading indicators ---
-
-    def test_rescore_button_has_indicator(self, jd_full_client):
-        """Re-score button has spinner with htmx-indicator class and hx-disable-elt."""
-        response = jd_full_client.get(
-            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
-        )
-        data = response.data.decode()
-        assert 'hx-disable-elt="this"' in data
-        assert "htmx-indicator" in data
-        assert "animate-spin" in data
-
-    def test_paste_jd_button_has_indicator(self, jobs_client):
-        """Paste-JD submit button has spinner with htmx-indicator class."""
-        # Use a job WITHOUT jd_full so paste-JD form is visible
-        response = jobs_client.get(
-            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-        )
-        data = response.data.decode()
-        assert "Score with JD" in data
-        assert "htmx-indicator" in data
-
-    # --- UX-02: OOB score cell ---
-
-    def test_compact_row_score_has_id(self, jd_full_client):
-        """Compact row score cell has id='score-...' for OOB targeting."""
-        response = jd_full_client.get("/jobs")
-        data = response.data.decode()
-        assert 'id="score-test%7Cjd-full-job%7Cremote"' in data
-
-    def test_rescore_response_has_oob_score_cell(self, jd_full_client):
-        """POST rescore response includes OOB score cell in <template> wrapper."""
-        response = jd_full_client.post("/jobs/test%7Cjd-full-job%7Cremote/rescore")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "<template>" in data
-        assert 'hx-swap-oob="outerHTML"' in data
-        assert 'id="score-test%7Cjd-full-job%7Cremote"' in data
-
-    def test_rescore_response_no_hx_trigger_header(self, jd_full_client):
-        """POST rescore response does NOT set HX-Trigger (avoids full table reload)."""
-        response = jd_full_client.post("/jobs/test%7Cjd-full-job%7Cremote/rescore")
-        assert response.status_code == 200
-        assert response.headers.get("HX-Trigger") is None
-
-    def test_paste_jd_response_has_oob_score_cell(self, jobs_client):
-        """POST paste-jd response includes OOB score cell in <template> wrapper."""
-        response = jobs_client.post(
-            "/jobs/acme%7Cdata-scientist%7Cremote/paste-jd",
-            data={"jd_text": "Full job description text for testing purposes."},
-        )
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "<template>" in data
-        assert 'hx-swap-oob="outerHTML"' in data
-
-    def test_score_cell_route_returns_td(self, jd_full_client):
-        """GET /jobs/{dedup_key}/score-cell returns 200 with score <td> element."""
-        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/score-cell")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert '<td id="score-' in data
-
-    def test_score_cell_route_404(self, jd_full_client):
-        """GET /jobs/nonexistent/score-cell returns 404."""
-        response = jd_full_client.get("/jobs/no%7Csuch%7Cjob/score-cell")
-        assert response.status_code == 404
-
-    def test_expand_no_load_trigger(self, jd_full_client):
-        """Regular expand does NOT include hx-trigger=load (no spurious score refresh)."""
-        response = jd_full_client.get(
-            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
-        )
-        assert response.status_code == 200
-        data = response.data.decode()
-
-
 class TestDashboardUserActivity:
     """Tests for get_recent_activity() DB function and dashboard User Activity section."""
 
@@ -2674,6 +1905,335 @@ class TestSmoothScroll:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def app_with_jd_full_job(tmp_db_path):
+    """Flask app with a job that has jd_full and haiku_score set."""
+    import sqlite3
+
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40},
+        "profile": {
+            "target_titles": ["ML Engineer"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    app = create_app(config=test_config)
+    app.config["TESTING"] = True
+
+    conn = sqlite3.connect(tmp_db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """INSERT INTO jobs
+            (dedup_key, title, company, location, sources, source_urls,
+             source_id, salary_min, salary_max, description, jd_full,
+             first_seen, last_seen, score, score_breakdown, pipeline_status,
+             classification)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "test|jd-full-job|remote",
+            "ML Engineer",
+            "TestCo",
+            "Remote",
+            '["linkedin"]',
+            '["https://linkedin.com/jobs/99"]',
+            "job-99",
+            160000,
+            220000,
+            "Build ML infrastructure",
+            "This is a full job description for testing.\nLine 2 of description.\nRequirements: Python, SQL",
+            "2026-03-01T10:00:00",
+            "2026-03-09T10:00:00",
+            8.0,
+            '{"skills": 0.8}',
+            "discovered",
+            "consider",  # v3 classification replacing legacy haiku_score=72
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    return app
+
+
+@pytest.fixture
+def jd_full_client(app_with_jd_full_job):
+    """Test client for the app with a jd_full job."""
+    return app_with_jd_full_job.test_client()
+
+
+@pytest.fixture
+def app_with_scored_jobs(tmp_db_path):
+    """App with one job per scoring state for score-cell rendering tests.
+
+    Each row exercises a distinct (classification, sub_scores) combination so
+    tests can assert color/value/tooltip rendering per state without ambiguity.
+    """
+    import sqlite3
+
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40},
+        "profile": {
+            "target_titles": ["ML Engineer"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    app = create_app(config=test_config)
+    app.config["TESTING"] = True
+
+    rows = [
+        # (dedup_key, title, classification, sub_scores_json, fit_analysis)
+        # Apply, max sum 30 (all 5s)
+        (
+            "ax|max-apply|remote",
+            "Max Apply Role",
+            "apply",
+            '{"title_fit": 5, "location_fit": 5, "comp_fit": 5, "domain_match": 5, "seniority_match": 5, "skills_match": 5}',
+            '{"strengths": ["Deep platform experience aligns with infra-heavy stack"], "gaps": ["No published Kubernetes operator work"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Apply, min sum 18 (all 3s)
+        (
+            "ax|min-apply|remote",
+            "Min Apply Role",
+            "apply",
+            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
+            '{"strengths": ["Adequate match"], "gaps": ["Borderline fit"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Consider, sum 22
+        (
+            "ax|consider-22|remote",
+            "Consider Role",
+            "consider",
+            '{"title_fit": 4, "location_fit": 3, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 3}',
+            '{"strengths": ["Strong technical match"], "gaps": ["Comp below target"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Skip, sum 22 (one axis at 2)
+        (
+            "ax|skip-22|remote",
+            "Skip Role",
+            "skip",
+            '{"title_fit": 5, "location_fit": 5, "comp_fit": 2, "domain_match": 5, "seniority_match": 5, "skills_match": 0}',
+            '{"strengths": [], "gaps": ["Compensation well below market"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Reject, sum 6 (all 1s would auto-reject; legitimacy_note also rejects)
+        (
+            "ax|reject-6|remote",
+            "Reject Role",
+            "reject",
+            '{"title_fit": 1, "location_fit": 1, "comp_fit": 1, "domain_match": 1, "seniority_match": 1, "skills_match": 1}',
+            '{"strengths": [], "gaps": ["Multiple critical mismatches"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Low signal: enrichment exhausted + jd_full short. Sub-scores irrelevant
+        # for color/rank rendering; the template branches solely on classification.
+        (
+            "ax|low-signal-18|remote",
+            "Low Signal Role",
+            "low_signal",
+            '{"title_fit": 3, "location_fit": 3, "comp_fit": 3, "domain_match": 3, "seniority_match": 3, "skills_match": 3}',
+            '{"strengths": ["Insufficient JD signal"], "gaps": ["No description available"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Unscored: classification + sub_scores_json + fit_analysis all NULL
+        ("ax|unscored|remote", "Unscored Role", None, None, None),
+        # Apply with no fit_analysis (rationale-missing edge case)
+        (
+            "ax|apply-no-rationale|remote",
+            "Apply No Rationale",
+            "apply",
+            '{"title_fit": 5, "location_fit": 4, "comp_fit": 5, "domain_match": 4, "seniority_match": 5, "skills_match": 4}',
+            None,
+        ),
+        # Apply with empty strengths/gaps lists
+        (
+            "ax|apply-empty-lists|remote",
+            "Apply Empty Lists",
+            "apply",
+            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
+            '{"strengths": [], "gaps": [], "talking_points": [], "resume_priority_skills": []}',
+        ),
+        # Apply with very long strength (truncation test)
+        (
+            "ax|apply-long-strength|remote",
+            "Apply Long Strength",
+            "apply",
+            '{"title_fit": 4, "location_fit": 4, "comp_fit": 4, "domain_match": 4, "seniority_match": 4, "skills_match": 4}',
+            '{"strengths": ["'
+            + ("A" * 200)
+            + '"], "gaps": ["'
+            + ("B" * 200)
+            + '"], "talking_points": [], "resume_priority_skills": []}',
+        ),
+    ]
+
+    conn = sqlite3.connect(tmp_db_path)
+    for dk, title, cls, subs, fit in rows:
+        conn.execute(
+            """INSERT INTO jobs
+                (dedup_key, title, company, location, sources, source_urls,
+                 source_id, salary_min, salary_max, description,
+                 first_seen, last_seen, score, score_breakdown, pipeline_status,
+                 classification, sub_scores_json, fit_analysis)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                dk,
+                title,
+                "TestCo",
+                "Remote",
+                '["test"]',
+                '["https://test/jobs/1"]',
+                dk,
+                100000,
+                200000,
+                "desc",
+                "2026-04-27T10:00:00",
+                "2026-04-27T10:00:00",
+                0.0,
+                "{}",
+                "discovered",
+                cls,
+                subs,
+                fit,
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    return app
+
+
+@pytest.fixture
+def scored_client(app_with_scored_jobs):
+    return app_with_scored_jobs.test_client()
+
+
+class TestUXPolish:
+    """Tests for Phase 15 UX polish: spinners, OOB score, jd_full display."""
+
+    # --- UX-03: jd_full collapsible display ---
+
+    def test_expand_with_jd_full_shows_details(self, jd_full_client):
+        """Expanded row shows <details> section when job has jd_full."""
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "<details" in data
+        assert "Job Description (full)" in data
+        assert "full job description for testing" in data
+
+    def test_expand_without_jd_full_no_details(self, jobs_client):
+        """Expanded row has no <details> JD section when jd_full is absent."""
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "Job Description (full)" not in data
+
+    def test_detail_inline_with_jd_full_shows_details(self, jd_full_client):
+        """Detail-inline view shows <details> section when job has jd_full."""
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/detail-inline", headers={"HX-Request": "true"}
+        )
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "<details" in data
+        assert "Full Job Description" in data
+
+    # --- UX-01: Spinner loading indicators ---
+
+    def test_rescore_button_has_indicator(self, jd_full_client):
+        """Re-score button has spinner with htmx-indicator class and hx-disable-elt."""
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        data = response.data.decode()
+        assert 'hx-disable-elt="this"' in data
+        assert "htmx-indicator" in data
+        assert "animate-spin" in data
+
+    def test_paste_jd_button_has_indicator(self, jobs_client):
+        """Paste-JD submit button has spinner with htmx-indicator class."""
+        # Use a job WITHOUT jd_full so paste-JD form is visible
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        data = response.data.decode()
+        assert "Score with JD" in data
+        assert "htmx-indicator" in data
+
+    # --- UX-02: OOB score cell ---
+
+    def test_compact_row_score_has_id(self, jd_full_client):
+        """Compact row score cell has id='score-...' for OOB targeting."""
+        response = jd_full_client.get("/jobs")
+        data = response.data.decode()
+        assert 'id="score-test%7Cjd-full-job%7Cremote"' in data
+
+    def test_rescore_response_has_oob_score_cell(self, jd_full_client):
+        """POST rescore response includes OOB score cell in <template> wrapper."""
+        response = jd_full_client.post("/jobs/test%7Cjd-full-job%7Cremote/rescore")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "<template>" in data
+        assert 'hx-swap-oob="outerHTML"' in data
+        assert 'id="score-test%7Cjd-full-job%7Cremote"' in data
+
+    def test_rescore_response_no_hx_trigger_header(self, jd_full_client):
+        """POST rescore response does NOT set HX-Trigger (avoids full table reload)."""
+        response = jd_full_client.post("/jobs/test%7Cjd-full-job%7Cremote/rescore")
+        assert response.status_code == 200
+        assert response.headers.get("HX-Trigger") is None
+
+    def test_paste_jd_response_has_oob_score_cell(self, jobs_client):
+        """POST paste-jd response includes OOB score cell in <template> wrapper."""
+        response = jobs_client.post(
+            "/jobs/acme%7Cdata-scientist%7Cremote/paste-jd",
+            data={"jd_text": "Full job description text for testing purposes."},
+        )
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "<template>" in data
+        assert 'hx-swap-oob="outerHTML"' in data
+
+    def test_score_cell_route_returns_td(self, jd_full_client):
+        """GET /jobs/{dedup_key}/score-cell returns 200 with score <td> element."""
+        response = jd_full_client.get("/jobs/test%7Cjd-full-job%7Cremote/score-cell")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert '<td id="score-' in data
+
+    def test_score_cell_route_404(self, jd_full_client):
+        """GET /jobs/nonexistent/score-cell returns 404."""
+        response = jd_full_client.get("/jobs/no%7Csuch%7Cjob/score-cell")
+        assert response.status_code == 404
+
+    def test_expand_no_load_trigger(self, jd_full_client):
+        """Regular expand does NOT include hx-trigger=load (no spurious score refresh)."""
+        response = jd_full_client.get(
+            "/jobs/test%7Cjd-full-job%7Cremote/expand", headers={"HX-Request": "true"}
+        )
+        assert response.status_code == 200
+        data = response.data.decode()
+
+
 class TestSaveJD:
     """Tests for POST /jobs/<key>/save-jd route (UI-01)."""
 
@@ -2881,83 +2441,6 @@ class TestGapClosureFixes:
         button_end = html.find("</button>", score_idx)
         score_button = html[button_start:button_end]
         assert "hx-on::after-request" not in score_button
-
-    def test_generate_resume_target_is_wrapper_not_section(self, app_with_sonnet_job):
-        """Generate Resume button hx-target is the narrow wrapper div, not resume-section."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        html = response.data.decode()
-        # Generate Resume button must target the wrapper, not the whole section
-        assert "resume-generate-wrapper" in html
-        # Must NOT target resume-section directly from the Generate Resume button
-        import re
-
-        gen_button_matches = re.findall(
-            r'hx-post="[^"]*resume/generate"[^>]*hx-target="([^"]*)"', html
-        )
-        assert len(gen_button_matches) > 0, "Generate Resume hx-target not found"
-        for target in gen_button_matches:
-            assert "resume-generate-wrapper" in target, (
-                f"Generate Resume must target wrapper, got: {target}"
-            )
-            assert "resume-section" not in target, (
-                f"Generate Resume must NOT target resume-section, got: {target}"
-            )
-
-    def test_quick_apply_target_is_section(self, app_with_sonnet_job):
-        """Quick Apply button hx-target is still the full resume-section."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        html = response.data.decode()
-        # Quick Apply button must still target the full resume-section
-        assert "Quick Apply" in html
-        import re
-
-        quick_apply_matches = re.findall(
-            r'hx-post="[^"]*quick-apply"[^>]*hx-target="([^"]*)"', html
-        )
-        assert len(quick_apply_matches) > 0, "Quick Apply hx-target not found"
-        for target in quick_apply_matches:
-            assert "resume-section" in target, (
-                f"Quick Apply must target resume-section, got: {target}"
-            )
-
-    def test_generate_resume_wrapper_exists_in_expanded_row(self, app_with_sonnet_job):
-        """Expanded row for Sonnet-scored job contains the resume-generate-wrapper div."""
-        from unittest.mock import patch
-
-        client = app_with_sonnet_job.test_client()
-        mock_status = {"ok": True, "error": None, "error_code": None}
-
-        with patch("job_finder.web.blueprints.jobs.get_drive_status", return_value=mock_status):
-            response = client.get(
-                "/jobs/drive-test%7Cdata-scientist%7Cremote/expand", headers={"HX-Request": "true"}
-            )
-
-        assert response.status_code == 200
-        html = response.data.decode()
-        import re
-
-        wrapper_matches = re.findall(r'id="resume-generate-wrapper-[^"]*"', html)
-        assert len(wrapper_matches) > 0, "resume-generate-wrapper div not found in expanded row"
 
     # --- REACT-01: data-sort-score in OOB score cell (Gap 1) ---
 

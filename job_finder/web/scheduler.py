@@ -468,38 +468,6 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        # -- Drive feedback poll (every 30 min) ----------------------------
-
-        def _import_feedback():
-            from job_finder.web.resume_feedback import run_drive_feedback_poll
-
-            return run_drive_feedback_poll
-
-        scheduler.add_job(
-            _make_simple_job(app, "Drive feedback poll", _import_feedback),
-            trigger=IntervalTrigger(minutes=30),
-            id="drive_feedback_poll",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
-        # -- Preference consolidation (weekly, Sunday 3:00 AM) -------------
-
-        def _import_consolidation():
-            from job_finder.web.resume_feedback import run_preference_consolidation
-
-            return run_preference_consolidation
-
-        scheduler.add_job(
-            _make_simple_job(app, "Preference consolidation", _import_consolidation),
-            trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
-            id="preference_consolidation",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
         # -- Rejection analysis (weekly, Monday 3:00 AM) -------------------
 
         def _import_rejection():

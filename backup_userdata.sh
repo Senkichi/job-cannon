@@ -12,7 +12,6 @@ FILES=(
     "config.yaml"
     "experience_profile.json"
     "experience_reference.md"
-    "resume_style_guide.json"
 )
 
 mkdir -p "$BACKUP_DIR"

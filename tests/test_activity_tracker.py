@@ -165,14 +165,9 @@ class TestActionConstants:
         from job_finder.web.activity_tracker import (
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
-            ACTION_CONFLICT_REVIEW,
             ACTION_EXPAND_JOB,
-            ACTION_EXTRACT_STYLE,
-            ACTION_GENERATE_RESUME,
             ACTION_PASTE_JD,
-            ACTION_QUICK_APPLY,
             ACTION_RESCORE,
-            ACTION_SAVE_CONFLICTS,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_EXPIRY_CHECK,
@@ -180,7 +175,6 @@ class TestActionConstants:
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
-            ACTION_UPLOAD_RESUME_PDF,
         )
 
         constants = [
@@ -192,33 +186,22 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
-            ACTION_GENERATE_RESUME,
-            ACTION_QUICK_APPLY,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_REJECTION_ANALYSIS,
-            ACTION_UPLOAD_RESUME_PDF,
-            ACTION_CONFLICT_REVIEW,
-            ACTION_SAVE_CONFLICTS,
-            ACTION_EXTRACT_STYLE,
             ACTION_SCHEDULED_EXPIRY_CHECK,
             ACTION_SAVE_JD,
         ]
         # Unique string values
-        assert len(set(constants)) == 18, f"Duplicate ACTION_* values found: {constants}"
+        assert len(set(constants)) == 12, f"Duplicate ACTION_* values found: {constants}"
 
     def test_constants_match_expected_names(self):
         """All ACTION_* constants have the expected string values."""
         from job_finder.web.activity_tracker import (
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
-            ACTION_CONFLICT_REVIEW,
             ACTION_EXPAND_JOB,
-            ACTION_EXTRACT_STYLE,
-            ACTION_GENERATE_RESUME,
             ACTION_PASTE_JD,
-            ACTION_QUICK_APPLY,
             ACTION_RESCORE,
-            ACTION_SAVE_CONFLICTS,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_EXPIRY_CHECK,
@@ -226,7 +209,6 @@ class TestActionConstants:
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
-            ACTION_UPLOAD_RESUME_PDF,
         )
 
         assert ACTION_SYNC == "sync"
@@ -237,15 +219,8 @@ class TestActionConstants:
         assert ACTION_RESCORE == "rescore"
         assert ACTION_BATCH_SCORE_HAIKU == "batch_score_haiku"
         assert ACTION_BATCH_SCORE_SONNET == "batch_score_sonnet"
-        assert ACTION_GENERATE_RESUME == "generate_resume"
-        assert ACTION_QUICK_APPLY == "quick_apply"
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
         assert ACTION_SCHEDULED_REJECTION_ANALYSIS == "scheduled_rejection_analysis"
-        # Constants added in later phases:
-        assert ACTION_UPLOAD_RESUME_PDF == "upload_resume_pdf"
-        assert ACTION_CONFLICT_REVIEW == "conflict_review"
-        assert ACTION_SAVE_CONFLICTS == "save_conflicts"
-        assert ACTION_EXTRACT_STYLE == "extract_style"
         assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
         assert ACTION_SAVE_JD == "save_jd"
 

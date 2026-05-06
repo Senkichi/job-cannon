@@ -60,7 +60,6 @@ def mem_db():
             sub_scores_json TEXT DEFAULT NULL,
             jd_full TEXT DEFAULT NULL,
             is_stale INTEGER DEFAULT 0,
-            rejection_reviewed INTEGER DEFAULT 0,
             locations_raw TEXT DEFAULT NULL,
             description_reformatted INTEGER DEFAULT 0
         );
@@ -73,19 +72,6 @@ def mem_db():
             timestamp TEXT NOT NULL,
             source TEXT DEFAULT 'manual',
             evidence TEXT DEFAULT ''
-        );
-
-        CREATE TABLE IF NOT EXISTS resume_generations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL,
-            generated_at TEXT NOT NULL,
-            model TEXT NOT NULL,
-            doc_url TEXT DEFAULT NULL,
-            generation_type TEXT DEFAULT 'single',
-            status TEXT DEFAULT 'done',
-            strategy TEXT DEFAULT NULL,
-            error_msg TEXT DEFAULT NULL,
-            last_drive_polled_at TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS pipeline_detections (
@@ -102,31 +88,6 @@ def mem_db():
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL,
             resolved_at TEXT DEFAULT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS interview_preps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL REFERENCES jobs(dedup_key),
-            status TEXT NOT NULL DEFAULT 'generating',
-            company_brief TEXT DEFAULT NULL,
-            predicted_questions TEXT DEFAULT '[]',
-            gap_mitigation TEXT DEFAULT '[]',
-            questions_to_ask TEXT DEFAULT '[]',
-            error_msg TEXT DEFAULT NULL,
-            generated_at TEXT NOT NULL,
-            cost_usd REAL DEFAULT 0.0
-        );
-
-        CREATE TABLE IF NOT EXISTS resume_preferences_detected (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id TEXT NOT NULL REFERENCES jobs(dedup_key),
-            preference_type TEXT NOT NULL,
-            preference_text TEXT NOT NULL,
-            example_before TEXT DEFAULT NULL,
-            example_after TEXT DEFAULT NULL,
-            accepted INTEGER NOT NULL DEFAULT 1,
-            detected_at TEXT NOT NULL,
-            applied_at TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS scoring_costs (
@@ -742,15 +703,12 @@ class TestAllowlist:
             _run_with_bad_tables(mem_db, "old", "new", bad_fk_tables)
 
     def test_allowlisted_tables_assertion_passes(self, mem_db):
-        """All 6 FK tables in ALLOWED_FK_TABLES are known valid table names."""
+        """All FK tables in ALLOWED_FK_TABLES are known valid table names."""
         from job_finder.web.dedup_normalizer import ALLOWED_FK_TABLES
 
         expected_tables = {
             "pipeline_events",
-            "resume_generations",
             "pipeline_detections",
-            "interview_preps",
-            "resume_preferences_detected",
             "scoring_costs",
         }
         assert frozenset(expected_tables) == ALLOWED_FK_TABLES
@@ -761,11 +719,11 @@ class TestAllowlist:
 
         assert isinstance(ALLOWED_FK_TABLES, frozenset)
 
-    def test_allowed_fk_tables_has_six_entries(self):
-        """ALLOWED_FK_TABLES contains exactly 6 table names."""
+    def test_allowed_fk_tables_has_three_entries(self):
+        """ALLOWED_FK_TABLES contains exactly 3 table names."""
         from job_finder.web.dedup_normalizer import ALLOWED_FK_TABLES
 
-        assert len(ALLOWED_FK_TABLES) == 6
+        assert len(ALLOWED_FK_TABLES) == 3
 
     def test_update_fk_tables_raises_for_unknown_table(self, mem_db):
         """_update_fk_tables raises AssertionError when fk_tables contains a non-allowlisted name.

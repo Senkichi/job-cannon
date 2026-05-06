@@ -42,7 +42,6 @@ def _get_stale_count(conn) -> int:
 
 from job_finder.web.blueprints import PIPELINE_STATUSES, trigger_interview_prep_if_applied
 from job_finder.web.db_helpers import get_db
-from job_finder.web.drive_status import get_drive_status
 
 logger = logging.getLogger(__name__)
 
@@ -224,11 +223,7 @@ def expand(dedup_key: str):
         return "", 404
 
     job = ctx["job"]
-    resume_history = ctx["resume_history"]
     prep_row = ctx["prep_row"]
-
-    config = current_app.config.get("JF_CONFIG", {})
-    drive_status = get_drive_status(config)
 
     try:
         log_activity(
@@ -248,9 +243,7 @@ def expand(dedup_key: str):
         "jobs/_row_expanded.html",
         job=job,
         pipeline_statuses=PIPELINE_STATUSES,
-        resume_history=resume_history,
         prep_row=prep_row,
-        drive_status=drive_status,
     )
 
 
@@ -384,9 +377,7 @@ def paste_jd(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="Please provide a job description.",
-            resume_history=ctx["resume_history"],
             prep_row=ctx["prep_row"],
-            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
     # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
@@ -443,9 +434,7 @@ def paste_jd(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         error=error,
-        resume_history=ctx["resume_history"],
         prep_row=ctx["prep_row"],
-        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
@@ -472,9 +461,7 @@ def rescore(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="No JD available for re-scoring. Paste a JD first.",
-            resume_history=ctx["resume_history"],
             prep_row=ctx["prep_row"],
-            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
     # Capture old classification before re-evaluation
@@ -552,9 +539,7 @@ def rescore(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         error=error,
-        resume_history=ctx["resume_history"],
         prep_row=ctx["prep_row"],
-        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
     oob_score = render_template("jobs/_score_cell.html", job=ctx["job"], oob=True)
     return make_response(expanded + "<template>" + oob_score + "</template>")
@@ -662,9 +647,7 @@ def save_jd(dedup_key: str):
             job=job,
             pipeline_statuses=PIPELINE_STATUSES,
             error="Please provide a job description.",
-            resume_history=ctx["resume_history"],
             prep_row=ctx["prep_row"],
-            drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
         )
 
     # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
@@ -697,9 +680,7 @@ def save_jd(dedup_key: str):
         job=ctx["job"],
         pipeline_statuses=PIPELINE_STATUSES,
         jd_saved=True,
-        resume_history=ctx["resume_history"],
         prep_row=ctx["prep_row"],
-        drive_status=get_drive_status(current_app.config.get("JF_CONFIG", {})),
     )
 
 

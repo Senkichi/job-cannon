@@ -25,12 +25,7 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
-    DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
-)
-from job_finder.web.drive_status import get_drive_status
-from job_finder.web.resume_style_guide import (
-    load_style_guide,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,49 +53,16 @@ def index():
             "scan_hour": 7,
         }
 
-    drive_status = get_drive_status(config)
-
     config_mtime = 0
     try:
         config_mtime = os.path.getmtime(_CONFIG_PATH)
     except OSError:
         pass
 
-    style_guide = load_style_guide()
-    new_field_names = [
-        "summary_formula",
-        "skills_format",
-        "bullet_formula",
-        "bullet_counts",
-        "confidentiality_rules",
-        "typography_rules",
-        "jd_mirroring_rules",
-        "anti_patterns",
-        "role_archetype",
-    ]
-    new_fields_present = sum(1 for f in new_field_names if style_guide.get(f))
-    new_fields_available = len(new_field_names) - new_fields_present
-
-    guidelines_text = ""
-    try:
-        guidelines_path = (
-            Path(__file__).resolve().parent.parent.parent.parent
-            / "docs"
-            / "resume_generation_guidelines.md"
-        )
-        guidelines_text = guidelines_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        pass
-
     return render_template(
         "settings/index.html",
         config=config,
-        drive_status=drive_status,
         config_mtime=config_mtime,
-        style_guide=style_guide,
-        new_fields_present=new_fields_present,
-        new_fields_available=new_fields_available,
-        guidelines_text=guidelines_text,
     )
 
 
@@ -317,10 +279,6 @@ def _parse_form_to_config(form) -> dict:
         models["sonnet"] = form["model_sonnet"]
     if models:
         scoring["models"] = models
-    if _has("multi_version_threshold") and form["multi_version_threshold"]:
-        scoring["multi_version_threshold"] = safe_int(
-            form["multi_version_threshold"], DEFAULT_MULTI_VERSION_THRESHOLD
-        )
     if scoring:
         config["scoring"] = scoring
 

@@ -26,7 +26,6 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     DEFAULT_MODEL_HAIKU,
     DEFAULT_MODEL_SONNET,
-    DEFAULT_MULTI_VERSION_THRESHOLD,
     load_config,
 )
 from job_finder.web.db_helpers import close_db
@@ -140,7 +139,6 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     # --- Jinja2 globals: centralized config defaults ---
     app.jinja_env.globals["DEFAULT_HAIKU_THRESHOLD"] = DEFAULT_HAIKU_THRESHOLD
     app.jinja_env.globals["DEFAULT_MIN_SCORE_THRESHOLD"] = DEFAULT_MIN_SCORE_THRESHOLD
-    app.jinja_env.globals["DEFAULT_MULTI_VERSION_THRESHOLD"] = DEFAULT_MULTI_VERSION_THRESHOLD
     app.jinja_env.globals["DEFAULT_LOOKBACK_DAYS"] = DEFAULT_LOOKBACK_DAYS
     app.jinja_env.globals["DEFAULT_MAX_RESULTS"] = DEFAULT_MAX_RESULTS
     app.jinja_env.globals["DEFAULT_MODEL_HAIKU"] = DEFAULT_MODEL_HAIKU
@@ -174,21 +172,15 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.blueprints.costs import costs_bp
     from job_finder.web.blueprints.dashboard import dashboard_bp
     from job_finder.web.blueprints.detections import detections_bp
-    from job_finder.web.blueprints.feedback import feedback_bp
-    from job_finder.web.blueprints.guidelines import guidelines_bp
     from job_finder.web.blueprints.jobs import jobs_bp
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
     from job_finder.web.blueprints.profile_recommendations import profile_recs_bp
-    from job_finder.web.blueprints.resume import resume_bp
-    from job_finder.web.blueprints.resume_review import resume_review_bp
     from job_finder.web.blueprints.settings import settings_bp
     from job_finder.web.blueprints.sync import sync_bp
 
-    # companies_bp, resume_bp, feedback_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
+    # companies_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
     app.register_blueprint(companies_bp)
-    app.register_blueprint(resume_bp)
-    app.register_blueprint(feedback_bp)
     app.register_blueprint(costs_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(dashboard_bp)
@@ -197,10 +189,8 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(detections_bp)
     app.register_blueprint(pipeline_bp)
     app.register_blueprint(profile_bp)
-    app.register_blueprint(resume_review_bp)
     app.register_blueprint(profile_recs_bp)
     app.register_blueprint(settings_bp)
-    app.register_blueprint(guidelines_bp)
     app.register_blueprint(admin_bp)
 
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---

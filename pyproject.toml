@@ -70,8 +70,6 @@ ignore = [
 # OAuth token paths use 'token' in variable names — not passwords.
 "job_finder/gmail_auth.py" = ["S105"]
 "job_finder/sources/gmail_source.py" = ["S105"]
-"job_finder/web/drive_status.py" = ["S107"]
-"job_finder/web/drive_uploader.py" = ["S107"]
 
 [tool.ruff.format]
 quote-style = "double"

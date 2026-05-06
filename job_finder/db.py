@@ -505,27 +505,20 @@ def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
 
 
 def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
-    """Load the standard job context bundle: job + resume_history + prep_row.
+    """Load the standard job context bundle: job + prep_row.
 
-    Shared helper for expand, rescore, paste_jd, and quick_apply routes.
-    Always fetches all three -- no flags/options per locked decision.
+    Shared helper for expand, rescore, paste_jd, and save_jd routes.
 
     Args:
         conn: Open sqlite3 connection.
         dedup_key: The job's primary key.
 
     Returns:
-        Dict with keys 'job', 'resume_history', 'prep_row', or None if job not found.
+        Dict with keys 'job', 'prep_row', or None if job not found.
     """
     job = get_job(conn, dedup_key)
     if job is None:
         return None
-
-    resume_history = conn.execute(
-        "SELECT id, job_id, status, doc_url, error_msg, generated_at, model, generation_type, validation_report "
-        "FROM resume_generations WHERE job_id = ? ORDER BY generated_at DESC",
-        (dedup_key,),
-    ).fetchall()
 
     prep_row = conn.execute(
         "SELECT status, company_brief, predicted_questions, gap_mitigation, "
@@ -536,7 +529,6 @@ def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
 
     return {
         "job": job,
-        "resume_history": resume_history,
         "prep_row": prep_row,
     }
 
