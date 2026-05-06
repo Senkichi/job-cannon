@@ -15,18 +15,14 @@ Architecture:
 """
 
 import concurrent.futures
-import json
 import logging
 import time
 from datetime import datetime
 
-import requests
-from bs4 import BeautifulSoup
+import requests  # noqa: F401  — bound here so test_careers_crawler patches resolve
 from playwright.sync_api import sync_playwright
 
-from job_finder.db import derive_classification
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 
 # Title hygiene + URL-path navigation filters — extracted to _title_filters.
 # Re-imported here so the public surface (job_finder.web.careers_crawler.X)
