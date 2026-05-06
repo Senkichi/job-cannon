@@ -122,7 +122,8 @@ SENDER_PARSERS = {
 
 **Development Server:**
 - Flask built-in dev server (debug=True, use_reloader=False)
-- Command: `python run.py` (entry point: `run.py`)
+- Command: `uv run job-cannon` (canonical) or `python -m job_finder` / `python run.py` (equivalent legacy entries)
+- Console script registered via `[project.scripts]` in `pyproject.toml`; entry point `job_finder.__main__:main` resolves `config.yaml` via `job_finder.config.resolve_config_path`
 
 ## Environment Configuration
 

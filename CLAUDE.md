@@ -19,7 +19,9 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 
 ```bash
 # Run the app
-uv run python run.py                              # Flask dev server on localhost:5000
+uv run job-cannon                                 # Flask dev server on localhost:5000 (canonical)
+uv run python -m job_finder                       # equivalent module entry
+uv run python run.py                              # legacy entry, still works (now a shim)
 
 # Tests
 uv run --active pytest tests/                              # All tests (2104 passing as of 2026-05-05)
