@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, and Thordata, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), tracks application pipeline status, and generates tailored resumes via Google Docs.
+Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, and DataForSEO, scores them with a two-tier Claude AI pipeline (Haiku fast filter → Sonnet deep evaluation), and tracks application pipeline status.
 
 **Single-user, local-only app. No deployment, no Docker, no CI/CD.**
 
@@ -12,8 +12,8 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 - **Frontend**: HTMX 2.x, Tailwind CSS (CDN), SortableJS, vanilla JS only
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
-- **AI**: Anthropic API — Haiku for fast scoring, Sonnet for deep evaluation, Opus for profile extraction
-- **APIs**: Gmail API v1 (OAuth 2.0), Google Drive/Docs API, SerpAPI (optional), Thordata SERP API (optional)
+- **AI**: Anthropic API — Haiku for fast scoring, Sonnet for deep evaluation
+- **APIs**: Gmail API v1 (OAuth 2.0, read-only); SerpAPI / Thordata / DataForSEO / portal-search aggregator (all optional)
 
 ## Key Commands
 
@@ -22,7 +22,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 uv run python run.py                              # Flask dev server on localhost:5000
 
 # Tests
-uv run --active pytest tests/                              # All tests (1359 passing)
+uv run --active pytest tests/                              # All tests (2104 passing as of 2026-05-05)
 uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
 
@@ -41,8 +41,8 @@ uv pip install -r requirements.txt
 job_finder/
 ├── web/
 │   ├── __init__.py              # Flask app factory (create_app)
-│   ├── blueprints/              # 10 blueprints: jobs, dashboard, pipeline, profile, settings, detections, companies, costs, feedback, resume
-│   ├── templates/               # 42 Jinja2 templates (base.html + partials)
+│   ├── blueprints/              # 11 blueprints: admin, batch_scoring, companies, costs, dashboard, detections, jobs, pipeline, profile, settings, sync
+│   ├── templates/               # 36 Jinja2 templates (base.html + partials)
 │   ├── claude_client.py         # Anthropic wrapper with cost tracking + budget gating
 │   ├── haiku_scorer.py          # Fast-filter scoring
 │   ├── sonnet_evaluator.py      # Deep evaluation with fit analysis
@@ -53,13 +53,13 @@ job_finder/
 │   ├── db_migrate.py            # Schema migrations (list of SQL strings)
 │   └── stale_detector.py        # Nightly stale job detection (own DB connection)
 ├── parsers/                     # Email parsers: linkedin, glassdoor, indeed (stub), ziprecruiter
-├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py
+├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py, dataforseo_source.py, portal_search_source.py
 ├── models.py                    # Job dataclass with dedup_key
 ├── db.py                        # Original CLI-era DB module (module-level functions take Connection)
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
-└── test_*.py                    # 45 test files
+└── test_*.py                    # 85 test files
 ```
 
 ## Architecture Decisions That Matter
@@ -103,8 +103,8 @@ This project uses the GSD framework. Key docs:
 - **Phase 1 (Foundation)**: Complete — 11/11 plans, 36/36 must-haves verified
 - **Phase 2 (AI Scoring)**: Complete — 5/5 plans
 - **Phase 3 (Pipeline Automation)**: Complete — 2/2 plans
-- **Phase 4 (Resume Generation)**: Operational — inherited from job-finder (resume generator, Drive upload, DOCX formatter, feedback, validation)
-- **Phase 5 (Intelligence)**: Operational — inherited from job-finder (interview prep, rejection analysis, notifications). Semantic similarity/clustering dropped.
+- **Phase 4 (Resume Generation)**: Removed (public-repo cleanup, 2026-05) — resume_generator, drive_uploader, drive_status, docx_formatter, resume_feedback, resume_validator, resume_style_guide, resume_multi_version, resume_review blueprint, feedback blueprint, guidelines blueprint all deleted; Migration 47 dropped resume_generations / resume_preferences_detected / resume_upload_reviews tables.
+- **Phase 5 (Intelligence)**: Removed (public-repo cleanup, 2026-05) — interview_prep, rejection_analyzer, rejection_patterns, notifier all deleted; Migration 48 dropped interview_preps / rejection_reports / rejection_pattern_reports tables and the jobs.rejection_reviewed column. AI career navigator (`ai_career_navigator.py`) was retained as a Tier-4 crawler fallback (16 cached recipes, ~10 active companies use ai_navigate/ai_replay tier).
 
 ## Verification Standards
 
@@ -124,7 +124,6 @@ When verifying phase completion or running `/gsd:verify-work`, self-check everyt
 - Visual/aesthetic judgments (spacing, colors, sizing, "looks broken")
 - Real browser JS execution (HTMX swap animations, SortableJS drag behavior)
 - Cross-element visual layout rendering (does two-column actually render correctly?)
-- OS-level features (Windows toast notifications appearing on screen)
 - Subjective UX quality ("is this intuitive?")
 
 **Use these agents/skills proactively at the right stages:**
@@ -141,7 +140,7 @@ When verifying phase completion or running `/gsd:verify-work`, self-check everyt
 
 ## Conventions
 
-- Always use Context7 MCP when working with library APIs, especially for: APScheduler, HTMX, Anthropic SDK, sqlite-vec, Quart, janus, pynput, sentence-transformers
+- Always use Context7 MCP when working with library APIs, especially for: APScheduler, HTMX, Anthropic SDK, Flask, jinja2-fragments
 - Snake_case everywhere (files, functions, variables). PascalCase for classes only.
 - No formatter or linter configured. PEP 8 followed implicitly.
 - Absolute imports from `job_finder` package root.
@@ -156,9 +155,7 @@ These files contain personal data and API keys. They are `.gitignore`d and must 
 | File | Template | Purpose |
 |------|----------|---------|
 | `config.yaml` | `config.example.yaml` | App config, API keys, profile targets |
-| `experience_profile.json` | `experience_profile.example.json` | Career history for resume generation |
-| `experience_reference.md` | — | Full experience reference document |
-| `resume_style_guide.json` | — | Extracted resume formatting preferences |
+| `experience_profile.json` | `experience_profile.example.json` | Career history (positions / skills / education) for Sonnet fit-scoring personalization |
 
 **config.yaml must ONLY be modified with the Edit tool (surgical string replacement), NEVER with the Write tool (full-file overwrite).** This file has been accidentally wiped 3 times by full-file rewrites that intended to change a single value. The settings save route (`_write_config`) is safe because it reads→merges→writes. The risk is Claude/GSD execution doing full-file writes.
 
