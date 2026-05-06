@@ -63,7 +63,7 @@ job_finder/
 ├── parsers/                     # Email parsers: linkedin, glassdoor, indeed (stub), ziprecruiter
 ├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py, dataforseo_source.py, portal_search_source.py
 ├── models.py                    # Job dataclass with dedup_key
-├── db.py                        # Original CLI-era DB module (module-level functions take Connection); split into db/ package by Reconciliation R3 (concurrent session in progress 2026-05-06)
+├── db/                          # CLI-era DB module split into a package by Reconciliation R3 / S7d (2026-05-06): __init__ lifecycle + _queries (read-only filters + sort_by allowlist) + _jobs (CRUD) + _persistence (writes + pipeline state machine) + _classification (JobAssessment + derive_classification). Tag portfolio/s7d-db-split.
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
@@ -119,7 +119,7 @@ This project uses the GSD framework. Key docs:
 - **Phase 4 (Resume Generation)**: Removed (public-repo cleanup, 2026-05) — resume_generator, drive_uploader, drive_status, docx_formatter, resume_feedback, resume_validator, resume_style_guide, resume_multi_version, resume_review blueprint, feedback blueprint, guidelines blueprint all deleted; Migration 47 dropped resume_generations / resume_preferences_detected / resume_upload_reviews tables.
 - **Phase 5 (Intelligence)**: Removed (public-repo cleanup, 2026-05) — interview_prep, rejection_analyzer, rejection_patterns, notifier all deleted; Migration 48 dropped interview_preps / rejection_reports / rejection_pattern_reports tables and the jobs.rejection_reviewed column. AI career navigator (`ai_career_navigator.py`) was retained as a Tier-4 crawler fallback (16 cached recipes, ~10 active companies use ai_navigate/ai_replay tier).
 - **Portfolio Cleanup (Track 1, Stage 1 link-shareable, 2026-05)**: Sessions 0-4 complete (`portfolio/s0-baseline` through `portfolio/s4-readme-skeleton`). Stage 1 gate held open by 3 user-action items (codecov authorization, hero GIF, "Why I Built It" narrative) — see `.planning/portfolio-cleanup/STAGE-1-GATE-BLOCKERS.md`.
-- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7e complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7e-careers-crawler-split`). Session 7d (db.py split) was SKIPPED in the original execution and is being recovered by Reconciliation Plan v1 Session R3 (concurrent at time of writing). Reconciliation track R0–R8 is in flight (`.planning/PORTFOLIO_RECONCILIATION_PLAN.md`). Sessions 8–11 unstarted.
+- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7d, 7e all complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7d-db-split` + `portfolio/s7e-careers-crawler-split`). Session 7d was originally SKIPPED in the first execution; recovered by Reconciliation Plan v1 Session R3 (concurrent session, closed 2026-05-06). Reconciliation track R0–R2 closed (tags `portfolio/r1-docs-reconciled` + `portfolio/r2-test-integrity`); R4–R8 pending. Sessions 8–11 unstarted.
 
 ## Verification Standards
 
