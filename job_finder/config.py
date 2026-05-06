@@ -4,11 +4,16 @@ All config fallback values live here so they stay in sync across the
 codebase.  Import the constant you need rather than hard-coding a number.
 """
 
+import os
 from pathlib import Path
 
 import yaml
 
 DEFAULT_CONFIG_PATH = "config.yaml"
+
+
+class ConfigNotFoundError(FileNotFoundError):
+    """Raised when config.yaml cannot be located via the documented lookup order."""
 
 # --- Server defaults ---
 DEFAULT_SERVER_HOST = "127.0.0.1"
@@ -103,6 +108,57 @@ def validate_required_sections(config: dict) -> None:
             f"Config is missing required section(s): {', '.join(missing)}\n"
             f"See config.example.yaml for the expected structure."
         )
+
+
+def resolve_config_path() -> str:
+    """Locate config.yaml via the documented lookup order.
+
+    Lookup order:
+      1. ``$JOB_CANNON_CONFIG`` environment variable.
+         If set but the path doesn't exist → :class:`ConfigNotFoundError`
+         (do NOT fall through — the user explicitly named where the
+         config is, silently using a different one is wrong UX).
+      2. ``./config.yaml`` in the current working directory.
+      3. User config directory:
+         - Windows: ``%APPDATA%/job-cannon/config.yaml``
+         - Unix:    ``~/.config/job-cannon/config.yaml``
+
+    Returns:
+        Absolute or relative path to the resolved config file.
+
+    Raises:
+        ConfigNotFoundError: if no path resolves AND no env var was set,
+            or if the env var was set but its target file does not exist.
+    """
+    env = os.environ.get("JOB_CANNON_CONFIG")
+    if env:
+        if not os.path.exists(env):
+            raise ConfigNotFoundError(
+                f"$JOB_CANNON_CONFIG is set to '{env}' but no file exists there. "
+                f"Either fix the env var, unset it, or place a config.yaml at the path."
+            )
+        return env
+
+    cwd = os.path.join(os.getcwd(), "config.yaml")
+    if os.path.exists(cwd):
+        return cwd
+
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", "")
+        user_config = os.path.join(appdata, "job-cannon", "config.yaml")
+    else:
+        user_config = os.path.join(
+            os.path.expanduser("~"), ".config", "job-cannon", "config.yaml"
+        )
+    if os.path.exists(user_config):
+        return user_config
+
+    raise ConfigNotFoundError(
+        "config.yaml not found. Looked at: "
+        f"./config.yaml, {user_config}. "
+        "Copy config.example.yaml to ./config.yaml to get started, "
+        "or set $JOB_CANNON_CONFIG to point to your config file."
+    )
 
 
 def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
