@@ -3,9 +3,12 @@
 ![Job Cannon](docs/assets/banner.svg)
 
 > A personal job-search command center: aggregates listings from Gmail
-> alerts, SERP APIs, and live ATS scanners; scores them with a
+> alerts and SERP APIs, **proactively scrapes career pages from a
+> curated company watchlist** (5-platform ATS coverage —
+> Greenhouse / Lever / Ashby / SmartRecruiters / Workday — plus a
+> tier-4 AI navigator for custom sites), scores everything with a
 > cascade-routed AI pipeline (free local + free cloud providers, with
-> Anthropic as paid fallback); and tracks application state.
+> Anthropic as paid fallback), and tracks application state.
 > Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
