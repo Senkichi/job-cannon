@@ -25,11 +25,10 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      - name: Install dev tools
-        run: uv pip install --system ruff
-
-      - run: ruff check .
-      - run: ruff format --check .
+      # Use uvx so we don't need a system 3.13 Python and don't need a venv
+      # for a pure CLI tool. uvx fetches ruff into a uv-managed cache.
+      - run: uvx ruff check .
+      - run: uvx ruff format --check .
 
 
   # ── Tests ────────────────────────────────────────────────────
@@ -48,16 +47,16 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      - name: Install dependencies
+      # Use a uv-managed venv (instead of `--system`) so we don't depend on
+      # a system 3.13 install being present on the runner. setup-uv brings
+      # 3.13 via uv; `uv venv` creates `.venv/` against that Python; the
+      # subsequent `uv run` resolves to it on both Linux and Windows.
+      - name: Create venv and install dependencies
         run: |
-          uv pip install --system -r requirements.txt
+          uv venv
+          uv pip install -r requirements.txt
 
       - name: Run tests
-        # Invoke pytest via `uv run` so the action's uv-managed Python is
-        # used (the same one `uv pip install --system` installed pytest
-        # into). Bare `python` on Windows runners points at a pre-installed
-        # Python that has no project deps; bare `pytest` collides with the
-        # AppInstaller stub. `uv run` resolves both.
         run: uv run pytest -q --tb=short
 
 
