@@ -78,11 +78,19 @@ eval = [
 # pre-commit framework is managed by .pre-commit-config.yaml. Adding
 # pinned versions here would surprise contributors with conflicting
 # global installs.
+#
+# Type-checkers (mypy, pyright) ARE pinned here because their behavior
+# is fully driven by [tool.mypy] / [tool.pyright] in this file —
+# project-internal config, not contributor-global. A pinned version
+# guarantees CI and local runs see the same error set, which is the
+# whole point of declaring a type-check baseline.
 dev = [
     "pytest~=8.0",
     "pytest-cov~=7.1",
     "pytest-playwright~=0.7",
     "python-dotenv~=1.0",
+    "mypy~=1.13",
+    "pyright~=1.1",
 ]
 
 [project.scripts]
@@ -180,6 +188,31 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",
 ]
+
+
+# ── Type Checking ─────────────────────────────────────────────
+# Active baseline tool: mypy. Pyright is installed as a secondary
+# check (faster iteration, complements mypy's diagnostics) but the
+# pre-commit hook and CI signal use mypy. Baseline error counts are
+# documented in docs/architecture/typecheck.md (Session 5).
+[tool.mypy]
+python_version = "3.13"
+ignore_missing_imports = true
+# Start gentle — these are tightened progressively in Session 8 once
+# Settings caller migration lands and untyped-call surface shrinks.
+warn_return_any = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["tests/", "scripts/", "build/", "dist/"]
+
+[tool.pyright]
+include = ["job_finder"]
+exclude = ["**/tests", "**/scripts", ".venv", "build", "dist"]
+typeCheckingMode = "basic"
+pythonVersion = "3.13"
+# Tighten to "strict" over time. "basic" matches mypy's posture for
+# the S5 baseline — high-signal errors only, no nag on every untyped
+# parameter.
 
 
 # ── Commitizen (Version Bumping + Changelog) ──────────────────
