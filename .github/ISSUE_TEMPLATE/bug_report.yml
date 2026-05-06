@@ -1,0 +1,51 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you do, and what went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal reproduction. Include the exact commands or UI clicks needed.
+      placeholder: |
+        1. Run `uv run job-cannon`
+        2. Open http://localhost:5000
+        3. Click ...
+        4. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        OS, Python version (`python --version`), commit hash
+        (`git rev-parse --short HEAD`), browser if relevant.
+      placeholder: |
+        OS: Windows 11
+        Python: 3.13.5
+        Commit: <short-sha>
+        Browser: Chrome 130 (if relevant)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: |
+        Paste any relevant traceback or log lines. **Redact API keys and
+        anything from `.env` / `config.yaml`** before pasting.
+      render: shell

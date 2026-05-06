@@ -1,0 +1,36 @@
+name: Feature request
+description: A new capability or behavior change.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: |
+        What pain point does this address? Why is the current behavior
+        insufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Other approaches you weighed and why they didn't fit. This helps
+        the maintainer understand the design space.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: |
+        This project is intentionally single-user and localhost-only. See
+        CONTRIBUTING.md and SECURITY.md for what is in/out of scope.
+      options:
+        - label: I've read CONTRIBUTING.md and the proposal fits the project's stated scope.
+          required: true
