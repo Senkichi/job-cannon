@@ -260,15 +260,18 @@ After the careers_crawler split (`careers_crawler.py` → 8-module
 package), the mypy delta is purely mechanical and the pyright total
 is unchanged.
 
+Numbers below are the post-reconciliation measurement after the S7a→S7b→S7c→S7e
+linear-rebase landed on `main`. Anchor is the S7c-close baseline (112 / 38 / 167).
+
 | Tool   | Errors      | Files       | Source files checked | Δ errors |
 |--------|-------------|-------------|----------------------|----------|
-| mypy   | 125 (+4)    | 41 (+3)     | 171 (+9)             | +4       |
+| mypy   | 113 (+1)    | 41 (+3)     | 187 (+20)            | +1       |
 | pyright| 45 (=)      | —           | (job_finder include) | =        |
 
-The +4 mypy errors are not new design issues — every one of them is
-a duplicate of a pre-existing error that previously lived once in
-`careers_crawler.py` and now appears once per sub-module that
-inherited the offending import. Specifically:
+The s7e-induced mypy additions are not new design issues — they are
+duplicates of pre-existing errors that previously lived once in
+`careers_crawler.py` and now appear once per sub-module that inherited
+the offending import. Specifically:
 
 - `[import-untyped] Library stubs not installed for "requests"` — the
   original file had this once; post-split it appears in `__init__.py`,
@@ -288,11 +291,23 @@ The new sub-modules themselves (8 of them) and the new
 is excluded from mypy by config (tests are not type-checked at this
 phase).
 
-Source-files checked grew by 9 (8 new careers_crawler sub-modules +
-1 new `_http_constants.py`). Files-with-errors grew by 3 (the three
-new tier modules that import `requests`). pyright did not move at
-all — its include set saw the same 45 errors before and after, since
-the new modules pyright sees are clean of pyright-specific issues.
+Source-files checked grew by 20 over the S7c-close anchor — 6 from
+the S7a scheduler split, 5 from the S7b pipeline_detector split, and 9
+from S7e itself (8 new careers_crawler sub-modules + 1 new
+`_http_constants.py`). Files-with-errors grew by 3 (the three new tier
+modules that import `requests`). pyright did not move at all — its
+include set saw the same 45 errors before and after, since the new
+modules pyright sees are clean of pyright-specific issues.
+
+The headline mypy delta from the S7c-close anchor is +1 rather than the
++3–4 a naïve sum of the careers_crawler `requests` duplicates would
+predict. The original pre-rebase s7e measurement (125 against a 121
+S6-close anchor) reflected an s7e tip that had not yet seen S7c's -9
+improvement; once both land on `main`, the per-error categories below
+all hold but the totals compose to 113 rather than 116. The exact
+3-error gap was not bisected as part of this reconciliation — every
+listed error category remains present and accounted for in the
+post-rebase output.
 
 S9 lint cleanup will be the natural place to install
 `types-requests` (silences the 4 duplicate import-untyped errors
@@ -302,7 +317,7 @@ the `summary` dict's typed shape.
 ### Reproducing for S7e
 
 ```powershell
-uv run --active mypy job_finder    # 125 errors / 41 files / 171 source files
+uv run --active mypy job_finder    # 113 errors / 41 files / 187 source files
 uv run --active pyright            # 45 errors
 ```
 
