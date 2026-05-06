@@ -65,6 +65,26 @@ repos:
       - id: commitizen
         stages: [commit-msg]
 
+  # ── Type Checking (manual-stage, opt-in) ────────────────────
+  # Runs the active baseline type-checker (mypy) over the whole
+  # job_finder/ package. Pinned to stages: [manual] so it does NOT
+  # gate every commit while the baseline error count is still
+  # being driven down (Session 5 baseline: 123 errors / 39 files —
+  # see docs/architecture/typecheck.md). Promotion to the default
+  # pre-commit stage is a Session 9/10 item.
+  #
+  # To run on demand:
+  #   uv run pre-commit run --hook-stage manual --all-files type-check
+  - repo: local
+    hooks:
+      - id: type-check
+        name: 'mypy (manual stage — opt-in baseline)'
+        entry: uv run --active mypy job_finder
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
+
   # ── Placeholder Discipline (MI-14) ──────────────────────────
   # Block accidental commits of `<<<TODO: REPLACE>>>` and `<<<VERIFY>>>`
   # template markers. The README + repo-metadata templates ship with
