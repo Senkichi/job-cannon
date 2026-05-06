@@ -1,13 +1,13 @@
-# Runs on every push to master (the canonical workflow) and on PRs if anyone
+# Runs on every push to main (the canonical workflow) and on PRs if anyone
 # ever opens one. Lint + tests run in parallel.
 
 name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master]
+    branches: [main]
 
 permissions:
   contents: read
