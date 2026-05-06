@@ -91,6 +91,11 @@ dev = [
     "python-dotenv~=1.0",
     "mypy~=1.13",
     "pyright~=1.1",
+    # types-requests silences the 4 duplicate [import-untyped] errors that
+    # the careers_crawler split spread across __init__.py + _static_tier.py
+    # + _playwright_tier.py + _api_cache.py (each imports `requests` directly).
+    # See Reconciliation Plan v1 R4.3 + finding F-D3.
+    "types-requests~=2.32",
 ]
 
 [project.scripts]
@@ -204,7 +209,7 @@ ignore_missing_imports = true
 warn_return_any = false
 warn_unused_ignores = true
 warn_redundant_casts = true
-exclude = ["tests/", "scripts/", "build/", "dist/"]
+exclude = ["tests/", "scripts/", "build/", "dist/", "backups/"]
 
 [tool.pyright]
 include = ["job_finder"]
