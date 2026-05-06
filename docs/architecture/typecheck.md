@@ -143,3 +143,54 @@ exclude is a Session 8 / Session 9 lint-cleanup item.
 The S6 measurement is recorded in this file only — the baseline
 artifacts are regeneratable per the reproducing block above and don't
 need a snapshot for every session.
+
+## Session 7c re-measurement — 2026-05-06
+
+After splitting `job_finder/web/ats_scanner.py` (863 LOC) into the
+`ats_scanner/` package (6 files: `__init__.py`, `_upsert.py`, `_probe.py`,
+`_promote.py`, `_run.py`, `_run_html.py`):
+
+- **mypy `job_finder`:** **112 errors / 38 files / 167 source files**.
+  Improvement of **-9 errors** vs. S6 close (121 / 38 / 162). Source
+  files +5 (the new package modules). File count unchanged at 38.
+- **pyright `job_finder`:** **45 errors / 0 warnings / 0 informations**.
+  Unchanged from S6 close.
+
+The mypy -9 improvement comes from the shape change rather than an
+explicit type-annotation pass: the slim `__init__.py` drops 50+ lines
+of imports (json, sqlite3, time, datetime, derive_classification,
+standalone_connection, strip_html_to_text, plus the four lazy-import
+try/except blocks). Several of those globals had `Any`-typed shapes
+(e.g., `score_and_persist_job = None  # type: ignore[assignment]`)
+that propagated through every reference inside the original 470-line
+`run_ats_scan`. Splitting that function into typed helpers in `_run.py`
+made the local type-narrowing tighter — the lazy globals only live in
+`_run.py` / `_run_html.py` now, where the outer phase guards narrow
+them at the call sites. New phase-helper signatures (`summary: dict`,
+`all_new_job_keys: list`) also let mypy infer return shapes more
+precisely than the inline-loop original.
+
+The S7c code itself (the six new package modules + the test patches)
+is mypy-clean from the start. No new mypy/pyright errors were
+introduced; the -9 improvement is downstream of the refactor.
+
+Note: Session 7a (`scheduler.py` split) is in flight in a parallel
+worktree as of this measurement and has landed one commit on local
+main (`d1d20a9 refactor(scheduler): introduce package layout`). The
+S7c worktree branched from that commit, so the 112/45 numbers above
+include 7a's intermediate state. When the user merges 7a/7b first and
+then rebases S7c, this delta should still hold — none of S7c's changes
+touch scheduler-related types.
+
+### Reproducing block (S7c)
+
+```bash
+uv run --active mypy job_finder | tail -1
+# Found 112 errors in 38 files (checked 167 source files)
+
+uv run --active pyright job_finder | tail -1
+# 45 errors, 0 warnings, 0 informations
+```
+
+Same scoping as S5/S6: `mypy job_finder` (NOT `mypy .`, per the S6
+cross-check note above).
