@@ -1261,6 +1261,10 @@ class TestUnifiedScorerConfigShape:
         assert "scoring:" in text
         assert "qwen2.5:14b" in text
 
+    @pytest.mark.skipif(
+        not os.path.exists("config.yaml"),
+        reason="config.yaml is gitignored user-local data; absent on CI runners",
+    )
     def test_config_yaml_has_providers_scoring_block(self):
         """config.yaml (user config) has providers.scoring after Plan 4."""
         from pathlib import Path
@@ -1270,6 +1274,10 @@ class TestUnifiedScorerConfigShape:
         assert "\n  scoring:\n" in text
         assert "qwen2.5:14b" in text
 
+    @pytest.mark.skipif(
+        not os.path.exists("config.yaml"),
+        reason="config.yaml is gitignored user-local data; absent on CI runners",
+    )
     def test_config_yaml_no_legacy_provider_blocks(self):
         """Plan 4 Commit E collapsed providers.haiku/providers.sonnet."""
         from pathlib import Path
