@@ -29,7 +29,7 @@ from playwright.sync_api import sync_playwright
 from job_finder.db import derive_classification
 from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.db_helpers import standalone_connection
-from job_finder.web.enrichment_tiers import _HEADERS, _TIMEOUT
+from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 
 logger = logging.getLogger(__name__)
 
