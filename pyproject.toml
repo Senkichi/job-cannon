@@ -73,14 +73,24 @@ eval = [
     "numpy~=2.4",
     "scipy~=1.17",
 ]
-# Test + tooling deps. ruff/pre-commit/commitizen are intentionally not
-# pinned here — ruff runs via `uvx ruff` (no install needed) and the
-# pre-commit framework is managed by .pre-commit-config.yaml. Adding
-# pinned versions here would surprise contributors with conflicting
-# global installs.
+# Test + tooling deps.
 #
-# Type-checkers (mypy, pyright) ARE pinned here because their behavior
-# is fully driven by [tool.mypy] / [tool.pyright] in this file —
+# ruff is intentionally not pinned here — it runs via `uvx ruff`, which
+# fetches the latest version on first use without installing anything
+# into the venv.
+#
+# pre-commit and commitizen ARE pinned (R5.1, 2026-05-06) because this
+# project is single-user-by-design — contributor-global-conflict risk
+# is moot, and the prior "intentionally not pinned" stance let `uv sync`
+# silently purge them, which led to the S3 incident where the first
+# commit landed unformatted because the .githooks/pre-commit shim
+# warned-and-passed instead of failing. Pinning here closes finding
+# F-F1 mechanically: every `uv sync --extra dev` re-installs both.
+# (R5.2 separately promotes the .githooks shim to fail-closed when
+# pre-commit isn't on PATH, closing F-F2.)
+#
+# Type-checkers (mypy, pyright) ARE pinned because their behavior is
+# fully driven by [tool.mypy] / [tool.pyright] in this file —
 # project-internal config, not contributor-global. A pinned version
 # guarantees CI and local runs see the same error set, which is the
 # whole point of declaring a type-check baseline.
@@ -91,6 +101,9 @@ dev = [
     "python-dotenv~=1.0",
     "mypy~=1.13",
     "pyright~=1.1",
+    # Pinned at R5.1 (2026-05-06). See block comment above.
+    "pre-commit~=4.6",
+    "commitizen~=4.15",
     # types-requests silences the 4 duplicate [import-untyped] errors that
     # the careers_crawler split spread across __init__.py + _static_tier.py
     # + _playwright_tier.py + _api_cache.py (each imports `requests` directly).
