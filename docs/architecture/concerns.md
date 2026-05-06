@@ -26,10 +26,10 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 - **Resolution:** Fixed in Phase 34 (v1.5, 2026-03-17). `safe_json_load()` utility created in `job_finder/web/db_helpers.py` and adopted at all JSON deserialization call sites. See `.planning/phases/34-data-quality/34-01-SUMMARY.md`.
 
 **APScheduler Version Lock Risk (Low Priority):**
-- Issue: `requirements.txt` pins APScheduler to `<4.0` to avoid breaking async API changes
-- Files: `requirements.txt`, `job_finder/web/scheduler.py`
+- Issue: `pyproject.toml` pins APScheduler to `>=3.11,<4.0` to avoid breaking async API changes
+- Files: `pyproject.toml`, `job_finder/web/scheduler.py`
 - Impact: Version 4.x has incompatible async patterns. Pinning to 3.11 prevents security updates if any are released in the 3.x series
-- Fix approach: Review APScheduler 4.x API periodically and plan migration when time permits. Not urgent for single-user local app. Document the reason in requirements.txt as a comment
+- Fix approach: Review APScheduler 4.x API periodically and plan migration when time permits. Not urgent for single-user local app.
 
 **Database Migration Pattern Relies on Individual Statement Execution (Low Priority):**
 - Issue: Migrations use list of discrete SQL statements rather than semicolon-delimited script. While intentional (per comment "avoids semicolon-splitting hazards"), it creates maintenance friction
@@ -150,7 +150,7 @@ This document catalogs known tech debt, fragile areas, scaling limits, and test-
 
 **APScheduler 3.11.x Pinning (Minor Risk):**
 - Risk: Version 3.x is aging (last release 2020). Version 4.x has breaking async changes. Pinning prevents updates but limits security/stability improvements
-- Files: `requirements.txt` (line with APScheduler<4.0)
+- Files: `pyproject.toml` (APScheduler>=3.11,<4.0 in [project.dependencies])
 - Impact: If future CVE found in APScheduler 3.11.x, only option is to migrate to 4.x (large effort)
 - Migration plan: Monitor APScheduler 4.x adoption. When stable, create isolated test environment and validate scheduler behavior with async API
 - Priority: Low — single-user local app, limited attack surface
