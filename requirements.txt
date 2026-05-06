@@ -32,6 +32,11 @@ scipy~=1.17
 # Content extraction
 trafilatura~=2.0             # Density-based main-content extraction (strips chrome/nav/aggregator boilerplate)
 
+# Search / discovery — used by enrichment_tiers + agentic_enricher to look
+# up career pages when neither a known ATS slug nor a sitemap-derived URL
+# is available.
+ddgs~=9.12
+
 # Dev
 pytest~=8.0
 pytest-playwright~=0.7
