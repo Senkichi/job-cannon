@@ -178,9 +178,13 @@ class TestSchedulerJobConfig:
         app = MagicMock()
         app.config = {"TESTING": False, "JF_CONFIG": {}, "DB_PATH": ":memory:"}
 
+        # CronTrigger moved from scheduler/__init__.py to scheduler/_jobs.py in
+        # S7a Commit 5 (job-registration extraction). The patch follows the
+        # symbol's new namespace; BackgroundScheduler stays in __init__.py
+        # because that is where init_scheduler instantiates it.
         with (
             patch("job_finder.web.scheduler.BackgroundScheduler") as MockScheduler,
-            patch("job_finder.web.scheduler.CronTrigger") as MockCronTrigger,
+            patch("job_finder.web.scheduler._jobs.CronTrigger") as MockCronTrigger,
         ):
             mock_sched = MagicMock()
             MockScheduler.return_value = mock_sched
