@@ -12,8 +12,11 @@ migration breaks every existing user's database, since their stored
 user_version becomes a wrong index into the list.
 """
 
+import importlib
+import re
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 
 from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 
@@ -80,3 +83,44 @@ def test_pragma_user_version_after_migrate_equals_max(tmp_db_path):
         "bump user_version, the migration loop terminated early, or the "
         "MIGRATIONS list was mutated mid-run."
     )
+
+
+_MIGRATION_FILENAME_RE = re.compile(r"^m(\d{3})_[a-z0-9_]+\.py$")
+
+
+def test_migration_filenames_match_version_numbers():
+    """Every `m{NNN:03d}_*.py` file in the migrations package declares a
+    MIGRATION whose .version equals the integer in the filename.
+
+    The discovery pass in `migrations/__init__.py` sorts by `m.version`, so a
+    filename/version mismatch would silently produce an out-of-order
+    MIGRATIONS list — the migrations would still apply (since SQLite doesn't
+    care about filenames), but the ordering invariant of MI-4 would be
+    technically violated and any operator inspecting the source would be
+    misled. This test enforces the convention loudly.
+    """
+    from job_finder.web import migrations as mig_pkg
+
+    pkg_dir = Path(mig_pkg.__file__).parent
+    migration_files = sorted(pkg_dir.glob("m*.py"))
+    assert len(migration_files) > 0, (
+        f"No m*.py files found in {pkg_dir}. The discovery pass would "
+        "produce an empty MIGRATIONS list."
+    )
+    for path in migration_files:
+        match = _MIGRATION_FILENAME_RE.match(path.name)
+        assert match, (
+            f"Migration file {path.name!r} does not match the "
+            f"m{{NNN:03d}}_<snake_case>.py convention. Three-digit "
+            "zero-padding is required so `pkgutil.iter_modules` returns "
+            "the modules in version order."
+        )
+        expected_version = int(match.group(1))
+        mod_name = f"{mig_pkg.__name__}.{path.stem}"
+        mod = importlib.import_module(mod_name)
+        actual_version = mod.MIGRATION.version
+        assert actual_version == expected_version, (
+            f"{path.name} declares MIGRATION.version={actual_version} but "
+            f"the filename says {expected_version}. Either rename the file "
+            "or fix the version in the Migration constructor."
+        )
