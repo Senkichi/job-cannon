@@ -861,20 +861,6 @@ def _process_email(
                 source="auto-detected",
             )
 
-            # Fire pipeline change notification (non-blocking, non-fatal)
-            try:
-                from job_finder.web.notifier import notify_pipeline_change
-
-                notify_pipeline_change(
-                    detection_type,
-                    best_job.get("title", ""),
-                    best_job.get("company", ""),
-                    best_job["dedup_key"],
-                    config or {},
-                )
-            except Exception:
-                logger.debug("detection notification failed", exc_info=True)
-
         _insert_detection(
             conn,
             message_id,

@@ -8,7 +8,7 @@ from flask import (
 )
 
 from job_finder.db import get_jobs_by_status, update_pipeline_status
-from job_finder.web.blueprints import PIPELINE_STATUSES, trigger_interview_prep_if_applied
+from job_finder.web.blueprints import PIPELINE_STATUSES
 from job_finder.web.db_helpers import get_db
 
 pipeline_bp = Blueprint("pipeline", __name__, url_prefix="/pipeline")
@@ -83,14 +83,5 @@ def move():
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
     update_pipeline_status(conn, job_id, new_status, source="manual")
-
-    # Trigger interview prep generation in background when dragged to "applied"
-    trigger_interview_prep_if_applied(
-        job_id,
-        new_status,
-        db_path,
-        current_app.config.get("JF_CONFIG", {}),
-        testing=current_app.config.get("TESTING", False),
-    )
 
     return ("", 200)

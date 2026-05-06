@@ -913,6 +913,18 @@ MIGRATIONS.append(
 )
 
 
+# Migration 48: drop rejection + interview prep tables (public-repo cleanup).
+MIGRATIONS.append(
+    [
+        "DROP INDEX IF EXISTS idx_interview_preps_job_id",
+        "DROP TABLE IF EXISTS interview_preps",
+        "DROP TABLE IF EXISTS rejection_reports",
+        "DROP TABLE IF EXISTS rejection_pattern_reports",
+        "ALTER TABLE jobs DROP COLUMN rejection_reviewed",
+    ]
+)
+
+
 def run_migrations(db_path: str) -> None:
     """Run pending migrations against the given SQLite database.
 

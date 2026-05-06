@@ -15,10 +15,8 @@ the Flask request thread.
 """
 
 import logging
-import threading
 from datetime import datetime
 
-from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.db import log_run
 from job_finder.scoring.scorer import JobScorer
 from job_finder.web.db_helpers import standalone_connection
@@ -55,13 +53,6 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
-
-# Track last notified budget threshold to avoid repeated notifications.
-# Reset on app restart (acceptable for single-user app).
-# Thread-safety: ALL reads and writes of _last_budget_pct_notified MUST occur
-# inside a `with _budget_alert_lock:` block to prevent data races.
-_budget_alert_lock = threading.Lock()
-_last_budget_pct_notified: float = 0.0
 
 
 def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
@@ -188,9 +179,6 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         summary["classified_skip"] = scoring_summary.get("classified_skip", 0)
         summary["classified_reject"] = scoring_summary.get("classified_reject", 0)
 
-    # --- Budget alert notification (check after AI scoring completes) ---
-    _check_budget_alert(config, db_path)
-
     summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
 
     total_fetched = (
@@ -214,46 +202,3 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     )
 
     return summary
-
-
-def _check_budget_alert(config: dict, db_path: str) -> None:
-    """Check monthly AI spend and fire budget alert notification if thresholds crossed.
-
-    Tracks the last notified threshold level via module-level variable to avoid
-    repeated notifications within a single app session. Resets on app restart.
-
-    Args:
-        config: Full JF_CONFIG dict (reads scoring.daily_budget_usd and
-                notifications.budget_alert toggle).
-        db_path: Path to the SQLite database file.
-    """
-    global _last_budget_pct_notified
-
-    budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
-    if not budget_cap or budget_cap <= 0:
-        return
-
-    try:
-        with standalone_connection(db_path) as conn:
-            from job_finder.web.claude_client import get_cost_stats
-
-            stats = get_cost_stats(conn)
-
-        monthly_spend = stats.get("month", 0.0)
-        if monthly_spend <= 0:
-            return
-
-        pct = (monthly_spend / budget_cap) * 100
-
-        from job_finder.web.notifier import notify_budget_alert
-
-        with _budget_alert_lock:
-            if pct >= 100 and _last_budget_pct_notified < 100:
-                notify_budget_alert(pct, config)
-                _last_budget_pct_notified = 100
-            elif pct >= 80 and _last_budget_pct_notified < 80:
-                notify_budget_alert(pct, config)
-                _last_budget_pct_notified = 80
-
-    except Exception as e:
-        logger.debug("Budget alert check failed (non-fatal): %s", e)

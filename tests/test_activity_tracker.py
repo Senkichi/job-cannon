@@ -171,7 +171,6 @@ class TestActionConstants:
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_EXPIRY_CHECK,
-            ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
@@ -187,12 +186,11 @@ class TestActionConstants:
             ACTION_BATCH_SCORE_HAIKU,
             ACTION_BATCH_SCORE_SONNET,
             ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_SCHEDULED_EXPIRY_CHECK,
             ACTION_SAVE_JD,
         ]
         # Unique string values
-        assert len(set(constants)) == 12, f"Duplicate ACTION_* values found: {constants}"
+        assert len(set(constants)) == 11, f"Duplicate ACTION_* values found: {constants}"
 
     def test_constants_match_expected_names(self):
         """All ACTION_* constants have the expected string values."""
@@ -205,7 +203,6 @@ class TestActionConstants:
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_EXPIRY_CHECK,
-            ACTION_SCHEDULED_REJECTION_ANALYSIS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
@@ -220,7 +217,6 @@ class TestActionConstants:
         assert ACTION_BATCH_SCORE_HAIKU == "batch_score_haiku"
         assert ACTION_BATCH_SCORE_SONNET == "batch_score_sonnet"
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
-        assert ACTION_SCHEDULED_REJECTION_ANALYSIS == "scheduled_rejection_analysis"
         assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
         assert ACTION_SAVE_JD == "save_jd"
 

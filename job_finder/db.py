@@ -124,7 +124,7 @@ JOBS_ALL_COLUMNS = (
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
     "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
-    "company_id, comp_data_json, enrichment_tier, rejection_reviewed, "
+    "company_id, comp_data_json, enrichment_tier, "
     "locations_raw, description_reformatted, expiry_checked_at, scoring_provider, "
     "opus_score, expiry_status, eval_blocks, job_archetype"
 )
@@ -505,7 +505,7 @@ def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
 
 
 def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
-    """Load the standard job context bundle: job + prep_row.
+    """Load the standard job context bundle.
 
     Shared helper for expand, rescore, paste_jd, and save_jd routes.
 
@@ -514,23 +514,13 @@ def load_job_context(conn: sqlite3.Connection, dedup_key: str) -> dict | None:
         dedup_key: The job's primary key.
 
     Returns:
-        Dict with keys 'job', 'prep_row', or None if job not found.
+        Dict with key 'job', or None if job not found.
     """
     job = get_job(conn, dedup_key)
     if job is None:
         return None
 
-    prep_row = conn.execute(
-        "SELECT status, company_brief, predicted_questions, gap_mitigation, "
-        "questions_to_ask, error_msg "
-        "FROM interview_preps WHERE job_id = ? ORDER BY id DESC LIMIT 1",
-        (dedup_key,),
-    ).fetchone()
-
-    return {
-        "job": job,
-        "prep_row": prep_row,
-    }
+    return {"job": job}
 
 
 def update_pipeline_status(

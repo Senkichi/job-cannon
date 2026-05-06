@@ -27,9 +27,6 @@ scipy~=1.17
 # Optional: JSearch
 # (uses requests directly, no extra package)
 
-# Phase 5: Intelligence
-win11toast~=0.35; sys_platform == "win32"   # Windows-only toast notifications
-
 # Telemetry — installed separately: uv pip install -e ../anthropic-telemetry
 
 # Content extraction

@@ -11,7 +11,6 @@ A local job search command center that aggregates listings from Gmail alerts and
 - Two-tier AI scoring: Haiku fast filter then Sonnet deep evaluation
 - Application pipeline tracking (applied, interview, offer, rejected)
 - Resume generation via Google Docs
-- Desktop notifications for high-scoring jobs (Windows)
 - Single-user, runs on localhost — your data stays on your machine
 
 ## Architecture
@@ -102,7 +101,6 @@ A configurable budget cap prevents runaway spending. The default is $25/month, s
 
 - Developed on Windows 11, tested with Python 3.13
 - Should work on macOS and Linux with no changes
-- Desktop notifications are Windows-only (the `win11toast` dependency is conditionally installed via a PEP 508 platform marker — on macOS/Linux it is simply not installed and the app runs without it)
 - SQLite is included with Python — no separate database install needed
 - No Docker, no cloud services, no deployment required
 

@@ -8,7 +8,7 @@ Provides:
 
 Architecture:
 - Thread-safe: probe_ats_slugs() creates own sqlite3 connection (same pattern
-  as stale_detector.py and rejection_analyzer.py)
+  as stale_detector.py)
 - TESTING guard on probe_ats_slugs to prevent external API calls in tests
 - Never re-probes cached misses; never downgrades confirmed hits to pending
 

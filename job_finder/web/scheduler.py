@@ -468,52 +468,6 @@ def init_scheduler(app) -> None:
             coalesce=True,
         )
 
-        # -- Rejection analysis (weekly, Monday 3:00 AM) -------------------
-
-        def _import_rejection():
-            from job_finder.web.rejection_analyzer import run_rejection_analysis
-
-            return run_rejection_analysis
-
-        def _import_rejection_action():
-            from job_finder.web.activity_tracker import ACTION_SCHEDULED_REJECTION_ANALYSIS
-
-            return ACTION_SCHEDULED_REJECTION_ANALYSIS
-
-        scheduler.add_job(
-            _make_tracked_job(
-                app,
-                "Rejection analysis",
-                import_func=_import_rejection,
-                import_action=_import_rejection_action,
-                extract_metadata=lambda r: {
-                    "rejections_analyzed": r.get("rejections_analyzed", 0),
-                    "budget_exceeded": r.get("budget_exceeded", False),
-                },
-            ),
-            trigger=CronTrigger(day_of_week="mon", hour=3, minute=0),
-            id="rejection_analysis",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
-        # -- Rejection pattern analysis (weekly, Tuesday 3:00 AM) -----------
-
-        def _import_rejection_patterns():
-            from job_finder.web.rejection_patterns import run_rejection_pattern_analysis
-
-            return run_rejection_pattern_analysis
-
-        scheduler.add_job(
-            _make_simple_job(app, "Rejection patterns", _import_rejection_patterns),
-            trigger=CronTrigger(day_of_week="tue", hour=3, minute=0),
-            id="rejection_patterns",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
-
         # -- ATS scan (Mon/Wed 7:00 AM) ------------------------------------
 
         def _import_ats_scan():
