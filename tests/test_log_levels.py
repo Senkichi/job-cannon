@@ -13,9 +13,6 @@ import os
 import sqlite3
 import tempfile
 from datetime import UTC
-from unittest.mock import patch
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,76 +38,6 @@ def _make_migrated_db() -> tuple[str, sqlite3.Connection]:
 
 class TestPipelineRunnerLogLevels:
     """pipeline_runner.py log level regressions."""
-
-    @pytest.mark.skip(
-        reason="Plan 4 Commit E deleted run_haiku_scoring; the v3 unified "
-        "run_scoring routes through the provider cascade and never "
-        "shells out to the claude CLI directly, so the log-level "
-        "invariant has no live code path to guard."
-    )
-    def test_claude_cli_not_found_logs_at_debug_in_scoring_runner(self, caplog): ...
-
-    @pytest.mark.skip(
-        reason="Plan 34-03 Commit E removed run_haiku_scoring from the "
-        "run_ingestion flow. run_scoring does not gate on claude CLI "
-        "presence (it routes via the provider cascade), so this "
-        "integration test no longer has a code path to exercise. "
-        "The static source inspection variant "
-        "(test_scoring_runner_claude_cli_not_found_log_level_in_source) "
-        "still guards the log-level invariant."
-    )
-    def test_claude_cli_not_found_logs_at_debug(self, caplog):
-        """When claude CLI is not on PATH, scoring_runner emits DEBUG not WARNING."""
-        import job_finder.web.pipeline_runner as runner_module
-        from job_finder.models import Job
-
-        db_path, conn = _make_migrated_db()
-        conn.close()
-
-        config = {
-            "sources": {"gmail": {"enabled": False}, "serpapi": {"enabled": False}},
-            "scoring": {"daily_budget_usd": 25.0, "haiku_threshold": 42},
-            "profile": {
-                "target_titles": [],
-                "target_locations": [],
-                "min_salary": None,
-                "exclusions": {},
-                "industries": [],
-                "skills": [],
-            },
-        }
-
-        fake_job = Job(
-            title="Fake Job",
-            company="FakeCo",
-            location="Remote",
-            source="test",
-            source_url="http://example.com",
-            source_id="x1",
-        )
-
-        try:
-            with (
-                patch.object(runner_module, "_fetch_gmail", return_value=[fake_job]),
-                patch.object(runner_module, "_fetch_serpapi", return_value=[]),
-                patch.object(runner_module, "_check_budget_alert"),
-                patch("job_finder.web.scoring_runner.shutil.which", return_value=None),
-                caplog.at_level(logging.DEBUG, logger="job_finder.web.scoring_runner"),
-            ):
-                runner_module.run_ingestion(db_path, config)
-        finally:
-            if os.path.exists(db_path):
-                os.remove(db_path)
-
-        debug_records = [
-            r
-            for r in caplog.records
-            if r.levelno == logging.DEBUG and "claude cli not found" in r.message.lower()
-        ]
-        assert debug_records, (
-            f"Expected a DEBUG record mentioning 'claude CLI not found' — got: "
-            f"{[r.message for r in caplog.records if r.levelno == logging.DEBUG]}"
-        )
 
     def test_zero_job_email_routed_to_activity_feed_logs_at_debug(self, caplog):
         """'Zero-job email routed to activity feed' uses logger.debug not WARNING."""
@@ -138,13 +65,6 @@ class TestPipelineRunnerLogLevels:
                     f"'Zero-job email routed to activity feed' must not use logger.warning.\n"
                     f"Context:\n{context}"
                 )
-
-    @pytest.mark.skip(
-        reason="Plan 4 Commit E deleted run_haiku_scoring -- the "
-        "'Haiku: no result for' log path it guarded no longer exists."
-    )
-    def test_haiku_no_result_logs_at_debug(self, caplog): ...
-
 
 # ---------------------------------------------------------------------------
 # ats_scanner.py — INFO demotion
