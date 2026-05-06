@@ -1,6 +1,6 @@
 # Architecture
 
-**Analysis Date:** 2026-03-17
+This document describes the layered architecture, data flow, and key abstractions of Job Cannon for engineers reading the source. For setup and run instructions, see [docs/SETUP.md](../SETUP.md).
 
 ## Pattern Overview
 
@@ -52,8 +52,8 @@ Job Finder follows a classic 3-tier architecture:
 
 **Background Tasks:**
 - Purpose: Long-running operations outside the request cycle
-- Location: `job_finder/web/scheduler.py` (APScheduler init), pipeline_runner, stale_detector, interview_prep
-- Contains: Scheduled jobs (30-min ingestion), one-time backfills (description reformat, data enrichment)
+- Location: `job_finder/web/scheduler.py` (APScheduler init), pipeline_runner, stale_detector
+- Contains: Scheduled jobs (3x/day ingestion + enrichment cadence), one-time backfills (description reformat, data enrichment)
 - Depends on: APScheduler (background thread), separate DB connections
 - Used by: APScheduler event loop
 
@@ -101,7 +101,7 @@ Job Finder follows a classic 3-tier architecture:
 2. User applies filter (status, score, salary, source, date range) → GET /jobs/?status=...&min_score=...
 3. Fragment routes (HTMX): GET /jobs/_table?filters=... → returns rows only
 4. User clicks expand → GET /jobs/{dedup_key}/detail → shows full description + AI analysis
-5. User changes status dropdown → POST /jobs/{dedup_key}/status?value=applied → updates DB + triggers interview prep
+5. User changes status dropdown → POST /jobs/{dedup_key}/status?value=applied → updates DB + logs pipeline event
 6. User pastes full JD → POST /jobs/{dedup_key}/paste-jd → stores jd_full + triggers Sonnet rescoring
 7. User rescores manually → POST /jobs/{dedup_key}/rescore → calls Haiku + Sonnet (budget-gated)
 
@@ -111,9 +111,7 @@ Job state transitions are tracked in the database:
 - `pipeline_status` on jobs table (discovered → reviewing → applied → phone_screen → ... → archived/rejected)
 - `pipeline_events` table logs all transitions with source (manual/detected/automated) and evidence
 - `pipeline_detections` table holds AI-detected transitions (awaiting manual confirmation)
-- Transitions trigger side effects:
-  - Status → "applied" triggers interview prep generation in background thread
-  - Status transitions logged to activity_tracker for audit trail
+- Transitions logged to activity_tracker for audit trail
 
 ## Key Abstractions
 
@@ -137,14 +135,14 @@ Job state transitions are tracked in the database:
 
 **Flask Blueprints:**
 - Purpose: Modular route groups
-- Examples: `jobs_bp`, `dashboard_bp`, `pipeline_bp`, `profile_bp`, `resume_bp`, etc.
+- Examples: `jobs_bp`, `dashboard_bp`, `pipeline_bp`, `profile_bp`, `companies_bp`, etc.
 - Pattern: Registered in order (detail routes BEFORE catch-alls to prevent shadowing)
 - HTMX partials check `request.headers.get('HX-Request')` to return fragments vs. full pages
 
 **Pipeline Detector (`job_finder/web/pipeline_detector.py`):**
 - Purpose: Multi-signal email classification to auto-detect pipeline state changes
-- Examples: Rejection email patterns, interview confirmation patterns, offer patterns
-- Pattern: Analyzes rejection/confirmation emails to emit pipeline events
+- Examples: Rejection email patterns, confirmation patterns, status-change cues
+- Pattern: Analyzes inbound application-related emails to emit pipeline events
 - Used by: Background pipeline watcher, manual confirmation UI
 
 ## Entry Points
@@ -183,10 +181,9 @@ Job state transitions are tracked in the database:
 - `/dashboard/` — Summary dashboard
 - `/pipeline/` — Pipeline event viewer
 - `/profile/` — Candidate profile editor
-- `/resume/` — Resume generation interface
+- `/companies/` — Company list and ATS scan controls
 - `/settings/` — App config editor
 - `/costs/` — Cost tracking dashboard
-- `/feedback/` — User preference feedback
 
 ## Error Handling
 
@@ -228,7 +225,6 @@ Job state transitions are tracked in the database:
 
 **Authentication:** None (single-user local app)
 - Gmail OAuth 2.0 for API access only (not user auth)
-- Google Drive/Docs OAuth for resume generation only
 
 **Cost Tracking:**
 - Every Claude call recorded to `scoring_costs` table (job_id, purpose, model, tokens, cost_usd, timestamp)
@@ -239,7 +235,3 @@ Job state transitions are tracked in the database:
 - User actions logged to `activity_log` table (action, job_id, metadata, timestamp)
 - Actions: expand_job, status_change, paste_jd, rescore, scheduled_sync, etc.
 - Used for audit trail and UX insights
-
----
-
-*Architecture analysis: 2026-03-17*

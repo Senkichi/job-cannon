@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-17
+This document describes the testing approach, fixtures, and conventions used in `tests/` for engineers reading the source. For setup and run instructions, see [docs/SETUP.md](../SETUP.md).
 
 ## Test Framework
 
@@ -34,9 +34,8 @@ pytest tests/test_scoring.py::TestCostComputation::test_haiku_input_pricing  # R
 - Example: tests for `job_finder/web/claude_client.py` are in `tests/test_costs.py` and `tests/test_scoring.py` (grouped by feature, not file)
 
 **File Count:**
-- 37 test files total (as of 2026-03-17)
-- ~27,000 total lines of test code
-- Large test files: `test_scoring.py`, `test_interview_prep.py`, `test_data_enricher.py` (hundreds of lines each)
+- ~85 test files total
+- Large test files: `test_scoring.py`, `test_data_enricher.py`, `test_pipeline_detector.py` (hundreds of lines each)
 
 ## Test Structure
 
@@ -126,7 +125,6 @@ def migrated_db():
 | `client` | Flask test client | test_client() |
 | `tmp_db_path` | Temp SQLite file path | path string |
 | `app_config` | Dict with test config values | config dict |
-| `sample_resume_data` | Resume dict for tests | structured dict |
 | `mock_anthropic_client` | Mocked Anthropic client | MagicMock |
 
 ## Mocking
@@ -136,7 +134,6 @@ def migrated_db():
 **Patterns:**
 
 ```python
-# tests/test_interview_prep.py (lines 16-17)
 from unittest.mock import MagicMock, patch, call
 
 # Mock Anthropic client response
@@ -339,16 +336,6 @@ def test_record_cost_inserts_row(self, migrated_db):
 - `test_pipeline.py`: Pipeline status updates
 - Tests use `migrated_db` fixture with pipelines table
 
-**Phase 4 (Resume Generation):**
-- `test_resume.py`: Resume content generation
-- `test_resume_generator.py`: Full resume workflow
-- `test_resume_feedback.py`: User feedback integration
-- Tests mock Anthropic API calls, use real database
-
-**Phase 5 (Intelligence):**
-- `test_interview_prep.py`: Interview preparation generation
-- Tests mock SerpAPI calls, use real database
-
 ## Isolation and Cleanup
 
 **Database Isolation:**
@@ -376,7 +363,3 @@ def migrated_db():
     if os.path.exists(path):
         os.remove(path)
 ```
-
----
-
-*Testing analysis: 2026-03-17*

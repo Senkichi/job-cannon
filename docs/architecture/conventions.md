@@ -1,6 +1,6 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-17
+This document describes the coding conventions used across `job_finder/` for engineers reading the source. For setup and run instructions, see [docs/SETUP.md](../SETUP.md).
 
 ## Naming Patterns
 
@@ -252,7 +252,3 @@ _TITLE_ABBREVS = [
 **Context Managers (minimal use):**
 - No `with` statements observed in primary code
 - Fixtures handle setup/teardown in tests
-
----
-
-*Convention analysis: 2026-03-17*
