@@ -203,3 +203,53 @@ shape for 7-series module splits: lifecycle-only `__init__.py` +
 focused private modules + re-exports for the test contract.
 
 Reproducing block unchanged. The S5 raw-output anchor remains immutable.
+
+## Session 7c re-measurement — 2026-05-06
+
+After splitting `job_finder/web/ats_scanner.py` (863 LOC) into the
+`ats_scanner/` package (6 files: `__init__.py`, `_upsert.py`, `_probe.py`,
+`_promote.py`, `_run.py`, `_run_html.py`):
+
+- **mypy `job_finder`:** **112 errors / 38 files / 167 source files**.
+  Improvement of **-9 errors** vs. S6 close (121 / 38 / 162). Source
+  files +5 (the new package modules). File count unchanged at 38.
+- **pyright `job_finder`:** **45 errors / 0 warnings / 0 informations**.
+  Unchanged from S6 close.
+
+The mypy -9 improvement comes from the shape change rather than an
+explicit type-annotation pass: the slim `__init__.py` drops 50+ lines
+of imports (json, sqlite3, time, datetime, derive_classification,
+standalone_connection, strip_html_to_text, plus the four lazy-import
+try/except blocks). Several of those globals had `Any`-typed shapes
+(e.g., `score_and_persist_job = None  # type: ignore[assignment]`)
+that propagated through every reference inside the original 470-line
+`run_ats_scan`. Splitting that function into typed helpers in `_run.py`
+made the local type-narrowing tighter — the lazy globals only live in
+`_run.py` / `_run_html.py` now, where the outer phase guards narrow
+them at the call sites. New phase-helper signatures (`summary: dict`,
+`all_new_job_keys: list`) also let mypy infer return shapes more
+precisely than the inline-loop original.
+
+The S7c code itself (the six new package modules + the test patches)
+is mypy-clean from the start. No new mypy/pyright errors were
+introduced; the -9 improvement is downstream of the refactor.
+
+Note: at the time of original measurement Session 7a was in flight in
+a parallel worktree, and S7c branched from `d1d20a9` (the scheduler
+package-layout commit on main). Post-rebase onto the S7a+S7b tip, the
+112/45 numbers hold — none of S7c's changes touch scheduler or
+pipeline_detector types, and S7a/S7b each closed at 121/45 with zero
+delta, so the -9 improvement composes cleanly.
+
+### Reproducing block (S7c)
+
+```bash
+uv run --active mypy job_finder | tail -1
+# Found 112 errors in 38 files (checked 167 source files)
+
+uv run --active pyright job_finder | tail -1
+# 45 errors, 0 warnings, 0 informations
+```
+
+Same scoping as S5/S6: `mypy job_finder` (NOT `mypy .`, per the S6
+cross-check note above).
