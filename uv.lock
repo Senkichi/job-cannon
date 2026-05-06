@@ -679,7 +679,7 @@ wheels = [
 [[package]]
 name = "job-cannon"
 version = "3.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "apscheduler" },

@@ -1,21 +1,10 @@
-"""Flask entry point for job-finder web application."""
+"""Backward-compat entry point. Prefer ``uv run job-cannon`` or ``python -m job_finder``.
 
-from job_finder.config import (
-    DEFAULT_SERVER_DEBUG,
-    DEFAULT_SERVER_HOST,
-    DEFAULT_SERVER_PORT,
-    load_config,
-)
-from job_finder.web import create_app
+Kept so anyone with a bookmarked ``python run.py`` invocation still works.
+The real entry point is :func:`job_finder.__main__.main`.
+"""
 
-cfg = load_config()
-app = create_app(config=cfg)
+from job_finder.__main__ import main
 
 if __name__ == "__main__":
-    server = cfg.get("server", {})
-    app.run(
-        host=server.get("host", DEFAULT_SERVER_HOST),
-        port=server.get("port", DEFAULT_SERVER_PORT),
-        debug=server.get("debug", DEFAULT_SERVER_DEBUG),
-        use_reloader=False,
-    )
+    main()
