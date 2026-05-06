@@ -64,3 +64,30 @@ repos:
     hooks:
       - id: commitizen
         stages: [commit-msg]
+
+  # ── Placeholder Discipline (MI-14) ──────────────────────────
+  # Block accidental commits of `<<<TODO: REPLACE>>>` and `<<<VERIFY>>>`
+  # template markers. The README + repo-metadata templates ship with
+  # placeholders that MUST be filled before commit; this hook is the
+  # safety net. Reason these exist as a single hook: every other defense
+  # (code review, eyeballing the diff, "I'll remember") has been
+  # demonstrably unreliable across the portfolio cleanup.
+  - repo: local
+    hooks:
+      - id: no-todo-replace
+        name: 'Block <<<TODO: REPLACE>>> and <<<VERIFY>>> markers'
+        entry: '<<<(TODO: REPLACE|VERIFY)'
+        language: pygrep
+        types: [text]
+        # Pin to pre-commit stage so the hook scans staged file contents
+        # only, not commit messages (which can legitimately mention the
+        # markers when describing the hook itself).
+        stages: [pre-commit]
+        # Exclude this config file (it has to mention the markers
+        # literally to define them) and the gitignored planning docs
+        # (which contain intentional template drafts).
+        exclude: |
+          (?x)^(
+            \.pre-commit-config\.yaml|
+            \.planning/.*
+          )$
