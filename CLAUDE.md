@@ -24,7 +24,7 @@ uv run python -m job_finder                       # equivalent module entry
 uv run python run.py                              # legacy entry, still works (now a shim)
 
 # Tests
-uv run --active pytest tests/                              # All tests (2104 passing as of 2026-05-05)
+uv run --active pytest tests/                              # All tests (2135 passing / 9 skipped / 1 deselected as of 2026-05-06)
 uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
 
@@ -50,20 +50,24 @@ job_finder/
 │   ├── providers/               # Per-provider implementations (anthropic, gemini, ollama)
 │   ├── job_scorer.py            # Single-tier v3.0 ordinal scoring (replaces deleted haiku_scorer / sonnet_evaluator)
 │   ├── scoring_orchestrator.py  # Per-run orchestration, retry, attribution
-│   ├── pipeline_detector.py     # Multi-signal email classification for pipeline state
+│   ├── scheduler/               # APScheduler background jobs (split S7a 2026-05-06: __init__ lifecycle + _pidfile + _ollama + _factories + _jobs + _runners + _sync)
+│   ├── pipeline_detector/       # Multi-signal email classification (split S7b 2026-05-06: __init__ + _constants + _gmail + _signals + _db + _processing)
+│   ├── ats_scanner/             # ATS platform scanner (split S7c 2026-05-06: __init__ + _upsert + _probe + _promote + _run + _run_html)
+│   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
+│   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m048 + _gate, _runner, _post_hooks, types)
+│   ├── _http_constants.py       # Shared HTTP _HEADERS / _TIMEOUT (extracted S7e onset; consumed by careers_crawler + enrichment_tiers)
 │   ├── pipeline_runner.py       # Orchestrates ingestion + scoring + detection
-│   ├── scheduler.py             # APScheduler background jobs
 │   ├── db_helpers.py            # Per-request g.db pattern
-│   ├── db_migrate.py            # Schema migrations (list of SQL strings)
+│   ├── db_migrate.py            # Migrations driver (slim post-S6: discovers + applies modules from migrations/)
 │   └── stale_detector.py        # Nightly stale job detection (own DB connection)
 ├── parsers/                     # Email parsers: linkedin, glassdoor, indeed (stub), ziprecruiter
 ├── sources/                     # gmail_source.py, serpapi_source.py, thordata_source.py, dataforseo_source.py, portal_search_source.py
 ├── models.py                    # Job dataclass with dedup_key
-├── db.py                        # Original CLI-era DB module (module-level functions take Connection)
+├── db.py                        # Original CLI-era DB module (module-level functions take Connection); split into db/ package by Reconciliation R3 (concurrent session in progress 2026-05-06)
 └── config.py                    # YAML config loader (fail-fast, no defaults)
 tests/
 ├── conftest.py                  # Fixtures: app factory, test DB, mocked Claude client
-└── test_*.py                    # 85 test files
+└── test_*.py                    # ~90 test files (canary + invariant suites added in S6/S7a/S7b/S7e)
 ```
 
 ## Architecture Decisions That Matter
@@ -114,6 +118,8 @@ This project uses the GSD framework. Key docs:
 - **Phase 3 (Pipeline Automation)**: Complete — 2/2 plans
 - **Phase 4 (Resume Generation)**: Removed (public-repo cleanup, 2026-05) — resume_generator, drive_uploader, drive_status, docx_formatter, resume_feedback, resume_validator, resume_style_guide, resume_multi_version, resume_review blueprint, feedback blueprint, guidelines blueprint all deleted; Migration 47 dropped resume_generations / resume_preferences_detected / resume_upload_reviews tables.
 - **Phase 5 (Intelligence)**: Removed (public-repo cleanup, 2026-05) — interview_prep, rejection_analyzer, rejection_patterns, notifier all deleted; Migration 48 dropped interview_preps / rejection_reports / rejection_pattern_reports tables and the jobs.rejection_reviewed column. AI career navigator (`ai_career_navigator.py`) was retained as a Tier-4 crawler fallback (16 cached recipes, ~10 active companies use ai_navigate/ai_replay tier).
+- **Portfolio Cleanup (Track 1, Stage 1 link-shareable, 2026-05)**: Sessions 0-4 complete (`portfolio/s0-baseline` through `portfolio/s4-readme-skeleton`). Stage 1 gate held open by 3 user-action items (codecov authorization, hero GIF, "Why I Built It" narrative) — see `.planning/portfolio-cleanup/STAGE-1-GATE-BLOCKERS.md`.
+- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7e complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7e-careers-crawler-split`). Session 7d (db.py split) was SKIPPED in the original execution and is being recovered by Reconciliation Plan v1 Session R3 (concurrent at time of writing). Reconciliation track R0–R8 is in flight (`.planning/PORTFOLIO_RECONCILIATION_PLAN.md`). Sessions 8–11 unstarted.
 
 ## Verification Standards
 
