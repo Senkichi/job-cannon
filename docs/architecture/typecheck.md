@@ -143,3 +143,58 @@ exclude is a Session 8 / Session 9 lint-cleanup item.
 The S6 measurement is recorded in this file only — the baseline
 artifacts are regeneratable per the reproducing block above and don't
 need a snapshot for every session.
+
+## Session 7e re-measurement (`portfolio/s7e-careers-crawler-split`, 2026-05-06)
+
+After the careers_crawler split (`careers_crawler.py` → 8-module
+package), the mypy delta is purely mechanical and the pyright total
+is unchanged.
+
+| Tool   | Errors      | Files       | Source files checked | Δ errors |
+|--------|-------------|-------------|----------------------|----------|
+| mypy   | 125 (+4)    | 41 (+3)     | 171 (+9)             | +4       |
+| pyright| 45 (=)      | —           | (job_finder include) | =        |
+
+The +4 mypy errors are not new design issues — every one of them is
+a duplicate of a pre-existing error that previously lived once in
+`careers_crawler.py` and now appears once per sub-module that
+inherited the offending import. Specifically:
+
+- `[import-untyped] Library stubs not installed for "requests"` — the
+  original file had this once; post-split it appears in `__init__.py`,
+  `_static_tier.py`, `_playwright_tier.py`, and `_api_cache.py` (each
+  of which still imports `requests` directly to do its own HTTP). +3.
+- `[union-attr] Item "AttributeValueList" has no attribute "strip"`
+  follows `_extract_jobs_from_soup` from `careers_crawler.py:172` to
+  `_static_tier.py:87`. Same error, new home. 0 net change.
+- `[arg-type] / [attr-defined]` in the `summary` dict (the
+  "errors": list-vs-int union the type-checker can't reconcile) stay
+  in `__init__.py` where `_crawl_companies` lives — same count as
+  pre-split.
+
+The new sub-modules themselves (8 of them) and the new
+`_http_constants.py` come in mypy-clean except for the inherited
+`requests` import noise. The new `tests/test_careers_crawler_invariants.py`
+is excluded from mypy by config (tests are not type-checked at this
+phase).
+
+Source-files checked grew by 9 (8 new careers_crawler sub-modules +
+1 new `_http_constants.py`). Files-with-errors grew by 3 (the three
+new tier modules that import `requests`). pyright did not move at
+all — its include set saw the same 45 errors before and after, since
+the new modules pyright sees are clean of pyright-specific issues.
+
+S9 lint cleanup will be the natural place to install
+`types-requests` (silences the 4 duplicate import-untyped errors
+across the careers_crawler package in a single step) and to adjust
+the `summary` dict's typed shape.
+
+### Reproducing for S7e
+
+```powershell
+uv run --active mypy job_finder    # 125 errors / 41 files / 171 source files
+uv run --active pyright            # 45 errors
+```
+
+Both invocations match S5 / S6's invocation conventions: `mypy job_finder`
+(scoped, NOT `mypy .`) so apples-to-apples comparison holds.
