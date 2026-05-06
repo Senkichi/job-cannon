@@ -1082,8 +1082,8 @@ class TestMigration41DestructiveShape:
         from job_finder.web.db_migrate import (
             MIGRATIONS,
             _apply_migration,
-            _migration_41_drop_legacy_scores,
         )
+        from job_finder.web.migrations import MigrationContext
 
         # Run all migrations EXCEPT Migration 41 so we can populate legacy
         # columns with a known payload before the destructive migration lands.
@@ -1092,10 +1092,11 @@ class TestMigration41DestructiveShape:
         try:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
-            for i, m in enumerate(MIGRATIONS, start=1):
-                if m is _migration_41_drop_legacy_scores:
+            ctx = MigrationContext(conn=conn, db_path=path, user_data_root=os.getcwd())
+            for m in MIGRATIONS:
+                if m.version == 41:
                     break
-                _apply_migration(conn, i, m)
+                _apply_migration(ctx, m)
 
             # Seed a row with both legacy columns AND v3 columns populated.
             sub_scores = {
@@ -1133,11 +1134,8 @@ class TestMigration41DestructiveShape:
             conn.commit()
 
             # Now apply Mig 41
-            _apply_migration(
-                conn,
-                MIGRATIONS.index(_migration_41_drop_legacy_scores) + 1,
-                _migration_41_drop_legacy_scores,
-            )
+            mig41 = next(m for m in MIGRATIONS if m.version == 41)
+            _apply_migration(ctx, mig41)
 
             row = conn.execute(
                 "SELECT classification, sub_scores_json, fit_analysis, "
