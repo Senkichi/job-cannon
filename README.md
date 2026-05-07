@@ -53,7 +53,7 @@
   cost-gate returns a bool and lets callers decide whether to
   fail-open or raise — the orchestrator and the scheduler choose
   differently and that's intentional.
-- **2110 tests** (unit + integration + Playwright e2e) green on the CI
+- **2163 tests** (unit + integration + Playwright e2e) green on the CI
   matrix (Ubuntu + Windows × Python 3.13).
 
 ## Quick Start
@@ -120,8 +120,8 @@ job_finder/
 |-- models.py               # Job dataclass with dedup_key
 |-- config.py               # YAML config loader + path discovery
 |-- __main__.py             # `uv run job-cannon` entry point
-`-- db.py                   # SQLite persistence (raw SQL, no ORM)
-tests/                      # 2110 tests, unit + integration + e2e
+`-- db/                     # SQLite persistence (raw SQL, no ORM); package since S7d (2026-05-06)
+tests/                      # 2163 tests, unit + integration + e2e
 docs/
 |-- SETUP.md                # Gmail OAuth, config reference, troubleshooting
 `-- architecture/           # Subsystem deep-dives

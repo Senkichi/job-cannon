@@ -24,7 +24,7 @@ uv run python -m job_finder                       # equivalent module entry
 uv run python run.py                              # legacy entry, still works (now a shim)
 
 # Tests
-uv run --active pytest tests/                              # All tests (2135 passing / 9 skipped / 1 deselected as of 2026-05-06)
+uv run --active pytest tests/                              # All tests (2163 collected / 2160 passing / 3 deselected via `not requires_artifacts` as of 2026-05-06)
 uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
 
@@ -119,7 +119,7 @@ This project uses the GSD framework. Key docs:
 - **Phase 4 (Resume Generation)**: Removed (public-repo cleanup, 2026-05) — resume_generator, drive_uploader, drive_status, docx_formatter, resume_feedback, resume_validator, resume_style_guide, resume_multi_version, resume_review blueprint, feedback blueprint, guidelines blueprint all deleted; Migration 47 dropped resume_generations / resume_preferences_detected / resume_upload_reviews tables.
 - **Phase 5 (Intelligence)**: Removed (public-repo cleanup, 2026-05) — interview_prep, rejection_analyzer, rejection_patterns, notifier all deleted; Migration 48 dropped interview_preps / rejection_reports / rejection_pattern_reports tables and the jobs.rejection_reviewed column. AI career navigator (`ai_career_navigator.py`) was retained as a Tier-4 crawler fallback (16 cached recipes, ~10 active companies use ai_navigate/ai_replay tier).
 - **Portfolio Cleanup (Track 1, Stage 1 link-shareable, 2026-05)**: Sessions 0-4 complete (`portfolio/s0-baseline` through `portfolio/s4-readme-skeleton`). Stage 1 gate held open by 3 user-action items (codecov authorization, hero GIF, "Why I Built It" narrative) — see `.planning/portfolio-cleanup/STAGE-1-GATE-BLOCKERS.md`.
-- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7d, 7e all complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7d-db-split` + `portfolio/s7e-careers-crawler-split`). Session 7d was originally SKIPPED in the first execution; recovered by Reconciliation Plan v1 Session R3 (concurrent session, closed 2026-05-06). Reconciliation track R0–R2 closed (tags `portfolio/r1-docs-reconciled` + `portfolio/r2-test-integrity`); R4–R8 pending. Sessions 8–11 unstarted.
+- **Portfolio Cleanup (Track 2, Lead/Staff depth, 2026-05)**: Sessions 5, 6, 7a, 7b, 7c, 7d, 7e all complete (tags `portfolio/s5-typecheck-baseline` through `portfolio/s7d-db-split` + `portfolio/s7e-careers-crawler-split`). Session 7d was originally SKIPPED in the first execution; recovered by Reconciliation Plan v1 Session R3 (concurrent session, closed 2026-05-06). Reconciliation track R1, R2, R4, R5, R6, R7 closed (tags placed); R8 (final audit) in flight. Sessions 8–11 unstarted.
 
 ## Verification Standards
 
