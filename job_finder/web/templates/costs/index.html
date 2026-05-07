@@ -149,11 +149,17 @@
     // the 'scoring' purpose. Legacy haiku_score / sonnet_eval entries
     // remain for historical rows written before Wave 2 flipped
     // use_unified_scorer=true, so keep their colors as aliases.
+    //
+    // Reconciliation R7.2 (2026-05-06): 'interview_prep' mapping removed —
+    // Phase 5 was deleted in the May-2026 public-repo cleanup, no
+    // scoring_costs rows have purpose='interview_prep' in any reachable
+    // user DB. 'resume_gen' and 'rejection_analysis' are similar orphans
+    // (also 0 rows) but kept for now — they belong to the broader S9 lint
+    // cleanup pass alongside the v1/v2 'haiku_score'/'sonnet_eval' aliases.
     'scoring':            'rgba(139, 92, 246, 0.8)',
     'haiku_score':        'rgba(139, 92, 246, 0.8)',
     'sonnet_eval':        'rgba(99, 102, 241, 0.8)',
     'resume_gen':         'rgba(16, 185, 129, 0.8)',
-    'interview_prep':     'rgba(245, 158, 11, 0.8)',
     'rejection_analysis': 'rgba(239, 68, 68, 0.8)',
     'enrichment':         'rgba(14, 165, 233, 0.8)',
   };
