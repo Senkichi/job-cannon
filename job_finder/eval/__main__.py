@@ -55,8 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--report-dir",
-        default=".planning/eval_results",
-        help="Directory to write the markdown report into",
+        default="eval_results",
+        help="Directory to write the markdown report into (relocated from "
+        ".planning/eval_results/ at Reconciliation R7.1)",
     )
     parser.add_argument(
         "--config",

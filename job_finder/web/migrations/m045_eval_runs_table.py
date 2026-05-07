@@ -19,7 +19,9 @@ Columns:
     config_json         — frozen config snapshot for reproducibility.
     metrics_json        — aggregated metrics dict.
     per_job_json        — per-job raw runs (one entry per call).
-    report_path         — path to the markdown report under .planning/eval_results/.
+    report_path         — path to the markdown report under eval_results/
+                          (repo root; relocated from .planning/eval_results/
+                          at Reconciliation R7.1, 2026-05-06).
     notes               — free-form annotation slot.
 """
 
