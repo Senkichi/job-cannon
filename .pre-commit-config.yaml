@@ -43,8 +43,10 @@ repos:
 
   # ── Secret Scanning ─────────────────────────────────────────
   # Catches accidental commits of API keys (Anthropic, SerpAPI, Thordata, Google).
+  # Bumped v8.22.1 → v8.30.1 at R6.1 (2026-05-06) to clear the recurring
+  # WASM panic seen on the ubuntu pre-commit job in S2 / S3 (finding F-G1).
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.22.1
+    rev: v8.30.1
     hooks:
       - id: gitleaks
 
