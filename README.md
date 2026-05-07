@@ -15,7 +15,7 @@
 [![Coverage](https://codecov.io/gh/Senkichi/job-cannon/graph/badge.svg)](https://codecov.io/gh/Senkichi/job-cannon)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ## Engineering Highlights
 
@@ -183,4 +183,4 @@ keys needed for unit / integration. The e2e tier requires
 
 ## License
 
-[MIT](LICENSE) — see LICENSE.
+[GNU AGPL v3.0 or later](LICENSE) — see LICENSE.

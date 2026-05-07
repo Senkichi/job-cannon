@@ -18,7 +18,7 @@ description = "Personal job search command center — Flask, Gmail ingestion, AI
 requires-python = ">=3.13"
 authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 keywords = [
     "job-search",
     "flask",
@@ -33,7 +33,7 @@ classifiers = [
     "Environment :: Web Environment",
     "Framework :: Flask",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
