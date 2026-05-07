@@ -1,6 +1,7 @@
 """Variant v4_finalist — combines screening winners B3 + A2.
 
-Composition (per .planning/eval_results/SCREENING-SUMMARY.md):
+Composition (per eval_results/SCREENING-SUMMARY.md; relocated from
+.planning/eval_results/ at Reconciliation R7.1):
     - B3 (v4b3_evidence_quote): per-axis JD quote required; no quote
       forces score ≤ 2. Strongest single-variant signal (apply-FP -0.091,
       coherence -0.125, all 5 gates passed).
