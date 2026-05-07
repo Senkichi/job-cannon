@@ -1,6 +1,7 @@
 """Markdown report generator for harness runs (Phase 5).
 
-Renders a versioned markdown file under ``.planning/eval_results/`` with
+Renders a versioned markdown file under ``eval_results/`` (repo root;
+relocated from ``.planning/eval_results/`` at Reconciliation R7.1) with
 the seven sections specified in the plan:
 
     1. Headline (apply false-positive rate, baseline delta if A/B)

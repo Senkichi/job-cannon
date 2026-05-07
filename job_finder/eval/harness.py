@@ -2,7 +2,9 @@
 
 Loads the gold set, runs a named variant N times per row, aggregates
 metrics, persists the run to ``eval_runs``, and writes a markdown report
-to ``.planning/eval_results/``.
+to ``eval_results/`` (repo root; relocated from ``.planning/eval_results/``
+at Reconciliation R7.1, 2026-05-06 — the production code path no longer
+references a ``.planning/`` location).
 
 Three operational modes (controlled at the CLI by which flags are passed):
     diagnose   — single variant, no baseline (one harness run, one report)
@@ -289,7 +291,7 @@ def run(
     variant_name: str = "baseline",
     n_runs: int = 3,
     baseline_run_id: str | None = None,
-    report_dir: str = ".planning/eval_results",
+    report_dir: str = "eval_results",
     config: dict | None = None,
 ) -> str:
     """Run a variant against the gold set; persist the run; return the report path.
