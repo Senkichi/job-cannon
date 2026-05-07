@@ -259,3 +259,54 @@ existing tests still pass.
 - Rule for future maintainers: if `get_filtered_jobs` ever needs to relocate,
   move the WHOLE function (signature + allowlist + composer + WHERE-clause
   builder) as a single unit. Do not split pieces of it across files.
+
+## CI / Dev-Tooling Footguns (R6 reconciliation, 2026-05-06)
+
+The two items below were observed during the portfolio cleanup but did not
+warrant code changes — they're documented here so future automation work
+doesn't re-discover them.
+
+### `gh run watch --exit-status` reports success even on job failure (F-G2)
+
+`gh run watch` is the natural building block for "wait for the CI run to
+finish" automation, but its `--exit-status` flag is unreliable: in practice
+it returned exit 0 even when an individual job in the run had concluded
+`failure` (observed in S2 / S3 portfolio-cleanup runs). The R0 inventory
+confirmed there are NO callsites in this repo's tracked tooling
+(`scripts/`, `.githooks/`, `.github/workflows/`) that gate logic on
+`gh run watch --exit-status`, so no live code is at risk today. The trap
+is documented here for the next person reaching for it.
+
+**Correct pattern when waiting on a CI run from automation:**
+
+```powershell
+$run_id = ...   # from gh run list / gh run create
+gh run watch $run_id  # streams output; ignore exit code
+$conclusion = gh run view $run_id --json conclusion --jq .conclusion
+if ($conclusion -ne "success") { exit 1 }
+```
+
+The conclusion field is the authoritative signal. Reach for it any time
+you need to gate a script on a remote run's outcome.
+
+### External auto-branch hook from S7a Surprise #1 (F-E3)
+
+During the S7a portfolio-cleanup session, an unidentified tool created a
+local branch named `portfolio/s7e-work` outside of any committed hook or
+script in this repo. The R0 audit (2026-05-06) searched `.githooks/`,
+`scripts/`, and `.claude/` and found no committed mechanism that would
+produce that branch name; the source is presumed external (IDE plugin,
+GitLens-style tooling, or a CLI shell wrapper not under version control).
+The branch itself was abandoned at S7a C1 and no remote ref persisted —
+the artifact is contained.
+
+**Why it's documented:** the multi-worktree concurrent-session pattern
+that the S7-series used (S7c + S7d in parallel worktrees, S7e in another)
+is no longer active — Stage 1 / Stage 2 portfolio work proceeds linearly
+on `main`. If a future multi-worktree session reintroduces the same
+contributor environment, the same external hook may auto-create a
+side-branch, and the visible symptom would be a `git status` line for an
+unexpected branch name with HEAD on it. Recovery is the verify-active-
+branch preflight already documented in plan v3.8 (a): on session start
+run `git rev-parse --abbrev-ref HEAD` and confirm against the expected
+session branch before any work.
