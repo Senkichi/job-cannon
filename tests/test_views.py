@@ -32,6 +32,8 @@ class TestBlueprintRoutes:
         """GET /dashboard returns 200."""
         response = client.get("/dashboard")
         assert response.status_code == 200
+        assert b"manual-job-dialog" in response.data
+        assert b"add-from-listing" in response.data
 
     def test_pipeline_returns_200(self, client):
         """GET /pipeline returns 200."""
@@ -264,59 +266,77 @@ class TestJobBoardRoutes:
         response = jobs_client.get("/jobs/not-a-real-key")
         assert response.status_code == 404
 
-    def test_jobs_add_get_returns_form_not_detail_404(self, jobs_client):
-        """GET /jobs/add must use the dedicated route (not ``detail(dedup_key='add')``)."""
-        response = jobs_client.get("/jobs/add")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert 'name="title"' in data
-        assert "Add job manually" in data
-
-    def test_jobs_add_post_creates_row_and_redirects_to_detail(self, jobs_client, tmp_db_path):
-        """POST /jobs/add persists via upsert_job and redirects to the job detail page."""
-        import sqlite3
-
+    def test_add_from_listing_non_htmx_redirects_to_dashboard(self, jobs_client):
+        """POST without HX-Request is rejected with redirect (modal-only contract)."""
         response = jobs_client.post(
-            "/jobs/add",
-            data={
-                "title": "Principal Widget Engineer",
-                "company": "Zorp Labs Inc",
-                "location": "Remote",
-                "apply_url": "https://example.com/careers/widgets",
-                "description": "Lead the widget platform.",
-                "salary_min": "180000",
-                "salary_max": "220000",
-            },
-            follow_redirects=False,
+            "/jobs/add-from-listing",
+            data={"listing_url": "https://example.com/job/1"},
         )
         assert response.status_code == 302
-        assert "/jobs/" in response.headers.get("Location", "")
+        assert "/dashboard" in response.headers.get("Location", "")
+
+    def test_add_from_listing_htmx_creates_job_and_calls_enrich(self, jobs_client, tmp_db_path):
+        """HTMX POST saves row, runs enrich_job, returns fragment."""
+        import sqlite3
+        from unittest.mock import patch
+
+        import job_finder.web.blueprints.jobs as jb
+
+        with patch.object(jb, "enrich_job", return_value={"jd_full": "x" * 250}) as mock_enrich:
+            with patch("job_finder.web.claude_client.cost_gate", return_value=False):
+                response = jobs_client.post(
+                    "/jobs/add-from-listing",
+                    data={
+                        "listing_url": "https://example.com/job/42",
+                        "job_title": "Widget Engineer",
+                        "company": "Contoso LLC",
+                        "location": "Remote",
+                    },
+                    headers={"HX-Request": "true"},
+                )
+        assert response.status_code == 200
+        body = response.data.decode()
+        assert "Job saved" in body
+        assert "Open job" in body
+        mock_enrich.assert_called_once()
 
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
-        job = conn.execute(
+        row = conn.execute(
             "SELECT title, company, sources, source_urls FROM jobs WHERE title = ?",
-            ("Principal Widget Engineer",),
+            ("Widget Engineer",),
         ).fetchone()
         conn.close()
-        assert job is not None
-        assert "Zorp" in job["company"]
-        assert "manual" in job["sources"]
-        assert "example.com" in job["source_urls"]
+        assert row is not None
+        assert "Contoso" in row["company"]
+        assert "manual" in row["sources"]
+        assert "example.com" in row["source_urls"]
 
-    def test_jobs_add_post_rejects_invalid_apply_url_scheme(self, jobs_client):
-        """POST /jobs/add rejects apply_url that is not http(s)."""
+    def test_add_from_listing_htmx_validation_error_fragment(self, jobs_client):
         response = jobs_client.post(
-            "/jobs/add",
-            data={
-                "title": "Engineer",
-                "company": "TestCo",
-                "apply_url": "javascript:alert(1)",
-            },
-            follow_redirects=False,
+            "/jobs/add-from-listing",
+            data={"listing_url": "javascript:void(0)"},
+            headers={"HX-Request": "true"},
         )
-        assert response.status_code == 302
-        assert response.headers["Location"].rstrip("/").endswith("/jobs/add")
+        assert response.status_code == 200
+        assert b"http://" in response.data or b"https://" in response.data
+
+    def test_infer_title_company_splits_html_title(self):
+        from unittest.mock import MagicMock, patch
+
+        from job_finder.web.blueprints.jobs import infer_title_company_from_listing_url
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.text = (
+            "<html><head><title>Sr PM | Contoso</title></head><body></body></html>"
+        )
+        with patch(
+            "job_finder.web.blueprints.jobs.requests.get", return_value=mock_resp
+        ):
+            title, company = infer_title_company_from_listing_url("https://x.com/j/1")
+        assert title == "Sr PM"
+        assert company == "Contoso"
 
     def test_jobs_collapse_returns_hidden_placeholder(self, jobs_client):
         """GET /jobs/<key>/collapse returns hidden placeholder <tr>, not a full row."""

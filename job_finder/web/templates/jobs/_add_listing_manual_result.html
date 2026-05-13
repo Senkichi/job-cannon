@@ -1,0 +1,24 @@
+{# HTMX fragment — dashboard “Add job manually” modal result #}
+{% if error %}
+<div class="rounded-lg border border-red-800 bg-red-950/40 text-red-200 text-sm px-3 py-2" role="alert">
+  {{ error }}
+</div>
+{% else %}
+<div class="rounded-lg border border-emerald-800/80 bg-emerald-950/30 text-slate-100 text-sm px-3 py-3 space-y-2" role="status">
+  <p class="font-medium text-emerald-100">Job saved.</p>
+  <p class="text-slate-300 leading-relaxed">{{ enrich_summary }}</p>
+  {% if score_note %}
+    <p class="text-slate-400 text-xs">{{ score_note }}</p>
+  {% endif %}
+  <div class="pt-1 flex flex-wrap gap-3 items-center">
+    <a href="{{ url_for('jobs.detail', dedup_key=dedup_key) }}"
+       class="text-indigo-400 hover:text-indigo-300 font-medium text-sm">
+      Open job →
+    </a>
+    <a href="{{ url_for('jobs.index') }}"
+       class="text-slate-400 hover:text-slate-200 text-sm">
+      Job Board
+    </a>
+  </div>
+</div>
+{% endif %}

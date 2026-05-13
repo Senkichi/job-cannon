@@ -289,7 +289,7 @@ def add_from_listing():
     Non-HTMX callers are redirected to the dashboard with a flash message.
     """
     if not request.headers.get("HX-Request"):
-        flash("Add a job from the Dashboard using the “Add Job Manually” dialog.", "info")
+        flash('Add a job from the Dashboard using the "Add Job Manually" dialog.', "info")
         return redirect(url_for("dashboard.index"))
 
     db_path = current_app.config["DB_PATH"]
@@ -323,11 +323,14 @@ def add_from_listing():
     description_raw = (request.form.get("description") or "").strip()
     description = description_raw or None
 
-    inferred_title, inferred_company = infer_title_company_from_listing_url(
-        listing_url
-    )
-    title = user_title or inferred_title
-    company = user_company or inferred_company
+    if user_title and user_company:
+        title, company = user_title, user_company
+    else:
+        inferred_title, inferred_company = infer_title_company_from_listing_url(
+            listing_url
+        )
+        title = user_title or inferred_title
+        company = user_company or inferred_company
 
     salary_min: int | None = None
     salary_max: int | None = None
