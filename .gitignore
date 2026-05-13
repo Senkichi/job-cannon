@@ -28,6 +28,7 @@ eval_results/
 
 # Application logs
 logs/
+*.log
 test_output.txt
 
 # Backups
