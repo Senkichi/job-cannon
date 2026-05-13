@@ -58,6 +58,29 @@ from job_finder.web.enrichment_tiers import (
 
 logger = logging.getLogger(__name__)
 
+
+def _maybe_reconcile_ats_identity(
+    conn: Any,
+    job_row: dict,
+    config: dict | None,
+    *,
+    reason: str,
+) -> None:
+    """After ``source_urls`` gains ATS links, reconcile company ATS identity."""
+
+    if conn is None:
+        return
+    cid = job_row.get("company_id")
+    if cid is None:
+        return
+    try:
+        from job_finder.web.ats_identity_reconcile import reconcile_company_ats
+
+        reconcile_company_ats(conn, int(cid), reason=reason, config=config)
+    except Exception as exc:
+        logger.debug("ATS identity reconcile skipped (%s): %s", reason, exc)
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -225,6 +248,9 @@ def enrich_job(
 
                 if ddg_source_url and conn and job_row.get("dedup_key"):
                     merge_apply_urls(conn, job_row["dedup_key"], [ddg_source_url])
+                    _maybe_reconcile_ats_identity(
+                        conn, job_row, config, reason="enrichment_ddg_apply_url"
+                    )
 
                 # Resolve what DDG tier found (via Haiku extraction later if needed)
                 # DDG doesn't directly provide structured data; it feeds the Haiku tier.
@@ -244,7 +270,13 @@ def enrich_job(
         if start_idx <= TIER_ORDER.index("serpapi") and serpapi_key and jd_still_missing:
             try:
                 query = f"{title} {company}"
-                serpapi_result, _apply_urls = search_serpapi(query, serpapi_key)
+                serpapi_result, apply_url_list = search_serpapi(query, serpapi_key)
+                if conn and job_row.get("dedup_key") and apply_url_list:
+                    merge_apply_urls(conn, job_row["dedup_key"], apply_url_list)
+                    _maybe_reconcile_ats_identity(
+                        conn, job_row, config, reason="enrichment_serpapi_apply_urls"
+                    )
+
                 if serpapi_result:
                     for k, v in serpapi_result.items():
                         if k not in fragments:
@@ -297,20 +329,21 @@ def run_enrichment_backfill(
     db_path: str,
     serpapi_key: str | None = None,
     config: dict | None = None,
-    limit: int = 100,
+    limit: int | None = 100,
 ) -> int:
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
 
     Queries jobs where enrichment_tier IS NULL or in a resumable state.
     Skips terminal tiers ('exhausted', 'serpapi', 'agentic') and the
     legacy synthesis tier ('sonnet') — none of these can advance further.
-    Processes up to `limit` jobs per call.
+    Processes up to `limit` jobs per call (omit ``limit`` / pass ``None`` to
+    process the full backlog in one run — no SQL ``LIMIT``).
 
     Args:
         db_path: Absolute path to the SQLite database file.
         serpapi_key: Optional SerpAPI API key.
         config: Optional application config dict.
-        limit: Max number of jobs to process per call.
+        limit: Max number of jobs to process per call, or ``None`` for no cap.
 
     Returns:
         Number of jobs that were enriched (had fields added).
@@ -323,7 +356,7 @@ def run_enrichment_backfill(
     with standalone_connection(db_path) as conn:
         # Only select rows that (a) are in a resumable enrichment tier AND
         # (b) are actually missing at least one field _find_missing_fields()
-        # checks. Without the (b) clause, LIMIT N silently returns the first
+        # checks. Without the (b) clause, a capped LIMIT silently returns the first
         # N rows in rowid order — which are the oldest, already-enriched
         # rows — and enrich_job() returns {} for each, leaving the real
         # backlog unreached. ORDER BY first_seen DESC further prioritises the
@@ -332,15 +365,17 @@ def run_enrichment_backfill(
         # 'exhausted' (all tiers tried and failed). 'sonnet' is the legacy
         # synthesis terminal tier, kept in the skip list for back-compat with
         # rows enriched before Phase 2b sub-fix RC4.
-        rows = conn.execute(
+        base_sql = (
             """SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
                       OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'sonnet'))
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
-               ORDER BY first_seen DESC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
+               ORDER BY first_seen DESC"""
+        )
+        if limit is None:
+            rows = conn.execute(base_sql).fetchall()
+        else:
+            rows = conn.execute(base_sql + "\n               LIMIT ?", (limit,)).fetchall()
 
         enriched_count = 0
         for row in rows:

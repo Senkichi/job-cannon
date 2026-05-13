@@ -273,6 +273,17 @@ staleness:
   # Phase C: per-request HTTP timeout (seconds).
   cascade_request_timeout_seconds: 8
 
+# --- ATS company identity (URL evidence → live verify → hit) ---
+# See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
+# ``pending``; reconciliation promotes to ``hit`` only after API verification.
+ats:
+  identity_reconcile:
+    enabled: true
+    # When true, run ranking + probes but do not UPDATE companies (shadow metrics).
+    shadow: false
+    max_unique_urls_per_company: 500
+    max_companies_per_promote_run: 500
+
 # --- Filtering ---
 filters:
   # Additional companies to auto-exclude (merged with built-in denylist)

@@ -800,7 +800,7 @@ class TestCompanyAutoPopulation:
         assert company is not None, "Company record should be created after ingestion"
         assert company["ats_platform"] == "lever"
         assert company["ats_slug"] == "stripe"
-        assert company["ats_probe_status"] == "hit"
+        assert company["ats_probe_status"] == "pending"
 
     def test_non_ats_job_creates_company_with_pending_status(
         self, minimal_config, migrated_db_path

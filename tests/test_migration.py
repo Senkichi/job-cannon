@@ -380,11 +380,13 @@ def test_migration_count_is_thirteen():
     Migration 48 (public-repo cleanup): drop interview_preps,
     rejection_reports, rejection_pattern_reports tables and the
     jobs.rejection_reviewed column.
+    Migration 49: ATS identity evidence columns on ``companies`` for audited
+    URL→verify→promote reconciliation.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 48
+    assert len(MIGRATIONS) == 49
 
 
 class TestMigration27:
@@ -908,8 +910,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 48 entries (Migration 48: public-repo cleanup drops rejection + interview_prep tables)."""
-        assert len(MIGRATIONS) == 48
+        """MIGRATIONS list has 49 entries (through Migration 49: ATS identity evidence)."""
+        assert len(MIGRATIONS) == 49
 
 
 class TestMigration40:

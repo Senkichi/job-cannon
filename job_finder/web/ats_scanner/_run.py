@@ -397,12 +397,22 @@ def _score_new_ats_jobs(
     all_new_job_keys: list,
     summary: dict,
 ) -> None:
-    """Phase D: score newly-discovered jobs via score_and_persist_job."""
+    """Phase D: enrich sparse rows, then score via score_and_persist_job.
+
+    Matches careers_crawl: shell listings (short HTML fallback, thin API text)
+    often lack jd_full / salary / location until enrich_job runs.
+    """
     # v3.0 (Phase 34 Plan 3 Commit A): uses unified score_and_persist_job;
     # per-classification counters replace haiku_scored / sonnet_evaluated.
     if not all_new_job_keys or score_and_persist_job is None:
         return
     try:
+        try:
+            from job_finder.web.data_enricher import enrich_job as _enrich_job
+        except ImportError:
+            _enrich_job = None  # type: ignore[assignment,misc]
+
+        serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
         scored_count = 0
 
         for dedup_key in all_new_job_keys:
@@ -413,6 +423,27 @@ def _score_new_ats_jobs(
                 if row is None:
                     continue
                 job_row = dict(row)
+
+                if _enrich_job is not None and (
+                    not job_row.get("jd_full")
+                    or job_row.get("salary_min") is None
+                    or not job_row.get("location")
+                ):
+                    try:
+                        enriched = _enrich_job(
+                            job_row,
+                            serpapi_key=serpapi_key,
+                            conn=conn,
+                            config=config,
+                        )
+                        if enriched:
+                            job_row.update(enriched)
+                    except Exception as enrich_err:
+                        logger.debug(
+                            "ATS scan enrichment failed for '%s' (non-fatal): %s",
+                            dedup_key,
+                            enrich_err,
+                        )
 
                 result = score_and_persist_job(
                     job_row,

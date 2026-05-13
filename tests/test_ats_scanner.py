@@ -2767,9 +2767,12 @@ class TestAtsJdFullStorage:
             },
         }
 
-        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
-            with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
-                run_ats_scan(migrated_db_path, config=config)
+        # Isolate ATS promote-to-jd_full behavior: pre-score enrich_job runs when
+        # salary_min is missing and would otherwise fetch a real JD from the network.
+        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp), patch(
+            "job_finder.web.data_enricher.enrich_job", return_value={}
+        ), patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
+            run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row

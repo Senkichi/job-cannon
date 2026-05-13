@@ -21,10 +21,10 @@ from pathlib import Path
 from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 
 # Sentinel — hard-coded count tracks the actual MIGRATIONS list. Update only
-# when intentionally adding a new migration. tests/test_migration.py:387
+# when intentionally adding a new migration. tests/test_migration.py:389
 # already asserts the same number; this duplicate is intentional — it gives
 # a clearer failure message and lives next to the other structural tests.
-EXPECTED_MIGRATION_COUNT = 48
+EXPECTED_MIGRATION_COUNT = 49
 
 
 def _migration_version(entry, position_one_indexed):

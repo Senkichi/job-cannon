@@ -60,6 +60,65 @@ _SMARTRECRUITERS_API_URL = re.compile(
     re.IGNORECASE,
 )
 
+# Bump alongside material changes to the regex patterns above (contract tests).
+ATS_EXTRACTOR_VERSION = "m049-v1"
+
+# Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
+_SPECIFICITY_API = 10
+_SPECIFICITY_BOARD = 5
+
+
+def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
+    """Pick the strongest ATS match for a single URL.
+
+    Prefer API/boards-api/hosted integrations over human career paths so
+    tied aggregate votes break toward canonical postings feeds.
+
+    Returns:
+        Tuple (platform, slug, specificity_weight) or None.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+
+    m = _LEVER_API_URL.search(url)
+    if m:
+        return "lever", m.group(1), _SPECIFICITY_API
+
+    m = _GREENHOUSE_API_URL.search(url)
+    if m:
+        return "greenhouse", m.group(1), _SPECIFICITY_API
+
+    m = _WORKDAY_API_URL.search(url)
+    if m:
+        return "workday", f"{m.group(1)}/{m.group(2)}", _SPECIFICITY_API
+
+    m = _SMARTRECRUITERS_API_URL.search(url)
+    if m:
+        return "smartrecruiters", m.group(1), _SPECIFICITY_API
+
+    m = _LEVER_JOBS_URL.search(url)
+    if m:
+        return "lever", m.group(1), _SPECIFICITY_BOARD
+
+    m = _GREENHOUSE_BOARDS_URL.search(url)
+    if m:
+        return "greenhouse", m.group(1), _SPECIFICITY_BOARD
+
+    m = _ASHBY_URL.search(url)
+    if m:
+        return "ashby", m.group(1), _SPECIFICITY_BOARD
+
+    m = _WORKDAY_HUMAN_URL.search(url)
+    if m:
+        if "/wday/" not in url.lower():
+            return "workday", f"{m.group(1)}/{m.group(2)}", _SPECIFICITY_BOARD
+
+    m = _SMARTRECRUITERS_JOBS_URL.search(url)
+    if m:
+        return "smartrecruiters", m.group(1), _SPECIFICITY_BOARD
+
+    return None
+
 
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[str | None, str | None]:
     """Extract ATS platform and slug from a list of job source URLs.
@@ -72,54 +131,88 @@ def extract_ats_from_urls(source_urls: list[str]) -> tuple[str | None, str | Non
         source_urls: List of URL strings from a job record's source_urls field.
 
     Returns:
-        Tuple of (platform, slug) where platform is 'lever', 'greenhouse',
-        or 'ashby'. Returns (None, None) if no ATS URL is found.
+        Tuple of (platform, slug). Platform is lever, greenhouse, ashby,
+        workday, or smartrecruiters when matched. ``(None, None)`` if none.
     """
     for url in source_urls:
-        # Check Lever (jobs.lever.co first, then api.lever.co)
-        m = _LEVER_JOBS_URL.search(url)
-        if m:
-            return "lever", m.group(1)
-
-        m = _LEVER_API_URL.search(url)
-        if m:
-            return "lever", m.group(1)
-
-        # Check Greenhouse (boards.greenhouse.io first, then boards-api)
-        m = _GREENHOUSE_BOARDS_URL.search(url)
-        if m:
-            return "greenhouse", m.group(1)
-
-        m = _GREENHOUSE_API_URL.search(url)
-        if m:
-            return "greenhouse", m.group(1)
-
-        # Check Ashby (case-sensitive — no IGNORECASE flag on pattern)
-        m = _ASHBY_URL.search(url)
-        if m:
-            return "ashby", m.group(1)
-
-        # Check Workday (API URL first — more specific pattern)
-        m = _WORKDAY_API_URL.search(url)
-        if m:
-            return "workday", f"{m.group(1)}/{m.group(2)}"
-
-        m = _WORKDAY_HUMAN_URL.search(url)
-        if m:
-            # Skip if this matched the /wday/ API path (handled above)
-            if "/wday/" not in url:
-                return "workday", f"{m.group(1)}/{m.group(2)}"
-
-        # Check SmartRecruiters (API URL first — more specific)
-        m = _SMARTRECRUITERS_API_URL.search(url)
-        if m:
-            return "smartrecruiters", m.group(1)
-
-        m = _SMARTRECRUITERS_JOBS_URL.search(url)
-        if m:
-            return "smartrecruiters", m.group(1)
-
+        hit = extract_ats_from_url_best(url)
+        if hit:
+            return hit[0], hit[1]
     return None, None
+
+
+def aggregate_ats_candidates_from_job_bundles(
+    job_bundles: list[dict],
+) -> tuple[tuple[str, str] | None, str | None]:
+    """Choose a single (platform, slug) from per-job URL lists.
+
+    Aggregate by distinct jobs (dedup_key), not duplicate URL rows. Prefer
+    more jobs supporting the same board, then stronger URL specificity, then
+    more recent ``last_seen`` as a lexical tie-break. If the top two
+    candidates tie on all three dimensions, abstain (no silent guess).
+
+    Args:
+        job_bundles: Each item has ``dedup_key`` (str), ``last_seen`` (str|None),
+            and ``urls`` (list[str]).
+
+    Returns:
+        ``((platform, slug), None)`` on success, or ``(None, reason)`` when
+        there is no evidence or confidence is insufficient.
+    """
+    # (platform, slug) -> job_count, max_spec_sum (sum of per-job best spec), last_seen_max
+    primary: dict[tuple[str, str], dict[str, int | str]] = {}
+
+    for bundle in job_bundles:
+        dk = bundle.get("dedup_key")
+        urls = bundle.get("urls") or []
+        if not dk or not urls:
+            continue
+        last_seen = bundle.get("last_seen") or ""
+
+        per_job_best: dict[tuple[str, str], int] = {}
+        for url in urls:
+            hit = extract_ats_from_url_best(url)
+            if not hit:
+                continue
+            plat, slug, spec = hit
+            key = (plat, slug)
+            prev = per_job_best.get(key, 0)
+            if spec > prev:
+                per_job_best[key] = spec
+
+        for key, spec in per_job_best.items():
+            bucket = primary.setdefault(
+                key,
+                {"job_count": 0, "spec_sum": 0, "last_seen_max": ""},
+            )
+            bucket["job_count"] = int(bucket["job_count"]) + 1
+            bucket["spec_sum"] = int(bucket["spec_sum"]) + int(spec)
+            ls = str(bucket["last_seen_max"])
+            if last_seen > ls:
+                bucket["last_seen_max"] = last_seen
+
+    if not primary:
+        return None, "no_ats_urls"
+
+    ranked = sorted(
+        primary.items(),
+        key=lambda item: (
+            item[1]["job_count"],
+            item[1]["spec_sum"],
+            item[1]["last_seen_max"],
+        ),
+        reverse=True,
+    )
+
+    winner_key, winner_stats = ranked[0]
+    if len(ranked) > 1:
+        _, second_stats = ranked[1]
+        w = (winner_stats["job_count"], winner_stats["spec_sum"], winner_stats["last_seen_max"])
+        s = (second_stats["job_count"], second_stats["spec_sum"], second_stats["last_seen_max"])
+        if w == s:
+            return None, "ambiguous_tie"
+
+    return winner_key, None
 
 
 def derive_slug_candidates(company_name: str) -> list[str]:

@@ -494,13 +494,12 @@ def _upsert_job_company(conn, job: Job) -> None:
         source_url = job.source_url or ""
         source_urls = [source_url] if source_url else []
         ats_platform, ats_slug = extract_ats_from_urls(source_urls)
-        probe_status = "hit" if ats_slug else "pending"
         company_id = upsert_company(
             conn,
             name=job.company,
             ats_platform=ats_platform,
             ats_slug=ats_slug,
-            ats_probe_status=probe_status,
+            ats_probe_status="pending",
         )
         if company_id:
             conn.execute(

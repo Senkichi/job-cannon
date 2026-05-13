@@ -1618,3 +1618,44 @@ class TestRunEnrichmentBackfillSelect:
         order = [call.args[0]["dedup_key"] for call in mock_enrich.call_args_list]
         # Expected descending by first_seen: 2026-04-23, 2026-04-22, 2026-04-21
         assert order == ["needs-jd-new-1", "needs-sal-new-2", "needs-both-3"]
+
+    def test_limit_none_processes_full_backlog(self, backfill_db_path):
+        """limit=None must not truncate — every eligible row is passed to enrich_job."""
+        import sqlite3
+
+        from job_finder.web.data_enricher import run_enrichment_backfill
+
+        conn = sqlite3.connect(backfill_db_path)
+        extra = [
+            ("extra-a", None, 80_000, None, "2026-04-24"),
+            ("extra-b", None, 70_000, "ddg", "2026-04-25"),
+        ]
+        conn.executemany(
+            "INSERT INTO jobs (dedup_key, jd_full, salary_min, enrichment_tier, first_seen, "
+            "title, company, location) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [(r[0], r[1], r[2], r[3], r[4], r[0], "co", "loc") for r in extra],
+        )
+        conn.commit()
+        conn.close()
+
+        with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
+            mock_enrich.return_value = {}
+            run_enrichment_backfill(backfill_db_path, limit=None)
+
+        passed_keys = {call.args[0]["dedup_key"] for call in mock_enrich.call_args_list}
+        assert passed_keys == {
+            "extra-b",
+            "extra-a",
+            "needs-jd-new-1",
+            "needs-sal-new-2",
+            "needs-both-3",
+        }
+        # Newest first_seen first (2026-04-25 … 2026-04-21)
+        order = [call.args[0]["dedup_key"] for call in mock_enrich.call_args_list]
+        assert order == [
+            "extra-b",
+            "extra-a",
+            "needs-jd-new-1",
+            "needs-sal-new-2",
+            "needs-both-3",
+        ]
