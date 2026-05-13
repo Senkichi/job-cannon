@@ -78,3 +78,21 @@ def resume_job(job_id: str):
     next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
     logger.warning("Admin: resumed scheduler job %s (next run %s)", job_id, next_run)
     return jsonify({"id": job_id, "paused": False, "next_run_time": next_run})
+
+
+@admin_bp.route("/jobs/<job_id>/run-now", methods=["POST"], strict_slashes=False)
+def run_job_now(job_id: str):
+    """Trigger immediate execution by setting next_run_time to now."""
+    from datetime import datetime, timezone
+
+    sched, err = _scheduler_or_503()
+    if err:
+        return err
+
+    job = sched.get_job(job_id)
+    if job is None:
+        return jsonify({"error": f"no such job: {job_id}"}), 404
+
+    job.modify(next_run_time=datetime.now(timezone.utc))
+    logger.warning("Admin: triggered immediate run of %s", job_id)
+    return jsonify({"id": job_id, "triggered": True})

@@ -519,7 +519,10 @@ def run_ddg_enrichment(
             continue
 
         name_raw = row["name_raw"]
-        print(f"  [{idx}/{total}] Enriching: {name_raw}")
+        # Logger (utf-8 file handler) instead of print() — bare print() hits
+        # cp1252 stdout on Windows and crashes the entire batch the first time
+        # a non-ASCII company name appears in the queue.
+        logger.info("DDG enrichment [%d/%d]: %s", idx, total, name_raw)
 
         try:
             result = _company_resolver.enrich_company_info(name_raw)

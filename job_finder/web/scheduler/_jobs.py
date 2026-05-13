@@ -432,12 +432,11 @@ def register_registry_hygiene(scheduler, app) -> None:
 
 # ---------------------------------------------------------------------------
 # Enrichment backfill (1 hour after each ingestion run: 1am, 9am, 5pm).
-# Two stages: (1) fill jd_full via the cost-ordered tier pipeline,
-# (2) score every newly-enriched row. Without stage 2 the v3.0 multi-stage
-# pipeline leaks — ingestion-time scoring sees empty jd_full and skips,
-# and nothing else picks the row up. Tracked via _make_tracked_job so
-# user_activity captures every run (the dashboard's scheduler-health view
-# depends on this).
+# Two stages: (1) fill jd_full via the cost-ordered tier pipeline (uncapped),
+# (2) score every row that has jd_full but no classification (uncapped).
+# Without stage 2 the v3.0 multi-stage pipeline leaks — ingestion-time
+# scoring sees empty jd_full and skips, and nothing else picks the row up.
+# Tracked via _make_tracked_job so user_activity captures every run.
 # ---------------------------------------------------------------------------
 
 

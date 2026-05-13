@@ -56,7 +56,7 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, A
             db_path,
             serpapi_key=serpapi_key,
             config=config,
-            limit=200,
+            limit=None,
         )
         result["enriched"] = enriched if isinstance(enriched, int) else 0
         logger.info("Enrichment backfill: %s", result["enriched"])
@@ -73,8 +73,7 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, A
                 "WHERE jd_full IS NOT NULL AND jd_full != '' "
                 "AND classification IS NULL "
                 "AND (pipeline_status IS NULL "
-                "     OR pipeline_status NOT IN ('archived', 'dismissed')) "
-                "LIMIT 500"
+                "     OR pipeline_status NOT IN ('archived', 'dismissed'))"
             ).fetchall()
         dedup_keys = [r[0] for r in rows]
         if not dedup_keys:
