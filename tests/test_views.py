@@ -264,6 +264,60 @@ class TestJobBoardRoutes:
         response = jobs_client.get("/jobs/not-a-real-key")
         assert response.status_code == 404
 
+    def test_jobs_add_get_returns_form_not_detail_404(self, jobs_client):
+        """GET /jobs/add must use the dedicated route (not ``detail(dedup_key='add')``)."""
+        response = jobs_client.get("/jobs/add")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'name="title"' in data
+        assert "Add job manually" in data
+
+    def test_jobs_add_post_creates_row_and_redirects_to_detail(self, jobs_client, tmp_db_path):
+        """POST /jobs/add persists via upsert_job and redirects to the job detail page."""
+        import sqlite3
+
+        response = jobs_client.post(
+            "/jobs/add",
+            data={
+                "title": "Principal Widget Engineer",
+                "company": "Zorp Labs Inc",
+                "location": "Remote",
+                "apply_url": "https://example.com/careers/widgets",
+                "description": "Lead the widget platform.",
+                "salary_min": "180000",
+                "salary_max": "220000",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert "/jobs/" in response.headers.get("Location", "")
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT title, company, sources, source_urls FROM jobs WHERE title = ?",
+            ("Principal Widget Engineer",),
+        ).fetchone()
+        conn.close()
+        assert job is not None
+        assert "Zorp" in job["company"]
+        assert "manual" in job["sources"]
+        assert "example.com" in job["source_urls"]
+
+    def test_jobs_add_post_rejects_invalid_apply_url_scheme(self, jobs_client):
+        """POST /jobs/add rejects apply_url that is not http(s)."""
+        response = jobs_client.post(
+            "/jobs/add",
+            data={
+                "title": "Engineer",
+                "company": "TestCo",
+                "apply_url": "javascript:alert(1)",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        assert response.headers["Location"].rstrip("/").endswith("/jobs/add")
+
     def test_jobs_collapse_returns_hidden_placeholder(self, jobs_client):
         """GET /jobs/<key>/collapse returns hidden placeholder <tr>, not a full row."""
         response = jobs_client.get(

@@ -3,11 +3,15 @@
 import logging
 import time as _time
 from datetime import datetime
+from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from flask import (
     Blueprint,
     abort,
     current_app,
+    flash,
     make_response,
     redirect,
     render_template,
@@ -23,7 +27,10 @@ from job_finder.db import (
     get_pipeline_events,
     load_job_context,
     update_pipeline_status,
+    upsert_job,
 )
+from job_finder.models import Job
+from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.activity_tracker import (
     ACTION_EXPAND_JOB,
     ACTION_PASTE_JD,
@@ -41,11 +48,73 @@ def _get_stale_count(conn) -> int:
 
 
 from job_finder.web.blueprints import PIPELINE_STATUSES
+from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import get_db
 
 logger = logging.getLogger(__name__)
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
+
+
+def _host_as_company_label(netloc: str) -> str:
+    """Derive a readable fallback company label from a URL host."""
+    h = (netloc or "").lower().removeprefix("www.")
+    parts = [p for p in h.split(".") if p]
+    if len(parts) >= 2:
+        base = f"{parts[-2]} {parts[-1]}"
+    elif parts:
+        base = parts[0]
+    else:
+        base = "employer"
+    return base.replace("-", " ").title()
+
+
+def infer_title_company_from_listing_url(url: str) -> tuple[str, str]:
+    """Best-effort (title, company) from listing HTML for bootstrap rows.
+
+    Used when the operator pastes a listing URL without title/company.
+    Never raises — returns safe non-empty strings suitable for ``Job()``.
+    """
+    parsed = urlparse(url)
+    host_fallback = _host_as_company_label(parsed.hostname or "")
+
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.debug("infer listing: fetch failed for %s: %s", url[:120], exc)
+        return ("Job listing", host_fallback)
+
+    try:
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception as exc:
+        logger.debug("infer listing: parse failed for %s: %s", url[:120], exc)
+        return ("Job listing", host_fallback)
+
+    raw = ""
+    if soup.title and soup.title.string:
+        raw = soup.title.string.strip()
+
+    og_company = ""
+    og_site = soup.find("meta", attrs={"property": "og:site_name"})
+    if og_site and og_site.get("content"):
+        og_company = str(og_site["content"]).strip()
+
+    title_guess = raw or "Job listing"
+    company_guess = og_company
+
+    for sep in (" | ", " – ", " - ", " · ", " :: ", " — "):
+        if sep in raw:
+            parts = [p.strip() for p in raw.split(sep, 1)]
+            if len(parts) == 2 and parts[0] and parts[1]:
+                title_guess, company_guess = parts[0], parts[1] or company_guess
+                break
+
+    title_guess = (title_guess or "Job listing")[:300]
+    if not (company_guess or "").strip():
+        company_guess = host_fallback
+    company_guess = (company_guess or host_fallback)[:200]
+    return title_guess, company_guess
 
 
 def _safe_float(raw: str, param_name: str) -> float | None:
@@ -207,6 +276,212 @@ def archived_table():
         "jobs/_table.html",
         jobs=jobs,
         pipeline_statuses=PIPELINE_STATUSES,
+    )
+
+
+@jobs_bp.route("/add-from-listing", methods=["POST"], strict_slashes=False)
+def add_from_listing():
+    """HTMX POST — create a job from a listing URL + optional fields, then enrich.
+
+    Intended for the dashboard modal: returns an HTML fragment (not a full
+    page). Registered before ``/<path:dedup_key>/…`` routes.
+
+    Non-HTMX callers are redirected to the dashboard with a flash message.
+    """
+    if not request.headers.get("HX-Request"):
+        flash("Add a job from the Dashboard using the “Add Job Manually” dialog.", "info")
+        return redirect(url_for("dashboard.index"))
+
+    db_path = current_app.config["DB_PATH"]
+    conn = get_db(db_path)
+    config = current_app.config.get("JF_CONFIG", {}) or {}
+
+    listing_url = (request.form.get("listing_url") or "").strip()
+    if not listing_url:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="Listing URL is required.",
+            ),
+            200,
+        )
+
+    if not (
+        listing_url.startswith("https://") or listing_url.startswith("http://")
+    ):
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="URL must start with http:// or https://.",
+            ),
+            200,
+        )
+
+    user_title = (request.form.get("job_title") or "").strip()
+    user_company = (request.form.get("company") or "").strip()
+    location = (request.form.get("location") or "").strip()
+    description_raw = (request.form.get("description") or "").strip()
+    description = description_raw or None
+
+    inferred_title, inferred_company = infer_title_company_from_listing_url(
+        listing_url
+    )
+    title = user_title or inferred_title
+    company = user_company or inferred_company
+
+    salary_min: int | None = None
+    salary_max: int | None = None
+    for field_name, raw in (
+        ("salary_min", request.form.get("salary_min", "").strip()),
+        ("salary_max", request.form.get("salary_max", "").strip()),
+    ):
+        if not raw:
+            continue
+        try:
+            val = int(raw)
+        except ValueError:
+            return (
+                render_template(
+                    "jobs/_add_listing_manual_result.html",
+                    error=f"Invalid {field_name.replace('_', ' ')}: use a whole number.",
+                ),
+                200,
+            )
+        if val < 0:
+            return (
+                render_template(
+                    "jobs/_add_listing_manual_result.html",
+                    error="Salary values cannot be negative.",
+                ),
+                200,
+            )
+        if field_name == "salary_min":
+            salary_min = val
+        else:
+            salary_max = val
+
+    if salary_min is not None and salary_max is not None and salary_min > salary_max:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="Minimum salary cannot be greater than maximum salary.",
+            ),
+            200,
+        )
+
+    try:
+        job = Job(
+            title=title,
+            company=company,
+            location=location,
+            source="manual",
+            source_url=listing_url,
+            source_id="",
+            description=description,
+            salary_min=salary_min,
+            salary_max=salary_max,
+        )
+    except ValueError as e:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error=str(e),
+            ),
+            200,
+        )
+
+    try:
+        upsert_job(conn, job)
+    except Exception as e:
+        logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="Could not save the job. Check logs for details.",
+            ),
+            200,
+        )
+
+    dedup_key = job.dedup_key
+    row = get_job(conn, dedup_key)
+    if row is None:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="Job was not found after save (unexpected).",
+            ),
+            200,
+        )
+
+    job_row = dict(row)
+    serpapi_key = (config.get("sources") or {}).get("serpapi", {}).get("api_key")
+
+    enriched: dict = {}
+    enrich_error = None
+    try:
+        enriched = enrich_job(
+            job_row,
+            serpapi_key=serpapi_key,
+            conn=conn,
+            config=config,
+        ) or {}
+    except Exception as e:
+        enrich_error = str(e)
+        logger.warning("add_from_listing: enrich_job failed for %s: %s", dedup_key, e)
+
+    row = get_job(conn, dedup_key)
+    if row is None:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error="Job row disappeared after enrichment.",
+            ),
+            200,
+        )
+    job_row = dict(row)
+
+    jd_len = len((job_row.get("jd_full") or "").strip())
+    if enriched:
+        enrich_summary = (
+            "Enrichment ran: filled gaps from the listing URL and cheaper tiers "
+            "where available."
+        )
+    elif jd_len >= 200:
+        enrich_summary = (
+            "A full job description is already available from your notes or the "
+            "listing page."
+        )
+    else:
+        enrich_summary = (
+            "Job saved. The listing page did not yield a long description yet — "
+            "open the job on the board to paste a JD, or wait for a later "
+            "enrichment pass."
+        )
+    if enrich_error:
+        enrich_summary += f" (enrichment error: {enrich_error})"
+
+    score_note = None
+    try:
+        from job_finder.web.claude_client import cost_gate
+        from job_finder.web.scoring_orchestrator import score_and_persist_job
+
+        if job_row.get("jd_full") and cost_gate(conn, config, "scoring"):
+            score_and_persist_job(job_row, conn, config)
+            score_note = "Scoring was attempted when a JD was available."
+        elif job_row.get("jd_full"):
+            score_note = "Budget cap reached — scoring skipped; JD is saved."
+    except ImportError as e:
+        logger.warning("add_from_listing: scorer not available: %s", e)
+        score_note = "Scoring unavailable in this environment."
+    except Exception as e:
+        logger.error("add_from_listing: scoring failed for %s: %s", dedup_key, e)
+        score_note = "Scoring failed; you can re-score from the job card."
+
+    return render_template(
+        "jobs/_add_listing_manual_result.html",
+        dedup_key=dedup_key,
+        enrich_summary=enrich_summary,
+        score_note=score_note,
     )
 
 
