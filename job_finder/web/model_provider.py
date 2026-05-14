@@ -477,8 +477,8 @@ def _maybe_record_cost(
 
     conn.execute(
         "INSERT INTO scoring_costs "
-        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider, schema_valid) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             job_id,
             purpose,
@@ -488,6 +488,7 @@ def _maybe_record_cost(
             cost_usd,
             utc_now_iso(),
             result.provider,
+            int(result.schema_valid),
         ),
     )
     conn.commit()
