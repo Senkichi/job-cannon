@@ -6,8 +6,8 @@ Orchestrates Gmail + SerpAPI ingestion with:
 - Per-job error isolation (one bad job does not halt persistence)
 - Scoring via JobScorer before persistence
 - Deduplication via db.upsert_job (dedup_key: company|title|location)
-- Two-tier AI scoring: Haiku fast-filter for all new jobs, Sonnet deep-eval
-  for jobs above haiku_threshold.
+- Two-tier AI scoring: v3.0 unified scoring via `run_scoring` for jobs above
+  `scoring.candidate_score_threshold` (heuristic pre-filter).
 
 Thread-safety: Creates a NEW sqlite3 connection per call. This function runs
 in the APScheduler background thread -- it must NOT share a connection with
