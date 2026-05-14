@@ -139,7 +139,7 @@ def reformat_description(
                 result = model_result.data
             except ProviderCascadeExhaustedError:
                 logger.warning("description_reformat: cascade exhausted, retrying via CLI")
-                result, _cost = call_claude(
+                result, _cost, _schema_valid = call_claude(
                     model=model,
                     system=_SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": description[:4000]}],
@@ -151,7 +151,7 @@ def reformat_description(
                     max_tokens=2048,
                 )
         else:
-            result, _cost = call_claude(
+            result, _cost, _schema_valid = call_claude(
                 model=model,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": description[:4000]}],

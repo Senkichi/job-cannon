@@ -428,7 +428,7 @@ def discover_navigation_recipe(
                         "ai_nav: cascade exhausted for %s, retrying via CLI",
                         careers_url,
                     )
-                    result, _cost = call_claude(
+                    result, _cost, _schema_valid = call_claude(
                         model="claude-haiku-4-5",
                         system=_DISCOVERY_SYSTEM,
                         messages=[{"role": "user", "content": user_message}],
@@ -439,7 +439,7 @@ def discover_navigation_recipe(
                         max_tokens=1024,
                     )
             else:
-                result, _cost = call_claude(
+                result, _cost, _schema_valid = call_claude(
                     model="claude-haiku-4-5",
                     system=_DISCOVERY_SYSTEM,
                     messages=[{"role": "user", "content": user_message}],
