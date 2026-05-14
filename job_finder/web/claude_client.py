@@ -497,7 +497,7 @@ def call_claude(
     timeout: float | None = None,
     *,
     ctx: ClaudeContext | None = None,
-) -> tuple[dict, float]:
+) -> tuple[dict, float, bool]:
     """Run a Claude CLI oneshot with budget gating and cost recording.
 
     Dispatches to ``_run_oneshot()`` which invokes ``claude -p`` as a
@@ -522,7 +522,7 @@ def call_claude(
             the individual conn/config parameters are ignored.
 
     Returns:
-        Tuple of (parsed_json_result: dict, cost_usd: float).
+        Tuple of (parsed_json_result: dict, cost_usd: float, schema_valid: bool).
 
     Raises:
         BudgetExceededError: If cost_gate blocks the call.
@@ -552,6 +552,7 @@ def call_claude(
         job_id,
         tier,
     )
+    schema_valid = True  # Default to valid if no schema
 
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
@@ -605,6 +606,7 @@ def call_claude(
     if output_schema is not None and _jsonschema_validate is not None and isinstance(result, dict):
         try:
             _jsonschema_validate(instance=result, schema=output_schema)
+            schema_valid = True
         except _ValidationError as _val_err:
             logger.warning(
                 "call_claude schema validation failed: purpose=%s model=%s error=%s — retrying once",
@@ -612,6 +614,7 @@ def call_claude(
                 model,
                 _val_err.message,
             )
+            schema_valid = False
             retry_user_message = (
                 user_message
                 + f"\n\nSchema validation error from previous attempt:\n- {_val_err.message}\n\n"
@@ -662,10 +665,11 @@ def call_claude(
 
             try:
                 _jsonschema_validate(instance=result, schema=output_schema)
+                schema_valid = True
             except _ValidationError as _retry_err:
                 raise ValueError(
                     f"Schema validation failed after retry: {_retry_err.message} "
                     f"(purpose={purpose}, model={model})"
                 ) from _retry_err
 
-    return result, cost_usd
+    return result, cost_usd, schema_valid
