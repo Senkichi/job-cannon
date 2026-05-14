@@ -855,7 +855,7 @@ class TestFindCareersUrlCascade:
 
         mock_cm.assert_called_once()
         assert mock_cm.call_args.kwargs["tier"] == "low"
-        assert mock_cm.call_args.kwargs["purpose"] == "careers_scrape"
+        assert mock_cm.call_args.kwargs["purpose"] == "find_careers_url"
         mock_cc.assert_not_called()
         assert result == "https://example.com/careers"
 
@@ -868,7 +868,7 @@ class TestFindCareersUrlCascade:
             patch("job_finder.web.careers_scraper.call_model") as mock_cm,
             patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
         ):
-            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
+            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001, True)
             result = _find_careers_url_with_low_tier(
                 "https://example.com/",
                 "<html></html>",
@@ -895,7 +895,7 @@ class TestFindCareersUrlCascade:
             patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
         ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
-            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001)
+            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001, True)
             result = _find_careers_url_with_low_tier(
                 "https://example.com/",
                 "<html></html>",
@@ -969,7 +969,7 @@ class TestExtractJobsCascade:
 
         mock_cm.assert_called_once()
         assert mock_cm.call_args.kwargs["tier"] == "low"
-        assert mock_cm.call_args.kwargs["purpose"] == "careers_scrape"
+        assert mock_cm.call_args.kwargs["purpose"] == "extract_jobs"
         mock_cc.assert_not_called()
         titles = [j["title"] for j in results]
         assert "Data Scientist" in titles
@@ -984,7 +984,7 @@ class TestExtractJobsCascade:
             patch("job_finder.web.careers_scraper.call_model") as mock_cm,
             patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
         ):
-            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
+            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001, True)
             results = _extract_jobs_with_low_tier(
                 "https://example.com/careers",
                 "<html></html>",
@@ -1013,7 +1013,7 @@ class TestExtractJobsCascade:
             patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
         ):
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
-            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001)
+            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001, True)
             results = _extract_jobs_with_low_tier(
                 "https://example.com/careers",
                 "<html></html>",

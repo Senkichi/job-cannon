@@ -156,7 +156,7 @@ class TestCallClaudeValidationRetry:
         _, conn = migrated_db
         mock_oneshot.return_value = _make_oneshot_envelope({"score": 75, "summary": "Good"})
 
-        result, cost = call_claude(
+        result, cost, _schema_valid = call_claude(
             model="claude-haiku-4-5",
             system="test",
             messages=[{"role": "user", "content": "test"}],
@@ -175,7 +175,7 @@ class TestCallClaudeValidationRetry:
             _make_oneshot_envelope({"score": 85, "summary": "Fixed"}),
         ]
 
-        result, cost = call_claude(
+        result, cost, _schema_valid = call_claude(
             model="claude-haiku-4-5",
             system="test",
             messages=[{"role": "user", "content": "test"}],
@@ -213,7 +213,7 @@ class TestCallClaudeValidationRetry:
             "usage": {"input_tokens": 10, "output_tokens": 10},
         }
 
-        result, cost = call_claude(
+        result, cost, _schema_valid = call_claude(
             model="claude-haiku-4-5",
             system="test",
             messages=[{"role": "user", "content": "test"}],
