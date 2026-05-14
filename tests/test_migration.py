@@ -380,13 +380,13 @@ def test_migration_count_is_thirteen():
     Migration 48 (public-repo cleanup): drop interview_preps,
     rejection_reports, rejection_pattern_reports tables and the
     jobs.rejection_reviewed column.
-    Migration 49: ATS identity evidence columns on ``companies`` for audited
-    URL→verify→promote reconciliation.
+    Migration 50: rename vestigial enrichment_tier strings haiku/sonnet -> low/mid.
+    Migration 51: consolidate user_activity actions batch_score_haiku/sonnet -> batch_score.
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 49
+    assert len(MIGRATIONS) == 51
 
 
 class TestMigration27:
@@ -910,8 +910,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 49 entries (through Migration 49: ATS identity evidence)."""
-        assert len(MIGRATIONS) == 49
+        """MIGRATIONS list has 51 entries (through Migration 51: consolidate actions)."""
+        assert len(MIGRATIONS) == 51
 
 
 class TestMigration40:
@@ -1238,3 +1238,110 @@ class TestMigration41BackupGate:
         monkeypatch.chdir(tmp_path)
         with pytest.raises(MigrationBlockedError):
             _check_backup_recent()
+
+
+class TestMigration50RewriteEnrichmentTier:
+    """Migration 50 — enrichment_tier literals haiku/sonnet/opus → low/mid/high."""
+
+    def test_m050_rewrites_enrichment_tier_and_is_idempotent(self, tmp_path):
+        import os
+        import tempfile
+
+        from job_finder.json_utils import utc_now_iso
+        from job_finder.web.db_migrate import MIGRATIONS, _apply_migration
+        from job_finder.web.migrations import MigrationContext
+
+        fd, path = tempfile.mkstemp(suffix=".db", dir=str(tmp_path))
+        os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        ctx = MigrationContext(conn=conn, db_path=path, user_data_root=str(tmp_path))
+        for m in MIGRATIONS:
+            if m.version == 50:
+                break
+            _apply_migration(ctx, m)
+        now = utc_now_iso()
+        for dedup_key, tier in (
+            ("m050|haiku", "haiku"),
+            ("m050|sonnet", "sonnet"),
+            ("m050|opus", "opus"),
+            ("m050|exhausted", "exhausted"),
+        ):
+            conn.execute(
+                """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, enrichment_tier)
+                VALUES (?, 'Title', 'Co', 'Remote', ?, ?, ?)""",
+                (dedup_key, now, now, tier),
+            )
+        conn.commit()
+        mig50 = next(m for m in MIGRATIONS if m.version == 50)
+        _apply_migration(ctx, mig50)
+        rows = {
+            r["dedup_key"]: r["enrichment_tier"]
+            for r in conn.execute(
+                "SELECT dedup_key, enrichment_tier FROM jobs WHERE dedup_key LIKE 'm050|%'"
+            ).fetchall()
+        }
+        assert rows["m050|haiku"] == "low"
+        assert rows["m050|sonnet"] == "mid"
+        assert rows["m050|opus"] == "high"
+        assert rows["m050|exhausted"] == "exhausted"
+        _apply_migration(ctx, mig50)
+        rows2 = {
+            r["dedup_key"]: r["enrichment_tier"]
+            for r in conn.execute(
+                "SELECT dedup_key, enrichment_tier FROM jobs WHERE dedup_key LIKE 'm050|%'"
+            ).fetchall()
+        }
+        assert rows2 == rows
+        conn.close()
+
+
+class TestMigration51ConsolidateBatchScoreActions:
+    """Migration 51 — user_activity batch_score_haiku/sonnet → batch_score."""
+
+    def test_m051_consolidates_actions_idempotent(self, tmp_path):
+        import os
+        import tempfile
+
+        from job_finder.json_utils import utc_now_iso
+        from job_finder.web.db_migrate import MIGRATIONS, _apply_migration
+        from job_finder.web.migrations import MigrationContext
+
+        fd, path = tempfile.mkstemp(suffix=".db", dir=str(tmp_path))
+        os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        ctx = MigrationContext(conn=conn, db_path=path, user_data_root=str(tmp_path))
+        for m in MIGRATIONS:
+            if m.version == 51:
+                break
+            _apply_migration(ctx, m)
+        now = utc_now_iso()
+        conn.execute(
+            "INSERT INTO user_activity (action, occurred_at) VALUES ('batch_score_haiku', ?)",
+            (now,),
+        )
+        conn.execute(
+            "INSERT INTO user_activity (action, occurred_at) VALUES ('batch_score_sonnet', ?)",
+            (now,),
+        )
+        conn.execute(
+            "INSERT INTO user_activity (action, occurred_at) VALUES ('rescore', ?)",
+            (now,),
+        )
+        conn.commit()
+        mig51 = next(m for m in MIGRATIONS if m.version == 51)
+        _apply_migration(ctx, mig51)
+        actions = {
+            r["action"] for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
+        }
+        assert "batch_score_haiku" not in actions
+        assert "batch_score_sonnet" not in actions
+        assert "batch_score" in actions
+        assert "rescore" in actions
+        _apply_migration(ctx, mig51)
+        actions2 = {
+            r["action"] for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
+        }
+        assert actions2 == actions
+        conn.close()

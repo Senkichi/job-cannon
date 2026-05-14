@@ -280,7 +280,7 @@ class TestSearchDuckDuckGo:
         assert result is None
 
 
-# Tests for extract_with_haiku/extract_with_sonnet were removed in Phase 2b
+# Tests for extract_with_low/extract_with_mid were removed in Phase 2b
 # sub-fix RC4 — both functions were deleted from enrichment_tiers.py because
 # the synthesis tiers fabricated short pseudo-JDs and blocked escalation to
 # real fetch tiers.
@@ -724,8 +724,8 @@ class TestEnrichJobBackwardCompat:
         assert "agentic" in TIER_ORDER
         assert "exhausted" in TIER_ORDER
         # Synthesis tiers removed in Phase 2b sub-fix RC4
-        assert "haiku" not in TIER_ORDER
-        assert "sonnet" not in TIER_ORDER
+        assert "low" not in TIER_ORDER
+        assert "mid" not in TIER_ORDER
         # Verify ordering: each tier before next
         assert TIER_ORDER.index("free") < TIER_ORDER.index("ddg")
         assert TIER_ORDER.index("ddg") < TIER_ORDER.index("serpapi")
@@ -742,8 +742,8 @@ class TestPipelineIntegration:
     """Integration tests verifying pipeline_runner wiring and Migration 8 schema.
 
     Tests verify:
-    - enrich_job is called BEFORE score_job_haiku in _run_haiku_scoring
-    - _run_sonnet_evaluation does NOT reference fetch_jd
+    - enrich_job is called BEFORE score_job_low in _run_low_scoring
+    - _run_mid_evaluation does NOT reference fetch_jd
     - Migration 8 adds enrichment_tier column correctly
     - Migration 8 backfills existing enriched jobs as 'serpapi'
     - Migration 8 leaves unenriched jobs with NULL enrichment_tier
@@ -753,7 +753,7 @@ class TestPipelineIntegration:
         """run_scoring source does not reference fetch_jd.
 
         v3 unified runner inherits the legacy no-JD-fetch contract from
-        run_sonnet_evaluation -- JD fetching is enrich_job's job.
+        run_mid_evaluation -- JD fetching is enrich_job's job.
         """
         from job_finder.web.scoring_runner import run_scoring
 
@@ -1548,15 +1548,15 @@ class TestRunEnrichmentBackfillSelect:
             # (dedup_key, jd_full, salary_min, tier, first_seen)
             # Already fully enriched -- must NOT be selected (the bug)
             ("enriched-old-1", "full JD text", 100_000, None, "2026-01-01"),
-            ("enriched-old-2", "full JD text", 120_000, "haiku", "2026-01-02"),
+            ("enriched-old-2", "full JD text", 120_000, "low", "2026-01-02"),
             ("enriched-old-3", "full JD text", 150_000, "free", "2026-01-03"),
             # Terminal tier -- must NOT be selected regardless of fields
             ("terminal-serpapi", None, None, "serpapi", "2026-01-04"),
-            ("terminal-sonnet", None, None, "sonnet", "2026-01-05"),
+            ("terminal-mid", None, None, "mid", "2026-01-05"),
             ("terminal-exhausted", None, None, "exhausted", "2026-01-06"),
             # Actually missing fields -- MUST be selected
             ("needs-jd-new-1", None, 90_000, None, "2026-04-23"),
-            ("needs-sal-new-2", "full JD", None, "haiku", "2026-04-22"),
+            ("needs-sal-new-2", "full JD", None, "low", "2026-04-22"),
             ("needs-both-3", None, None, "ddg", "2026-04-21"),
         ]
         conn.executemany(
@@ -1584,7 +1584,7 @@ class TestRunEnrichmentBackfillSelect:
         assert "enriched-old-3" not in passed_keys
 
     def test_skips_terminal_tiers(self, backfill_db_path):
-        """Rows with tier in (exhausted, serpapi, sonnet) must NOT be selected."""
+        """Rows with tier in (exhausted, serpapi, mid) must NOT be selected."""
         from job_finder.web.data_enricher import run_enrichment_backfill
 
         with patch("job_finder.web.data_enricher.enrich_job") as mock_enrich:
@@ -1593,7 +1593,7 @@ class TestRunEnrichmentBackfillSelect:
 
         passed_keys = {call.args[0]["dedup_key"] for call in mock_enrich.call_args_list}
         assert "terminal-serpapi" not in passed_keys
-        assert "terminal-sonnet" not in passed_keys
+        assert "terminal-mid" not in passed_keys
         assert "terminal-exhausted" not in passed_keys
 
     def test_selects_only_rows_that_need_fields(self, backfill_db_path):

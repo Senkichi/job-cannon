@@ -11,9 +11,9 @@ import dataclasses
 import pytest
 
 from job_finder.config import (
+    DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_DB_PATH,
-    DEFAULT_HAIKU_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
@@ -36,7 +36,7 @@ def test_default_settings_match_config_py_defaults():
     assert s.server.host == DEFAULT_SERVER_HOST
     assert s.server.port == DEFAULT_SERVER_PORT
     assert s.server.debug == DEFAULT_SERVER_DEBUG
-    assert s.scoring.haiku_threshold == DEFAULT_HAIKU_THRESHOLD
+    assert s.scoring.candidate_score_threshold == DEFAULT_CANDIDATE_SCORE_THRESHOLD
     assert s.scoring.daily_budget_usd == DEFAULT_DAILY_BUDGET_USD
     assert s.scoring.min_score_threshold == DEFAULT_MIN_SCORE_THRESHOLD
     assert s.ingestion.lookback_days == DEFAULT_LOOKBACK_DAYS
@@ -49,7 +49,7 @@ def test_from_dict_typed_round_trip():
     cfg = {
         "server": {"host": "0.0.0.0", "port": 8080, "debug": False},
         "scoring": {
-            "haiku_threshold": 60,
+            "candidate_score_threshold": 60,
             "daily_budget_usd": 5.5,
             "min_score_threshold": 35,
         },
@@ -60,7 +60,7 @@ def test_from_dict_typed_round_trip():
     assert s.server.host == "0.0.0.0"
     assert s.server.port == 8080
     assert s.server.debug is False
-    assert s.scoring.haiku_threshold == 60
+    assert s.scoring.candidate_score_threshold == 60
     assert s.scoring.daily_budget_usd == 5.5
     assert s.scoring.min_score_threshold == 35
     assert s.ingestion.lookback_days == 14
@@ -73,12 +73,12 @@ def test_from_dict_falls_back_to_defaults_for_missing_or_null_sections():
     """Empty / partial / None-valued sections fall through to DEFAULT_*."""
     s_empty = Settings.from_dict({})
     assert s_empty.server.host == DEFAULT_SERVER_HOST
-    assert s_empty.scoring.haiku_threshold == DEFAULT_HAIKU_THRESHOLD
+    assert s_empty.scoring.candidate_score_threshold == DEFAULT_CANDIDATE_SCORE_THRESHOLD
     assert s_empty.db_path == DEFAULT_DB_PATH
 
     # Partial section: scoring exists but only sets one field; others fall back.
-    s_partial = Settings.from_dict({"scoring": {"haiku_threshold": 99}})
-    assert s_partial.scoring.haiku_threshold == 99
+    s_partial = Settings.from_dict({"scoring": {"candidate_score_threshold": 99}})
+    assert s_partial.scoring.candidate_score_threshold == 99
     assert s_partial.scoring.daily_budget_usd == DEFAULT_DAILY_BUDGET_USD
 
     # YAML-style null (None) values: cfg.get("server") returns None, not {}.
@@ -106,8 +106,8 @@ def test_validate_rejects_out_of_contract_scoring_fields():
     with pytest.raises(ValueError, match="daily_budget_usd"):
         s_neg_budget.validate()
 
-    s_high_threshold = Settings(scoring=ScoringSettings(haiku_threshold=150))
-    with pytest.raises(ValueError, match="haiku_threshold"):
+    s_high_threshold = Settings(scoring=ScoringSettings(candidate_score_threshold=150))
+    with pytest.raises(ValueError, match="candidate_score_threshold"):
         s_high_threshold.validate()
 
     s_neg_lookback = Settings(ingestion=IngestionSettings(lookback_days=-1))
@@ -149,3 +149,33 @@ def test_raw_proxy_is_defensive_copy_at_top_level():
     # objects (lists, dicts) ARE shared — documented limitation; deep
     # copy would be a perf hit and Session 8 caller migration removes
     # the need for raw entirely.
+
+
+def test_loads_legacy_tier_keys(tmp_path):
+    """Legacy providers.* / scoring.haiku_threshold keys migrate on disk (ruamel)."""
+    cfg_path = tmp_path / "legacy.yaml"
+    cfg_path.write_text(
+        "# tier rename migration comment\n"
+        "profile: {}\n"
+        "sources: {}\n"
+        "providers:\n"
+        "  haiku:  # inline\n"
+        "    provider: anthropic\n"
+        "    model: claude-haiku-4-5\n"
+        "scoring:\n"
+        "  haiku_threshold: 77\n"
+        "  models:\n"
+        "    haiku: claude-haiku-4-5\n"
+        "    sonnet: claude-sonnet-4-6\n"
+        "db:\n"
+        "  path: jobs.db\n",
+        encoding="utf-8",
+    )
+    s = Settings.load_from_yaml(str(cfg_path))
+    assert s.scoring.candidate_score_threshold == 77
+    assert s.raw["providers"]["low"]["model"] == "claude-haiku-4-5"
+    assert s.raw["scoring"]["models"]["low"] == "claude-haiku-4-5"
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "candidate_score_threshold" in text
+    assert "haiku_threshold" not in text
+    assert "tier rename migration comment" in text

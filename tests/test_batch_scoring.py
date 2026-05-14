@@ -323,19 +323,19 @@ class TestUnifiedRouteShape:
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_legacy_haiku_route_delegates(self):
-        """POST /dashboard/batch-score/haiku/start still works — it delegates to the unified route."""
+    def test_unified_batch_score_start_inserts_scoring_session(self):
+        """POST /dashboard/batch-score/start inserts session_type='scoring'."""
         path, conn = _make_db()
         try:
             _insert_unscored_job(conn, "job-legacy-1")
             app = self._build_app(path)
             with app.test_client() as client:
-                resp = client.post("/dashboard/batch-score/haiku/start")
+                resp = client.post("/dashboard/batch-score/start")
             assert resp.status_code == 200
             session_type = conn.execute(
                 "SELECT session_type FROM batch_score_sessions ORDER BY id DESC LIMIT 1"
             ).fetchone()[0]
-            # Legacy wrapper still writes the v3 session_type value.
+            # Unified route writes session_type='scoring'
             assert session_type == "scoring"
         finally:
             conn.close()

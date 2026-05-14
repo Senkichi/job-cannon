@@ -82,8 +82,8 @@ def test_base_provider_subclass_must_implement_call():
 
 
 def test_resolve_provider_from_config():
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.5-pro"}}}
-    result = resolve_provider_config("sonnet", config)
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.5-pro"}}}
+    result = resolve_provider_config("mid", config)
     assert result["provider"] == "gemini"
     assert result["model"] == "gemini-2.5-pro"
 
@@ -91,39 +91,39 @@ def test_resolve_provider_from_config():
 def test_resolve_provider_with_fallback():
     config = {
         "providers": {
-            "sonnet": {
+            "mid": {
                 "provider": "gemini",
                 "model": "gemini-2.5-pro",
                 "fallback": "anthropic",
             }
         }
     }
-    result = resolve_provider_config("sonnet", config)
+    result = resolve_provider_config("mid", config)
     assert result["fallback"] == "anthropic"
     assert result["provider"] == "gemini"
     assert result["model"] == "gemini-2.5-pro"
 
 
 def test_resolve_provider_missing_falls_back_to_anthropic():
-    config = {"scoring": {"models": {"sonnet": "claude-sonnet-4-6"}}}
-    result = resolve_provider_config("sonnet", config)
+    config = {"scoring": {"models": {"mid": "claude-sonnet-4-6"}}}
+    result = resolve_provider_config("mid", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_no_providers_section():
     config = {}
-    result = resolve_provider_config("sonnet", config)
+    result = resolve_provider_config("mid", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_tier_model_missing_uses_scoring_models():
     config = {
-        "providers": {"sonnet": {"provider": "ollama"}},
-        "scoring": {"models": {"sonnet": "claude-sonnet-4-6"}},
+        "providers": {"mid": {"provider": "ollama"}},
+        "scoring": {"models": {"mid": "claude-sonnet-4-6"}},
     }
-    result = resolve_provider_config("sonnet", config)
+    result = resolve_provider_config("mid", config)
     assert result["model"] == "claude-sonnet-4-6"
     assert result["provider"] == "ollama"
 
@@ -137,9 +137,9 @@ def test_resolve_provider_scoring_tier_default():
     assert result["model"] == "claude-sonnet-4-6"
 
 
-def test_resolve_provider_opus_tier():
+def test_resolve_provider_high_tier():
     config = {}
-    result = resolve_provider_config("opus", config)
+    result = resolve_provider_config("high", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-opus-4-6"
 
@@ -150,7 +150,7 @@ def test_resolve_provider_opus_tier():
 def test_resolve_with_fallback_chain():
     config = {
         "providers": {
-            "sonnet": {
+            "mid": {
                 "provider": "ollama",
                 "model": "qwen2.5:14b",
                 "fallback_chain": [
@@ -160,25 +160,25 @@ def test_resolve_with_fallback_chain():
             }
         }
     }
-    result = resolve_provider_config("sonnet", config)
-    assert result["fallback_chain"] == config["providers"]["sonnet"]["fallback_chain"]
+    result = resolve_provider_config("mid", config)
+    assert result["fallback_chain"] == config["providers"]["mid"]["fallback_chain"]
     assert result["provider"] == "ollama"
 
 
 def test_resolve_returns_daily_limits():
     config = {
         "providers": {
-            "sonnet": {"provider": "ollama", "model": "qwen2.5:14b"},
+            "mid": {"provider": "ollama", "model": "qwen2.5:14b"},
             "daily_limits": {"ollama": 350, "gemini": 170},
         }
     }
-    result = resolve_provider_config("sonnet", config)
+    result = resolve_provider_config("mid", config)
     assert result["daily_limits"] == {"ollama": 350, "gemini": 170}
 
 
 def test_resolve_backward_compat_empty_chain():
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
-    result = resolve_provider_config("sonnet", config)
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    result = resolve_provider_config("mid", config)
     assert result["fallback_chain"] == []
     assert result["daily_limits"] == {}
     assert result["provider"] == "gemini"  # existing behavior preserved
@@ -187,7 +187,7 @@ def test_resolve_backward_compat_empty_chain():
 def test_resolve_chain_with_daily_limits_combined():
     config = {
         "providers": {
-            "sonnet": {
+            "mid": {
                 "provider": "ollama",
                 "model": "qwen2.5:14b",
                 "fallback_chain": [{"provider": "gemini", "model": "gemini-2.0-flash"}],
@@ -195,7 +195,7 @@ def test_resolve_chain_with_daily_limits_combined():
             "daily_limits": {"ollama": 350},
         }
     }
-    result = resolve_provider_config("sonnet", config)
+    result = resolve_provider_config("mid", config)
     assert result["fallback_chain"] == [{"provider": "gemini", "model": "gemini-2.0-flash"}]
     assert result["daily_limits"] == {"ollama": 350}
 
@@ -230,10 +230,10 @@ def _migrated_conn(tmp_path):
 
 
 def test_call_model_routes_to_configured_provider(tmp_path):
-    """call_model routes to GeminiProvider when config says providers.sonnet.provider=gemini."""
+    """call_model routes to GeminiProvider when config says providers.mid.provider=gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
     expected_result = _make_result(provider="gemini")
 
@@ -246,7 +246,7 @@ def test_call_model_routes_to_configured_provider(tmp_path):
         mock_adapter.call.return_value = expected_result
         mock_make_adapter.return_value = mock_adapter
 
-        result = call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        result = call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_make_adapter.assert_called_once_with(
         "gemini", None, conn, config, job_id=None, purpose=""
@@ -258,7 +258,7 @@ def test_call_model_retries_on_schema_failure(tmp_path):
     """call_model retries once with schema errors appended to prompt on first validation failure."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -280,7 +280,7 @@ def test_call_model_retries_on_schema_failure(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet",
+            "mid",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -301,7 +301,7 @@ def test_call_model_fallback_to_anthropic(tmp_path):
 
     config = {
         "providers": {
-            "sonnet": {
+            "mid": {
                 "provider": "gemini",
                 "model": "gemini-2.0-flash",
                 "fallback": "anthropic",
@@ -346,7 +346,7 @@ def test_call_model_fallback_to_anthropic(tmp_path):
         mock_anthropic_cls.return_value = mock_anthropic_instance
 
         result = call_model(
-            "sonnet",
+            "mid",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -373,7 +373,7 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
     """call_model does NOT call cost_gate when provider is free."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
+    config = {"providers": {"mid": {"provider": provider_name, "model": model_name}}}
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -385,7 +385,7 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_not_called()
 
@@ -408,10 +408,10 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "mid", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
         )
 
-    mock_cost_gate.assert_called_once_with(conn, config, "sonnet")
+    mock_cost_gate.assert_called_once_with(conn, config, "mid")
 
 
 def test_call_model_raises_budget_exceeded(tmp_path):
@@ -424,7 +424,7 @@ def test_call_model_raises_budget_exceeded(tmp_path):
 
     with patch("job_finder.web.model_provider.cost_gate", return_value=False):
         with pytest.raises(BudgetExceededError):
-            call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
 
 def test_call_model_no_record_cost_for_anthropic(tmp_path):
@@ -454,7 +454,7 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "mid", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
         )
 
     mock_record_cost.assert_not_called()
@@ -464,7 +464,7 @@ def test_call_model_records_cost_for_gemini(tmp_path):
     """call_model records $0 cost row for free providers like gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
     gemini_result = _make_result(provider="gemini", data={"score": 80})
 
@@ -476,7 +476,7 @@ def test_call_model_records_cost_for_gemini(tmp_path):
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     # Free providers record cost directly in DB at $0 (not via record_cost/compute_cost)
     row = conn.execute(
@@ -491,7 +491,7 @@ def test_call_model_raises_on_no_fallback(tmp_path):
     """call_model raises RuntimeError when retry fails and no fallback configured."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -511,7 +511,7 @@ def test_call_model_raises_on_no_fallback(tmp_path):
 
         with pytest.raises(RuntimeError, match="no fallback"):
             call_model(
-                "sonnet",
+                "mid",
                 "sys",
                 [{"role": "user", "content": "hi"}],
                 conn,
@@ -630,7 +630,7 @@ def test_ensure_usage_current_noop_same_day(tmp_path, _reset_daily_state):
 # Shared config for cascade tests: ollama primary -> gemini -> anthropic
 _CASCADE_CONFIG = {
     "providers": {
-        "sonnet": {
+        "mid": {
             "provider": "ollama",
             "model": "qwen2.5:14b",
             "fallback_chain": [
@@ -665,7 +665,7 @@ def test_cascade_skips_exhausted_provider(tmp_path, _reset_daily_state):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # First call should be to gemini (ollama was at limit and skipped)
@@ -703,7 +703,7 @@ def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # _make_adapter called twice: ollama (ValueError) then gemini
@@ -745,7 +745,7 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # Ollama should be marked exhausted at its configured limit
@@ -776,7 +776,7 @@ def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         with pytest.raises(RuntimeError, match="exhausted"):
-            call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
+            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
@@ -819,7 +819,7 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "sonnet",
+            "mid",
             "sys",
             original_messages,
             conn,
@@ -840,7 +840,7 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
 # Config with prompt_variant on a chain entry
 _CASCADE_VARIANT_CONFIG = {
     "providers": {
-        "sonnet": {
+        "mid": {
             "provider": "ollama",
             "model": "qwen2.5:14b",
             "fallback_chain": [
@@ -858,7 +858,7 @@ _CASCADE_VARIANT_CONFIG = {
 
 
 def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_daily_state):
-    """Plan 4 Commit E removed PROMPT_VARIANTS along with sonnet_evaluator.
+    """Plan 4 Commit E removed PROMPT_VARIANTS along with mid_evaluator.
 
     The prompt_variant cascade key is now ignored -- every entry uses the
     caller's system prompt verbatim. This test pins the new behavior so a
@@ -884,7 +884,7 @@ def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_dail
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet",
+            "mid",
             "original system prompt",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -919,7 +919,7 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "sonnet",
+            "mid",
             "custom system prompt",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1050,14 +1050,14 @@ def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily
         patch("job_finder.web.model_provider.cost_gate", return_value=True),
     ):
         with pytest.raises(ProviderCascadeExhaustedError):
-            call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
+            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
     """Non-cascade path schema failure raises plain RuntimeError, not ProviderCascadeExhaustedError."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -1077,7 +1077,7 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 
         with pytest.raises(RuntimeError) as exc_info:
             call_model(
-                "sonnet",
+                "mid",
                 "sys",
                 [{"role": "user", "content": "hi"}],
                 conn,
@@ -1094,44 +1094,44 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 
 def test_tier_has_provider_non_anthropic_with_key():
     """Non-Anthropic primary + valid constructor -> True even when client=None."""
-    config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        assert tier_has_configured_provider("haiku", config, client=None) is True
+        assert tier_has_configured_provider("low", config, client=None) is True
 
 
 def test_tier_has_provider_anthropic_only_no_client():
     """Anthropic-only chain + client=None -> False."""
     config = {}  # default: anthropic
-    assert tier_has_configured_provider("haiku", config, client=None) is False
+    assert tier_has_configured_provider("low", config, client=None) is False
 
 
 def test_tier_has_provider_anthropic_only_with_client():
     """Anthropic-only chain + client present -> True."""
     config = {}
     mock_client = MagicMock()
-    assert tier_has_configured_provider("haiku", config, client=mock_client) is True
+    assert tier_has_configured_provider("low", config, client=mock_client) is True
 
 
 def test_tier_has_provider_typo_no_client():
     """Typo provider name + client=None -> False."""
-    config = {"providers": {"haiku": {"provider": "gorq", "model": "llama-3.1-8b-instant"}}}
-    assert tier_has_configured_provider("haiku", config, client=None) is False
+    config = {"providers": {"low": {"provider": "gorq", "model": "llama-3.1-8b-instant"}}}
+    assert tier_has_configured_provider("low", config, client=None) is False
 
 
 def test_tier_has_provider_missing_api_key():
     """Recognized provider name but missing required API key -> False."""
-    config = {"providers": {"haiku": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"low": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
     with patch.dict("os.environ", {}, clear=True):
-        assert tier_has_configured_provider("haiku", config, client=None) is False
+        assert tier_has_configured_provider("low", config, client=None) is False
 
 
 def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
     """Mixed chain where primary is misconfigured but fallback is locally valid -> True."""
     config = {
         "providers": {
-            "haiku": {
+            "low": {
                 "provider": "gemini",
                 "model": "gemini-2.0-flash",
                 "fallback_chain": [
@@ -1142,27 +1142,27 @@ def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
     }
     mock_client = MagicMock()
     with patch.dict("os.environ", {}, clear=True):
-        assert tier_has_configured_provider("haiku", config, client=mock_client) is True
+        assert tier_has_configured_provider("low", config, client=mock_client) is True
 
 
 def test_tier_has_provider_conn_none_accepted():
     """conn=None accepted without error (validates signature change)."""
-    config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        result = tier_has_configured_provider("haiku", config, client=None, conn=None)
+        result = tier_has_configured_provider("low", config, client=None, conn=None)
     assert result is True
 
 
 def test_tier_has_provider_ollama_unreachable():
     """Ollama configured but unreachable -> False (operational check)."""
-    config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__",
         side_effect=RuntimeError("Connection refused"),
     ):
-        assert tier_has_configured_provider("haiku", config, client=None) is False
+        assert tier_has_configured_provider("low", config, client=None) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1176,7 +1176,7 @@ def test_cascade_ollama_primary_gemini_fallback(tmp_path, _reset_daily_state):
 
     config = {
         "providers": {
-            "haiku": {
+            "low": {
                 "provider": "ollama",
                 "model": "qwen2.5:14b",
                 "fallback_chain": [
@@ -1211,7 +1211,7 @@ def test_cascade_ollama_primary_gemini_fallback(tmp_path, _reset_daily_state):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "haiku",
+            "low",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1227,7 +1227,7 @@ def test_backward_compat_single_ollama_no_cascade(tmp_path):
     """Single-provider Ollama config with no fallback_chain routes correctly."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"haiku": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
     conn = _migrated_conn(tmp_path)
 
     ollama_result = ModelResult(
@@ -1249,7 +1249,7 @@ def test_backward_compat_single_ollama_no_cascade(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "haiku",
+            "low",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1271,7 +1271,7 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
     """call_model does NOT call cost_gate for ollama and gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"sonnet": {"provider": provider_name, "model": model_name}}}
+    config = {"providers": {"mid": {"provider": provider_name, "model": model_name}}}
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -1283,6 +1283,6 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("sonnet", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_not_called()

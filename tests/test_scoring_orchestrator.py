@@ -349,7 +349,7 @@ class TestResolveScoringModel:
     def test_missing_scoring_block_returns_none(self):
         assert (
             so._resolve_scoring_model(
-                {"providers": {"haiku": {"model": "x"}}},
+                {"providers": {"low": {"model": "x"}}},
                 provider=None,
             )
             is None

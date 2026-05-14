@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Renamed vestigial tier routing strings `haiku` / `sonnet` / `opus` to
+  `low` / `mid` / `high` across config, dispatcher, DB `enrichment_tier`
+  values (migration 50), and UI. Renamed `scoring.haiku_threshold` to
+  `scoring.candidate_score_threshold`. Removed deprecated
+  `/dashboard/batch-score/haiku/start` and `/dashboard/batch-score/sonnet/start`
+  routes; consolidated `user_activity` batch-score actions (migration 51).
+  Dashboard batch scoring is a single control. `config.yaml` legacy keys
+  auto-migrate on load via ruamel.yaml round-trip.
+
 ## [4.0.0] — 2026-05-06
 
 ### Removed (BREAKING)

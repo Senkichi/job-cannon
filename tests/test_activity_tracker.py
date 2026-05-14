@@ -163,8 +163,7 @@ class TestActionConstants:
     def test_constants_exported(self):
         """All ACTION_* constants are importable."""
         from job_finder.web.activity_tracker import (
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
+            ACTION_BATCH_SCORE,
             ACTION_EXPAND_JOB,
             ACTION_PASTE_JD,
             ACTION_RESCORE,
@@ -183,20 +182,18 @@ class TestActionConstants:
             ACTION_STATUS_CHANGE,
             ACTION_PASTE_JD,
             ACTION_RESCORE,
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
+            ACTION_BATCH_SCORE,
             ACTION_SCHEDULED_ATS_SCAN,
             ACTION_SCHEDULED_EXPIRY_CHECK,
             ACTION_SAVE_JD,
         ]
         # Unique string values
-        assert len(set(constants)) == 11, f"Duplicate ACTION_* values found: {constants}"
+        assert len(set(constants)) == 10, f"Duplicate ACTION_* values found: {constants}"
 
     def test_constants_match_expected_names(self):
         """All ACTION_* constants have the expected string values."""
         from job_finder.web.activity_tracker import (
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
+            ACTION_BATCH_SCORE,
             ACTION_EXPAND_JOB,
             ACTION_PASTE_JD,
             ACTION_RESCORE,
@@ -214,8 +211,7 @@ class TestActionConstants:
         assert ACTION_STATUS_CHANGE == "status_change"
         assert ACTION_PASTE_JD == "paste_jd"
         assert ACTION_RESCORE == "rescore"
-        assert ACTION_BATCH_SCORE_HAIKU == "batch_score_haiku"
-        assert ACTION_BATCH_SCORE_SONNET == "batch_score_sonnet"
+        assert ACTION_BATCH_SCORE == "batch_score"
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
         assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
         assert ACTION_SAVE_JD == "save_jd"
@@ -243,7 +239,7 @@ class TestCallSiteIntegration:
             config={
                 "TESTING": True,
                 "db": {"path": db_path},
-                "scoring": {"min_score": 5.0, "haiku_threshold": 55, "daily_budget_usd": 25.0},
+                "scoring": {"min_score": 5.0, "candidate_score_threshold": 55, "daily_budget_usd": 25.0},
                 "polling": {"interval_minutes": 30},
             }
         )

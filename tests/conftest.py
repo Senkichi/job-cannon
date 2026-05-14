@@ -340,7 +340,7 @@ def migrated_db_with_jobs():
 def mock_run_oneshot():
     """Auto-mock _run_oneshot so no test accidentally invokes the real Claude CLI.
 
-    Returns a superset envelope that works for both legacy (Haiku/Sonnet) and
+    Returns a superset envelope that works for both legacy (low/mid) and
     v3.0 (JobAssessment) call sites. structured_output carries the legacy
     {score, summary} shape (keeps pre-Phase-34 tests green) while the result
     JSON carries the v3 ordinal fields at the top level (matches
@@ -383,10 +383,10 @@ def mock_run_oneshot():
 def mock_run_oneshot_legacy():
     """Opt-in fixture for tests exercising the pre-v3 legacy path.
 
-    Returns the Haiku/Sonnet-shaped envelope only, without the v3 ordinal
+    Returns the low/mid-tier envelope only, without the v3 ordinal
     fields. Overrides the autouse mock_run_oneshot when declared explicitly
     in a test function's signature. Removed in Plan 4 alongside the
-    haiku_scorer.py / sonnet_evaluator.py deletion.
+    low_tier_scorer.py / mid_tier_evaluator.py deletion.
     """
     envelope = {
         "is_error": False,
@@ -402,7 +402,7 @@ def mock_run_oneshot_legacy():
 @pytest.fixture(autouse=True)
 def mock_liveness_check():
     """Auto-mock check_job_liveness so no test accidentally issues real HTTP
-    probes during Sonnet's liveness gate.
+    probes during mid-tier's liveness gate.
 
     Defaults to INCONCLUSIVE — the safe pass-through that neither archives
     the job nor blocks evaluation. Tests that specifically exercise the gate
@@ -417,8 +417,8 @@ def mock_liveness_check():
 
 
 @pytest.fixture
-def cascade_config_haiku():
-    """Config with Ollama primary + Anthropic CLI fallback for the haiku tier.
+def cascade_config_low():
+    """Config with Ollama primary + Anthropic CLI fallback for the low tier.
 
     Mirrors backfill_enrichment._OFFLINE_PROVIDERS so call_model() takes the
     cascade branch (non-empty fallback_chain) and raises
@@ -427,7 +427,7 @@ def cascade_config_haiku():
     """
     return {
         "providers": {
-            "haiku": {
+            "low": {
                 "provider": "ollama",
                 "model": "qwen2.5:14b",
                 "fallback_chain": [
@@ -439,11 +439,11 @@ def cascade_config_haiku():
 
 
 @pytest.fixture
-def cascade_config_sonnet():
-    """Config with Ollama primary + Anthropic CLI fallback for the sonnet tier."""
+def cascade_config_mid():
+    """Config with Ollama primary + Anthropic CLI fallback for the mid tier."""
     return {
         "providers": {
-            "sonnet": {
+            "mid": {
                 "provider": "ollama",
                 "model": "qwen2.5:14b",
                 "fallback_chain": [

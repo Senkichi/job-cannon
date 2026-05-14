@@ -86,7 +86,7 @@ def _make_tracking_connection_factory(calls_out: list[str]):
 # ---------------------------------------------------------------------------
 
 _TEST_CONFIG = {
-    "scoring": {"haiku_threshold": 5},
+    "scoring": {"candidate_score_threshold": 5},
     "profile": {
         "target_titles": ["Data Scientist"],
         "target_locations": ["Remote"],

@@ -24,7 +24,7 @@ uv run python -m job_finder                       # equivalent module entry
 uv run python run.py                              # legacy entry, still works (now a shim)
 
 # Tests
-uv run --active pytest tests/                              # All tests (2163 collected / 2160 passing / 3 deselected via `not requires_artifacts` as of 2026-05-06)
+uv run --active pytest tests/                              # Full suite (use `pytest --co` for exact count; excludes e2e by default in CI docs)
 uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
 
@@ -54,7 +54,7 @@ job_finder/
 │   ├── pipeline_detector/       # Multi-signal email classification (split S7b 2026-05-06: __init__ + _constants + _gmail + _signals + _db + _processing)
 │   ├── ats_scanner/             # ATS platform scanner (split S7c 2026-05-06: __init__ + _upsert + _probe + _promote + _run + _run_html)
 │   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
-│   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m048 + _gate, _runner, _post_hooks, types)
+│   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m051 + _gate, _runner, _post_hooks, types)
 │   ├── _http_constants.py       # Shared HTTP _HEADERS / _TIMEOUT (extracted S7e onset; consumed by careers_crawler + enrichment_tiers)
 │   ├── pipeline_runner.py       # Orchestrates ingestion + scoring + detection
 │   ├── db_helpers.py            # Per-request g.db pattern
@@ -101,8 +101,7 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
 - Rescoring skips already-scored jobs unless `force=True` (manual rescore).
 
-**Tier-name vestigial labels (IMPORTANT):**
-The strings `'haiku'`, `'sonnet'`, and `'opus'` in `_TIER_DEFAULTS` (`model_provider.py:33-43`), `providers.haiku/sonnet/opus` config keys, and the `enrichment_tier` DB column are **vestigial labels from the v1/v2 architecture**. They no longer mean Anthropic models — they mean cheap-fast (`'haiku'`), balanced-deep (`'sonnet'`), and heavy-reasoning (`'opus'`) routing classes for non-scoring callers (enrichment_tiers, careers_scraper, ai_career_navigator, company_research, description_reformatter). A future refactor will rename these to `'low' / 'mid' / 'high'`. Until then: do **not** assume "haiku" means an Anthropic model in code or docs. The `'scoring'` tier is the only post-v3.0 tier name that means what it says.
+**Routing tiers:** `call_model` uses `low`, `mid`, and `high` for non-scoring callers, and `scoring` for v3.0 job scoring. Anthropic model IDs (for example `claude-haiku-4-5`) are vendor model names, not tier labels.
 
 ## Planning Documentation
 

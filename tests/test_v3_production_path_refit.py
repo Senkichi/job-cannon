@@ -195,11 +195,9 @@ def test_g4_refit_live_ollama():
     from job_finder.web.job_scorer import score_job
 
     if not BASELINE_SAMPLE.exists() or not BASELINE_GOLD.exists():
-        pytest.fail(
+        pytest.skip(
             f"Phase 33 baseline artifacts missing ({BASELINE_SAMPLE} and/or {BASELINE_GOLD}). "
-            "This test runs a live MAE measurement against gold. Regenerate via Phase 33's "
-            "baseline sampling + gold scoring pass. (Already gated by @pytest.mark.integration; "
-            "only fires under `pytest -m integration`.)"
+            "Regenerate via Phase 33 baseline sampling + gold scoring pass."
         )
 
     sample = _iter_sample_rows()

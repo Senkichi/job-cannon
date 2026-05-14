@@ -412,7 +412,7 @@ class TestDiscoverNavigationRecipeCascade:
 
     def test_uses_call_model_when_providers_configured(
         self,
-        cascade_config_haiku,
+        cascade_config_low,
         make_model_result,
     ):
         with (
@@ -431,10 +431,10 @@ class TestDiscoverNavigationRecipeCascade:
             self._stub_connection(mock_sc)
             mock_cm.return_value = make_model_result(self._RECIPE)
 
-            recipe = self._run_discovery(cascade_config_haiku)
+            recipe = self._run_discovery(cascade_config_low)
 
         mock_cm.assert_called_once()
-        assert mock_cm.call_args.kwargs["tier"] == "haiku"
+        assert mock_cm.call_args.kwargs["tier"] == "low"
         assert mock_cm.call_args.kwargs["purpose"] == "ai_nav_discovery"
         mock_cc.assert_not_called()
         assert recipe is not None
@@ -463,7 +463,7 @@ class TestDiscoverNavigationRecipeCascade:
         mock_cc.assert_called_once()
         assert recipe is not None
 
-    def test_cascade_exhausted_falls_back_to_cli(self, cascade_config_haiku):
+    def test_cascade_exhausted_falls_back_to_cli(self, cascade_config_low):
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
 
         with (
@@ -483,13 +483,13 @@ class TestDiscoverNavigationRecipeCascade:
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.return_value = (self._RECIPE, 0.001)
 
-            recipe = self._run_discovery(cascade_config_haiku)
+            recipe = self._run_discovery(cascade_config_low)
 
         mock_cm.assert_called_once()
         mock_cc.assert_called_once()
         assert recipe is not None
 
-    def test_cascade_and_cli_both_fail_returns_none(self, cascade_config_haiku):
+    def test_cascade_and_cli_both_fail_returns_none(self, cascade_config_low):
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
 
         with (
@@ -506,6 +506,6 @@ class TestDiscoverNavigationRecipeCascade:
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
             mock_cc.side_effect = RuntimeError("CLI unavailable")
 
-            recipe = self._run_discovery(cascade_config_haiku)
+            recipe = self._run_discovery(cascade_config_low)
 
         assert recipe is None

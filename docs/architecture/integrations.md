@@ -150,7 +150,7 @@ The `'scoring'` tier dispatches through `job_finder/web/model_provider.py:call_m
 - `sources.jsearch.enabled` - Enable JSearch (not yet implemented)
 - `sources.jsearch.rapidapi_key` - RapidAPI key for JSearch
 - `scoring.monthly_budget_usd` - Monthly Claude budget cap (default: $25.00)
-- `scoring.haiku_threshold` - Vestigially-named candidate-score threshold gating full v3 scoring evaluation (default: 55). The name predates v3.0; the value is still active but no longer "promote to Sonnet" — it gates the cascade entry.
+- `scoring.candidate_score_threshold` - Minimum candidate score (0-100) required to spend an LLM call on full v3 scoring; pre-filter gate (default: 55).
 
 **Secrets Location:**
 - `.env` file (gitignored) - Contains ANTHROPIC_API_KEY

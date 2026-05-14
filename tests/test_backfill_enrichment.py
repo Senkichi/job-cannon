@@ -117,8 +117,8 @@ def test_convergence_multiple_passes(migrated_db):
         insert_job(conn, f"job{i}")
 
     # Track call count per job to advance tier step by step
-    # free -> ddg -> haiku -> serpapi -> sonnet -> exhausted (5 steps)
-    tier_progression = ["free", "ddg", "haiku", "serpapi", "sonnet", "exhausted"]
+    # free -> ddg -> low -> serpapi -> mid -> exhausted (5 steps)
+    tier_progression = ["free", "ddg", "low", "serpapi", "mid", "exhausted"]
 
     def mock_enrich(job_row, serpapi_key=None, conn=None, config=None):
         key = job_row["dedup_key"]
@@ -153,8 +153,8 @@ def test_convergence_multiple_passes(migrated_db):
 
     # Multiple passes should complete and all 5 jobs should have been advanced.
     # Actual convergence: 5 jobs x 4 tier advancements each = 20 total before exhausted.
-    # The test fixture advances through free->ddg->haiku->serpapi (4 tiers); pass 5 finds 0.
-    # Note: >= 25 was wrong because the sonnet/exhausted tiers are terminal, not transitional.
+    # The test fixture advances through free->ddg->low->serpapi (4 tiers); pass 5 finds 0.
+    # Note: >= 25 was wrong because the mid/exhausted tiers are terminal, not transitional.
     assert total_enriched >= 20, (
         f"Expected >=20 enrichments (5 jobs x 4 active tiers), got {total_enriched}"
     )
@@ -213,7 +213,7 @@ def test_cost_estimate_counts_tiers(migrated_db, monkeypatch, capsys):
     insert_job(conn, "null2", enrichment_tier=None)
     insert_job(conn, "free1", enrichment_tier="free")
     insert_job(conn, "ddg1", enrichment_tier="ddg")
-    insert_job(conn, "haiku1", enrichment_tier="haiku")
+    insert_job(conn, "low1", enrichment_tier="low")
     insert_job(conn, "exhausted1", enrichment_tier="exhausted")  # excluded
 
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
@@ -503,7 +503,7 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
     insert_job(conn, "job_agentic_exhausted", enrichment_tier="agentic_exhausted")
     insert_job(conn, "job_exhausted", enrichment_tier="exhausted")
     insert_job(conn, "job_serpapi", enrichment_tier="serpapi")
-    insert_job(conn, "job_sonnet", enrichment_tier="sonnet")
+    insert_job(conn, "job_mid", enrichment_tier="mid")
     # This one should be ELIGIBLE
     insert_job(conn, "job_null_tier", enrichment_tier=None)
 
@@ -517,10 +517,10 @@ def test_agentic_and_agentic_exhausted_excluded_from_backfill(migrated_db):
     assert "job_agentic_exhausted" not in eligible_keys, (
         "'agentic_exhausted' tier must be excluded"
     )
-    # exhausted, serpapi, sonnet must also be excluded
+    # exhausted, serpapi, mid must also be excluded
     assert "job_exhausted" not in eligible_keys
     assert "job_serpapi" not in eligible_keys
-    assert "job_sonnet" not in eligible_keys
+    assert "job_mid" not in eligible_keys
     # NULL tier (unenriched) must be eligible
     assert "job_null_tier" in eligible_keys
 

@@ -690,7 +690,7 @@ def app_with_migrations(tmp_db_path):
 
     test_config = {
         "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40, "haiku_threshold": 55},
+        "scoring": {"min_score_threshold": 40, "candidate_score_threshold": 55},
         "profile": {
             "target_titles": ["Staff Data Scientist"],
             "target_locations": ["Remote"],
@@ -722,7 +722,7 @@ def app_with_unscored_jobs(tmp_db_path):
 
     test_config = {
         "db": {"path": tmp_db_path},
-        "scoring": {"min_score_threshold": 40, "haiku_threshold": 55},
+        "scoring": {"min_score_threshold": 40, "candidate_score_threshold": 55},
         "profile": {
             "target_titles": ["Staff Data Scientist"],
             "target_locations": ["Remote"],
@@ -806,44 +806,36 @@ def unscored_client(app_with_unscored_jobs):
 # ---------------------------------------------------------------------------
 
 
-class TestBatchScoreHaikuStart:
-    def test_haiku_start_returns_progress_fragment_when_unscored_exist(self, unscored_client):
-        """POST /dashboard/batch-score/haiku/start returns progress fragment with session_id."""
-        response = unscored_client.post("/dashboard/batch-score/haiku/start")
+class TestBatchScoreStart:
+    def test_batch_score_start_returns_progress_fragment_when_unscored_exist(self, unscored_client):
+        """POST /dashboard/batch-score/start returns progress fragment with session_id."""
+        response = unscored_client.post("/dashboard/batch-score/start")
         assert response.status_code == 200
         data = response.data.decode()
-        # Should contain progress fragment (not done fragment)
-        assert "batch-score-haiku-status" in data
+        assert "batch-score-status" in data
         assert "hx-trigger" in data  # polling continues
 
-    def test_haiku_start_returns_done_when_no_unscored_jobs(self, migrated_client):
-        """POST /dashboard/batch-score/haiku/start returns done fragment when 0 unscored jobs."""
-        response = migrated_client.post("/dashboard/batch-score/haiku/start")
+    def test_batch_score_start_returns_done_when_no_unscored_jobs(self, migrated_client):
+        """POST /dashboard/batch-score/start returns done fragment when 0 unscored jobs."""
+        response = migrated_client.post("/dashboard/batch-score/start")
         assert response.status_code == 200
         data = response.data.decode()
-        # Should return done fragment (no hx-trigger) since nothing to score
         assert "hx-trigger" not in data
-        # Done fragment should mention no scoring needed
-        assert "batch-score-haiku-status" in data
+        assert "batch-score-status" in data
 
-    def test_haiku_start_progress_contains_haiku_label(self, unscored_client):
-        """POST /dashboard/batch-score/haiku/start progress fragment contains 'Haiku' label."""
-        response = unscored_client.post("/dashboard/batch-score/haiku/start")
+    def test_batch_score_start_progress_shows_scoring_label(self, unscored_client):
+        """Progress fragment shows Scoring progress text."""
+        response = unscored_client.post("/dashboard/batch-score/start")
         assert response.status_code == 200
         data = response.data.decode()
-        assert "Haiku" in data
+        assert "Scoring:" in data
 
-    def test_haiku_start_creates_session_in_db(self, app_with_unscored_jobs):
-        """POST /dashboard/batch-score/haiku/start inserts a batch_score_sessions row.
-
-        v3.0 (Phase 34 Plan 3 Commit B): the legacy haiku/start URL delegates
-        to the unified scorer, which always writes session_type='scoring'
-        regardless of which wrapper route was called.
-        """
+    def test_batch_score_start_creates_session_in_db(self, app_with_unscored_jobs):
+        """POST /dashboard/batch-score/start inserts a batch_score_sessions row."""
         import sqlite3
 
         client = app_with_unscored_jobs.test_client()
-        client.post("/dashboard/batch-score/haiku/start")
+        client.post("/dashboard/batch-score/start")
 
         db_path = app_with_unscored_jobs.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
@@ -856,34 +848,6 @@ class TestBatchScoreHaikuStart:
         assert session is not None
         assert session["session_type"] == "scoring"
         assert session["status"] in ("running", "done", "cancelled")
-
-
-class TestBatchScoreSonnetStart:
-    def test_sonnet_start_returns_progress_when_qualifying_jobs_exist(self, unscored_client):
-        """POST /dashboard/batch-score/sonnet/start returns progress fragment when qualifying jobs exist."""
-        response = unscored_client.post("/dashboard/batch-score/sonnet/start")
-        assert response.status_code == 200
-        data = response.data.decode()
-        # The beta|staff-ds job has haiku_score=75 (>=55 threshold) and no sonnet_score
-        # But no jd_full -- so with the jd_full IS NOT NULL check it would return done
-        # Let's just assert 200 and correct fragment structure
-        assert "batch-score-sonnet-status" in data
-
-    def test_sonnet_start_returns_done_when_no_qualifying_jobs(self, migrated_client):
-        """POST /dashboard/batch-score/sonnet/start returns done when no qualifying jobs."""
-        response = migrated_client.post("/dashboard/batch-score/sonnet/start")
-        assert response.status_code == 200
-        data = response.data.decode()
-        # No jobs at all, so no qualifying jobs
-        assert "batch-score-sonnet-status" in data
-        assert "hx-trigger" not in data  # done fragment stops polling
-
-    def test_sonnet_start_progress_contains_sonnet_label(self, unscored_client):
-        """POST /dashboard/batch-score/sonnet/start fragment contains 'Sonnet' label."""
-        response = unscored_client.post("/dashboard/batch-score/sonnet/start")
-        assert response.status_code == 200
-        data = response.data.decode()
-        assert "Sonnet" in data
 
 
 class TestBatchScoreStatus:
@@ -952,7 +916,7 @@ class TestBatchScoreStatus:
         assert response.status_code == 200
         data = response.data.decode()
         assert "hx-trigger" not in data
-        assert "batch-score-" in data  # correct fragment container
+        assert "batch-score-status" in data  # correct fragment container
 
 
 class TestBatchScoreCancel:
@@ -1002,7 +966,7 @@ class TestBatchScoreCancel:
         assert response.status_code == 200
         data = response.data.decode()
         # Cancel response keeps polling until background thread sets status='cancelled'
-        assert "batch-score-" in data
+        assert "batch-score-status" in data
 
 
 # ---------------------------------------------------------------------------
@@ -1355,7 +1319,7 @@ class TestSettingsAtsScanSection:
                     "weight_recency": "0.05",
                     "min_score_threshold": "40",
                     "daily_budget_usd": "25.0",
-                    "haiku_threshold": "42",
+                    "candidate_score_threshold": "42",
                     "model_haiku": "claude-haiku-4-5",
                     "model_sonnet": "claude-sonnet-4-6",
                     "output_default_format": "cli",
