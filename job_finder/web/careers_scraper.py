@@ -177,7 +177,7 @@ def _find_careers_url_with_low_tier(
                     config=config,
                     output_schema=_CAREERS_URL_SCHEMA,
                     job_id=None,
-                    purpose="careers_scrape",
+                    purpose="find_careers_url",
                     max_tokens=256,
                     client=_CLI_CLIENT_STUB,
                 )
@@ -194,7 +194,7 @@ def _find_careers_url_with_low_tier(
                     output_schema=_CAREERS_URL_SCHEMA,
                     conn=conn,
                     job_id=None,
-                    purpose="careers_scrape",
+                    purpose="find_careers_url",
                     config=config,
                     max_tokens=256,
                 )
@@ -206,7 +206,7 @@ def _find_careers_url_with_low_tier(
                 output_schema=_CAREERS_URL_SCHEMA,
                 conn=conn,
                 job_id=None,
-                purpose="careers_scrape",
+                purpose="find_careers_url",
                 config=config,
                 max_tokens=256,
             )
@@ -311,7 +311,7 @@ def _extract_jobs_with_low_tier(
                     config=config,
                     output_schema=_CAREERS_JOBS_SCHEMA,
                     job_id=None,
-                    purpose="careers_scrape",
+                    purpose="extract_jobs",
                     max_tokens=1024,
                     client=_CLI_CLIENT_STUB,
                 )
@@ -328,7 +328,7 @@ def _extract_jobs_with_low_tier(
                     output_schema=_CAREERS_JOBS_SCHEMA,
                     conn=conn,
                     job_id=None,
-                    purpose="careers_scrape",
+                    purpose="extract_jobs",
                     config=config,
                     max_tokens=1024,
                 )
@@ -340,7 +340,7 @@ def _extract_jobs_with_low_tier(
                 output_schema=_CAREERS_JOBS_SCHEMA,
                 conn=conn,
                 job_id=None,
-                purpose="careers_scrape",
+                purpose="extract_jobs",
                 config=config,
                 max_tokens=1024,
             )
