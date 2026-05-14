@@ -187,7 +187,7 @@ def _find_careers_url_with_low_tier(
                     "careers_scrape: cascade exhausted for URL discovery of '%s', retrying via CLI",
                     homepage_url,
                 )
-                result, _cost = call_claude(
+                result, _cost, _schema_valid = call_claude(
                     model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
@@ -199,7 +199,7 @@ def _find_careers_url_with_low_tier(
                     max_tokens=256,
                 )
         else:
-            result, _cost = call_claude(
+            result, _cost, _schema_valid = call_claude(
                 model=DEFAULT_MODEL_LOW,
                 system=system,
                 messages=messages,
@@ -321,7 +321,7 @@ def _extract_jobs_with_low_tier(
                     "careers_scrape: cascade exhausted for job extraction at '%s', retrying via CLI",
                     careers_url,
                 )
-                result, _cost = call_claude(
+                result, _cost, _schema_valid = call_claude(
                     model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
@@ -333,7 +333,7 @@ def _extract_jobs_with_low_tier(
                     max_tokens=1024,
                 )
         else:
-            result, _cost = call_claude(
+            result, _cost, _schema_valid = call_claude(
                 model=DEFAULT_MODEL_LOW,
                 system=system,
                 messages=messages,
