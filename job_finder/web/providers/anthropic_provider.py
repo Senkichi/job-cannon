@@ -73,7 +73,7 @@ class AnthropicProvider(BaseProvider):
             timeout: Request timeout in seconds.
 
         Returns:
-            ModelResult with provider="anthropic", schema_valid=True.
+            ModelResult with provider="anthropic", schema_valid reflecting actual validation outcome.
             input_tokens and output_tokens are 0 — call_claude records
             them internally to scoring_costs.
 
@@ -81,7 +81,7 @@ class AnthropicProvider(BaseProvider):
             BudgetExceededError: Propagated from call_claude() when budget cap hit.
             RuntimeError: Propagated from call_claude() on API errors.
         """
-        data, cost_usd = call_claude(
+        data, cost_usd, schema_valid = call_claude(
             client=self._client,
             model=model,
             system=system,
@@ -101,5 +101,5 @@ class AnthropicProvider(BaseProvider):
             output_tokens=0,
             model=model,
             provider="anthropic",
-            schema_valid=True,  # call_claude enforces schema via tool-choice
+            schema_valid=schema_valid,  # Use actual validation outcome from call_claude
         )
