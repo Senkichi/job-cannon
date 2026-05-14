@@ -127,6 +127,7 @@ def record_cost(
     input_tokens: int,
     output_tokens: int,
     provider: str = "anthropic",
+    schema_valid: bool = True,
 ) -> float:
     """Insert a cost row into scoring_costs and return cost_usd.
 
@@ -138,6 +139,7 @@ def record_cost(
         input_tokens: Number of input tokens consumed.
         output_tokens: Number of output tokens generated.
         provider: Provider name for attribution (default "anthropic").
+        schema_valid: Whether schema validation succeeded (default True).
 
     Returns:
         Computed cost in USD (0.0 for free/subscription providers).
@@ -147,9 +149,9 @@ def record_cost(
     )
     timestamp = utc_now_iso()
     conn.execute(
-        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider),
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider, schema_valid) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider, int(schema_valid)),
     )
     conn.commit()
     return cost_usd
@@ -643,6 +645,7 @@ def call_claude(
                 retry_usage.get("input_tokens", 0),
                 retry_usage.get("output_tokens", 0),
                 provider="claude_cli",
+                schema_valid=schema_valid,
             )
 
             # Parse retry result
