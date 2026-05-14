@@ -193,22 +193,22 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
 def cost_gate(
     conn: sqlite3.Connection,
     config: dict,
-    model_tier: str = "sonnet",
+    model_tier: str = "mid",
 ) -> bool:
     """Check whether a model tier call is allowed under the daily budget.
 
-    Haiku calls are always allowed regardless of spend.
-    Sonnet/Opus calls are blocked when daily spend >= budget cap.
+    Low-tier calls are always allowed regardless of spend.
+    Mid/High-tier calls are blocked when daily spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
         config: Application config dict (reads scoring.daily_budget_usd).
-        model_tier: "haiku" or "sonnet" (or "opus"). Defaults to "sonnet".
+        model_tier: "low", "mid", or "high". Defaults to "mid".
 
     Returns:
         True if the call is allowed, False if blocked.
     """
-    if model_tier == "haiku":
+    if model_tier == "low":
         return True
 
     scoring_cfg = config.get("scoring", {})
@@ -538,9 +538,9 @@ def call_claude(
     # Determine model tier for budget gating
     matching_pricing_key = next((k for k in MODEL_PRICING if model.startswith(k)), None)
     if matching_pricing_key:
-        tier = "haiku" if "haiku" in matching_pricing_key else "sonnet"
+        tier = "low" if "haiku" in matching_pricing_key else "mid"
     else:
-        tier = "haiku" if "haiku" in model.lower() else "sonnet"
+        tier = "low" if "haiku" in model.lower() else "mid"
 
     if conn is None:
         raise ValueError("call_claude requires a database connection (conn is None)")

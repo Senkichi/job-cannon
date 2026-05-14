@@ -22,15 +22,15 @@ DEFAULT_SERVER_PORT = 5000
 DEFAULT_SERVER_DEBUG = True
 
 # --- Scoring defaults ---
-DEFAULT_HAIKU_THRESHOLD = 42
+DEFAULT_CANDIDATE_SCORE_THRESHOLD = 42
 DEFAULT_BORDERLINE_HIGH = 54
 DEFAULT_DAILY_BUDGET_USD: float = 10.0
 DEFAULT_MIN_SCORE_THRESHOLD = 40
 
 # --- Model defaults ---
-DEFAULT_MODEL_HAIKU = "claude-haiku-4-5"
-DEFAULT_MODEL_SONNET = "claude-sonnet-4-6"
-DEFAULT_MODEL_OPUS = "claude-opus-4-6"
+DEFAULT_MODEL_LOW = "claude-haiku-4-5"
+DEFAULT_MODEL_MID = "claude-sonnet-4-6"
+DEFAULT_MODEL_HIGH = "claude-opus-4-6"
 
 # --- Database ---
 DEFAULT_DB_PATH = "jobs.db"

@@ -135,16 +135,17 @@ scoring:
   low_signal_jd_chars: 1500
   # Monthly API spending cap in USD (scoring pauses when reached)
   monthly_budget_usd: 25.0
-  # Haiku fast-filter threshold — jobs below this skip Sonnet deep evaluation
-  haiku_threshold: 55
+  # Candidate score threshold gating LLM scoring — jobs with a candidate_score
+  # below this (computed during initial ingestion) are skipped for full AI scoring.
+  candidate_score_threshold: 55
   # Phase 4 rubric variant. 'baseline' uses the production v3 prompt; any
   # other name resolves to job_finder.web.scoring_prompts.variants.<name>.
   # The eval-harness CLI overrides this at runtime via --variant.
   prompt_variant: baseline
   # AI models (defaults are recommended; change only if you know what you're doing)
   models:
-    haiku: claude-haiku-4-5
-    sonnet: claude-sonnet-4-6
+    low: claude-haiku-4-5
+    mid: claude-sonnet-4-6
 
 # --- Multi-provider model routing (optional) ---
 # By default, all tiers route to Anthropic using the models specified above.
@@ -152,27 +153,27 @@ scoring:
 # Requires: google-genai package (for Gemini), or local Ollama server.
 #
 # providers:
-#   # Sonnet tier — deep evaluation, resume generation, enrichment
-#   sonnet:
+#   # Balanced tier — deep evaluation, resume generation, enrichment
+#   mid:
 #     provider: anthropic          # "anthropic" | "gemini" | "ollama"
 #     model: claude-sonnet-4-6     # Provider-specific model ID
 #     fallback: anthropic          # Fall back to Anthropic on schema validation failure
 #
-#   # Haiku tier — fast scoring, description reformatting, careers scraping
-#   haiku:
+#   # Cheap tier — fast scoring, description reformatting, careers scraping
+#   low:
 #     provider: anthropic
 #     model: claude-haiku-4-5
 #     fallback: null               # No fallback (null = disabled)
 #
-#   # Opus tier — profile extraction, interview prep, rejection analysis
-#   opus:
+#   # High tier — profile extraction, interview prep, rejection analysis
+#   high:
 #     provider: anthropic
 #     model: claude-opus-4-6
 #     fallback: null
 #
-# Example: Route Sonnet to Gemini free tier for zero-cost evaluation
+# Example: Route mid tier to Gemini free tier for zero-cost evaluation
 # providers:
-#   sonnet:
+#   mid:
 #     provider: gemini
 #     model: gemini-2.0-flash
 #     fallback: anthropic

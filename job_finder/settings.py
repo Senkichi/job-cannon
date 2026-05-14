@@ -17,9 +17,9 @@ from types import MappingProxyType
 from typing import Any
 
 from job_finder.config import (
+    DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_DAILY_BUDGET_USD,
     DEFAULT_DB_PATH,
-    DEFAULT_HAIKU_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
@@ -40,7 +40,7 @@ class ServerSettings:
 
 @dataclass(frozen=True)
 class ScoringSettings:
-    haiku_threshold: int = DEFAULT_HAIKU_THRESHOLD
+    candidate_score_threshold: int = DEFAULT_CANDIDATE_SCORE_THRESHOLD
     daily_budget_usd: float = DEFAULT_DAILY_BUDGET_USD
     min_score_threshold: int = DEFAULT_MIN_SCORE_THRESHOLD
 
@@ -69,6 +69,15 @@ class Settings:
     raw: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_RAW)
 
     @classmethod
+    def load_from_yaml(cls, config_path: str) -> Settings:
+        """Load settings from YAML file, performing auto-migration if needed."""
+        migrate_config_keys(config_path)
+        from job_finder.config import load_config
+
+        cfg = load_config(config_path)
+        return cls.from_dict(cfg)
+
+    @classmethod
     def from_dict(cls, cfg: dict[str, Any]) -> Settings:
         srv = cfg.get("server") or {}
         scoring = cfg.get("scoring") or {}
@@ -81,7 +90,9 @@ class Settings:
                 debug=bool(srv.get("debug", DEFAULT_SERVER_DEBUG)),
             ),
             scoring=ScoringSettings(
-                haiku_threshold=int(scoring.get("haiku_threshold", DEFAULT_HAIKU_THRESHOLD)),
+                candidate_score_threshold=int(
+                    scoring.get("candidate_score_threshold", DEFAULT_CANDIDATE_SCORE_THRESHOLD)
+                ),
                 daily_budget_usd=float(scoring.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)),
                 min_score_threshold=int(
                     scoring.get("min_score_threshold", DEFAULT_MIN_SCORE_THRESHOLD)
@@ -110,7 +121,7 @@ class Settings:
                 "debug": self.server.debug,
             },
             "scoring": {
-                "haiku_threshold": self.scoring.haiku_threshold,
+                "candidate_score_threshold": self.scoring.candidate_score_threshold,
                 "daily_budget_usd": self.scoring.daily_budget_usd,
                 "min_score_threshold": self.scoring.min_score_threshold,
             },
@@ -127,8 +138,13 @@ class Settings:
             raise ValueError(f"Invalid server.port: {self.server.port}")
         if self.scoring.daily_budget_usd < 0:
             raise ValueError(f"Invalid scoring.daily_budget_usd: {self.scoring.daily_budget_usd}")
-        if self.scoring.haiku_threshold < 0 or self.scoring.haiku_threshold > 100:
-            raise ValueError(f"Invalid scoring.haiku_threshold: {self.scoring.haiku_threshold}")
+        if (
+            self.scoring.candidate_score_threshold < 0
+            or self.scoring.candidate_score_threshold > 100
+        ):
+            raise ValueError(
+                f"Invalid scoring.candidate_score_threshold: {self.scoring.candidate_score_threshold}"
+            )
         if self.scoring.min_score_threshold < 0 or self.scoring.min_score_threshold > 100:
             raise ValueError(
                 f"Invalid scoring.min_score_threshold: {self.scoring.min_score_threshold}"
@@ -137,3 +153,65 @@ class Settings:
             raise ValueError(f"Invalid ingestion.lookback_days: {self.ingestion.lookback_days}")
         if self.ingestion.max_results < 1:
             raise ValueError(f"Invalid ingestion.max_results: {self.ingestion.max_results}")
+
+
+def migrate_config_keys(config_path: str) -> bool:
+    """Migrate legacy tier keys in config.yaml to new semantic names.
+
+    Uses ruamel.yaml to preserve comments. Returns True if any migration occurred.
+    """
+    import logging
+    from pathlib import Path
+
+    from ruamel.yaml import YAML
+
+    path = Path(config_path)
+    if not path.exists():
+        return False
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.indent(mapping=2, sequence=4, offset=2)
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.load(f)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Failed to load config for migration: %s", exc)
+        return False
+
+    if not data or not isinstance(data, dict):
+        return False
+
+    changed = False
+
+    # 1. providers.haiku|sonnet|opus -> providers.low|mid|high
+    if "providers" in data and isinstance(data["providers"], dict):
+        p = data["providers"]
+        for old, new in [("haiku", "low"), ("sonnet", "mid"), ("opus", "high")]:
+            if old in p:
+                p[new] = p.pop(old)
+                changed = True
+
+    # 2. scoring.models.haiku|sonnet -> scoring.models.low|mid
+    if "scoring" in data and isinstance(data["scoring"], dict):
+        s = data["scoring"]
+        if "models" in s and isinstance(s["models"], dict):
+            m = s["models"]
+            for old, new in [("haiku", "low"), ("sonnet", "mid")]:
+                if old in m:
+                    m[new] = m.pop(old)
+                    changed = True
+
+        # 3. scoring.haiku_threshold -> scoring.candidate_score_threshold
+        if "haiku_threshold" in s:
+            s["candidate_score_threshold"] = s.pop("haiku_threshold")
+            changed = True
+
+    if changed:
+        logging.getLogger(__name__).info("Migrating legacy tier keys in %s", config_path)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f)
+        return True
+
+    return False

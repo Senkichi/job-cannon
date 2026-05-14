@@ -20,7 +20,7 @@ from typing import Any
 import requests
 from jsonschema import ValidationError, validate
 
-from job_finder.config import DEFAULT_MODEL_HAIKU, DEFAULT_MODEL_OPUS, DEFAULT_MODEL_SONNET
+from job_finder.config import DEFAULT_MODEL_HIGH, DEFAULT_MODEL_LOW, DEFAULT_MODEL_MID
 from job_finder.web.claude_client import (  # noqa: F401 — record_cost re-exported for test patching
     FREE_PROVIDERS,
     BudgetExceededError,
@@ -32,14 +32,14 @@ logger = logging.getLogger(__name__)
 
 _TIER_DEFAULTS: dict[str, str] = {
     # Plan 4 Commit E: 'scoring' is the v3.0 single tier for job scoring.
-    # The 'haiku' and 'sonnet' tiers remain for non-scoring callers --
+    # The 'low', 'mid', and 'high' tiers remain for non-scoring callers --
     # enrichment_tiers, careers_scraper, ai_career_navigator,
     # company_research, description_reformatter -- which still route
     # short/cheap vs long/deep reasoning through tier names.
-    "scoring": DEFAULT_MODEL_SONNET,
-    "haiku": DEFAULT_MODEL_HAIKU,
-    "sonnet": DEFAULT_MODEL_SONNET,
-    "opus": DEFAULT_MODEL_OPUS,
+    "scoring": DEFAULT_MODEL_MID,
+    "low": DEFAULT_MODEL_LOW,
+    "mid": DEFAULT_MODEL_MID,
+    "high": DEFAULT_MODEL_HIGH,
 }
 
 # Daily usage tracking — module-level state for rate limiting.
@@ -139,7 +139,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     """Resolve logical tier name to provider + model + fallback.
 
     Args:
-        tier: Logical tier name: "sonnet", "haiku", or "opus".
+        tier: Logical tier name: "mid", "low", or "high".
         config: Full application config dict.
 
     Returns:
@@ -156,7 +156,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     tier_cfg = providers_cfg.get(tier, {})
 
     # Inherit provider routing from a configured peer tier when this tier has
-    # no explicit config.  This lets a single providers.sonnet entry cover all
+    # no explicit config.  This lets a single providers.mid entry cover all
     # tiers without duplicating the cascade in config.yaml.  The model and
     # prompt_variant stay tier-specific (only provider + fallback_chain inherit).
     if not tier_cfg:
@@ -175,7 +175,7 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
             }
 
     scoring_model = config.get("scoring", {}).get("models", {}).get(tier)
-    default_model = scoring_model or _TIER_DEFAULTS.get(tier, DEFAULT_MODEL_SONNET)
+    default_model = scoring_model or _TIER_DEFAULTS.get(tier, DEFAULT_MODEL_MID)
 
     provider = tier_cfg.get("provider", "anthropic")
     model = tier_cfg.get("model") or default_model
@@ -514,7 +514,7 @@ def call_model(
     non-Anthropic providers (avoiding double-recording).
 
     Args:
-        tier: Logical tier name: "sonnet", "haiku", or "opus".
+        tier: Logical tier name: "mid", "low", or "high".
         system: System prompt string.
         messages: List of message dicts [{role, content}].
         conn: Open SQLite connection for budget gating and cost recording.

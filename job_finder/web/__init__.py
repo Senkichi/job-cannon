@@ -19,13 +19,14 @@ from flask import Flask, redirect, url_for
 load_dotenv()
 
 from job_finder.config import (
+    DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_DAILY_BUDGET_USD,
-    DEFAULT_HAIKU_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
-    DEFAULT_MODEL_HAIKU,
-    DEFAULT_MODEL_SONNET,
+    DEFAULT_MODEL_HIGH,
+    DEFAULT_MODEL_LOW,
+    DEFAULT_MODEL_MID,
     load_config,
 )
 from job_finder.web.db_helpers import close_db
@@ -100,6 +101,9 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
 
     # --- Configuration ---
     if config is None:
+        from job_finder.settings import migrate_config_keys
+
+        migrate_config_keys(config_path)
         cfg = load_config(config_path)
     else:
         cfg = config
@@ -133,12 +137,13 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         run_data_backfills_once(app.config["DB_PATH"], cfg)
 
     # --- Jinja2 globals: centralized config defaults ---
-    app.jinja_env.globals["DEFAULT_HAIKU_THRESHOLD"] = DEFAULT_HAIKU_THRESHOLD
+    app.jinja_env.globals["DEFAULT_CANDIDATE_SCORE_THRESHOLD"] = DEFAULT_CANDIDATE_SCORE_THRESHOLD
     app.jinja_env.globals["DEFAULT_MIN_SCORE_THRESHOLD"] = DEFAULT_MIN_SCORE_THRESHOLD
     app.jinja_env.globals["DEFAULT_LOOKBACK_DAYS"] = DEFAULT_LOOKBACK_DAYS
     app.jinja_env.globals["DEFAULT_MAX_RESULTS"] = DEFAULT_MAX_RESULTS
-    app.jinja_env.globals["DEFAULT_MODEL_HAIKU"] = DEFAULT_MODEL_HAIKU
-    app.jinja_env.globals["DEFAULT_MODEL_SONNET"] = DEFAULT_MODEL_SONNET
+    app.jinja_env.globals["DEFAULT_MODEL_LOW"] = DEFAULT_MODEL_LOW
+    app.jinja_env.globals["DEFAULT_MODEL_MID"] = DEFAULT_MODEL_MID
+    app.jinja_env.globals["DEFAULT_MODEL_HIGH"] = DEFAULT_MODEL_HIGH
     app.jinja_env.globals["DEFAULT_DAILY_BUDGET_USD"] = DEFAULT_DAILY_BUDGET_USD
 
     # --- Custom Jinja2 filters ---

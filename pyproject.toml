@@ -63,6 +63,7 @@ dependencies = [
     # look up career pages when neither a known ATS slug nor a sitemap-
     # derived URL is available.
     "ddgs~=9.12",
+    "ruamel-yaml>=0.19.1",
 ]
 
 [project.optional-dependencies]
