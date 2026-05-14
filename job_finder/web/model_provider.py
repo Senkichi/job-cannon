@@ -208,6 +208,7 @@ _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
         "anthropic",
         "gemini",
         "ollama",
+        "openrouter",
     }
 )
 
@@ -446,6 +447,10 @@ def _make_adapter(
         return GeminiProvider(config=config)
     if provider_name == "ollama":
         return OllamaProvider(config=config)
+    if provider_name == "openrouter":
+        from job_finder.web.providers.openrouter_provider import OpenRouterProvider
+
+        return OpenRouterProvider(config=config)
 
 
 def _maybe_record_cost(

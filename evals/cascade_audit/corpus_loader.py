@@ -1,0 +1,267 @@
+"""Corpus loader for cascade audit (Phase 36).
+
+Samples production DB rows for the 6 non-scoring callsites and persists
+dedup_keys for reproducibility across rounds.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class CorpusLoader:
+    """Loads and caches corpus data for cascade audit evaluation.
+
+    Samples production DB rows at Round 0 start, persists dedup_keys for
+    reproducibility, and caches inputs (HTML, JD text) to artifacts/
+    for deterministic execution across rounds.
+    """
+
+    def __init__(self, artifact_dir: Path, db_path: str) -> None:
+        """Initialize corpus loader.
+
+        Args:
+            artifact_dir: Base directory for artifact storage.
+            db_path: Path to production SQLite database.
+        """
+        self._artifact_dir = Path(artifact_dir)
+        self._db_path = db_path
+        self._dedup_keys_file = self._artifact_dir / "round_0" / "dedup_keys.json"
+
+    def load_round_0(self, n_per_callsite: int, conn: sqlite3.Connection) -> dict[str, list[dict]]:
+        """Sample corpus for all 6 callsites and cache inputs.
+
+        Args:
+            n_per_callsite: Number of rows to sample per callsite.
+            conn: Open SQLite connection to production DB.
+
+        Returns:
+            Dict mapping callsite name to list of sampled rows.
+        """
+        corpus: dict[str, list[dict]] = {}
+
+        # Create round_0 artifact directories
+        round_0_dir = self._artifact_dir / "round_0"
+        round_0_dir.mkdir(parents=True, exist_ok=True)
+        (round_0_dir / "html").mkdir(exist_ok=True)
+        (round_0_dir / "recipes").mkdir(exist_ok=True)
+
+        # Sample each callsite
+        corpus["parse_structured_fields"] = self._sample_parse_structured_fields(
+            n_per_callsite, conn, round_0_dir
+        )
+        corpus["find_careers_url"] = self._sample_find_careers_url(
+            n_per_callsite, conn, round_0_dir
+        )
+        corpus["extract_jobs"] = self._sample_extract_jobs(
+            50, conn, round_0_dir  # Spec requires 50 companies for extract_jobs
+        )
+        corpus["description_reformat"] = self._sample_description_reformat(
+            n_per_callsite, conn, round_0_dir
+        )
+        corpus["company_research"] = self._sample_company_research(
+            n_per_callsite, conn, round_0_dir
+        )
+        corpus["ai_nav_discovery"] = self._sample_ai_nav_discovery(
+            n_per_callsite, conn, round_0_dir
+        )
+
+        # Persist dedup_keys for reproducibility
+        dedup_keys = {
+            callsite: [row["dedup_key"] for row in rows]
+            for callsite, rows in corpus.items()
+        }
+        self._dedup_keys_file.write_text(json.dumps(dedup_keys, indent=2))
+
+        return corpus
+
+    def load_round_1(self, conn: sqlite3.Connection) -> dict[str, list[dict]]:
+        """Load corpus using persisted dedup_keys from Round 0.
+
+        Args:
+            conn: Open SQLite connection to production DB.
+
+        Returns:
+            Dict mapping callsite name to list of rows from production DB.
+        """
+        if not self._dedup_keys_file.exists():
+            raise FileNotFoundError(
+                f"dedup_keys.json not found at {self._dedup_keys_file}. "
+                "Run Round 0 first to generate corpus."
+            )
+
+        dedup_keys = json.loads(self._dedup_keys_file.read_text())
+        corpus: dict[str, list[dict]] = {}
+
+        corpus["parse_structured_fields"] = self._load_by_keys(
+            "jobs", dedup_keys["parse_structured_fields"], conn
+        )
+        corpus["find_careers_url"] = self._load_by_keys(
+            "companies", dedup_keys["find_careers_url"], conn
+        )
+        corpus["extract_jobs"] = self._load_by_keys(
+            "companies", dedup_keys["extract_jobs"], conn
+        )
+        corpus["description_reformat"] = self._load_by_keys(
+            "jobs", dedup_keys["description_reformat"], conn
+        )
+        corpus["company_research"] = self._load_by_keys(
+            "companies", dedup_keys["company_research"], conn
+        )
+        corpus["ai_nav_discovery"] = self._load_by_keys(
+            "companies", dedup_keys["ai_nav_discovery"], conn
+        )
+
+        return corpus
+
+    def _sample_parse_structured_fields(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample jobs with jd_full for parse_structured_fields."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, jd_full
+            FROM jobs
+            WHERE jd_full IS NOT NULL AND LENGTH(jd_full) > 400
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            result.append(dict(row))
+            # Cache JD text to artifacts
+            key = row["dedup_key"]
+            (artifact_dir / "jd" / f"{key}.txt").parent.mkdir(exist_ok=True)
+            (artifact_dir / "jd" / f"{key}.txt").write_text(row["jd_full"])
+
+        return result
+
+    def _sample_find_careers_url(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample companies with homepage_url for find_careers_url."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, homepage_url
+            FROM companies
+            WHERE homepage_url IS NOT NULL
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = [dict(row) for row in rows]
+        return result
+
+    def _sample_extract_jobs(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample 50 companies for extract_jobs and cache HTML."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, homepage_url
+            FROM companies
+            WHERE homepage_url IS NOT NULL
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            result.append(dict(row))
+            # Cache homepage HTML to artifacts/round_1/html/
+            # Note: HTML fetching happens at Round 1 start per spec
+            # This just records the companies to fetch
+
+        return result
+
+    def _sample_description_reformat(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample jobs with description for description_reformat."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, description
+            FROM jobs
+            WHERE description IS NOT NULL
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            result.append(dict(row))
+            # Cache description to artifacts
+            key = row["dedup_key"]
+            (artifact_dir / "descriptions" / f"{key}.txt").parent.mkdir(exist_ok=True)
+            (artifact_dir / "descriptions" / f"{key}.txt").write_text(row["description"])
+
+        return result
+
+    def _sample_company_research(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample companies for company_research."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, name, domain
+            FROM companies
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = [dict(row) for row in rows]
+        return result
+
+    def _sample_ai_nav_discovery(
+        self, n: int, conn: sqlite3.Connection, artifact_dir: Path
+    ) -> list[dict]:
+        """Sample companies with careers_nav_recipe for ai_nav_discovery."""
+        rows = conn.execute(
+            """
+            SELECT dedup_key, careers_nav_recipe
+            FROM companies
+            WHERE careers_nav_recipe IS NOT NULL
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (n,),
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            result.append(dict(row))
+            # Cache recipe to artifacts/round_0/recipes/
+            key = row["dedup_key"]
+            recipe_path = artifact_dir / "recipes" / f"{key}.json"
+            recipe_path.write_text(row["careers_nav_recipe"])
+
+        return result
+
+    def _load_by_keys(
+        self, table: str, dedup_keys: list[str], conn: sqlite3.Connection
+    ) -> list[dict]:
+        """Load rows from table by dedup_keys."""
+        if not dedup_keys:
+            return []
+
+        placeholders = ",".join("?" * len(dedup_keys))
+        query = f"SELECT * FROM {table} WHERE dedup_key IN ({placeholders})"
+        rows = conn.execute(query, dedup_keys).fetchall()
+        return [dict(row) for row in rows]

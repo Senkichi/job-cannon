@@ -1,0 +1,19 @@
+"""Cascade audit eval harness (Phase 36).
+
+Provides shadow-replay evaluation infrastructure for comparing LLM outputs
+across providers using a DeepSeek-V3.2 judge for the 6 non-scoring callsites:
+parse_structured_fields, find_careers_url, extract_jobs, description_reformat,
+company_research, ai_nav_discovery.
+"""
+
+from evals.cascade_audit.corpus_loader import CorpusLoader
+from evals.cascade_audit.judge import JUDGE_SYSTEM_PROMPT, judge_pair, judge_with_position_swap
+from evals.cascade_audit.verdict import Verdict
+
+__all__ = [
+    "CorpusLoader",
+    "Verdict",
+    "judge_pair",
+    "judge_with_position_swap",
+    "JUDGE_SYSTEM_PROMPT",
+]
