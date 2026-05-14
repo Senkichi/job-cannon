@@ -334,8 +334,8 @@ def run_enrichment_backfill(
     """Backfill unenriched jobs using the cost-ordered tier pipeline.
 
     Queries jobs where enrichment_tier IS NULL or in a resumable state.
-    Skips terminal tiers ('exhausted', 'serpapi', 'agentic') and the
-    legacy synthesis tier ('sonnet') — none of these can advance further.
+    Skips terminal tiers ('exhausted', 'serpapi', 'agentic') and the balanced
+    enrichment terminal tier ('mid') — none of these can advance further.
     Processes up to `limit` jobs per call (omit ``limit`` / pass ``None`` to
     process the full backlog in one run — no SQL ``LIMIT``).
 
@@ -362,13 +362,12 @@ def run_enrichment_backfill(
         # backlog unreached. ORDER BY first_seen DESC further prioritises the
         # freshest rows, which are the ones users are actively viewing.
         # Terminal tiers: 'serpapi' (got JD), 'agentic' (got JD via Playwright),
-        # 'exhausted' (all tiers tried and failed). 'sonnet' is the legacy
-        # synthesis terminal tier, kept in the skip list for back-compat with
-        # rows enriched before Phase 2b sub-fix RC4.
+        # 'exhausted' (all tiers tried and failed). 'mid' is terminal for the
+        # enrichment pipeline (fully enriched at balanced tier).
         base_sql = (
             """SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
-                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'sonnet'))
+                      OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'mid'))
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
                ORDER BY first_seen DESC"""
         )

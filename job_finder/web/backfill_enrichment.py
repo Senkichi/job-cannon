@@ -40,20 +40,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Approximate token counts per enrichment call
-_HAIKU_INPUT_TOKENS = 600
-_HAIKU_OUTPUT_TOKENS = 200
-_SONNET_INPUT_TOKENS = 2000
-_SONNET_OUTPUT_TOKENS = 500
+_LOW_INPUT_TOKENS = 600
+_LOW_OUTPUT_TOKENS = 200
+_MID_INPUT_TOKENS = 2000
+_MID_OUTPUT_TOKENS = 500
 
 # Tiers eligible for re-enrichment (not yet exhausted or at high paid tiers)
-_ELIGIBLE_TIERS_QUERY = "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'sonnet', 'agentic', 'agentic_exhausted')"
+_ELIGIBLE_TIERS_QUERY = "enrichment_tier IS NULL OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'mid', 'agentic', 'agentic_exhausted')"
 
 # Borderline score range for re-scoring after tier advancement
 _BORDERLINE_MIN = 40
 _BORDERLINE_MAX = 70
 
 # Offline-only provider routing. Live pipeline config intentionally has no
-# providers.haiku / providers.sonnet so scoring_runner stays on the Claude CLI
+# providers.low / providers.mid so scoring_runner stays on the Claude CLI
 # (lower latency after cold-start flag tuning). Backfill wraps its config
 # through _offline_config() to opt into Ollama with a CLI fallback, trading a
 # few extra seconds per call for zero API cost on nightly/manual batches.
@@ -137,9 +137,9 @@ def estimate_and_confirm(conn: sqlite3.Connection, config: dict) -> bool:
         "claude-sonnet-4-6",
         {"input": 3.0, "output": 15.0},
     )
-    fallback_cost = (total_eligible * _SONNET_INPUT_TOKENS / 1_000_000) * fallback_pricing[
+    fallback_cost = (total_eligible * _MID_INPUT_TOKENS / 1_000_000) * fallback_pricing[
         "input"
-    ] + (total_eligible * _SONNET_OUTPUT_TOKENS / 1_000_000) * fallback_pricing["output"]
+    ] + (total_eligible * _MID_OUTPUT_TOKENS / 1_000_000) * fallback_pricing["output"]
 
     print("\nEstimated AI cost (worst case -- 100% fallback to Anthropic):")
     print(f"  Scoring (~{total_eligible} jobs): ${fallback_cost:.4f}")

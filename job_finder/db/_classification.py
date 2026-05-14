@@ -81,8 +81,8 @@ def derive_classification(
         sub_scores: dict of the 6 ordinal sub-scores (1-5 integers).
         legitimacy_note: value of the jobs.legitimacy_note column; truthy means
             ingestion-time scam/exclusion detection flagged this row.
-        enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'haiku'
-            | 'serpapi' | 'sonnet' | 'exhausted' | None). Only 'exhausted'
+        enrichment_tier: value of jobs.enrichment_tier ('free' | 'ddg' | 'low'
+            | 'serpapi' | 'mid' | 'exhausted' | None). Only 'exhausted'
             participates in the low_signal rule; other tiers are still
             re-enrichment candidates.
         jd_full_length: character length of jobs.jd_full (0 when NULL).

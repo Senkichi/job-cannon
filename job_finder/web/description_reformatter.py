@@ -24,7 +24,7 @@ import logging
 import re
 from typing import Any
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.config import DEFAULT_MODEL_LOW
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
@@ -113,19 +113,19 @@ def reformat_description(
     if header_count >= _ALREADY_FORMATTED_THRESHOLD:
         return description
 
-    model = config.get("scoring", {}).get("models", {}).get("haiku", DEFAULT_MODEL_HAIKU)
+    model = config.get("scoring", {}).get("models", {}).get("low", DEFAULT_MODEL_LOW)
 
     # call_model() requires a non-None conn for cost recording (_ensure_usage_current
     # + _maybe_record_cost). When conn is None (e.g. single-shot callers not
     # passing a DB handle), skip cascade routing and rely on call_claude's own
     # conn=None handling, which raises ValueError and is caught below.
-    use_dispatcher = conn is not None and bool(config.get("providers", {}).get("haiku"))
+    use_dispatcher = conn is not None and bool(config.get("providers", {}).get("low"))
 
     try:
         if use_dispatcher:
             try:
                 model_result = call_model(
-                    tier="haiku",
+                    tier="low",
                     system=_SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": description[:4000]}],
                     conn=conn,

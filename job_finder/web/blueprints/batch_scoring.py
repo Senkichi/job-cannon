@@ -1,12 +1,8 @@
-"""Batch scoring blueprint — unified batch scoring routes (v3.0 Phase 34 Plan 3 Commit B).
+"""Batch scoring blueprint — unified batch scoring routes (v3.0).
 
-v3.0 merges the previous Haiku/Sonnet two-route split into a single
-`batch_score_start` route + `_run_batch_bg` worker. The session_type enum
-collapses from {haiku, sonnet, sync} to {scoring, sync}. Old
-/batch-score/haiku/start and /batch-score/sonnet/start URLs are retained
-as thin wrappers that delegate to the unified route so existing HTMX
-templates keep working until Commit D migrates them; Plan 4 removes the
-wrappers entirely.
+Single ``batch_score_start`` route plus ``_run_batch_bg`` worker.
+``batch_score_sessions.session_type`` uses ``scoring`` (legacy rows may
+still store ``haiku`` / ``sonnet``; the status UI treats them as scoring).
 """
 
 import json
@@ -25,9 +21,6 @@ logger = logging.getLogger(__name__)
 
 batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
 
-# v3.0 session_type for the unified scoring route. Plan 4 drops the old
-# "haiku"/"sonnet" values entirely. Until then, the status route renders
-# them with a generic "Scoring" label.
 _SESSION_TYPE_SCORING = "scoring"
 
 
@@ -38,10 +31,9 @@ def _render_scoring_done(
     message: str | None = None,
     error_msg: str | None = None,
 ):
-    """Render the batch-score done fragment with the v3 'Scoring' label."""
+    """Render the batch-score done fragment (terminal state)."""
     return render_template(
         "dashboard/_batch_score_done.html",
-        label="Scoring",
         scored=scored,
         skipped=skipped,
         status=status,
@@ -50,16 +42,8 @@ def _render_scoring_done(
     )
 
 
-def _start_batch_session(label: str = "Scoring"):
-    """Shared core for /batch-score/start and the back-compat haiku/sonnet wrappers.
-
-    The `label` arg controls the user-visible text in the returned fragment AND
-    the id= prefix of the surrounding div (`batch-score-<label.lower()>-status`).
-    The unified route passes "Scoring"; the legacy wrappers pass "Haiku"/"Sonnet"
-    so existing HTMX hx-target selectors in the pre-Commit-D dashboard templates
-    still line up. Plan 34-03 Commit D replaces the templates with a single
-    Scoring region; Plan 4 removes the wrappers entirely.
-    """
+def _start_batch_session():
+    """Shared core for POST /batch-score/start."""
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
     testing = current_app.config.get("TESTING", False)
@@ -70,7 +54,6 @@ def _start_batch_session(label: str = "Scoring"):
         if total == 0:
             return render_template(
                 "dashboard/_batch_score_done.html",
-                label=label,
                 scored=0,
                 skipped=0,
                 status="done",
@@ -97,7 +80,6 @@ def _start_batch_session(label: str = "Scoring"):
 
     return render_template(
         "dashboard/_batch_score_progress.html",
-        label=label,
         session_id=session_id,
         total=total,
         scored=0,
@@ -110,28 +92,11 @@ def _start_batch_session(label: str = "Scoring"):
 def batch_score_start():
     """Start async unified batch scoring — returns HTMX polling fragment.
 
-    v3.0 (Phase 34 Plan 3 Commit B): replaces batch_score_haiku_start +
-    batch_score_sonnet_start. Counts jobs with classification IS NULL
-    (i.e. not yet processed by the unified scorer) and kicks off a
-    daemon thread that routes each row through score_and_persist_job.
+    Counts jobs with classification IS NULL (not yet processed by the unified
+    scorer) and kicks off a daemon thread that routes each row through
+    score_and_persist_job.
     """
-    return _start_batch_session(label="Scoring")
-
-
-# Back-compat wrappers — template buttons still POST to /batch-score/haiku/start
-# and /batch-score/sonnet/start. Commit D migrates the templates; Plan 4 removes
-# these wrappers entirely. Delegating with the original label argument preserves
-# HTMX id= selectors in the pre-Commit-D templates. PLAN-4-REMOVE
-@batch_scoring_bp.route("/batch-score/haiku/start", methods=["POST"], strict_slashes=False)
-def batch_score_haiku_start():
-    """DEPRECATED — delegates to the unified scorer. Plan 4 removes."""
-    return _start_batch_session(label="Haiku")
-
-
-@batch_scoring_bp.route("/batch-score/sonnet/start", methods=["POST"], strict_slashes=False)
-def batch_score_sonnet_start():
-    """DEPRECATED — delegates to the unified scorer. Plan 4 removes."""
-    return _start_batch_session(label="Sonnet")
+    return _start_batch_session()
 
 
 @batch_scoring_bp.route("/batch-score/status/<int:session_id>", strict_slashes=False)
@@ -152,7 +117,6 @@ def batch_score_status(session_id):
     if session is None:
         return render_template(
             "dashboard/_batch_score_done.html",
-            label="Unknown",
             scored=0,
             skipped=0,
             status="error",
@@ -160,7 +124,6 @@ def batch_score_status(session_id):
             error_msg="Session not found.",
         )
 
-    label = _label_for_session(session["session_type"])
     status = session["status"]
 
     # Timeout safety net: if session has been running for >30 minutes, auto-mark as error
@@ -184,7 +147,6 @@ def batch_score_status(session_id):
                 resp = make_response(
                     render_template(
                         "dashboard/_batch_score_done.html",
-                        label=label,
                         scored=session["scored"],
                         skipped=session["skipped"],
                         status="error",
@@ -204,7 +166,6 @@ def batch_score_status(session_id):
         resp = make_response(
             render_template(
                 "dashboard/_batch_score_done.html",
-                label=label,
                 scored=session["scored"],
                 skipped=session["skipped"],
                 status=status,
@@ -221,7 +182,6 @@ def batch_score_status(session_id):
     # Still running (running or cancelling) — return progress fragment (WITH hx-trigger)
     return render_template(
         "dashboard/_batch_score_progress.html",
-        label=label,
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
@@ -255,7 +215,6 @@ def batch_score_cancel(session_id):
     if session is None:
         return render_template(
             "dashboard/_batch_score_done.html",
-            label="Unknown",
             scored=0,
             skipped=0,
             status="error",
@@ -263,32 +222,16 @@ def batch_score_cancel(session_id):
             error_msg="Session not found.",
         )
 
-    label = _label_for_session(session["session_type"])
-
     # Return progress fragment with cancelling=True — polling continues until
     # the background thread sets status='cancelled'
     return render_template(
         "dashboard/_batch_score_progress.html",
-        label=label,
         session_id=session_id,
         total=session["total"],
         scored=session["scored"],
         skipped=session["skipped"],
         cancelling=True,
     )
-
-
-def _label_for_session(session_type: str) -> str:
-    """Map a session_type enum value to the user-visible label.
-
-    v3.0 normalizes "haiku"/"sonnet"/"scoring" all to "Scoring" so the
-    running UI reflects the unified pipeline regardless of which route
-    created the session (plans 3 and 4 progressively remove the legacy
-    session_type values).
-    """
-    if session_type == "sync":
-        return "Sync"
-    return "Scoring"
 
 
 def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
@@ -431,20 +374,9 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
     conn.commit()
 
     try:
-        from job_finder.web.activity_tracker import (
-            ACTION_BATCH_SCORE_HAIKU,
-            ACTION_BATCH_SCORE_SONNET,
-            log_activity,
-        )
+        from job_finder.web.activity_tracker import ACTION_BATCH_SCORE, log_activity
 
-        # v3.0 keeps the existing activity constants for continuity with
-        # dashboard Recent Activity records; Plan 4 consolidates them into
-        # a single ACTION_BATCH_SCORE. For now the unified session_type
-        # maps to BATCH_SCORE_HAIKU to avoid breaking the dashboard query.
-        if session_type == "sonnet":
-            action = ACTION_BATCH_SCORE_SONNET
-        else:
-            action = ACTION_BATCH_SCORE_HAIKU
+        action = ACTION_BATCH_SCORE
         session_row = conn.execute(
             "SELECT scored, skipped, total FROM batch_score_sessions WHERE id = ?",
             (session_id,),

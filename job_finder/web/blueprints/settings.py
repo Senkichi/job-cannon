@@ -21,7 +21,7 @@ from flask import (
 )
 
 from job_finder.config import (
-    DEFAULT_HAIKU_THRESHOLD,
+    DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
@@ -270,13 +270,15 @@ def _parse_form_to_config(form) -> dict:
         scoring["min_score_threshold"] = safe_int(
             form["min_score_threshold"], DEFAULT_MIN_SCORE_THRESHOLD
         )
-    if _has("haiku_threshold"):
-        scoring["haiku_threshold"] = safe_int(form["haiku_threshold"], DEFAULT_HAIKU_THRESHOLD)
+    if _has("candidate_score_threshold"):
+        scoring["candidate_score_threshold"] = safe_int(
+            form["candidate_score_threshold"], DEFAULT_CANDIDATE_SCORE_THRESHOLD
+        )
     models = {}
-    if _has("model_haiku"):
-        models["haiku"] = form["model_haiku"]
-    if _has("model_sonnet"):
-        models["sonnet"] = form["model_sonnet"]
+    if _has("model_low"):
+        models["low"] = form["model_low"]
+    if _has("model_mid"):
+        models["mid"] = form["model_mid"]
     if models:
         scoring["models"] = models
     if scoring:

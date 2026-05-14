@@ -24,7 +24,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from job_finder.config import DEFAULT_MODEL_HAIKU
+from job_finder.config import DEFAULT_MODEL_LOW
 from job_finder.web.claude_client import call_claude
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
@@ -46,7 +46,7 @@ _CLI_CLIENT_STUB = _CLIClientStub()
 
 _CAREERS_PATTERNS = ["/careers", "/jobs", "/join", "/join-us", "/work-with-us", "/openings"]
 
-_HAIKU_HTML_CHARS = 3000  # Truncate HTML sent to Haiku (~1000 tokens)
+_LOW_TIER_HTML_CHARS = 3000  # Truncate HTML sent to low tier (~1000 tokens)
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobFinder/1.0)"}
 
@@ -130,28 +130,27 @@ def _extract_base_domain(url: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _find_careers_url_with_haiku(
+def _find_careers_url_with_low_tier(
     homepage_url: str,
     homepage_html: str,
     conn: sqlite3.Connection,
     config: dict,
 ) -> str | None:
-    """Use Haiku to identify careers page URL from homepage HTML.
+    """Use low-tier model to identify careers page URL from homepage HTML.
 
     Only called when heuristic link-finding fails. Truncates HTML to
-    _HAIKU_HTML_CHARS (~1000 tokens) to minimize cost.
+    _LOW_TIER_HTML_CHARS (~1000 tokens) to minimize cost.
 
     Args:
         homepage_url: The homepage URL (for resolving relative URLs).
         homepage_html: Raw HTML of the homepage.
-        client: Anthropic client instance.
         conn: SQLite connection for cost recording.
         config: Application config dict.
 
     Returns:
         Absolute URL to the careers page, or None if not found.
     """
-    truncated_html = homepage_html[:_HAIKU_HTML_CHARS]
+    truncated_html = homepage_html[:_LOW_TIER_HTML_CHARS]
 
     system = (
         "You identify careers/jobs page URLs from company website HTML. "
@@ -165,13 +164,13 @@ def _find_careers_url_with_haiku(
         }
     ]
 
-    use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+    use_dispatcher = bool(config.get("providers", {}).get("low"))
 
     try:
         if use_dispatcher:
             try:
                 model_result = call_model(
-                    tier="haiku",
+                    tier="low",
                     system=system,
                     messages=messages,
                     conn=conn,
@@ -189,7 +188,7 @@ def _find_careers_url_with_haiku(
                     homepage_url,
                 )
                 result, _cost = call_claude(
-                    model=DEFAULT_MODEL_HAIKU,
+                    model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
                     output_schema=_CAREERS_URL_SCHEMA,
@@ -201,7 +200,7 @@ def _find_careers_url_with_haiku(
                 )
         else:
             result, _cost = call_claude(
-                model=DEFAULT_MODEL_HAIKU,
+                model=DEFAULT_MODEL_LOW,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_URL_SCHEMA,
@@ -212,7 +211,7 @@ def _find_careers_url_with_haiku(
                 max_tokens=256,
             )
     except Exception as e:
-        logger.debug("Haiku careers URL fallback failed for '%s': %s", homepage_url, e)
+        logger.debug("Low-tier careers URL fallback failed for '%s': %s", homepage_url, e)
         return None
 
     url_text = (result.get("url", "") if isinstance(result, dict) else "").strip()
@@ -260,7 +259,7 @@ def _fetch_job_description(url: str) -> str:
         return ""
 
 
-def _extract_jobs_with_haiku(
+def _extract_jobs_with_low_tier(
     careers_url: str,
     careers_html: str,
     target_titles: list[str],
@@ -268,24 +267,23 @@ def _extract_jobs_with_haiku(
     conn: sqlite3.Connection,
     config: dict,
 ) -> list[dict]:
-    """Extract job listings from unstructured careers page HTML using Haiku.
+    """Extract job listings from unstructured careers page HTML using low-tier model.
 
     Called when HTML link-parsing finds 0 results. Sends truncated HTML
-    to Haiku for structured extraction.
+    to low tier for structured extraction.
 
     Args:
         careers_url: URL of the careers page (for resolving relative URLs).
         careers_html: Raw HTML of the careers page.
         target_titles: Target title keywords for post-extraction filtering.
         exclusions: Exclusion keywords for post-extraction filtering.
-        client: Anthropic client instance.
         conn: SQLite connection for cost recording.
         config: Application config dict.
 
     Returns:
         List of dicts with title, url, description keys. May be empty.
     """
-    truncated_html = careers_html[:_HAIKU_HTML_CHARS]
+    truncated_html = careers_html[:_LOW_TIER_HTML_CHARS]
 
     system = (
         "You extract job listings from careers page HTML. Populate the 'jobs' "
@@ -300,13 +298,13 @@ def _extract_jobs_with_haiku(
         }
     ]
 
-    use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+    use_dispatcher = bool(config.get("providers", {}).get("low"))
 
     try:
         if use_dispatcher:
             try:
                 model_result = call_model(
-                    tier="haiku",
+                    tier="low",
                     system=system,
                     messages=messages,
                     conn=conn,
@@ -324,7 +322,7 @@ def _extract_jobs_with_haiku(
                     careers_url,
                 )
                 result, _cost = call_claude(
-                    model=DEFAULT_MODEL_HAIKU,
+                    model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
                     output_schema=_CAREERS_JOBS_SCHEMA,
@@ -336,7 +334,7 @@ def _extract_jobs_with_haiku(
                 )
         else:
             result, _cost = call_claude(
-                model=DEFAULT_MODEL_HAIKU,
+                model=DEFAULT_MODEL_LOW,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_JOBS_SCHEMA,
@@ -374,12 +372,12 @@ def _extract_jobs_with_haiku(
                 {
                     "title": title,
                     "url": url,
-                    "description": "",  # No JD fetch for Haiku-extracted jobs (too costly)
+                    "description": "",  # No JD fetch for low-tier-extracted jobs (too costly)
                 }
             )
 
         logger.debug(
-            "_extract_jobs_with_haiku('%s'): %d jobs extracted, %d after filter",
+            "_extract_jobs_with_low_tier('%s'): %d jobs extracted, %d after filter",
             careers_url,
             len(jobs),
             len(filtered),
@@ -387,7 +385,7 @@ def _extract_jobs_with_haiku(
         return filtered
 
     except Exception as e:
-        logger.debug("Haiku job extraction failed for '%s': %s", careers_url, e)
+        logger.debug("Low-tier job extraction failed for '%s': %s", careers_url, e)
         return []
 
 
@@ -576,10 +574,10 @@ def find_careers_url(
             except Exception:
                 continue
 
-    # Haiku fallback: if heuristic found nothing and client is available
+    # low-tier fallback: if heuristic found nothing and client is available
     if conn is not None and config is not None:
-        logger.debug("find_careers_url('%s'): trying Haiku fallback", homepage_url)
-        return _find_careers_url_with_haiku(homepage_url, resp.text, conn, config)
+        logger.debug("find_careers_url('%s'): trying low-tier fallback", homepage_url)
+        return _find_careers_url_with_low_tier(homepage_url, resp.text, conn, config)
 
     return None
 
@@ -603,7 +601,7 @@ def scrape_careers_page(
     return empty description. Descriptions capped at _MAX_JD_CHARS.
 
     When HTML parsing finds 0 matching jobs AND client/conn/config are provided,
-    falls back to Haiku AI extraction via _extract_jobs_with_haiku.
+    falls back to low-tier AI extraction via _extract_jobs_with_low_tier.
 
     Args:
         careers_url: URL of the careers page to scrape.
@@ -685,10 +683,10 @@ def scrape_careers_page(
         else:
             job["description"] = ""
 
-    # Haiku fallback when HTML parsing found no matching jobs
+    # low-tier fallback when HTML parsing found no matching jobs
     if not results and conn is not None and config is not None:
-        logger.debug("scrape_careers_page('%s'): trying Haiku fallback", careers_url)
-        results = _extract_jobs_with_haiku(
+        logger.debug("scrape_careers_page('%s'): trying low-tier fallback", careers_url)
+        results = _extract_jobs_with_low_tier(
             careers_url, resp.text, target_titles, exclusions, conn, config
         )
 

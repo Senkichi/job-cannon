@@ -321,7 +321,7 @@
         </svg>
       </button>
       <div class="section-body border-t border-slate-700 p-6 space-y-4">
-        <p class="text-xs text-slate-500">Control API spending. Sonnet calls are paused when monthly spend reaches the cap. Haiku is always allowed.</p>
+        <p class="text-xs text-slate-500">Control API spending. Mid/High-tier calls are paused when monthly spend reaches the cap. Low-tier is always allowed.</p>
 
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -332,27 +332,28 @@
             <p class="text-xs text-slate-600 mt-1">Default: ${{ DEFAULT_DAILY_BUDGET_USD|int }}/day</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Haiku Score Threshold</label>
-            <input type="number" name="haiku_threshold" min="0" max="100"
-                   value="{{ config.get('scoring', {}).get('haiku_threshold', DEFAULT_HAIKU_THRESHOLD) }}"
-                   class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
-            <p class="text-xs text-slate-600 mt-1">Jobs above this score are queued for Sonnet deep eval</p>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Candidate Score Threshold</label>
+            <input type="number" name="candidate_score_threshold" min="0" max="100"
+                   value="{{ config.get('scoring', {}).get('candidate_score_threshold', DEFAULT_CANDIDATE_SCORE_THRESHOLD) }}"
+                   class="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <p class="text-xs text-slate-600 mt-1">Jobs with a candidate_score below this (from initial ingestion) are skipped for full AI scoring.</p>
           </div>
+
         </div>
 
         <div class="pt-2 border-t border-slate-700">
           <p class="text-sm text-slate-400 font-medium mb-3">Model Selection <span class="text-slate-600 font-normal text-xs">(advanced — change only if you know the exact model IDs)</span></p>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Haiku Model</label>
-              <input type="text" name="model_haiku"
-                     value="{{ config.get('scoring', {}).get('models', {}).get('haiku', DEFAULT_MODEL_HAIKU) }}"
+              <label class="block text-xs font-medium text-slate-400 mb-1">Cheap-Tier Model</label>
+              <input type="text" name="model_low"
+                     value="{{ config.get('scoring', {}).get('models', {}).get('low', DEFAULT_MODEL_LOW) }}"
                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Sonnet Model</label>
-              <input type="text" name="model_sonnet"
-                     value="{{ config.get('scoring', {}).get('models', {}).get('sonnet', DEFAULT_MODEL_SONNET) }}"
+              <label class="block text-xs font-medium text-slate-400 mb-1">Balanced-Tier Model</label>
+              <input type="text" name="model_mid"
+                     value="{{ config.get('scoring', {}).get('models', {}).get('mid', DEFAULT_MODEL_MID) }}"
                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
             </div>
           </div>
@@ -447,7 +448,7 @@
                    {% if notif_cfg.get('high_score', True) %}checked{% endif %}>
             <div>
               <span class="text-sm font-medium text-slate-200">High Score Jobs</span>
-              <p class="text-xs text-slate-500 mt-0.5">Notify when a new job scores above the Haiku threshold</p>
+              <p class="text-xs text-slate-500 mt-0.5">Notify when a new job scores above the candidate threshold</p>
             </div>
           </label>
 

@@ -55,13 +55,10 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     3. Apply keyword filter using config profile.target_titles and exclusions
     4. For each matched job, create Job object and call upsert_job
     5. Collect dedup_keys of newly-discovered jobs
-    6. Score new jobs via scoring_orchestrator (Haiku fast-filter)
-    7. Evaluate jobs above haiku_threshold via scoring_orchestrator (Sonnet deep-eval)
-    8. Insert company_scan_log row and update company.last_scanned_at
-    9. Insert activity feed entry into runs table
-    10. Return summary dict
-
-    Args:
+    6. Score new jobs via scoring_orchestrator (v3.0 unified `run_scoring`)
+    7. Insert company_scan_log row and update company.last_scanned_at
+    8. Insert activity feed entry into runs table
+    9. Return summary dict
         db_path: Absolute path to the SQLite database file.
         config: Application config dict. Reads TESTING flag, profile section.
 

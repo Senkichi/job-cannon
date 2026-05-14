@@ -466,7 +466,7 @@ def parse_structured_fields(
 
     try:
         result = call_model(
-            tier="haiku",  # cheap; structured-extraction task
+            tier="low",  # cheap; structured-extraction task
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
             conn=conn,

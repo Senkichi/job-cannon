@@ -150,7 +150,7 @@ def run_company_research_background(
 
             client = anthropic.Anthropic()
             result_obj = call_model(
-                tier="haiku",
+                tier="low",
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_msg}],
                 conn=conn,

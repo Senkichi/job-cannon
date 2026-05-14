@@ -123,19 +123,12 @@ def _cached_tier_available(tier: str, config: dict, client) -> bool:
 def _get_quick_actions_context(conn, config):
     """Build template context for quick actions section.
 
-    v3.0 (Phase 34 Plan 3 Commit C): merges the legacy Haiku/Sonnet stat
-    blocks into a single scoring_eligible_count + scoring_available pair.
+    v3.0: merges the legacy Haiku/Sonnet stat blocks into a single
+    ``unscored_count`` + ``scoring_available`` pair.
     Active sessions collapse to {sync, scoring}. Legacy 'haiku'/'sonnet'
-    session_type values (written pre-Plan-3 or by the Plan-3 Commit B
-    delegating wrappers) are treated as the unified 'scoring' session so
-    the UI reflects the live pipeline regardless of which historical
-    route created the row.
-
-    Back-compat keys (haiku_scorable_count, sonnet_eligible_count,
-    haiku_available, sonnet_available, active_haiku, active_sonnet) are
-    still populated with the unified values so any Commit-D-pending
-    template fragment keeps rendering without NameErrors. Plan 4 removes
-    the aliases.
+    session_type values (written pre-Plan-3) are treated as the unified
+    'scoring' session so the UI reflects the live pipeline regardless
+    of which historical route created the row.
     """
     # Detect active (non-terminal) sessions — unified {sync, scoring} semantics
     active_sync = None
@@ -152,17 +145,16 @@ def _get_quick_actions_context(conn, config):
             if stype == "sync" and active_sync is None:
                 active_sync = s
             elif stype in ("scoring", "haiku", "sonnet") and active_scoring is None:
-                # Plan 3 Commit C: 'haiku'/'sonnet' rows written before/during
-                # the migration window fold into the unified 'scoring' session.
+                # 'haiku'/'sonnet' rows written before the migration fold into
+                # the unified 'scoring' session.
                 active_scoring = s
     except Exception:
         pass
 
-    # Single scoring-eligible count — jobs with classification IS NULL
-    # that would pass the exclusion filter.
-    scoring_eligible_count = 0
+    # Single count — jobs with classification IS NULL that would pass the exclusion filter.
+    unscored_count = 0
     if not active_scoring:
-        scoring_eligible_count = count_scorable(conn, config)
+        unscored_count = count_scorable(conn, config)
 
     client = _get_anthropic_client()
     scoring_available = _cached_tier_available("scoring", config, client)
@@ -170,15 +162,8 @@ def _get_quick_actions_context(conn, config):
     return {
         "active_sync": active_sync,
         "active_scoring": active_scoring,
-        "scoring_eligible_count": scoring_eligible_count,
+        "unscored_count": unscored_count,
         "scoring_available": scoring_available,
-        # Back-compat aliases — Commit D collapses templates; Plan 4 removes. PLAN-4-REMOVE
-        "active_haiku": active_scoring,
-        "active_sonnet": active_scoring,
-        "haiku_scorable_count": scoring_eligible_count,
-        "sonnet_eligible_count": 0,
-        "haiku_available": scoring_available,
-        "sonnet_available": scoring_available,
     }
 
 

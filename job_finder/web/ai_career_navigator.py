@@ -372,7 +372,7 @@ def discover_navigation_recipe(
         f"Produce a navigation recipe JSON to find job listings on this page."
     )
 
-    # Dispatch through call_model when providers.haiku is configured; fall
+    # Dispatch through call_model when providers.low is configured; fall
     # back to direct call_claude otherwise or when the cascade is exhausted.
     try:
         db_path = config.get("db_path", "jobs.db")
@@ -406,12 +406,12 @@ def discover_navigation_recipe(
                 "required": ["steps", "extraction"],
             }
 
-            use_dispatcher = bool(config.get("providers", {}).get("haiku"))
+            use_dispatcher = bool(config.get("providers", {}).get("low"))
 
             if use_dispatcher:
                 try:
                     model_result = call_model(
-                        tier="haiku",
+                        tier="low",
                         system=_DISCOVERY_SYSTEM,
                         messages=[{"role": "user", "content": user_message}],
                         conn=conn,

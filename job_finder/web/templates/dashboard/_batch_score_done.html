@@ -1,14 +1,14 @@
 {# Batch score done/error/cancelled terminal fragment.
    NO hx-trigger — omitting it stops HTMX polling (Phase 4 proven pattern). #}
-<div id="batch-score-{{ label | lower }}-status"
+<div id="batch-score-status"
      class="text-xs text-slate-400 py-1">
   {% if error_msg %}
-    <span class="text-red-400">{{ label }} scoring error: {{ error_msg }}</span>
+    <span class="text-red-400">Scoring error: {{ error_msg }}</span>
   {% elif status == 'cancelled' %}
     <span class="text-amber-400">Cancelled — {{ scored }} jobs scored before stopping</span>
   {% elif message %}
     <span>{{ message }}</span>
   {% else %}
-    <span class="text-emerald-400">{{ label }} scoring complete: {{ scored }} scored, {{ skipped }} skipped</span>
+    <span class="text-emerald-400">Scoring complete: {{ scored }} scored, {{ skipped }} skipped</span>
   {% endif %}
 </div>
