@@ -22,6 +22,16 @@ from evals.cascade_audit.corpus_loader import CorpusLoader
 
 logger = logging.getLogger(__name__)
 
+CALLSITES = [
+    "parse_structured_fields",
+    "find_careers_url",
+    "extract_jobs",
+    "description_reformat",
+    "company_research",
+    "ai_nav_discovery",
+]
+DEFAULT_PROVIDERS = ["ollama", "gemini", "anthropic"]
+
 
 @contextmanager
 def _playwright_context():
@@ -69,6 +79,9 @@ def _write_artifact_atomically(
     """
     artifact = {
         "provenance": provenance,
+        "config_snapshot": provenance.get("config_snapshot", {}),
+        "model_versions": provenance.get("model_versions", {}),
+        "commit_sha": provenance.get("commit_sha", provenance.get("harness_commit_sha", "unknown")),
         "data": data,
         "timestamp": datetime.now(UTC).isoformat(),
     }
@@ -119,6 +132,108 @@ def _load_adapter(callsite: str, artifact_dir: Path, judge_provider=None):
 
         return AiNavDiscoveryAdapter(artifact_dir=artifact_dir)
     raise ValueError(f"Unknown cascade audit callsite: {callsite}")
+
+
+def _round_to_number(round_value: str) -> int:
+    normalized = str(round_value).lower()
+    if normalized in {"0", "r0"}:
+        return 0
+    if normalized in {"1", "r1"}:
+        return 1
+    if normalized in {"2", "r2"}:
+        return 2
+    raise ValueError(f"Unsupported audit round: {round_value}")
+
+
+def _parse_csv(value: str | None, default: list[str]) -> list[str]:
+    if not value:
+        return list(default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _wilson_interval(successes: int, total: int, z: float = 1.96) -> dict:
+    if total == 0:
+        return {"low": 0.0, "high": 0.0, "half_width": 0.0}
+    phat = successes / total
+    denominator = 1 + z**2 / total
+    center = (phat + z**2 / (2 * total)) / denominator
+    margin = z * ((phat * (1 - phat) + z**2 / (4 * total)) / total) ** 0.5 / denominator
+    return {
+        "low": max(0.0, center - margin),
+        "high": min(1.0, center + margin),
+        "half_width": margin,
+    }
+
+
+def _artifact_verdict(metrics: dict) -> str:
+    sample_count = int(metrics.get("sample_count", 0))
+    error_count = int(metrics.get("error_count", 0))
+    schema_valid_rate = float(metrics.get("schema_valid_rate", 1.0))
+    if sample_count and error_count / sample_count > 0.10:
+        return "UNSUITABLE"
+    if schema_valid_rate < 0.85:
+        return "UNSUITABLE"
+    if sample_count and error_count / sample_count > 0.02:
+        return "MARGINAL"
+    if schema_valid_rate < 0.95:
+        return "MARGINAL"
+    return "SUITABLE"
+
+
+def _enrich_artifact_data(round_num: int, artifact_data: dict) -> dict:
+    metrics = dict(artifact_data.get("metrics", {}))
+    sample_size = int(metrics.get("sample_count", 0))
+    success_count = int(metrics.get("success_count", 0))
+    schema_valid_rate = float(metrics.get("schema_valid_rate", 1.0 if sample_size else 0.0))
+    enriched = dict(artifact_data)
+    enriched["sample_size"] = sample_size
+    enriched["accuracy"] = success_count / sample_size if sample_size else 0.0
+    enriched["latency_p50_ms"] = metrics.get("latency_ms_avg", 0)
+    enriched["cost_per_1k"] = metrics.get("cost_per_1k_avg", 0)
+    enriched["schema_valid_rate"] = schema_valid_rate
+    if round_num == 2:
+        enriched["confidence_interval"] = _wilson_interval(success_count, sample_size)
+        enriched["verdict"] = _artifact_verdict(metrics)
+    return enriched
+
+
+def _write_callsite_round_artifact(
+    artifact_dir: Path,
+    round_num: int,
+    callsite: str,
+    provider_results: dict[str, dict],
+    provenance: dict,
+) -> None:
+    rows = list(provider_results.values())
+    sample_size = max((int(row.get("sample_size", 0)) for row in rows), default=0)
+    verdicts = [row.get("verdict") for row in rows if row.get("verdict")]
+    summary = {
+        "callsite": callsite,
+        "round": f"r{round_num}",
+        "sample_size": sample_size,
+        "provider_results": provider_results,
+    }
+    if round_num == 2:
+        summary["confidence_interval"] = _wilson_interval(
+            sum(int(row.get("accuracy", 0) * int(row.get("sample_size", 0))) for row in rows),
+            sum(int(row.get("sample_size", 0)) for row in rows),
+        )
+        summary["verdict"] = "SUITABLE" if "SUITABLE" in verdicts else (verdicts[0] if verdicts else "UNSUITABLE")
+    artifact_path = artifact_dir / f"round_{round_num}" / f"{callsite}_r{round_num}.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_artifact_atomically(artifact_path, summary, provenance)
+
+
+def _emit_resume_schedulers_prompt() -> None:
+    print("\n" + "=" * 60)
+    print("RESUME SCHEDULERS")
+    print("=" * 60)
+    print("\nAudit Round 2 (R2) complete.")
+    print("Re-enable APScheduler jobs to resume background ingest/scoring:")
+    print("  1. Open Flask app at http://localhost:5000/settings/scheduler")
+    print("  2. Click 'Enable Scheduler' if disabled")
+    print("  3. Verify jobs are running in scheduler status")
+    print("\n" + "=" * 60 + "\n")
 
 
 def _aggregate_metrics(rows: list[dict]) -> dict:
@@ -211,27 +326,32 @@ def main() -> None:
     )
     parser.add_argument(
         "--round",
-        type=int,
+        type=str,
         required=True,
-        choices=[0, 1, 2],
-        help="Round number (0=dry-run, 1=cheap-screen, 2=full-battery)",
+        choices=["0", "1", "2", "r0", "r1", "r2"],
+        help="Round number (r0/0=dry-run, r1/1=cheap-screen, r2/2=full-battery)",
+    )
+    parser.add_argument(
+        "--callsite",
+        type=str,
+        help="Single callsite to evaluate (Phase 37 shorthand)",
     )
     parser.add_argument(
         "--callsites",
         type=str,
-        required=True,
+        required=False,
         help="Comma-separated list of callsites to evaluate",
     )
     parser.add_argument(
         "--providers",
         type=str,
-        required=True,
+        required=False,
         help="Comma-separated list of providers to evaluate",
     )
     parser.add_argument(
         "--db-path",
         type=str,
-        required=True,
+        default="jobs.db",
         help="Path to production SQLite database",
     )
     parser.add_argument(
@@ -248,6 +368,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    round_num = _round_to_number(args.round)
 
     # Load config
     with open(args.config) as f:
@@ -263,7 +384,7 @@ def main() -> None:
 
     try:
         # Load corpus based on round
-        if args.round == 0:
+        if round_num == 0:
             corpus = loader.load_round_0(
                 n_per_callsite=3, conn=conn  # Round 0 uses n=3 per callsite
             )
@@ -271,14 +392,18 @@ def main() -> None:
             corpus = loader.load_round_1(conn=conn)
 
         # Parse callsites and providers
-        callsites = [c.strip() for c in args.callsites.split(",")]
-        providers = [p.strip() for p in args.providers.split(",")]
+        callsite_arg = args.callsite or args.callsites
+        callsites = _parse_csv(callsite_arg, CALLSITES)
+        providers = _parse_csv(args.providers, DEFAULT_PROVIDERS)
 
         # Build provenance block
+        commit_sha = _get_git_commit_sha()
         provenance = {
+            "config_snapshot": config.get("providers", {}),
             "provider_config": config.get("providers", {}),
             "model_versions": {provider: provider for provider in providers},
-            "harness_commit_sha": _get_git_commit_sha(),
+            "commit_sha": commit_sha,
+            "harness_commit_sha": commit_sha,
             "sample_seed": "sqlite-random",
             "scheduler_pause_status": "unknown",  # TODO: check scheduler status
         }
@@ -286,9 +411,10 @@ def main() -> None:
 
         # Evaluate each (callsite, provider) pair
         for callsite in callsites:
+            provider_results: dict[str, dict] = {}
             for provider in providers:
                 logger.info(
-                    f"Evaluating round={args.round} callsite={callsite} provider={provider}"
+                    f"Evaluating round={round_num} callsite={callsite} provider={provider}"
                 )
 
                 adapter = _load_adapter(callsite, artifact_dir, judge_provider)
@@ -301,32 +427,43 @@ def main() -> None:
                     callsite=callsite,
                     artifact_dir=artifact_dir,
                 )
+                artifact_data = _enrich_artifact_data(round_num, artifact_data)
+                provider_results[provider] = artifact_data
 
                 artifact_path = (
-                    artifact_dir / f"round_{args.round}" / f"{callsite}_{provider}.json"
+                    artifact_dir / f"round_{round_num}" / f"{callsite}_{provider}.json"
                 )
                 artifact_path.parent.mkdir(parents=True, exist_ok=True)
                 _write_artifact_atomically(artifact_path, artifact_data, provenance)
 
                 logger.info(f"Artifact written to {artifact_path}")
+            _write_callsite_round_artifact(
+                artifact_dir, round_num, callsite, provider_results, provenance
+            )
 
         # Generate reports
-        from evals.cascade_audit.report import write_report
+        from evals.cascade_audit.report import write_cascade_audit_report, write_report
 
         report_dir = artifact_dir / "reports"
         report_dir.mkdir(parents=True, exist_ok=True)
 
         for callsite in callsites:
             for provider in providers:
-                report_path = report_dir / f"round_{args.round}_{callsite}_{provider}.md"
+                report_path = report_dir / f"round_{round_num}_{callsite}_{provider}.md"
                 write_report(
-                    round_num=args.round,
+                    round_num=round_num,
                     callsite=callsite,
                     provider=provider,
                     artifacts_dir=artifact_dir,
                     output_path=report_path,
                 )
                 logger.info(f"Report written to {report_path}")
+        if round_num == 2:
+            write_cascade_audit_report(
+                artifacts_dir=artifact_dir,
+                output_path=Path("CASCADE-AUDIT.md"),
+            )
+            _emit_resume_schedulers_prompt()
 
     finally:
         conn.close()

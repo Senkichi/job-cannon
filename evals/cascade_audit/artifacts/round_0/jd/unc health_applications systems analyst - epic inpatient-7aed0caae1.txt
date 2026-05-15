@@ -1,0 +1,57 @@
+Description
+Become part of an inclusive organization with over 40,000 teammates, whose mission is to improve the health and well-being of the unique communities we serve.
+Summary
+As an Epic Orders Application Analyst Sr, you will serve as the primary support contact for the Epic Orders application. This role involves working closely with providers, operational, and administrative staff to optimize the use of the Epic system, ensuring it meets the needs of the healthcare organization and supports the delivery of high-quality patient care.
+Provides a high level of technical support (development, testing, integration and implementation) of applications and interfaces which deliver IT tools and support business functions across the health system. Performs project management, requirements definitions, systems design, analysis, code development, problem resolution and vendor coordination.
+Responsibilities
+The HCS Epic Orders Application Analyst Sr focuses on people through
+:
+Supporting essential inpatient clinical operations in a wide range of inpatient settings.
+Providing a secure, effective, integrated patient care delivery system that continually improves outcomes, reduces cost, increases efficiency, and enhances patients' experiences. Primary responsibilities include collaborating with providers and end users of the system to design, build, test, train, implement, evaluate, and maintain Epic and other associated systems.
+Demonstrating a strong understanding of inpatient provider workflows.
+The HCS Epic Orders Application Analyst Sr focuses on Quality & Value by
+:
+Develops and maintains collaborative relationships with all stakeholders; meets with customers and sponsors to capture business & technical requirements.
+Demonstrates knowledge of processes within the facility department; assesses workflow processes, identifies gaps, defines necessary process changes, and develops future workflows related to the implementation of new solutions or functionality.
+Designs, builds, and configures within assigned Epic system modules and any supporting third-party applications; develops and maintains system process documentation and outlines process steps using appropriate tools; identifies and implements requested changes to the system.
+Designs and develops test scripts and materials for end-to-end workflow testing; Performs unit, system, and integration testing per standards, including negative and regression testing; documents outcomes.
+Remains current on industry trends and vendor/application/system updates. Ensures that all software modifications/upgrades are working according to Epic specifications.
+Follows departmental standards for software configuration control, quality assurance, and version releases; Provides documentation on system upgrades and new releases of Epic applications; provides training if required.
+Troubleshoots issues or system deficiencies and initiates escalation procedures with minimal supervision as required. Provides recommendations for resolution of the problems found.
+Participates in multiple cross-functional projects; Understands project planning and coordination methodologies using project management skills, tools, and lean methodologies. Communicates project status of deliverables, shared issues, end-user concerns, and upcoming milestones.
+Actively participates in project, team, departmental, and other meetings as required. Reports status updates, accomplishments, tasks, and any barriers to the manager.
+Participates in the on-call responsibilities in support of a 24hrs/7days production systems environment; acts as the primary support contact for the application's end-users.
+Collaborating with Leadership in efforts to support clinical transformation via continuously improving integration, especially across ISD teams, project teams, and all sources of patient data.
+Understanding and incorporating the organization’s mission, vision, and values in behaviors, practices, and decisions
+Embracing and leading change related to applications, clinical technologies, and their implementation across the enterprise
+Assists other IT teams with selection and provides technical evaluation of products / tools to ensure that the proposed solution adheres to enterprise-wide requirements, adapts to new requirements and changing technologies in order to meet business standardization protocols and objectives. May provide guidance to Applications System Analysts to ensure best practices, standard methodologies and processes are executed.
+Develops and maintains clear, understandable documentation to describe program development and modification, as well as troubleshooting. Updates system and support documentation as necessary to reflect changes to programs, solutions, reports and interfaces.
+Evaluates requests and consults in design for new or modified computer programs, solutions, reports and interfaces to determine feasibility and compatibility with current system. Identifies and recommends solution development for larger and complex projects and ensures best practice development. Formulates and develops plans at a high level and documents required steps to achieve stated requirements. Reviews plans with management/peers as appropriate.
+Functions as a technical consultant to the health system and maintains high service levels. Participates in system wide initiatives to improve efficiency and reach institutional goals and objectives.
+Updates management, customers and others as appropriate on a timely basis regarding progress on assigned tasks, projects and issues, via written or oral reports
+Other Information
+Education Requirements:
+Bachelor’s degree in Computer Science, Information Systems Management or related field (or equivalent combination of education, training and experience).
+Licensure/Certification Requirements
+No licensure or certification required.
+Professional Experience Requirements
+If a Bachelor's degree: Four (4) years of experience with IT systems and/or related operational experience.
+If an Associate's degree: Six (6) years of IT systems and/or related operational experience.
+If a High School diploma or GED: Eight (8) years of IT systems and/or related operational experience.
+Knowledge/Skills/and Abilities Requirements
+Excellent analytical and communication skills. Ability to work well in a team environment. Demonstrated ability to successfully manage multiple tasks simultaneously. Highly responsive to internal customers.
+Job Details
+Legal Employer: NCHEALTH
+Entity: Shared Services
+Organization Unit: ISD Clinical Systems
+Work Type: Full Time
+Standard Hours Per Week: 40.00
+Salary Range: $41.45 - $59.58 per hour (Hiring Range)
+Pay offers are determined by experience and internal equity
+Work Assignment Type: Remote
+Work Schedule: Day Job
+Location of Job: US:NC:Morrisville
+Exempt From Overtime: Exempt: Yes
+This position is employed by NC Health (Rex Healthcare, Inc., d/b/a NC Health), a private, fully-owned subsidiary of UNC Health Care System, in a department that provides shared services to operations across UNC Health Care; except that, if you are currently a UNCHCS State employee already working in a designated shared services department, you may remain a UNCHCS State employee if selected for this job.
+Qualified applicants will be considered without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, age, genetic information, disability, status as a protected veteran or political affiliation.
+UNC Health makes reasonable accommodations for applicants' and employees' religious practices and beliefs, as well as applicants and employees with disabilities. All interested applicants are invited to apply for career opportunities. Please email applicant.accommodations@unchealth.unc.edu if you need a reasonable accommodation to search and/or to apply for a career opportunity.

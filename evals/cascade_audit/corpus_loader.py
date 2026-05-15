@@ -6,13 +6,23 @@ dedup_keys for reproducibility across rounds.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_cache_stem(value: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value).strip(" ._")
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
+    if not cleaned:
+        cleaned = "item"
+    return f"{cleaned[:80]}-{digest}"
 
 
 class CorpusLoader:
@@ -140,8 +150,9 @@ class CorpusLoader:
             result.append(dict(row))
             # Cache JD text to artifacts
             key = row["dedup_key"]
-            (artifact_dir / "jd" / f"{key}.txt").parent.mkdir(exist_ok=True)
-            (artifact_dir / "jd" / f"{key}.txt").write_text(row["jd_full"])
+            cache_path = artifact_dir / "jd" / f"{_safe_cache_stem(key)}.txt"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(row["jd_full"])
 
         return result
 
@@ -207,8 +218,9 @@ class CorpusLoader:
             result.append(dict(row))
             # Cache description to artifacts
             key = row["dedup_key"]
-            (artifact_dir / "descriptions" / f"{key}.txt").parent.mkdir(exist_ok=True)
-            (artifact_dir / "descriptions" / f"{key}.txt").write_text(row["description"])
+            cache_path = artifact_dir / "descriptions" / f"{_safe_cache_stem(key)}.txt"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(row["description"])
 
         return result
 
@@ -249,7 +261,8 @@ class CorpusLoader:
             result.append(dict(row))
             # Cache recipe to artifacts/round_0/recipes/
             key = row["dedup_key"]
-            recipe_path = artifact_dir / "recipes" / f"{key}.json"
+            recipe_path = artifact_dir / "recipes" / f"{_safe_cache_stem(key)}.json"
+            recipe_path.parent.mkdir(parents=True, exist_ok=True)
             recipe_path.write_text(row["careers_nav_recipe"])
 
         return result
