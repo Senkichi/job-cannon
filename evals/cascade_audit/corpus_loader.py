@@ -87,7 +87,7 @@ class CorpusLoader:
             callsite: [row["dedup_key"] for row in rows]
             for callsite, rows in corpus.items()
         }
-        self._dedup_keys_file.write_text(json.dumps(dedup_keys, indent=2))
+        self._dedup_keys_file.write_text(json.dumps(dedup_keys, indent=2), encoding="utf-8")
 
         return corpus
 
@@ -106,7 +106,7 @@ class CorpusLoader:
                 "Run Round 0 first to generate corpus."
             )
 
-        dedup_keys = json.loads(self._dedup_keys_file.read_text())
+        dedup_keys = json.loads(self._dedup_keys_file.read_text(encoding="utf-8"))
         corpus: dict[str, list[dict]] = {}
 
         corpus["parse_structured_fields"] = self._load_by_keys(
@@ -152,7 +152,7 @@ class CorpusLoader:
             key = row["dedup_key"]
             cache_path = artifact_dir / "jd" / f"{_safe_cache_stem(key)}.txt"
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(row["jd_full"])
+            cache_path.write_text(row["jd_full"], encoding="utf-8")
 
         return result
 
@@ -162,7 +162,7 @@ class CorpusLoader:
         """Sample companies with homepage_url for find_careers_url."""
         rows = conn.execute(
             """
-            SELECT dedup_key, homepage_url
+            SELECT CAST(id AS TEXT) AS dedup_key, homepage_url
             FROM companies
             WHERE homepage_url IS NOT NULL
             ORDER BY RANDOM()
@@ -180,7 +180,7 @@ class CorpusLoader:
         """Sample 50 companies for extract_jobs and cache HTML."""
         rows = conn.execute(
             """
-            SELECT dedup_key, homepage_url
+            SELECT CAST(id AS TEXT) AS dedup_key, homepage_url
             FROM companies
             WHERE homepage_url IS NOT NULL
             ORDER BY RANDOM()
@@ -220,7 +220,7 @@ class CorpusLoader:
             key = row["dedup_key"]
             cache_path = artifact_dir / "descriptions" / f"{_safe_cache_stem(key)}.txt"
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(row["description"])
+            cache_path.write_text(row["description"], encoding="utf-8")
 
         return result
 
@@ -230,7 +230,7 @@ class CorpusLoader:
         """Sample companies for company_research."""
         rows = conn.execute(
             """
-            SELECT dedup_key, name, domain
+            SELECT CAST(id AS TEXT) AS dedup_key, name, homepage_url
             FROM companies
             ORDER BY RANDOM()
             LIMIT ?
@@ -247,7 +247,7 @@ class CorpusLoader:
         """Sample companies with careers_nav_recipe for ai_nav_discovery."""
         rows = conn.execute(
             """
-            SELECT dedup_key, careers_nav_recipe
+            SELECT CAST(id AS TEXT) AS dedup_key, careers_nav_recipe
             FROM companies
             WHERE careers_nav_recipe IS NOT NULL
             ORDER BY RANDOM()
@@ -263,18 +263,27 @@ class CorpusLoader:
             key = row["dedup_key"]
             recipe_path = artifact_dir / "recipes" / f"{_safe_cache_stem(key)}.json"
             recipe_path.parent.mkdir(parents=True, exist_ok=True)
-            recipe_path.write_text(row["careers_nav_recipe"])
+            recipe_path.write_text(row["careers_nav_recipe"], encoding="utf-8")
 
         return result
 
     def _load_by_keys(
         self, table: str, dedup_keys: list[str], conn: sqlite3.Connection
     ) -> list[dict]:
-        """Load rows from table by dedup_keys."""
+        """Load rows from table by dedup_keys.
+
+        For the `jobs` table the keying column is `dedup_key`. For the
+        `companies` table production has no `dedup_key`; the sampler aliases
+        `CAST(id AS TEXT) AS dedup_key`, so reload via the `id` column and
+        expose `id` back as `dedup_key` for downstream consistency.
+        """
         if not dedup_keys:
             return []
 
         placeholders = ",".join("?" * len(dedup_keys))
-        query = f"SELECT * FROM {table} WHERE dedup_key IN ({placeholders})"
+        if table == "companies":
+            query = f"SELECT *, CAST(id AS TEXT) AS dedup_key FROM {table} WHERE CAST(id AS TEXT) IN ({placeholders})"
+        else:
+            query = f"SELECT * FROM {table} WHERE dedup_key IN ({placeholders})"
         rows = conn.execute(query, dedup_keys).fetchall()
         return [dict(row) for row in rows]

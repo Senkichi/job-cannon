@@ -17,9 +17,11 @@ def mock_harness(tmp_path):
     db_path = tmp_path / "jobs.db"
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE jobs (dedup_key TEXT, jd_full TEXT, description TEXT)")
-    conn.execute("CREATE TABLE companies (dedup_key TEXT, homepage_url TEXT, name TEXT, domain TEXT, careers_nav_recipe TEXT)")
+    # Mirror production schema: companies uses an INTEGER PRIMARY KEY (id), not dedup_key.
+    # The corpus loader aliases `CAST(id AS TEXT) AS dedup_key` to keep downstream code uniform.
+    conn.execute("CREATE TABLE companies (id INTEGER PRIMARY KEY, homepage_url TEXT, name TEXT, careers_nav_recipe TEXT)")
     conn.execute("INSERT INTO jobs VALUES ('job1', ?, 'Description')", ("Full JD " * 100,))
-    conn.execute("INSERT INTO companies VALUES ('co1', 'https://example.com', 'Example', 'example.com', '{\"steps\": []}')")
+    conn.execute("INSERT INTO companies (id, homepage_url, name, careers_nav_recipe) VALUES (1, 'https://example.com', 'Example', '{\"steps\": []}')")
     conn.commit()
     conn.close()
 

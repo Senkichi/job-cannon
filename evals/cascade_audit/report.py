@@ -45,7 +45,7 @@ def write_report(
     if not artifact_path.exists():
         raise FileNotFoundError(f"Artifact not found: {artifact_path}")
 
-    artifact = json.loads(artifact_path.read_text())
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
 
     # Extract provenance and results
     provenance = artifact.get("provenance", {})

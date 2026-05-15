@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.cascade_audit.adapters import rows_to_dicts
+from evals.cascade_audit.corpus_loader import _safe_cache_stem
 
 
 class AiNavDiscoveryAdapter:
@@ -34,9 +35,13 @@ class AiNavDiscoveryAdapter:
         """Exercise ai_nav_discovery production code."""
         from job_finder.web.ai_career_navigator import discover_navigation_recipe
 
-        # Load cached recipe from artifacts/round_0/recipes/
+        # Load cached recipe from artifacts/round_0/recipes/. Filename uses the
+        # same _safe_cache_stem convention as corpus_loader so adapter and loader
+        # agree on the on-disk name (#phase-36 audit followup).
         dedup_key = row["dedup_key"]
-        recipe_path = self._artifact_dir / "round_0" / "recipes" / f"{dedup_key}.json"
+        recipe_path = (
+            self._artifact_dir / "round_0" / "recipes" / f"{_safe_cache_stem(dedup_key)}.json"
+        )
         if not recipe_path.exists():
             raise FileNotFoundError(f"Cached recipe not found: {recipe_path}")
 
