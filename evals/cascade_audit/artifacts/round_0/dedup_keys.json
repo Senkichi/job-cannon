@@ -1,0 +1,79 @@
+{
+  "parse_structured_fields": [
+    "reddit|community data analyst",
+    "abbott laboratories|brand manager, hcp marketing analytics & insights",
+    "experian|servicenow business analyst - application portfolio management"
+  ],
+  "find_careers_url": [
+    "113",
+    "368",
+    "1159"
+  ],
+  "extract_jobs": [
+    "176",
+    "134",
+    "1478",
+    "548",
+    "127",
+    "329",
+    "929",
+    "1505",
+    "1573",
+    "1029",
+    "1410",
+    "733",
+    "1545",
+    "260",
+    "1886",
+    "1780",
+    "15",
+    "401",
+    "1830",
+    "1744",
+    "470",
+    "486",
+    "1992",
+    "806",
+    "434",
+    "1026",
+    "624",
+    "1448",
+    "613",
+    "1553",
+    "870",
+    "69",
+    "1493",
+    "88",
+    "1295",
+    "775",
+    "1189",
+    "1964",
+    "26",
+    "1355",
+    "1057",
+    "528",
+    "779",
+    "1321",
+    "906",
+    "1087",
+    "382",
+    "1005",
+    "1528",
+    "532"
+  ],
+  "description_reformat": [
+    "sofi|senior manager data scientist (portfolio management and loss mitigation)",
+    "nubank|senior business analyst",
+    "clubhouse|\ud83d\udcc8 data scientist (staff)"
+  ],
+  "company_research": [
+    "3115",
+    "2696",
+    "3011"
+  ],
+  "ai_nav_discovery": [
+    "47",
+    "1878",
+    "701"
+  ]
+}
