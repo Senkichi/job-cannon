@@ -66,3 +66,14 @@ docs/superpowers/
 # checked in are version-controlled.
 !/.planning/eval_results/
 !/.planning/eval_results/**
+
+# Cascade audit (phase 36/37) artifact outputs — regenerable, may contain
+# LLM cost details and per-row provider responses. JD source samples under
+# round_*/jd/ and the dedup_keys.json corpus lock are tracked (reproducibility);
+# harness per-provider outputs, recipe/HTML caches, and generated reports are not.
+/evals/cascade_audit/artifacts/round_*/*.json
+!/evals/cascade_audit/artifacts/round_0/dedup_keys.json
+/evals/cascade_audit/artifacts/round_*/recipes/
+/evals/cascade_audit/artifacts/round_*/html/
+/evals/cascade_audit/artifacts/round_*/descriptions/
+/evals/cascade_audit/artifacts/reports/
