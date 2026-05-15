@@ -1,0 +1,117 @@
+LinkedIn hiring Tech Lead, GTM Applied AI and Analytics in San Francisco, CA | LinkedIn
+Skip to main content
+Tech Lead, GTM Applied AI and Analytics
+LinkedIn
+San Francisco, CA
+Apply
+Tech Lead, GTM Applied AI and Analytics
+LinkedIn
+San Francisco, CA
+2 days ago
+Be among the first 25 applicants
+See who LinkedIn has hired for this role
+Apply
+Save
+Report this job
+Use AI to assess how you fit
+Get AI-powered advice on this job and more exclusive features.
+Am I a good fit for this job?
+Tailor my resume
+Sign in to access AI-powered advices
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Sign in to evaluate your skills
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+Sign in to tailor your resume
+Email or phone
+Password
+Show
+Forgot password?
+Sign in
+Sign in with Email
+or
+New to LinkedIn?
+Join now
+By clicking Continue to join or sign in, you agree to LinkedIn’s
+User Agreement
+,
+Privacy Policy
+, and
+Cookie Policy
+.
+LinkedIn is the world’s largest professional network, built to create economic opportunity for every member of the global workforce. Our products help people make powerful connections, discover exciting opportunities, build necessary skills, and gain valuable insights every day. We’re also committed to providing transformational opportunities for our own employees by investing in their growth. We aspire to create a culture that’s built on trust, care, inclusion, and fun – where everyone can succeed.
+Join us to transform the way the world works.
+Job Description
+This role can be based in either our Sunnyvale, San Francisco, New York, or Chicago offices.
+At LinkedIn, our approach to flexible work is centered on trust and optimized for culture, connection, clarity, and the evolving needs of our business. The work location of this role is hybrid, meaning it will be performed both from home and from a LinkedIn office on select days, as determined by the business needs of the team.
+The Tech & Analytics team builds the analytical and automation foundation that powers LinkedIn's most important Go-to-Market decisions. We partner across Sales, Customer Success, Marketing, and Engineering to create a unified understanding of GTM performance. Our mission is to transform data into proactive insights and intelligent systems that guide LinkedIn's growth and efficiency.
+As the Tech Lead for GTM Applied AI & Analytics, you are the technical authority and chief architect for the next generation of our GTM data solutions. This is a hands-on leadership role for a "player-coach" who will spend a significant portion of their time architecting solutions, writing production-grade code, and mentoring a team of 3-4 data scientists and analytics engineers.
+You will be responsible for the end-to-end technical lifecycle of our most complex projects, from prototyping new AI-driven concepts to deploying scalable, automated systems. You will combine the analytical depth of a principal data scientist with the strategic storytelling needed to influence GTM leadership. Your primary goal is to architect and build the agentic workflows, predictive models, and automated systems that will fundamentally change how our GTM teams operate.
+Responsibilities
+Architect & Build: Lead the hands-on design, development, and deployment of scalable data products, AI/ML models (e.g., customer health, pipeline risk, propensity to buy), and GenAI-powered agentic workflows.
+Technical Strategy: Define the technical roadmap and architecture for the GTM Applied AI pillar, making key decisions on frameworks, tools, and MLOps practices.
+End-to-End Automation: Write high-quality, production-ready Python and SQL to build and maintain automated data pipelines, complex analytics, and insight-delivery systems.
+Applied AI Integration: Act as the subject matter expert in applying modern AI, LLMs, and ML techniques (e.g., RAG, fine-tuning) to solve concrete GTM business problems in partnership with central Data Science and Engineering teams.
+Technical Mentorship: Mentor and develop a team of data scientists and engineers, setting a high bar for technical rigor, code quality, and engineering best practices through a "lead-by-example" approach.
+Executive Storytelling: Translate highly complex technical concepts and model outputs into clear, concise, and actionable narratives for senior GTM and Operations leadership.
+Cross-Functional Partnership: Collaborate with Product, Engineering, and Data Science partners to operationalize and scale models from prototype to production, ensuring reliability and business impact.
+Qualifications
+Basic Qualifications
+BA/BS degree in a quantitative field (e.g., Computer Science, Statistics, Operations Research, Engineering) or equivalent practical experience.
+10+ years of experience in data science, machine learning, or analytics engineering.
+Experience in Python for data manipulation (pandas, NumPy), analytics, and ML (e.g., scikit-learn, TensorFlow, PyTorch).
+Experience in SQL with large-scale data warehouses (e.g., Presto, Trino, Spark SQL).
+Experience architecting, building, and deploying machine learning models or automated data solutions into a production environment.
+Preferred Qualifications
+MS or PhD in Computer Science, Statistics, or a related quantitative field.
+Experience with GenAI technologies and frameworks (e.g., LangChain, LlamaIndex, LLM APIs).
+Experience with MLOps principles and tools (e.g., MLflow, Kubeflow, SageMaker, Vertex AI) for model versioning, deployment, and monitoring.
+Experience with modern data stack and automation tools (e.g., Airflow, Databricks, dbt).
+Deep understanding of GTM financial and operational metrics (e.g., pipeline, ACV, margin, LTV, CAC, Customer Health).
+A self-directed, intellectually curious mindset with a proven ability to lead ambiguous, complex technical projects from 0 to 1.
+A passion for AI coupled with a strong, opinionated perspective on how to strategically apply machine learning to drive business decisions in a fast-moving environment.
+A resilient and resourceful "get-it-done" attitude, with the ability to thrive in a dynamic, fast-paced setting.
+Proven ability to influence a technical roadmap and lead projects in a fast-moving, ambiguous environment.
+Suggested Skills:
+Python
+SQL
+Data Science
+Machine Learning
+Building and Deploying Models
+LinkedIn is committed to fair and equitable compensation practices.
+The pay range for this role is $138,000 to $225,000. Actual compensation packages are based on a wide array of factors unique to each candidate, including but not limited to skill set, years & depth of experience, certifications, and specific office location. This may differ in other locations due to cost of labor considerations.
+The total compensation package for this position may also include annual performance bonus, stock, benefits and/or other applicable incentive compensation plans. For additional information, visit: https://careers.linkedin.com/benefits.
+Additional Information
+Equal Opportunity Statement
+We seek candidates with a wide range of perspectives and backgrounds and we are proud to be an equal opportunity employer. LinkedIn considers qualified applicants without regard to race, color, religion, creed, gender, national origin, age, disability, veteran status, marital status, pregnancy, sex, gender expression or identity, sexual orientation, citizenship, or any other legally protected class.
+LinkedIn is committed to offering an inclusive and accessible experience for all job seekers, including individuals with disabilities. Our goal is to foster an inclusive and accessible workplace where everyone has the opportunity to be successful.
+If you need a reasonable accommodation to
