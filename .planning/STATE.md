@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Public Release Foundation — Cascade Audit + Strangerify P1 + PyPI
-status: completed
-stopped_at: Phase 38 context gathered, ready for planning
-last_updated: "2026-05-14T16:00:00.000Z"
-last_activity: 2026-05-14 — Phase 38 discuss-phase complete; context captured in .planning/phases/038-strangerify-foundation/038-CONTEXT.md
+status: in-progress
+stopped_at: Phase 37 R0 + R1 complete; R2 + report generation + verification deferred to next session
+last_updated: "2026-05-14T20:30:00.000Z"
+last_activity: 2026-05-14 — Phase 37 plan 01 partial: R0 calibration + R1 contenders rounds executed; phase 36 harness defects patched
 progress:
   total_phases: 11
   completed_phases: 1
@@ -19,10 +19,10 @@ progress:
 ## Current Position
 
 Milestone: v5.0 Public Release Foundation — Cascade Audit + Strangerify P1 + PyPI
-Phase: 35 — Audit Telemetry & Callsite Attribution — COMPLETE
-Plan: 1 of 1 — COMPLETE
-Status: Phase 35 execution complete, ready for Phase 36
-Last activity: 2026-05-14 — Phase 35 execution complete
+Phase: 37 — Cascade Audit Execution & Decision — IN PROGRESS (R0 + R1 done; R2 + report + 10-spot-check + verify pending)
+Plan: 1 of 1 — partial (tasks 01-01, 01-02, 01-03, 01-04, 01-08, 01-09 done; 01-05, 01-06, 01-07, 01-10 deferred to next session)
+Status: Phase 37 R0/R1 complete on cranky-satoshi-410e36 worktree; multiple phase 36 harness defects patched in-flight, full follow-up audit pending
+Last activity: 2026-05-14 — R0 calibration + R1 contenders rounds executed against main repo's jobs.db + config.yaml; artifacts in evals/cascade_audit/artifacts/round_0/ and round_1/
 
 ## Project Reference
 
@@ -129,10 +129,33 @@ See: .planning/PROJECT.md (updated 2026-05-13 — Current Milestone section adde
 
 ## Session Continuity
 
-Last session: 2026-05-14 — Phase 35 execution complete
-Stopped at: Phase 35 complete, ready for Phase 36
-Resume file: n/a
+Last session: 2026-05-14 evening — Phase 37 R0 + R1 executed; phase 36 harness defects patched in-flight
+Stopped at: Phase 37 plan 01 tasks 01-05 (R2), 01-06 (10 spot-checks), 01-07 (CASCADE-AUDIT.md), 01-10 (verify completeness) deferred
+Resume file: n/a (continue by running `/gsd-execute-phase 37` against the same worktree; dedup_keys.json locks R0 sample so R2 measures comparably)
 
-**Next step:** `/gsd-plan-phase 36` (Phase 36: Cascade Audit Eval Harness).
+**Phase 36 audit followup REQUIRED before phase 37 completes:** During R0/R1 execution multiple phase 36 harness defects surfaced. Two classes already patched in-flight (commit 3930315):
+1. corpus_loader schema mismatch (companies.dedup_key → CAST(id AS TEXT)) — 4 sampling methods + _load_by_keys
+2. corpus_loader UTF-8 encoding (5 write_text/read_text/open call sites — Windows cp1252 default crashed on real production JD content)
+3. ai_nav_discovery_adapter recipe filename mismatch (used raw dedup_key, corpus_loader uses _safe_cache_stem)
+4. extract_jobs_adapter missing lazy HTML caching (spec required R1-start HTML fetch; harness had no fetcher)
+5. test_audit_execution.py fixture used dedup_key TEXT companies (matched bug, not production)
 
-**Planned Phase:** 37 (Cascade Audit Execution & Decision) — 1 plans — 2026-05-14T15:37:35.728Z
+Still un-patched (surface only as row-level failures inside artifacts — R2 cannot meaningfully test these callsites until fixed):
+- description_reformat → OpenRouter API returns 404 (model endpoint stale or model name changed)
+- company_research → production code path expects company_research table that does not exist in production DB
+- ai_nav_discovery → discover_navigation_recipe() does not accept recipe= keyword (signature drift between adapter and production)
+- parse_structured_fields → score function sets schema_valid=False even when candidate returns the expected keys (score-fn bug)
+- R1 sample_size = 3 not 10 (corpus_loader R1 reuses R0's n_per_callsite=3 keys; plan expected R1 to sample n=10)
+
+**Next step (recommended):**
+1. `/gsd-validate-phase 36` — retroactive audit of phase 36 harness against production schemas + signatures (use this session's defect list as the seed set)
+2. Apply phase 36 gap-closure plan to fix the remaining 5 defects above
+3. Re-run R0 + R1 on the corrected harness for clean data
+4. `/gsd-execute-phase 37 --tasks 01-05,01-06,01-07,01-10` (R2 + 10-spot-checks + CASCADE-AUDIT.md + verify completeness)
+
+**Branch reconciliation note (this session):**
+- main repo at cc28393 — untracked all .planning/ files per .gitignore:62 policy (was force-tracked at 9951b49 merge); planning artifacts remain on disk only
+- this worktree (cranky-satoshi-410e36) at ba0944a — force-tracks phase 37 planning + ROADMAP + REQUIREMENTS + PROJECT (continuing the existing worktree pattern); main and this worktree both descend from merge 9951b49 but have diverged
+- friendly-kilby-2d64a5 worktree at 2bf7fd7 — stale, predates wip(37) and phase 39 merge
+
+**Planned Phase:** 37 (Cascade Audit Execution & Decision) — 1 plans — 2026-05-14T15:37:35.728Z (PARTIAL — see Session Continuity above)
