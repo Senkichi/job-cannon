@@ -6,7 +6,10 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from evals.cascade_audit.adapters import rows_to_dicts
+from evals.cascade_audit.corpus_loader import _safe_cache_stem
 
 
 class ExtractJobsAdapter:
@@ -34,11 +37,23 @@ class ExtractJobsAdapter:
         """Exercise extract_jobs production code."""
         from job_finder.web.careers_scraper import _extract_jobs_with_low_tier
 
-        # Load cached HTML from artifacts/round_1/html/
+        # Load cached HTML from artifacts/round_1/html/. Lazy-fetch on first
+        # access so all providers in the same round share the same frozen
+        # snapshot (#phase-36 audit followup: spec said HTML should be cached
+        # at Round 1 start, but no fetcher step exists in the harness).
         dedup_key = row["dedup_key"]
-        html_path = self._artifact_dir / "round_1" / "html" / f"{dedup_key}.html"
+        html_dir = self._artifact_dir / "round_1" / "html"
+        html_dir.mkdir(parents=True, exist_ok=True)
+        html_path = html_dir / f"{_safe_cache_stem(dedup_key)}.html"
         if not html_path.exists():
-            raise FileNotFoundError(f"Cached HTML not found: {html_path}")
+            resp = requests.get(
+                row["homepage_url"],
+                timeout=15,
+                allow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (cascade-audit/phase-36)"},
+            )
+            resp.raise_for_status()
+            html_path.write_text(resp.text, encoding="utf-8")
 
         cached_html = html_path.read_text(encoding="utf-8")
 

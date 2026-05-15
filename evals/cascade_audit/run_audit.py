@@ -371,7 +371,7 @@ def main() -> None:
     round_num = _round_to_number(args.round)
 
     # Load config
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     # Initialize corpus loader
