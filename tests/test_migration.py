@@ -386,7 +386,7 @@ def test_migration_count_is_thirteen():
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 51
+    assert len(MIGRATIONS) == 53
 
 
 class TestMigration27:
@@ -911,7 +911,7 @@ class TestMigration18:
 
     def test_migrations_count_is_19(self):
         """MIGRATIONS list has 51 entries (through Migration 51: consolidate actions)."""
-        assert len(MIGRATIONS) == 51
+        assert len(MIGRATIONS) == 53
 
 
 class TestMigration40:
@@ -1344,4 +1344,44 @@ class TestMigration51ConsolidateBatchScoreActions:
             r["action"] for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
         }
         assert actions2 == actions
+        conn.close()
+
+
+class TestMigration52And53:
+    """Migration 52 (schema_valid column) and Migration 53 (onboarding_state table)."""
+
+    def test_migration53_creates_onboarding_state(self, tmp_db_path):
+        """Migration 53 creates onboarding_state table with correct schema."""
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+
+        # Check PRAGMA user_version is 53
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 53, f"Expected PRAGMA user_version=53, got: {version}"
+
+        # Check onboarding_state table exists
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='onboarding_state'"
+        ).fetchone()
+        assert table is not None, "onboarding_state table not found"
+
+        # Check table structure
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(onboarding_state)").fetchall()}
+        assert "id" in cols
+        assert "onboarding_complete" in cols
+        assert "created_at" in cols
+        assert "updated_at" in cols
+
+        # Insert a row and verify onboarding_complete defaults to 0
+        conn.execute("INSERT INTO onboarding_state (id) VALUES (1)")
+        conn.commit()
+        row = conn.execute("SELECT onboarding_complete FROM onboarding_state WHERE id = 1").fetchone()
+        assert row[0] == 0, f"Expected onboarding_complete=0, got: {row[0]}"
+
+        # Check schema_valid column exists on scoring_costs (from migration 52)
+        scoring_costs_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(scoring_costs)").fetchall()
+        }
+        assert "schema_valid" in scoring_costs_cols, "schema_valid column missing from scoring_costs"
+
         conn.close()
