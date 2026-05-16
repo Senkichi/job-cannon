@@ -1,104 +1,101 @@
-"""Unit tests for ``job_finder.config.resolve_config_path``.
+"""Unit tests for ``job_finder.config.load_config`` and ``write_config``.
 
-Covers the four lookup branches plus the V3 explicit-env-var-miss raise,
-which is the security-relevant behavior — falling through to a different
-config when the user explicitly named one is wrong UX.
+Covers the new platformdirs-based config loading with allow_missing support,
+plus the atomic write_config function.
 """
 
 import os
 
 import pytest
 
-from job_finder.config import ConfigNotFoundError, resolve_config_path
+from job_finder.config import ConfigNotFoundError, load_config, write_config
+from job_finder.web import user_data_dirs
 
 
-class TestResolveConfigPath:
-    """Branch-coverage tests for the documented lookup order."""
+class TestLoadConfig:
+    """Tests for load_config with platformdirs and allow_missing."""
 
     def test_env_var_set_and_file_exists_returns_env_path(self, monkeypatch, tmp_path):
-        """Branch 1 happy path — env var wins over CWD and user-config dir."""
+        """$JOB_CANNON_CONFIG set and file exists — use that path."""
         target = tmp_path / "alt-config.yaml"
         target.write_text("profile: {}\n", encoding="utf-8")
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(target))
-        # Even if a CWD config.yaml exists, env var must take precedence.
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "config.yaml").write_text("ignored: true\n", encoding="utf-8")
 
-        resolved = resolve_config_path()
+        cfg = load_config()
 
-        assert resolved == str(target)
+        assert cfg == {"profile": {}}
 
     def test_env_var_set_but_file_missing_raises(self, monkeypatch, tmp_path):
-        """Branch 1 V3 fix — explicit env-var miss must NOT silently fall through."""
+        """$JOB_CANNON_CONFIG set but missing raises ConfigNotFoundError."""
         bogus = tmp_path / "does-not-exist.yaml"
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(bogus))
-        # CWD has a perfectly valid config.yaml — but env var was set
-        # explicitly and points at a missing file. The user is asking for
-        # this specific file; using a different one is wrong UX.
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "config.yaml").write_text("would-fall-through: true\n", encoding="utf-8")
 
         with pytest.raises(ConfigNotFoundError, match=r"\$JOB_CANNON_CONFIG is set"):
-            resolve_config_path()
+            load_config()
 
-    def test_cwd_config_yaml_is_returned_when_no_env_var(self, monkeypatch, tmp_path):
-        """Branch 2 — env var unset, ./config.yaml present."""
+    def test_allow_missing_returns_empty_dict(self, monkeypatch, tmp_path):
+        """allow_missing=True returns {} when config doesn't exist."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         monkeypatch.delenv("JOB_CANNON_CONFIG", raising=False)
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "config.yaml").write_text("profile: {}\n", encoding="utf-8")
 
-        resolved = resolve_config_path()
+        cfg = load_config(allow_missing=True)
 
-        # The function returns os.path.join(getcwd(), "config.yaml") so the
-        # exact return value is the absolute joined path on Windows; compare
-        # by realpath to be platform-tolerant.
-        assert os.path.realpath(resolved) == os.path.realpath(str(tmp_path / "config.yaml"))
+        assert cfg == {}
 
-    def test_user_config_dir_returned_when_cwd_empty(self, monkeypatch, tmp_path):
-        """Branch 3 — env var unset, no CWD config, user-config dir has one."""
+    def test_allow_missing_false_raises(self, monkeypatch, tmp_path):
+        """allow_missing=False raises when config doesn't exist."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
         monkeypatch.delenv("JOB_CANNON_CONFIG", raising=False)
-        # Empty CWD — no config.yaml here.
-        empty_cwd = tmp_path / "empty"
-        empty_cwd.mkdir()
-        monkeypatch.chdir(empty_cwd)
 
-        if os.name == "nt":
-            user_root = tmp_path / "AppData"
-            monkeypatch.setenv("APPDATA", str(user_root))
-            user_dir = user_root / "job-cannon"
-        else:
-            home = tmp_path / "fakehome"
-            home.mkdir()
-            monkeypatch.setenv("HOME", str(home))
-            user_dir = home / ".config" / "job-cannon"
+        with pytest.raises(ConfigNotFoundError, match=r"Config file not found"):
+            load_config(allow_missing=False)
 
-        user_dir.mkdir(parents=True)
-        user_config = user_dir / "config.yaml"
-        user_config.write_text("profile: {}\n", encoding="utf-8")
+    def test_explicit_path_overrides_env(self, monkeypatch, tmp_path):
+        """Explicit config_path parameter wins over environment."""
+        target = tmp_path / "my-config.yaml"
+        target.write_text("profile: {}\n", encoding="utf-8")
+        monkeypatch.setenv("JOB_CANNON_CONFIG", str(tmp_path / "other.yaml"))
 
-        resolved = resolve_config_path()
+        cfg = load_config(str(target))
 
-        assert os.path.realpath(resolved) == os.path.realpath(str(user_config))
+        assert cfg == {"profile": {}}
 
-    def test_no_config_anywhere_raises(self, monkeypatch, tmp_path):
-        """Branch 4 — nothing set, nothing on disk → ConfigNotFoundError."""
-        monkeypatch.delenv("JOB_CANNON_CONFIG", raising=False)
-        empty_cwd = tmp_path / "empty"
-        empty_cwd.mkdir()
-        monkeypatch.chdir(empty_cwd)
 
-        # Point user-config dir at an empty location.
-        if os.name == "nt":
-            empty_appdata = tmp_path / "EmptyAppData"
-            empty_appdata.mkdir()
-            monkeypatch.setenv("APPDATA", str(empty_appdata))
-        else:
-            empty_home = tmp_path / "emptyhome"
-            empty_home.mkdir()
-            monkeypatch.setenv("HOME", str(empty_home))
+class TestWriteConfig:
+    """Tests for atomic write_config function."""
 
-        with pytest.raises(ConfigNotFoundError, match=r"config\.yaml not found"):
-            resolve_config_path()
+    def test_write_config_creates_file_in_user_data_dir(self, monkeypatch, tmp_path):
+        """write_config creates config.yaml under JOB_CANNON_USER_DATA_DIR."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+
+        data = {
+            "server": {"port": 5050},
+            "profile": {},
+            "sources": {},
+            "scoring": {},
+            "db": {},
+        }
+        result_path = write_config(data)
+
+        assert result_path == tmp_path / "config.yaml"
+        assert result_path.exists()
+
+    def test_write_config_roundtrip(self, monkeypatch, tmp_path):
+        """Config written by write_config can be read by load_config."""
+        monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
+
+        data = {
+            "server": {"port": 5050},
+            "profile": {},
+            "sources": {},
+            "scoring": {},
+            "db": {},
+        }
+        write_config(data)
+
+        loaded = load_config()
+
+        assert loaded == data
 
     def test_config_not_found_error_is_filenotfounderror_subclass(self):
         """API guarantee — callers can ``except FileNotFoundError`` if they want."""
