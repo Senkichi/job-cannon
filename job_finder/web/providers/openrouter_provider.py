@@ -57,7 +57,7 @@ class OpenRouterProvider(BaseProvider):
         """Make a chat completion call to OpenRouter /api/v1/chat/completions.
 
         Args:
-            model: Model identifier, e.g. "deepseek/deepseek-chat:free".
+            model: Model identifier, e.g. "deepseek/deepseek-v4-flash:free".
             system: System prompt string.
             messages: List of message dicts [{role, content}].
             output_schema: JSON schema dict for structured output (or None).

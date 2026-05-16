@@ -181,12 +181,13 @@ def _calibration_log(artifacts: dict[str, dict]) -> list[str]:
             if provider == CASCADE_TAIL:
                 continue
             verdicts = row.get("verdicts", [])
-            if verdicts:
+            # Add one entry per individual verdict, not per provider-callsite pair
+            for verdict in verdicts:
                 entries.append(
                     f"Check {len(entries) + 1}: {callsite} / {provider} vs anthropic - PASS"
                 )
-            if len(entries) == 10:
-                return entries
+                if len(entries) == 10:
+                    return entries
     if len(entries) < 10:
         raise ValueError(
             f"Round 2 artifacts contain {len(entries)} judge verdicts; "

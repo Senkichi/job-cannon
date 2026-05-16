@@ -29,7 +29,7 @@ def test_judge_pair_mock():
     # Verify provider.call was called correctly
     mock_provider.call.assert_called_once()
     call_args = mock_provider.call.call_args
-    assert call_args[1]["model"] == "deepseek/deepseek-chat:free"
+    assert call_args[1]["model"] == "deepseek/deepseek-v4-flash:free"
     assert call_args[1]["system"] == JUDGE_SYSTEM_PROMPT
     assert call_args[1]["max_tokens"] == 1024
 

@@ -43,7 +43,7 @@ def test_openrouter_provider_call():
         with patch("requests.post", return_value=mock_response) as mock_post:
             provider = OpenRouterProvider(config={})
             result = provider.call(
-                model="deepseek/deepseek-chat:free",
+                model="deepseek/deepseek-v4-flash:free",
                 system="Test system",
                 messages=[{"role": "user", "content": "Test"}],
             )
@@ -52,7 +52,7 @@ def test_openrouter_provider_call():
             mock_post.assert_called_once()
             call_args = mock_post.call_args
             assert "https://openrouter.ai/api/v1/chat/completions" in call_args[0][0]
-            assert call_args[1]["json"]["model"] == "deepseek/deepseek-chat:free"
+            assert call_args[1]["json"]["model"] == "deepseek/deepseek-v4-flash:free"
             assert call_args[1]["json"]["temperature"] == 0
             assert call_args[1]["headers"]["Authorization"] == "Bearer test-key"
 
@@ -81,7 +81,7 @@ def test_openrouter_provider_call_with_output_schema():
         with patch("requests.post", return_value=mock_response) as mock_post:
             provider = OpenRouterProvider(config={})
             result = provider.call(
-                model="deepseek/deepseek-chat:free",
+                model="deepseek/deepseek-v4-flash:free",
                 system="Test",
                 messages=[{"role": "user", "content": "Test"}],
                 output_schema=output_schema,

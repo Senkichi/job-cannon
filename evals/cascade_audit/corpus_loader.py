@@ -94,6 +94,9 @@ class CorpusLoader:
     def load_round_1(self, conn: sqlite3.Connection) -> dict[str, list[dict]]:
         """Load corpus using persisted dedup_keys from Round 0.
 
+        For judge-based callsites (description_reformat, company_research), samples
+        additional rows to reach n=10 for calibration log requirements.
+
         Args:
             conn: Open SQLite connection to production DB.
 
@@ -118,11 +121,12 @@ class CorpusLoader:
         corpus["extract_jobs"] = self._load_by_keys(
             "companies", dedup_keys["extract_jobs"], conn
         )
-        corpus["description_reformat"] = self._load_by_keys(
-            "jobs", dedup_keys["description_reformat"], conn
+        # Sample additional rows for judge-based callsites to reach n=10
+        corpus["description_reformat"] = self._sample_description_reformat(
+            10, conn, self._artifact_dir / "round_0"
         )
-        corpus["company_research"] = self._load_by_keys(
-            "companies", dedup_keys["company_research"], conn
+        corpus["company_research"] = self._sample_company_research(
+            10, conn, self._artifact_dir / "round_0"
         )
         corpus["ai_nav_discovery"] = self._load_by_keys(
             "companies", dedup_keys["ai_nav_discovery"], conn

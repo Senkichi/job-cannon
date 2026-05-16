@@ -408,6 +408,7 @@ def main() -> None:
             "scheduler_pause_status": "unknown",  # TODO: check scheduler status
         }
         judge_provider = _load_judge_provider(config)
+        logger.info(f"Judge provider loaded: {judge_provider is not None}")
 
         # Evaluate each (callsite, provider) pair
         for callsite in callsites:

@@ -58,9 +58,9 @@ Output B:
 
 Which output is better? Respond with winner ('A', 'B', or 'tie'), rationale, and confidence (0-1)."""
 
-    # Call provider with DeepSeek-V3.2
+    # Call provider with DeepSeek-V4 Flash (free tier)
     result = provider.call(
-        model="deepseek/deepseek-chat:free",
+        model="deepseek/deepseek-v4-flash:free",
         system=JUDGE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
         output_schema=Verdict.model_json_schema(),
@@ -69,19 +69,27 @@ Which output is better? Respond with winner ('A', 'B', or 'tie'), rationale, and
 
     # Parse response into Verdict
     try:
-        verdict = Verdict.model_validate_json(result.data)
+        # OpenRouter provider returns parsed dict, not JSON string
+        if isinstance(result.data, dict):
+            verdict = Verdict.model_validate(result.data)
+        else:
+            verdict = Verdict.model_validate_json(result.data)
         return verdict
     except ValidationError as exc:
         logger.warning(f"Judge response validation error: {exc}, retrying once...")
         # Retry once with same inputs
         result = provider.call(
-            model="deepseek/deepseek-chat:free",
+            model="deepseek/deepseek-v4-flash:free",
             system=JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
             output_schema=Verdict.model_json_schema(),
             max_tokens=1024,
         )
-        verdict = Verdict.model_validate_json(result.data)
+        # OpenRouter provider returns parsed dict, not JSON string
+        if isinstance(result.data, dict):
+            verdict = Verdict.model_validate(result.data)
+        else:
+            verdict = Verdict.model_validate_json(result.data)
         return verdict
 
 

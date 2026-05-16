@@ -1,0 +1,69 @@
+WNS Global Services Senior Analyst  - IT | SmartRecruiters
+Google Chrome
+Microsoft Edge
+Apple Safari
+Mozilla Firefox
+Senior Analyst  - IT
+Full-time
+Company Description
+HealthHelp - A WNS Company (www.HealthHelp.com), is the leader in the field of healthcare utilization and care management. We have gained this position by actively working to change out-of-date practices with a collaborative, non-denial based approach. Our methodology helps payors achieve a higher return on investment, gives providers education programs that better inform physicians, and ensures quality and safety for the patients needing treatment. HealthHelp’s innovative approach and strong IT capability in specialty benefits management means that staff will move healthcare forward when provided with evidence-based solutions and second opinions. HealthHelp's staff is comprised of healthcare professionals who make a difference every day. HealthHelp has a desire to fill their company with talented and innovative people who want a career path filled with success and personal growth. Our specialty benefits management services are broad and include, Cardiology, Oncology, Radiology, Radiation Therapy, Sleep Care, and Musculoskeletal Care. HealthHelp is headquartered in Houston, Texas. HealthHelp provides equal opportunities to all employees and applicants without regard to race, color, religion, gender, sexual orientation, gender identity or expression, national origin, age, disability, genetic information, marital status, amnesty or status as a covered veteran in accordance with applicable federal, state, and local laws. If you need assistance in completing this application due to a disability, please contact a member of the Talent Acquisition Group to request an accommodation or an alternative application process by emailing
+[email protected]
+Job Description
+SUMMARY
+The IT Triage Analyst is an individual contributor and the first point of contact for all software, integration, and Electronic Data Interchange (EDI) issues submitted to HealthHelp's internal portal. This role serves as the gatekeeper between end users and the development team — evaluating, reproducing, and validating issues before they ever reach IT development. The analyst determines whether a submitted issue is a true defect, a data discrepancy, or a user education opportunity, and routes each accordingly.
+Key Responsibilities:
+•    Monitor the HealthHelp issue portal daily, serving as the sole owner of the triage queue from intake through resolution or escalation.
+•    Reproduce and validate reported issues across applications, EDI transactions, integrations, and data to confirm whether a true defect exists.
+•    Distinguish between application bugs, EDI/integration failures, data discrepancies, and workflow misunderstandings; close non-bug tickets with a clear explanation to the submitter and backlog recurring misunderstanding patterns for escalation to the appropriate training team.
+•    Convert validated defects into DevOps bugs with full documentation and manage the triage bucket on an ongoing basis.
+•    Monitor auth reported tables for failed authorization records and action within SLA to prevent gaps in payer claim system visibility.
+•    Coordinate with the Scrum Master and Product Director to prioritize confirmed bugs and determine Program Increment (PI) placement.
+•    Route optimization requests to the weekly Change Control Board (CCB) rather than the development queue.
+•    Escalate client-impacting issues to Client Managers and data-related issues to the data team as appropriate.
+Qualifications
+•    3+ years of experience in a technical triage, IT operations, or healthcare IT support role.
+•    Experience working with issue or ticketing portals (e.g., Jira, ServiceNow, Azure DevOps, or similar).
+•    Ability to reproduce and investigate software and integration issues independently.
+•    Strong communication skills; able to translate technical findings for non-technical end users and leadership.
+•    Highly organized with strong attention to detail and consistent follow-through.
+•    Familiarity with EDI standards, specifically X12 278 (prior authorization transactions).
+•    Experience in healthcare IT, utilization management, or prior authorization workflows.
+•    Exposure to Agile/SAFe development environments and DevOps practices.
+•    Basic understanding of SQL or data querying for investigative purposes.
+•    Experience with FHIR-based integrations or payer/provider interoperability (preferred).
+Additional Information
+Compensation Disclosure
+The base salary range for this position is $115,000 to $135,000 annually. This represents the base pay range that we reasonably expect to offer for this position.
+Final compensation will be determined based on a variety of factors, including but not limited to the candidate’s experience, education, skillset, and location.
+In addition to base pay, this role may be eligible for performance-based bonuses, incentive pay, or commissions, which are not included in the listed base salary range.
+WNS complies with all applicable federal, state, and local pay transparency laws, including those in California, Colorado, New York, Washington, and Illinois.
+Note: For complete compensation information, please refer to the job posting on our official careers page.
+Benefits Overview
+Our benefits package includes (but is not limited to):
+- Medical, dental, and vision insurance
+- Paid time off (PTO), holidays, and sick leave
+- 401(k) with company match or other retirement plan
+- Life and AD&D Insurance
+- Employee Assistance Program
+Equal Opportunity Employer Statement
+WNS is an Equal Opportunity Employer. We celebrate diversity and are committed to creating an inclusive environment for all employees.
+All qualified applicants will receive consideration for employment without regard to race, color, religion, sex (including pregnancy, childbirth, or related medical conditions), sexual orientation, gender identity or expression, national origin, age, disability, genetic information, veteran status, or any other status protected under federal, state, or local law.
+We also provide reasonable accommodations to individuals with disabilities and for sincerely held religious beliefs in all aspects of employment, including the application process.
+How to Apply
+Please submit your application, including a resume and optional cover letter, through our careers page or email to
+[email protected]
+.
+Job Location
+Google Maps requires functional cookies to be enabled
+I'm interested
+I'm interested
+Privacy Notice
+Imprint
+Share to WeChat
+×
+Copy the link and open WeChat to share.
+Copy to clipboard
+Open WeChat
+Share to WeChat
+×
+Use Scan QR Code in WeChat and click ··· to share.
