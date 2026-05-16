@@ -32,33 +32,63 @@ logger = logging.getLogger(__name__)
 
 _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 
-# Phase 39: nested provider -> workload -> model defaults.
+# Workload-class model defaults per provider.
 # - quick:  every non-scoring LLM call (extraction, parsing, navigation, research, reformatting, agentic enricher).
 # - score:  full ordinal-rubric job scoring.
 # - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
+#
 # Triage entries are absent here (resolved as identical to `quick` at lookup time).
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-    "claude_code_cli": {"quick": "claude-haiku-4-5",       "score": "claude-sonnet-4-6"},
-    "anthropic":       {"quick": "claude-haiku-4-5",       "score": "claude-sonnet-4-6"},
-    "gemini":          {"quick": "gemini-2.0-flash",       "score": "gemini-2.0-pro"},
-    "gemini_cli":      {"quick": "gemini-2.0-flash",       "score": "gemini-2.0-pro"},
-    "ollama":          {"quick": "qwen2.5:14b",            "score": "qwen2.5:14b"},
-    "local_bundled":   {"quick": "<bundled-gguf>",         "score": "<bundled-gguf>"},
-    "groq":            {"quick": "llama-3.3-70b-versatile", "score": "llama-3.3-70b-versatile"},
-    "cerebras":        {"quick": "llama3.3-70b",            "score": "llama3.3-70b"},
+    "claude_code_cli": {"quick": "claude-haiku-4-5",  "score": "claude-sonnet-4-6"},
+    "anthropic":       {"quick": "claude-haiku-4-5",  "score": "claude-sonnet-4-6"},
+    "gemini":          {"quick": "gemini-2.5-flash",  "score": "gemini-2.5-pro"},
+    "gemini_cli":      {"quick": "gemini-2.5-flash",  "score": "gemini-2.5-pro"},
+    "ollama":          {"quick": "qwen2.5:14b",       "score": "qwen2.5:14b"},
+    "local_bundled":   {"quick": "Qwen2.5-3B-Instruct-Q4_K_M", "score": None},
+    "groq":            {"quick": "llama-3.1-8b-instant", "score": "llama-3.3-70b-versatile"},
+    "cerebras":        {"quick": "llama3.1-8b",            "score": "llama-3.3-70b"},
 }
 
-# Phase 39: legacy-tier translation. Deleted in Phase 40 after all callers are renamed.
-_LEGACY_TIER_MAP: dict[str, str] = {
-    "low":     "quick",
-    "mid":     "score",
-    "high":    "score",
-    "scoring": "score",
-    # Forward-compat passthrough:
-    "quick":   "quick",
-    "score":   "score",
-    "triage":  "triage",
-}
+def resolve_workload_routing(workload: str, config: dict) -> dict:
+    """Resolve workload-class -> {primary, fallback} routing.
+
+    Returns:
+        {
+          "primary":  {"provider": str, "model": str},
+          "fallback": [{"provider": str, "model": str}, ...],
+        }
+
+    `triage` resolves to the same model as `quick` for the same provider —
+    the gate is a prompt+schema choice, not a capability tier.
+    """
+    if workload not in _VALID_WORKLOADS:
+        raise ValueError(f"Unknown workload: {workload!r}. Valid: {sorted(_VALID_WORKLOADS)}")
+
+    providers_cfg = config.get("providers", {})
+    primary_name = providers_cfg.get("primary", "anthropic")
+    overrides = providers_cfg.get("overrides", {})
+    fallback_names = providers_cfg.get("fallback_chain", [])
+
+    def lookup_model(provider: str) -> str:
+        # triage uses the quick model
+        lookup_key = "quick" if workload == "triage" else workload
+        override = overrides.get(provider, {}).get(lookup_key)
+        if override:
+            return override
+        provider_defaults = _PROVIDER_DEFAULTS.get(provider, {})
+        model = provider_defaults.get(lookup_key)
+        if model is None:
+            # Skip provider (e.g., local_bundled has no score entry)
+            raise ValueError(f"Provider {provider} has no model for workload {lookup_key}")
+        return model
+
+    return {
+        "primary": {"provider": primary_name, "model": lookup_model(primary_name)},
+        "fallback": [
+            {"provider": name, "model": lookup_model(name)}
+            for name in fallback_names
+        ],
+    }
 
 # Daily usage tracking — module-level state for rate limiting.
 # Resets automatically on date rollover; bootstraps from scoring_costs DB.
@@ -157,12 +187,12 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     """Resolve logical tier name to provider + model + fallback.
 
     Args:
-        tier: Logical tier name: "mid", "low", or "high".
+        tier: Workload name: "quick", "score", or "triage".
         config: Full application config dict.
 
     Returns:
         Dict with keys:
-            provider (str): "anthropic" | "gemini" | "ollama"
+            provider (str): Provider name
             model (str): Provider-specific model identifier
             prompt_variant (str | None): Prompt variant for primary provider
             fallback (str | None): Fallback provider name, or None
@@ -171,54 +201,26 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
             throttle_delays (dict[str, float]): Per-provider seconds between requests, or {}
     """
     providers_cfg = config.get("providers", {})
-    tier_cfg = providers_cfg.get(tier, {})
-
-    # Inherit provider routing from a configured peer tier when this tier has
-    # no explicit config.  This lets a single providers.mid entry cover all
-    # tiers without duplicating the cascade in config.yaml.  The model and
-    # prompt_variant stay tier-specific (only provider + fallback_chain inherit).
-    if not tier_cfg:
-        _non_meta = {
-            k: v
-            for k, v in providers_cfg.items()
-            if isinstance(v, dict) and k not in ("daily_limits", "throttle_delays")
-        }
-        if _non_meta:
-            _donor = next(iter(_non_meta.values()))
-            tier_cfg = {
-                "provider": _donor.get("provider", "anthropic"),
-                "model": _donor.get("model"),
-                "fallback_chain": _donor.get("fallback_chain", []),
-                "fallback": _donor.get("fallback"),
-            }
-
-    # Phase 39: translate legacy tier names ("low"/"mid"/"high"/"scoring") to
-    # workload names ("quick"/"score"/"triage"). Deleted in Phase 40.
-    workload = _LEGACY_TIER_MAP.get(tier, tier)
-
-    # Look up the per-provider default for this workload. Fall back to the
-    # anthropic[score] entry if the provider is unknown (e.g., a typo'd
-    # config name); the cascade catches the resulting ValueError downstream.
-    provider_defaults = _PROVIDER_DEFAULTS.get(
-        tier_cfg.get("provider", "anthropic"),
-        _PROVIDER_DEFAULTS["anthropic"],
-    )
-    scoring_model = config.get("scoring", {}).get("models", {}).get(tier)
-    default_model = scoring_model or provider_defaults.get(workload) or provider_defaults["quick"]
-
-    provider = tier_cfg.get("provider", "anthropic")
-    model = tier_cfg.get("model") or default_model
-    prompt_variant = tier_cfg.get("prompt_variant")
-    fallback = tier_cfg.get("fallback")
-    fallback_chain = tier_cfg.get("fallback_chain", [])
     daily_limits = providers_cfg.get("daily_limits", {})
     throttle_delays = providers_cfg.get("throttle_delays", {})
 
+    # Use new workload routing
+    routing = resolve_workload_routing(tier, config)
+
+    # Build fallback chain, skipping providers that have no model for this workload
+    fallback_chain = []
+    for entry in routing["fallback"]:
+        try:
+            fallback_chain.append(entry)
+        except ValueError:
+            # Provider has no model for this workload (e.g., local_bundled for score)
+            continue
+
     return {
-        "provider": provider,
-        "model": model,
-        "prompt_variant": prompt_variant,
-        "fallback": fallback,
+        "provider": routing["primary"]["provider"],
+        "model": routing["primary"]["model"],
+        "prompt_variant": None,
+        "fallback": None,
         "fallback_chain": fallback_chain,
         "daily_limits": daily_limits,
         "throttle_delays": throttle_delays,

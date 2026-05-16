@@ -17,6 +17,10 @@ class ConfigNotFoundError(FileNotFoundError):
     """Raised when config.yaml cannot be located via the documented lookup order."""
 
 
+class ConfigError(ValueError):
+    """Raised when config.yaml has invalid schema or structure."""
+
+
 # --- Server defaults ---
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 5000
@@ -29,9 +33,25 @@ DEFAULT_DAILY_BUDGET_USD: float = 10.0
 DEFAULT_MIN_SCORE_THRESHOLD = 40
 
 # --- Model defaults ---
-DEFAULT_MODEL_LOW = "claude-haiku-4-5"
-DEFAULT_MODEL_MID = "claude-sonnet-4-6"
-DEFAULT_MODEL_HIGH = "claude-opus-4-6"
+# Legacy tier constants removed in Phase 40 (replaced by _PROVIDER_DEFAULTS)
+
+def resolve_triage_enabled(config: dict) -> bool:
+    """Resolve 'auto' string to bool based on primary provider.
+
+    Returns:
+        True when primary is claude_code_cli, gemini, gemini_cli, or anthropic.
+        False when primary is ollama or local_bundled.
+        Preserves explicit True/False from config.
+    """
+    triage_cfg = config.get("providers", {}).get("triage", {})
+    enabled = triage_cfg.get("enabled", "auto")
+
+    if enabled == "auto":
+        primary = config.get("providers", {}).get("primary", "anthropic")
+        _LOCAL_PRIMARIES = {"ollama", "local_bundled"}
+        return primary not in _LOCAL_PRIMARIES
+
+    return bool(enabled)
 
 # --- Database ---
 DEFAULT_DB_PATH = "jobs.db"
@@ -109,6 +129,14 @@ def validate_required_sections(config: dict) -> None:
         raise ValueError(
             f"Config is missing required section(s): {', '.join(missing)}\n"
             f"See config.example.yaml for the expected structure."
+        )
+
+    # Reject old providers.scoring schema (Phase 40 migration)
+    if "providers" in config and "scoring" in config["providers"]:
+        raise ConfigError(
+            "Old config schema detected: providers.scoring key found. "
+            "Phase 40 migrated to flat providers: schema. "
+            "See .planning/phases/40-workload-tiers-cascade-rewire-canary/40-CONTEXT.md for migration instructions."
         )
 
 

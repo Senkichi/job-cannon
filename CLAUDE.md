@@ -101,7 +101,13 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
 - Rescoring skips already-scored jobs unless `force=True` (manual rescore).
 
-**Routing tiers:** `call_model` uses `low`, `mid`, and `high` for non-scoring callers, and `scoring` for v3.0 job scoring. Anthropic model IDs (for example `claude-haiku-4-5`) are vendor model names, not tier labels.
+**Workload-class tiers:** The system now uses workload-named tiers (`quick`/`score`/`triage`):
+- `quick`: every non-scoring LLM call (extraction, parsing, navigation, research, reformatting, agentic enricher)
+- `score`: full ordinal-rubric job scoring
+- `triage`: optional pre-scoring gate (uses quick model with triage-specific prompt)
+
+Per-provider model defaults live in `_PROVIDER_DEFAULTS` (nested provider→workload→model dict).
+Legacy tier names (`low`/`mid`/`high`/`haiku`/`sonnet`/`opus`) are removed.
 
 ## Planning Documentation
 

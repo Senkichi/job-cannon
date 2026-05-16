@@ -24,9 +24,6 @@ from job_finder.config import (
     DEFAULT_LOOKBACK_DAYS,
     DEFAULT_MAX_RESULTS,
     DEFAULT_MIN_SCORE_THRESHOLD,
-    DEFAULT_MODEL_HIGH,
-    DEFAULT_MODEL_LOW,
-    DEFAULT_MODEL_MID,
     load_config,
 )
 from job_finder.web import user_data_dirs
@@ -156,9 +153,6 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.jinja_env.globals["DEFAULT_MIN_SCORE_THRESHOLD"] = DEFAULT_MIN_SCORE_THRESHOLD
     app.jinja_env.globals["DEFAULT_LOOKBACK_DAYS"] = DEFAULT_LOOKBACK_DAYS
     app.jinja_env.globals["DEFAULT_MAX_RESULTS"] = DEFAULT_MAX_RESULTS
-    app.jinja_env.globals["DEFAULT_MODEL_LOW"] = DEFAULT_MODEL_LOW
-    app.jinja_env.globals["DEFAULT_MODEL_MID"] = DEFAULT_MODEL_MID
-    app.jinja_env.globals["DEFAULT_MODEL_HIGH"] = DEFAULT_MODEL_HIGH
     app.jinja_env.globals["DEFAULT_DAILY_BUDGET_USD"] = DEFAULT_DAILY_BUDGET_USD
 
     # --- Custom Jinja2 filters ---
