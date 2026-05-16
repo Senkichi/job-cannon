@@ -175,6 +175,7 @@ These files contain personal data and API keys. They are `.gitignore`d and must 
 
 ## Environment Variables
 
+- `JOB_CANNON_USER_DATA_DIR` (optional) — absolute path to user data directory. For local development, set this to the project root if you want config.yaml and jobs.db to stay in the repository directory instead of the OS user-data directory.
 - `OLLAMA_EXE` (optional) — absolute path to `ollama.exe`. Only needed if Ollama is installed somewhere other than the Windows default (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`) and not on PATH. The scheduler auto-starts Ollama at app boot so the nightly agentic backfill (3:30 AM) has a live service.
 
 ## Don't
