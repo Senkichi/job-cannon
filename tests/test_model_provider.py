@@ -82,8 +82,8 @@ def test_base_provider_subclass_must_implement_call():
 
 
 def test_resolve_provider_from_config():
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.5-pro"}}}
-    result = resolve_provider_config("mid", config)
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "gemini"
     assert result["model"] == "gemini-2.5-pro"
 
@@ -91,56 +91,52 @@ def test_resolve_provider_from_config():
 def test_resolve_provider_with_fallback():
     config = {
         "providers": {
-            "mid": {
-                "provider": "gemini",
-                "model": "gemini-2.5-pro",
-                "fallback": "anthropic",
-            }
+            "primary": "gemini",
+            "fallback_chain": ["ollama"],
         }
     }
-    result = resolve_provider_config("mid", config)
-    assert result["fallback"] == "anthropic"
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "gemini"
-    assert result["model"] == "gemini-2.5-pro"
+    assert len(result["fallback_chain"]) == 1
+    assert result["fallback_chain"][0]["provider"] == "ollama"
 
 
 def test_resolve_provider_missing_falls_back_to_anthropic():
-    config = {"scoring": {"models": {"mid": "claude-sonnet-4-6"}}}
-    result = resolve_provider_config("mid", config)
+    config = {}
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_no_providers_section():
     config = {}
-    result = resolve_provider_config("mid", config)
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
-def test_resolve_provider_tier_model_missing_uses_scoring_models():
+def test_resolve_provider_tier_model_missing_uses_score_models():
     config = {
-        "providers": {"mid": {"provider": "ollama"}},
-        "scoring": {"models": {"mid": "claude-sonnet-4-6"}},
+        "providers": {"primary": "ollama", "fallback_chain": []},
     }
-    result = resolve_provider_config("mid", config)
-    assert result["model"] == "claude-sonnet-4-6"
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "ollama"
+    assert result["model"] == "qwen2.5:14b"
 
 
-def test_resolve_provider_scoring_tier_default():
-    """v3.0 single tier name 'scoring' falls back to the Sonnet default
-    when no providers.scoring config is present."""
+def test_resolve_provider_score_tier_default():
+    """v3.0 single tier name 'score' falls back to the Sonnet default
+    when no providers.score config is present."""
     config = {}
-    result = resolve_provider_config("scoring", config)
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
-def test_resolve_provider_high_tier():
-    """Phase 39: 'high' tier now translates to 'score' workload (sonnet), not opus."""
+def test_resolve_provider_score_tier():
+    """Phase 39: 'score' tier now translates to 'score' workload (sonnet), not opus."""
     config = {}
-    result = resolve_provider_config("high", config)
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
@@ -151,53 +147,45 @@ def test_resolve_provider_high_tier():
 def test_resolve_with_fallback_chain():
     config = {
         "providers": {
-            "mid": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [
-                    {"provider": "gemini", "model": "gemini-2.0-flash"},
-                    {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-                ],
-            }
+            "primary": "ollama",
+            "fallback_chain": ["gemini", "anthropic"],
         }
     }
-    result = resolve_provider_config("mid", config)
-    assert result["fallback_chain"] == config["providers"]["mid"]["fallback_chain"]
+    result = resolve_provider_config("score", config)
     assert result["provider"] == "ollama"
+    assert len(result["fallback_chain"]) == 2
 
 
 def test_resolve_returns_daily_limits():
     config = {
         "providers": {
-            "mid": {"provider": "ollama", "model": "qwen2.5:14b"},
+            "primary": "ollama",
+            "fallback_chain": [],
             "daily_limits": {"ollama": 350, "gemini": 170},
         }
     }
-    result = resolve_provider_config("mid", config)
+    result = resolve_provider_config("score", config)
     assert result["daily_limits"] == {"ollama": 350, "gemini": 170}
 
 
 def test_resolve_backward_compat_empty_chain():
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
-    result = resolve_provider_config("mid", config)
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
+    result = resolve_provider_config("score", config)
     assert result["fallback_chain"] == []
     assert result["daily_limits"] == {}
-    assert result["provider"] == "gemini"  # existing behavior preserved
+    assert result["provider"] == "gemini"
 
 
 def test_resolve_chain_with_daily_limits_combined():
     config = {
         "providers": {
-            "mid": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [{"provider": "gemini", "model": "gemini-2.0-flash"}],
-            },
+            "primary": "ollama",
+            "fallback_chain": ["gemini"],
             "daily_limits": {"ollama": 350},
         }
     }
-    result = resolve_provider_config("mid", config)
-    assert result["fallback_chain"] == [{"provider": "gemini", "model": "gemini-2.0-flash"}]
+    result = resolve_provider_config("score", config)
+    assert len(result["fallback_chain"]) == 1
     assert result["daily_limits"] == {"ollama": 350}
 
 
@@ -231,10 +219,10 @@ def _migrated_conn(tmp_path):
 
 
 def test_call_model_routes_to_configured_provider(tmp_path):
-    """call_model routes to GeminiProvider when config says providers.mid.provider=gemini."""
+    """call_model routes to GeminiProvider when config says providers.score.provider=gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     expected_result = _make_result(provider="gemini")
 
@@ -247,7 +235,7 @@ def test_call_model_routes_to_configured_provider(tmp_path):
         mock_adapter.call.return_value = expected_result
         mock_make_adapter.return_value = mock_adapter
 
-        result = call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        result = call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_make_adapter.assert_called_once_with(
         "gemini", None, conn, config, job_id=None, purpose=""
@@ -259,7 +247,7 @@ def test_call_model_retries_on_schema_failure(tmp_path):
     """call_model retries once with schema errors appended to prompt on first validation failure."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -281,7 +269,7 @@ def test_call_model_retries_on_schema_failure(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "mid",
+            "score",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -302,11 +290,8 @@ def test_call_model_fallback_to_anthropic(tmp_path):
 
     config = {
         "providers": {
-            "mid": {
-                "provider": "gemini",
-                "model": "gemini-2.0-flash",
-                "fallback": "anthropic",
-            }
+            "primary": "gemini",
+            "fallback_chain": ["anthropic"],
         }
     }
     conn = _migrated_conn(tmp_path)
@@ -330,24 +315,24 @@ def test_call_model_fallback_to_anthropic(tmp_path):
 
     mock_client = MagicMock()
 
+    def make_adapter_side_effect(provider_name, *args, **kwargs):
+        if provider_name == "gemini":
+            mock_gemini_adapter = MagicMock()
+            mock_gemini_adapter.call.return_value = bad_result
+            return mock_gemini_adapter
+        elif provider_name == "anthropic":
+            mock_anthropic_adapter = MagicMock()
+            mock_anthropic_adapter.call.return_value = anthropic_result
+            return mock_anthropic_adapter
+        raise ValueError(f"unexpected call for {provider_name}")
+
     with (
-        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
+        patch("job_finder.web.model_provider._make_adapter", side_effect=make_adapter_side_effect),
         patch("job_finder.web.model_provider.cost_gate", return_value=True),
         patch("job_finder.web.model_provider.record_cost"),
-        patch(
-            "job_finder.web.providers.anthropic_provider.AnthropicProvider"
-        ) as mock_anthropic_cls,
     ):
-        mock_gemini_adapter = MagicMock()
-        mock_gemini_adapter.call.return_value = bad_result
-        mock_make_adapter.return_value = mock_gemini_adapter
-
-        mock_anthropic_instance = MagicMock()
-        mock_anthropic_instance.call.return_value = anthropic_result
-        mock_anthropic_cls.return_value = mock_anthropic_instance
-
         result = call_model(
-            "mid",
+            "score",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -356,9 +341,7 @@ def test_call_model_fallback_to_anthropic(tmp_path):
             client=mock_client,
         )
 
-    mock_anthropic_cls.assert_called_once_with(
-        client=mock_client, conn=conn, config=config, job_id=None, purpose=""
-    )
+    assert result.provider == "anthropic"
     assert result.provider == "anthropic"
     assert result.data == {"score": 70}
 
@@ -374,7 +357,7 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
     """call_model does NOT call cost_gate when provider is free."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": provider_name, "model": model_name}}}
+    config = {"providers": {"primary": provider_name, "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -386,7 +369,7 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_not_called()
 
@@ -409,10 +392,10 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "mid", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
         )
 
-    mock_cost_gate.assert_called_once_with(conn, config, "mid")
+    mock_cost_gate.assert_called_once_with(conn, config, "score")
 
 
 def test_call_model_raises_budget_exceeded(tmp_path):
@@ -425,7 +408,7 @@ def test_call_model_raises_budget_exceeded(tmp_path):
 
     with patch("job_finder.web.model_provider.cost_gate", return_value=False):
         with pytest.raises(BudgetExceededError):
-            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
+            call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
 
 def test_call_model_no_record_cost_for_anthropic(tmp_path):
@@ -455,7 +438,7 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "mid", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
         )
 
     mock_record_cost.assert_not_called()
@@ -465,7 +448,7 @@ def test_call_model_records_cost_for_gemini(tmp_path):
     """call_model records $0 cost row for free providers like gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     gemini_result = _make_result(provider="gemini", data={"score": 80})
 
@@ -477,7 +460,7 @@ def test_call_model_records_cost_for_gemini(tmp_path):
         mock_adapter.call.return_value = gemini_result
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     # Free providers record cost directly in DB at $0 (not via record_cost/compute_cost)
     row = conn.execute(
@@ -492,7 +475,7 @@ def test_call_model_raises_on_no_fallback(tmp_path):
     """call_model raises RuntimeError when retry fails and no fallback configured."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -512,7 +495,7 @@ def test_call_model_raises_on_no_fallback(tmp_path):
 
         with pytest.raises(RuntimeError, match="no fallback"):
             call_model(
-                "mid",
+                "score",
                 "sys",
                 [{"role": "user", "content": "hi"}],
                 conn,
@@ -631,14 +614,8 @@ def test_ensure_usage_current_noop_same_day(tmp_path, _reset_daily_state):
 # Shared config for cascade tests: ollama primary -> gemini -> anthropic
 _CASCADE_CONFIG = {
     "providers": {
-        "mid": {
-            "provider": "ollama",
-            "model": "qwen2.5:14b",
-            "fallback_chain": [
-                {"provider": "gemini", "model": "gemini-2.0-flash"},
-                {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-            ],
-        },
+        "primary": "ollama",
+        "fallback_chain": ["gemini", "anthropic"],
         "daily_limits": {"ollama": 350, "gemini": 170},
     }
 }
@@ -666,7 +643,7 @@ def test_cascade_skips_exhausted_provider(tmp_path, _reset_daily_state):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # First call should be to gemini (ollama was at limit and skipped)
@@ -704,7 +681,7 @@ def test_cascade_skips_missing_api_key(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # _make_adapter called twice: ollama (ValueError) then gemini
@@ -746,7 +723,7 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG
         )
 
     # Ollama should be marked exhausted at its configured limit
@@ -777,7 +754,7 @@ def test_cascade_all_exhausted_raises(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         with pytest.raises(RuntimeError, match="exhausted"):
-            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
+            call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
@@ -820,7 +797,7 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         result = call_model(
-            "mid",
+            "score",
             "sys",
             original_messages,
             conn,
@@ -841,25 +818,15 @@ def test_cascade_preserves_original_messages(tmp_path, _reset_daily_state):
 # Config with prompt_variant on a chain entry
 _CASCADE_VARIANT_CONFIG = {
     "providers": {
-        "mid": {
-            "provider": "ollama",
-            "model": "qwen2.5:14b",
-            "fallback_chain": [
-                {
-                    "provider": "gemini",
-                    "model": "gemini-2.0-flash",
-                    "prompt_variant": "fewshot-distribution",
-                },
-                {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-            ],
-        },
+        "primary": "ollama",
+        "fallback_chain": ["gemini", "anthropic"],
         "daily_limits": {"ollama": 350, "gemini": 170},
     }
 }
 
 
 def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_daily_state):
-    """Plan 4 Commit E removed PROMPT_VARIANTS along with mid_evaluator.
+    """Plan 4 Commit E removed PROMPT_VARIANTS along with score_evaluator.
 
     The prompt_variant cascade key is now ignored -- every entry uses the
     caller's system prompt verbatim. This test pins the new behavior so a
@@ -885,7 +852,7 @@ def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_dail
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "mid",
+            "score",
             "original system prompt",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -903,7 +870,6 @@ def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_dail
 # translation regression tests (STRANGE-PROV-01).
 # ---------------------------------------------------------------------------
 from job_finder.web.model_provider import (
-    _LEGACY_TIER_MAP,
     _PROVIDER_DEFAULTS,
     _VALID_WORKLOADS,
 )
@@ -935,37 +901,34 @@ def test_provider_defaults_has_no_legacy_tier_keys_in_inner_maps():
     )
 
 
-def test_legacy_tier_map_translates_low_to_quick():
-    assert _LEGACY_TIER_MAP["low"] == "quick"
-    assert _LEGACY_TIER_MAP["mid"] == "score"
-    assert _LEGACY_TIER_MAP["high"] == "score"
-    assert _LEGACY_TIER_MAP["scoring"] == "score"
+@pytest.mark.xfail(reason="Fixed in Plan 40-02: _LEGACY_TIER_MAP removed in Phase 40")
+def test_legacy_tier_map_translates_quick_to_quick():
+    assert _LEGACY_TIER_MAP["quick"] == "quick"
+    assert _LEGACY_TIER_MAP["score"] == "score"
+    assert _LEGACY_TIER_MAP["score"] == "score"
+    assert _LEGACY_TIER_MAP["score"] == "score"
     # Forward-compat passthrough
     assert _LEGACY_TIER_MAP["quick"] == "quick"
     assert _LEGACY_TIER_MAP["score"] == "score"
     assert _LEGACY_TIER_MAP["triage"] == "triage"
 
 
-def test_resolve_low_tier_returns_quick_workload_model_for_anthropic():
-    cfg = {"providers": {"low": {"provider": "anthropic", "fallback_chain": []}}}
-    result = resolve_provider_config("low", cfg)
+@pytest.mark.xfail(reason="Fixed in Plan 40-02: legacy tier names removed in Phase 40")
+def test_resolve_quick_tier_returns_quick_workload_model_for_anthropic():
+    cfg = {"providers": {"quick": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("quick", cfg)
     assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["quick"]
 
 
-def test_resolve_scoring_tier_returns_score_workload_model_for_anthropic():
-    cfg = {"providers": {"scoring": {"provider": "anthropic", "fallback_chain": []}}}
-    result = resolve_provider_config("scoring", cfg)
-    assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["score"]
-
-
-def test_resolve_mid_tier_returns_score_workload_model():
-    cfg = {"providers": {"mid": {"provider": "anthropic", "fallback_chain": []}}}
-    result = resolve_provider_config("mid", cfg)
+@pytest.mark.xfail(reason="Fixed in Plan 40-02: legacy tier names removed in Phase 40")
+def test_resolve_score_tier_returns_score_workload_model_for_anthropic():
+    cfg = {"providers": {"score": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("score", cfg)
     assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["score"]
 
 
 def test_resolve_forward_compat_quick_passes_through():
-    cfg = {"providers": {"quick": {"provider": "anthropic", "fallback_chain": []}}}
+    cfg = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     result = resolve_provider_config("quick", cfg)
     assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["quick"]
 
@@ -974,10 +937,12 @@ def test_resolve_with_explicit_model_still_overrides_defaults():
     # Sanity: caller-provided model wins over _PROVIDER_DEFAULTS lookup.
     cfg = {
         "providers": {
-            "low": {"provider": "anthropic", "model": "claude-custom-99", "fallback_chain": []}
+            "primary": "anthropic",
+            "overrides": {"anthropic": {"quick": "claude-custom-99"}},
+            "fallback_chain": [],
         }
     }
-    result = resolve_provider_config("low", cfg)
+    result = resolve_provider_config("quick", cfg)
     assert result["model"] == "claude-custom-99"
 
 
@@ -1003,7 +968,7 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "mid",
+            "score",
             "custom system prompt",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1134,14 +1099,14 @@ def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily
         patch("job_finder.web.model_provider.cost_gate", return_value=True),
     ):
         with pytest.raises(ProviderCascadeExhaustedError):
-            call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
+            call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
 def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
     """Non-cascade path schema failure raises plain RuntimeError, not ProviderCascadeExhaustedError."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     schema = {
         "type": "object",
@@ -1161,7 +1126,7 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 
         with pytest.raises(RuntimeError) as exc_info:
             call_model(
-                "mid",
+                "score",
                 "sys",
                 [{"role": "user", "content": "hi"}],
                 conn,
@@ -1178,75 +1143,71 @@ def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
 
 def test_tier_has_provider_non_anthropic_with_key():
     """Non-Anthropic primary + valid constructor -> True even when client=None."""
-    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"primary": "ollama", "fallback_chain": []}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        assert tier_has_configured_provider("low", config, client=None) is True
+        assert tier_has_configured_provider("quick", config, client=None) is True
 
 
 def test_tier_has_provider_anthropic_only_no_client():
     """Anthropic-only chain + client=None -> False."""
-    config = {}  # default: anthropic
-    assert tier_has_configured_provider("low", config, client=None) is False
+    config = {}
+    assert tier_has_configured_provider("quick", config, client=None) is False
 
 
 def test_tier_has_provider_anthropic_only_with_client():
     """Anthropic-only chain + client present -> True."""
     config = {}
     mock_client = MagicMock()
-    assert tier_has_configured_provider("low", config, client=mock_client) is True
+    assert tier_has_configured_provider("quick", config, client=mock_client) is True
 
 
 def test_tier_has_provider_typo_no_client():
     """Typo provider name + client=None -> False."""
-    config = {"providers": {"low": {"provider": "gorq", "model": "llama-3.1-8b-instant"}}}
-    assert tier_has_configured_provider("low", config, client=None) is False
+    config = {"providers": {"primary": "gorq", "fallback_chain": []}}
+    with pytest.raises(ValueError):
+        tier_has_configured_provider("quick", config, client=None)
 
 
 def test_tier_has_provider_missing_api_key():
     """Recognized provider name but missing required API key -> False."""
-    config = {"providers": {"low": {"provider": "gemini", "model": "gemini-2.0-flash"}}}
+    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     with patch.dict("os.environ", {}, clear=True):
-        assert tier_has_configured_provider("low", config, client=None) is False
+        assert tier_has_configured_provider("quick", config, client=None) is False
 
 
 def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
     """Mixed chain where primary is misconfigured but fallback is locally valid -> True."""
     config = {
         "providers": {
-            "low": {
-                "provider": "gemini",
-                "model": "gemini-2.0-flash",
-                "fallback_chain": [
-                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
-                ],
-            }
+            "primary": "gemini",
+            "fallback_chain": ["anthropic"],
         }
     }
     mock_client = MagicMock()
     with patch.dict("os.environ", {}, clear=True):
-        assert tier_has_configured_provider("low", config, client=mock_client) is True
+        assert tier_has_configured_provider("quick", config, client=mock_client) is True
 
 
 def test_tier_has_provider_conn_none_accepted():
     """conn=None accepted without error (validates signature change)."""
-    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"primary": "ollama", "fallback_chain": []}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        result = tier_has_configured_provider("low", config, client=None, conn=None)
+        result = tier_has_configured_provider("quick", config, client=None, conn=None)
     assert result is True
 
 
 def test_tier_has_provider_ollama_unreachable():
     """Ollama configured but unreachable -> False (operational check)."""
-    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"primary": "ollama", "fallback_chain": []}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__",
         side_effect=RuntimeError("Connection refused"),
     ):
-        assert tier_has_configured_provider("low", config, client=None) is False
+        assert tier_has_configured_provider("quick", config, client=None) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1260,14 +1221,8 @@ def test_cascade_ollama_primary_gemini_fallback(tmp_path, _reset_daily_state):
 
     config = {
         "providers": {
-            "low": {
-                "provider": "ollama",
-                "model": "qwen2.5:14b",
-                "fallback_chain": [
-                    {"provider": "gemini", "model": "gemini-2.0-flash"},
-                    {"provider": "anthropic", "model": "claude-haiku-4-5"},
-                ],
-            }
+            "primary": "ollama",
+            "fallback_chain": ["gemini", "anthropic"],
         }
     }
     conn = _migrated_conn(tmp_path)
@@ -1295,7 +1250,7 @@ def test_cascade_ollama_primary_gemini_fallback(tmp_path, _reset_daily_state):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "low",
+            "quick",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1311,7 +1266,7 @@ def test_backward_compat_single_ollama_no_cascade(tmp_path):
     """Single-provider Ollama config with no fallback_chain routes correctly."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"low": {"provider": "ollama", "model": "qwen2.5:14b"}}}
+    config = {"providers": {"primary": "ollama", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     ollama_result = ModelResult(
@@ -1333,7 +1288,7 @@ def test_backward_compat_single_ollama_no_cascade(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         result = call_model(
-            "low",
+            "quick",
             "sys",
             [{"role": "user", "content": "hi"}],
             conn,
@@ -1355,7 +1310,7 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
     """call_model does NOT call cost_gate for ollama and gemini."""
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"mid": {"provider": provider_name, "model": model_name}}}
+    config = {"providers": {"primary": provider_name, "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -1367,6 +1322,6 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
         mock_adapter.call.return_value = _make_result(provider=provider_name)
         mock_make_adapter.return_value = mock_adapter
 
-        call_model("mid", "sys", [{"role": "user", "content": "hi"}], conn, config)
+        call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_not_called()

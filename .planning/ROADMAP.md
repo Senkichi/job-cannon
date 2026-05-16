@@ -335,7 +335,7 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | 36. Cascade Audit Eval Harness | v5.0 | 4/4 | Complete | 2026-05-14 |
 | 37. Cascade Audit Execution & Decision | v5.0 | 0/? | Not started | - |
 | 38. Strangerify Foundation | v5.0 | 0/? | Not started | - |
-| 39. Strangerify Provider Abstraction | v5.0 | 0/? | Not started | - |
+| 39. Strangerify Provider Abstraction | v5.0 | 6/6 | Complete | 2026-05-16 |
 | 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 0/? | Not started | - |
 | 41. Strangerify Data Sources | v5.0 | 0/? | Not started | - |
 | 42. Onboarding Wizard | v5.0 | 0/? | Not started | - |

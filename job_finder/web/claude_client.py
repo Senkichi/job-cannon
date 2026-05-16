@@ -203,18 +203,20 @@ def cost_gate(
 ) -> bool:
     """Check whether a model tier call is allowed under the daily budget.
 
-    Low-tier calls are always allowed regardless of spend.
-    Mid/High-tier calls are blocked when daily spend >= budget cap.
+    Quick-tier calls (replaces low) are always allowed regardless of spend.
+    Score/triage-tier calls (replace mid/high) are blocked when daily spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
         config: Application config dict (reads scoring.daily_budget_usd).
-        model_tier: "low", "mid", or "high". Defaults to "mid".
+        model_tier: "quick", "score", "triage", or legacy names "low"/"mid"/"high". Defaults to "mid".
 
     Returns:
         True if the call is allowed, False if blocked.
     """
-    if model_tier == "low":
+    # Map new workload names to legacy behavior
+    # quick = low (always allowed), score/triage = mid/high (budget checked)
+    if model_tier in ("quick", "low"):
         return True
 
     scoring_cfg = config.get("scoring", {})
