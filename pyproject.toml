@@ -64,6 +64,8 @@ dependencies = [
     # derived URL is available.
     "ddgs~=9.12",
     "ruamel-yaml>=0.19.1",
+    # Cross-platform user data directories
+    "platformdirs>=4.0",
 ]
 
 [project.optional-dependencies]
