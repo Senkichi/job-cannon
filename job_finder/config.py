@@ -5,9 +5,12 @@ codebase.  Import the constant you need rather than hard-coding a number.
 """
 
 import os
+import tempfile
 from pathlib import Path
 
 import yaml
+
+from job_finder.web import user_data_dirs
 
 DEFAULT_CONFIG_PATH = "config.yaml"
 
@@ -111,68 +114,73 @@ def validate_required_sections(config: dict) -> None:
         )
 
 
-def resolve_config_path() -> str:
-    """Locate config.yaml via the documented lookup order.
+def write_config(data: dict) -> Path:
+    """Write config dict to user-data config.yaml atomically.
 
-    Lookup order:
-      1. ``$JOB_CANNON_CONFIG`` environment variable.
-         If set but the path doesn't exist → :class:`ConfigNotFoundError`
-         (do NOT fall through — the user explicitly named where the
-         config is, silently using a different one is wrong UX).
-      2. ``./config.yaml`` in the current working directory.
-      3. User config directory:
-         - Windows: ``%APPDATA%/job-cannon/config.yaml``
-         - Unix:    ``~/.config/job-cannon/config.yaml``
+    Creates the user-data directory if needed, writes to a temp file in the
+    same directory, then swaps with os.replace() for atomicity.
+
+    Args:
+        data: Configuration dictionary to write.
 
     Returns:
-        Absolute or relative path to the resolved config file.
-
-    Raises:
-        ConfigNotFoundError: if no path resolves AND no env var was set,
-            or if the env var was set but its target file does not exist.
+        Path to the written config file.
     """
-    env = os.environ.get("JOB_CANNON_CONFIG")
-    if env:
-        if not os.path.exists(env):
-            raise ConfigNotFoundError(
-                f"$JOB_CANNON_CONFIG is set to '{env}' but no file exists there. "
-                f"Either fix the env var, unset it, or place a config.yaml at the path."
-            )
-        return env
+    user_data_dirs.ensure_user_data_dir()
+    config_path = user_data_dirs.config_path()
 
-    cwd = os.path.join(os.getcwd(), "config.yaml")
-    if os.path.exists(cwd):
-        return cwd
+    # Write to a temp file in the same directory for atomic swap
+    fd, temp_path = tempfile.mkstemp(dir=config_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, default_flow_style=False)
+        # Atomic swap
+        os.replace(temp_path, config_path)
+    except Exception:
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
 
-    if os.name == "nt":
-        appdata = os.environ.get("APPDATA", "")
-        user_config = os.path.join(appdata, "job-cannon", "config.yaml")
-    else:
-        user_config = os.path.join(os.path.expanduser("~"), ".config", "job-cannon", "config.yaml")
-    if os.path.exists(user_config):
-        return user_config
-
-    raise ConfigNotFoundError(
-        "config.yaml not found. Looked at: "
-        f"./config.yaml, {user_config}. "
-        "Copy config.example.yaml to ./config.yaml to get started, "
-        "or set $JOB_CANNON_CONFIG to point to your config file."
-    )
+    return config_path
 
 
-def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
+def load_config(config_path: str | os.PathLike[str] | None = None, *, allow_missing: bool = False) -> dict:
     """Load configuration from YAML file.
 
     Args:
-        config_path: Path to config.yaml.
+        config_path: Path to config.yaml. If None, uses platformdirs default.
+        allow_missing: If True, returns {} when config doesn't exist.
 
     Returns:
-        Configuration dictionary.
+        Configuration dictionary, or {} if allow_missing=True and file doesn't exist.
+
+    Raises:
+        ConfigNotFoundError: If config file not found and allow_missing=False.
     """
-    path = Path(config_path)
+    # Path selection rules
+    if config_path is None:
+        env = os.environ.get("JOB_CANNON_CONFIG")
+        if env:
+            if not os.path.exists(env):
+                raise ConfigNotFoundError(
+                    f"$JOB_CANNON_CONFIG is set to '{env}' but no file exists there. "
+                    f"Either fix the env var, unset it, or place a config.yaml at the path."
+                )
+            path = Path(env)
+        else:
+            path = user_data_dirs.config_path()
+    else:
+        path = Path(config_path)
+
+    # File existence check
     if not path.exists():
-        raise FileNotFoundError(
-            f"Config file not found: {config_path}\n\n"
+        if allow_missing:
+            return {}
+        raise ConfigNotFoundError(
+            f"Config file not found: {path}\n\n"
             f"To get started:\n"
             f"  1. Copy the example:  cp config.example.yaml config.yaml\n"
             f"  2. Edit config.yaml and fill in:\n"
@@ -189,18 +197,18 @@ def load_config(config_path: str = DEFAULT_CONFIG_PATH) -> dict:
                 cfg = yaml.safe_load(f)
             except yaml.YAMLError as exc:
                 raise ValueError(
-                    f"Config file contains invalid YAML: {config_path}\n{exc}\n"
+                    f"Config file contains invalid YAML: {path}\n{exc}\n"
                     f"See config.example.yaml for the expected structure."
                 ) from exc
     except UnicodeDecodeError as exc:
         raise ValueError(
-            f"Config file is not valid UTF-8: {config_path}\n"
+            f"Config file is not valid UTF-8: {path}\n"
             f"Ensure the file is saved with UTF-8 encoding.\n{exc}"
         ) from exc
 
     if cfg is None:
         raise ValueError(
-            f"Config file is empty or contains only comments: {config_path}\n"
+            f"Config file is empty or contains only comments: {path}\n"
             f"See config.example.yaml for the expected structure."
         )
 
