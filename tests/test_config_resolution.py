@@ -18,12 +18,12 @@ class TestLoadConfig:
     def test_env_var_set_and_file_exists_returns_env_path(self, monkeypatch, tmp_path):
         """$JOB_CANNON_CONFIG set and file exists — use that path."""
         target = tmp_path / "alt-config.yaml"
-        target.write_text("profile: {}\n", encoding="utf-8")
+        target.write_text("profile: {}\nsources: {}\nscoring: {}\ndb: {}\n", encoding="utf-8")
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(target))
 
         cfg = load_config()
 
-        assert cfg == {"profile": {}}
+        assert cfg == {"profile": {}, "sources": {}, "scoring": {}, "db": {}}
 
     def test_env_var_set_but_file_missing_raises(self, monkeypatch, tmp_path):
         """$JOB_CANNON_CONFIG set but missing raises ConfigNotFoundError."""
@@ -53,12 +53,12 @@ class TestLoadConfig:
     def test_explicit_path_overrides_env(self, monkeypatch, tmp_path):
         """Explicit config_path parameter wins over environment."""
         target = tmp_path / "my-config.yaml"
-        target.write_text("profile: {}\n", encoding="utf-8")
+        target.write_text("profile: {}\nsources: {}\nscoring: {}\ndb: {}\n", encoding="utf-8")
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(tmp_path / "other.yaml"))
 
         cfg = load_config(str(target))
 
-        assert cfg == {"profile": {}}
+        assert cfg == {"profile": {}, "sources": {}, "scoring": {}, "db": {}}
 
 
 class TestWriteConfig:
