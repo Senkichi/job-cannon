@@ -10,8 +10,6 @@ from pathlib import Path
 
 import yaml
 
-from job_finder.web import user_data_dirs
-
 DEFAULT_CONFIG_PATH = "config.yaml"
 
 
@@ -126,6 +124,8 @@ def write_config(data: dict) -> Path:
     Returns:
         Path to the written config file.
     """
+    from job_finder.web import user_data_dirs
+
     user_data_dirs.ensure_user_data_dir()
     config_path = user_data_dirs.config_path()
 
@@ -160,6 +160,8 @@ def load_config(config_path: str | os.PathLike[str] | None = None, *, allow_miss
     Raises:
         ConfigNotFoundError: If config file not found and allow_missing=False.
     """
+    from job_finder.web import user_data_dirs
+
     # Path selection rules
     if config_path is None:
         env = os.environ.get("JOB_CANNON_CONFIG")
