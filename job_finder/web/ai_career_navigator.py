@@ -406,12 +406,12 @@ def discover_navigation_recipe(
                 "required": ["steps", "extraction"],
             }
 
-            use_dispatcher = bool(config.get("providers", {}).get("low"))
+            use_dispatcher = True  # Always use dispatcher with new cascade
 
             if use_dispatcher:
                 try:
                     model_result = call_model(
-                        tier="low",
+                        tier="quick",
                         system=_DISCOVERY_SYSTEM,
                         messages=[{"role": "user", "content": user_message}],
                         conn=conn,

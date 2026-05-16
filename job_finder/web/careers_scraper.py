@@ -24,8 +24,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from job_finder.config import DEFAULT_MODEL_LOW
 from job_finder.web.claude_client import call_claude
+from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)
@@ -164,13 +164,13 @@ def _find_careers_url_with_low_tier(
         }
     ]
 
-    use_dispatcher = bool(config.get("providers", {}).get("low"))
+    use_dispatcher = True  # Always use dispatcher with new cascade
 
     try:
         if use_dispatcher:
             try:
                 model_result = call_model(
-                    tier="low",
+                    tier="quick",
                     system=system,
                     messages=messages,
                     conn=conn,
@@ -188,7 +188,6 @@ def _find_careers_url_with_low_tier(
                     homepage_url,
                 )
                 result, _cost, _schema_valid = call_claude(
-                    model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
                     output_schema=_CAREERS_URL_SCHEMA,
@@ -200,7 +199,7 @@ def _find_careers_url_with_low_tier(
                 )
         else:
             result, _cost, _schema_valid = call_claude(
-                model=DEFAULT_MODEL_LOW,
+                model=call_claude,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_URL_SCHEMA,
@@ -298,13 +297,13 @@ def _extract_jobs_with_low_tier(
         }
     ]
 
-    use_dispatcher = bool(config.get("providers", {}).get("low"))
+    use_dispatcher = True  # Always use dispatcher with new cascade
 
     try:
         if use_dispatcher:
             try:
                 model_result = call_model(
-                    tier="low",
+                    tier="quick",
                     system=system,
                     messages=messages,
                     conn=conn,
@@ -322,7 +321,6 @@ def _extract_jobs_with_low_tier(
                     careers_url,
                 )
                 result, _cost, _schema_valid = call_claude(
-                    model=DEFAULT_MODEL_LOW,
                     system=system,
                     messages=messages,
                     output_schema=_CAREERS_JOBS_SCHEMA,
@@ -334,7 +332,7 @@ def _extract_jobs_with_low_tier(
                 )
         else:
             result, _cost, _schema_valid = call_claude(
-                model=DEFAULT_MODEL_LOW,
+                model=call_claude,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_JOBS_SCHEMA,

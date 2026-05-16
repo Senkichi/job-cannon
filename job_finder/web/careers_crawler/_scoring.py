@@ -61,7 +61,7 @@ def _score_new_jobs(
     except (ImportError, Exception):
         pass
 
-    if not tier_has_configured_provider("scoring", config, _scoring_client):
+    if not tier_has_configured_provider("score", config, _scoring_client):
         logger.debug("No routable scoring provider — skipping careers_crawl scoring")
         return
 

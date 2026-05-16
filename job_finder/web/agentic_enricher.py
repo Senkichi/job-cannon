@@ -224,39 +224,43 @@ def _generate_queries(
     title: str,
     company: str,
     n: int,
-    provider,  # OllamaProvider — typed as Any to avoid import at module level
-    model: str = "qwen2.5:14b",
+    conn: Any,
+    config: dict,
 ) -> list[str]:
-    """Ask OllamaProvider to generate search queries for a job posting.
+    """Generate search queries for a job posting using call_model.
 
     Args:
         title: Job title.
         company: Company name.
         n: Number of queries to generate.
-        provider: OllamaProvider instance (passed from run_agentic_backfill).
-        model: Ollama model to use.
+        conn: SQLite connection for cost recording.
+        config: Application config dict for provider routing.
 
     Returns:
         List of search query strings. Falls back to heuristic queries on failure.
     """
+    from job_finder.web.model_provider import call_model
+
     system = _QUERY_GEN_PROMPT.format(n=n)
     user_msg = f"Job title: {title}\nCompany: {company}"
-    max_tokens = 512
 
     # Inner try/except: handles mid-run transient failures (model timeout,
     # malformed JSON from a specific query) without crashing the outer loop.
     try:
-        result = provider.call(
-            model, system, [{"role": "user", "content": user_msg}], max_tokens=max_tokens
+        result = call_model(
+            tier="quick",
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+            conn=conn,
+            config=config,
+            job_id=None,
+            purpose="agentic_query_generation",
+            max_tokens=512,
         )
-        # result.data is already parsed as a dict by OllamaProvider.call() —
-        # do NOT call json.loads() on it (would raise TypeError on dict input).
         data = result.data
     except Exception as exc:
-        # DEFECT 019 FIX: log at WARNING (not swallowed) so operators can distinguish
-        # transient Ollama failures (503, timeout) from normal parse-failure fallback.
         logger.warning(
-            "OllamaProvider provider error in _generate_queries for '%s' @ '%s': %s — "
+            "call_model error in _generate_queries for '%s' @ '%s': %s — "
             "falling back to heuristic queries",
             title[:40],
             company[:20],
@@ -264,7 +268,7 @@ def _generate_queries(
         )
         return _fallback_queries(title, company)
 
-    # Handle both list and dict response shapes from Ollama
+    # Handle both list and dict response shapes
     if isinstance(data, list) and all(isinstance(q, str) for q in data):
         return data[:n]
     if isinstance(data, dict):
@@ -291,21 +295,23 @@ def _validate_page(
     text: str,
     title: str,
     company: str,
-    model: str,
-    provider,  # OllamaProvider
+    conn: Any,
+    config: dict,
 ) -> tuple[bool, float]:
-    """Ask OllamaProvider if page content matches the target job.
+    """Validate whether page content matches the target job using call_model.
 
     Args:
         text: Page text to validate (will be truncated to keep context reasonable).
         title: Target job title.
         company: Target company name.
-        model: Ollama model tag.
-        provider: OllamaProvider instance passed from enrich_single_job.
+        conn: SQLite connection for cost recording.
+        config: Application config dict for provider routing.
 
     Returns:
         Tuple of (is_match, confidence). Returns (False, 0.0) on any failure.
     """
+    from job_finder.web.model_provider import call_model
+
     system = _VALIDATE_PROMPT.format(title=title, company=company)
     # Truncate page text to _VALIDATE_MAX_CHARS (not _MAX_JD_CHARS) to leave
     # token budget for the model's JSON response without truncating mid-reasoning.
@@ -313,13 +319,19 @@ def _validate_page(
 
     # Inner try/except: handles mid-run transient failures per-URL
     try:
-        result = provider.call(
-            model, system, [{"role": "user", "content": user_msg}], max_tokens=256
+        result = call_model(
+            tier="quick",
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+            conn=conn,
+            config=config,
+            job_id=None,
+            purpose="agentic_page_validation",
+            max_tokens=256,
         )
-        # result.data is already a parsed dict — no json.loads() needed
         data = result.data
     except Exception as exc:
-        logger.warning("OllamaProvider call failed in _validate_page: %s", exc)
+        logger.warning("call_model error in _validate_page: %s", exc)
         return False, 0.0
 
     try:
@@ -341,18 +353,16 @@ def _validate_page(
 def enrich_single_job(
     job_row: dict,
     page,
-    model: str,
-    provider,  # OllamaProvider — passed from run_agentic_backfill
+    conn: Any,
+    config: dict,
 ) -> str | None:
     """Run the agentic enrichment loop for a single job.
 
     Args:
         job_row: Job dict with title, company fields.
         page: Playwright page object (reused across jobs).
-        model: Ollama model to use for query gen + validation.
-        provider: OllamaProvider instance instantiated once in run_agentic_backfill.
-            Passed down to _generate_queries() and _validate_page() so each
-            function can call provider.call() without needing its own LLM setup.
+        conn: SQLite connection for cost recording.
+        config: Application config dict for provider routing.
 
     Returns:
         The job description text if found, None otherwise.
@@ -363,9 +373,9 @@ def enrich_single_job(
     if not title or not company:
         return None
 
-    # Step 1: Generate search queries via OllamaProvider
+    # Step 1: Generate search queries via call_model
     queries = _generate_queries(
-        title, company, n=_MAX_SEARCH_QUERIES, provider=provider, model=model
+        title, company, n=_MAX_SEARCH_QUERIES, conn=conn, config=config
     )
     logger.info("Agentic: %d queries for '%s' @ '%s'", len(queries), title[:40], company[:20])
 
@@ -432,8 +442,8 @@ def enrich_single_job(
                 company_miss += 1
                 continue
 
-        # Validate with OllamaProvider — provider passed through from caller
-        is_match, confidence = _validate_page(text, title, company, model=model, provider=provider)
+        # Validate with call_model
+        is_match, confidence = _validate_page(text, title, company, conn=conn, config=config)
 
         if is_match and confidence > best_confidence:
             best_text = text
@@ -473,57 +483,45 @@ def enrich_one_job(
     job_row: dict,
     conn: Any,
     config: dict,
-    model: str = "qwen2.5:14b",
 ) -> dict:
     """Single-job entry point for the agentic enricher.
 
-    Spins up Ollama + Playwright on each call, runs the agentic loop for
+    Spins up Playwright on each call, runs the agentic loop for
     one job, returns a dict suitable for splatting into a jobs-table UPDATE.
     Caller is responsible for persisting (atomically with enrichment_tier).
 
-    Costs: Playwright launches a Chromium instance and Ollama loads a model
-    on first call. This is significantly more expensive per-row than the
-    batch path (run_agentic_backfill), so the synchronous cascade in
-    data_enricher.enrich_job() should only invoke this for jobs that have
-    truly exhausted cheaper tiers (free → ddg → serpapi).
+    Costs: Playwright launches a Chromium instance. This is significantly
+    more expensive per-row than the batch path (run_agentic_backfill), so
+    the synchronous cascade in data_enricher.enrich_job() should only invoke
+    this for jobs that have truly exhausted cheaper tiers (free → ddg → serpapi).
 
     Args:
         job_row: Job dict — must have 'title' and 'company'.
-        conn: SQLite connection. Currently unused (caller persists), but
-            accepted so the call signature mirrors other tier helpers and
-            future callers can record cost/telemetry into the same DB.
-        config: Application config dict. Read by OllamaProvider for
-            providers.ollama.base_url (default: localhost:11434).
-        model: Ollama model tag for query gen + page validation.
+        conn: SQLite connection for cost recording.
+        config: Application config dict for provider routing.
 
     Returns:
         Dict with 'jd_full' on success, empty dict on any failure
-        (Ollama unavailable, Playwright unavailable, no URLs found,
-        no high-confidence match). Never raises.
+        (Playwright unavailable, no URLs found, no high-confidence match).
+        Never raises.
     """
     title = job_row.get("title")
     company = job_row.get("company")
     if not title or not company:
         return {}
 
-    # Lazy imports + provider/browser setup. Match run_agentic_backfill's
-    # guards exactly: ImportError covers missing playwright/ollama packages,
-    # RuntimeError covers Ollama service unreachable.
+    # Lazy imports for Playwright
     try:
         from playwright.sync_api import sync_playwright
-
-        from job_finder.web.providers.ollama_provider import OllamaProvider
-
-        provider = OllamaProvider(config=config)
-    except (ImportError, RuntimeError) as exc:
-        logger.warning("enrich_one_job: prerequisites unavailable: %s", exc)
+    except ImportError as exc:
+        logger.warning("enrich_one_job: Playwright unavailable: %s", exc)
         return {}
 
     try:
         with sync_playwright() as pw:
             browser, page = _create_browser(pw)
             try:
-                jd = enrich_single_job(job_row, page, model=model, provider=provider)
+                jd = enrich_single_job(job_row, page, conn=conn, config=config)
             finally:
                 browser.close()
     except Exception as exc:
@@ -544,15 +542,10 @@ def run_agentic_backfill(
     db_path: str,
     config: dict,
     limit: int = 50,
-    model: str = "qwen2.5:14b",
 ) -> int:
     """Run agentic enrichment on exhausted jobs missing jd_full.
 
     Architecture notes:
-    - OllamaProvider is instantiated ONCE here at the top, guarded by
-      try/except (ImportError, RuntimeError). If Ollama is unreachable,
-      returns 0 cleanly without crashing — callers (_make_tracked_job) see
-      a successful return with no side effects.
     - DB connections are scoped per-operation (short SELECT + per-job UPDATE)
       rather than held open across minutes of Playwright network I/O. This
       prevents SQLite lock contention with the Flask request thread.
@@ -561,26 +554,19 @@ def run_agentic_backfill(
 
     Args:
         db_path: Path to SQLite database.
-        config: Application config dict. OllamaProvider reads
-            config['providers']['ollama']['base_url'] (default: localhost:11434).
+        config: Application config dict for provider routing.
         limit: Maximum jobs to process.
-        model: Ollama model for query gen + validation.
 
     Returns:
         Number of jobs successfully enriched. Always returns 0 when
-        prerequisites (Ollama, Playwright) are unavailable.
+        prerequisites (Playwright) are unavailable.
     """
-    # Guard: instantiate OllamaProvider and import Playwright before any DB or
-    # network work. ImportError covers missing playwright/ollama packages;
-    # RuntimeError covers Ollama service unreachable (OllamaProvider._check_health).
+    # Guard: import Playwright before any DB or network work.
     try:
         from playwright.sync_api import sync_playwright
 
         from job_finder.web.db_helpers import standalone_connection
-        from job_finder.web.providers.ollama_provider import OllamaProvider
-
-        provider = OllamaProvider(config=config)
-    except (ImportError, RuntimeError) as exc:
+    except ImportError as exc:
         logger.warning("Agentic backfill unavailable: %s", exc)
         return 0
 
@@ -636,10 +622,8 @@ def run_agentic_backfill(
                 logger.info("[%d/%d] %s @ %s", i, total, title, company)
 
                 t0 = time.time()
-                # Provider passed through: run_agentic_backfill -> enrich_single_job
-                # -> _generate_queries / _validate_page. Single instantiation of
-                # OllamaProvider shared across all jobs in this batch run.
-                jd = enrich_single_job(job, page, model=model, provider=provider)
+                # All LLM calls now route through call_model with cascade
+                jd = enrich_single_job(job, page, conn=conn, config=config)
                 elapsed = time.time() - t0
 
                 if jd:

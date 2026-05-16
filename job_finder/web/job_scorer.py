@@ -7,7 +7,7 @@ is Python-derived at persist time (see derive_classification in db.py).
 This module is a pure-function addition in Phase 34 Plan 1 — no callers
 land until Plan 2's orchestrator wires score_and_persist_job through it.
 
-Routes through shared call_model(tier="scoring", ...) per CONTEXT D-09.
+Routes through shared call_model(tier="score", ...) per CONTEXT D-09.
 Does NOT instantiate its own provider or duplicate schema-retry/cascade
 logic. Inherits ~250 lines of battle-tested dispatcher behavior.
 
@@ -253,7 +253,7 @@ def score_job(
 
     try:
         result = call_model(
-            tier="scoring",
+            tier="score",
             system=system,
             messages=[{"role": "user", "content": user_content}],
             conn=conn,
