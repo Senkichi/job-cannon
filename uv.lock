@@ -420,6 +420,15 @@ wheels = [
 ]
 
 [[package]]
+name = "diskcache"
+version = "5.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/21/1c1ffc1a039ddcc459db43cc108658f32c57d271d7289a2794e401d0fdb6/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc", size = 67916, upload-time = "2023-08-31T06:12:00.316Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19", size = 45550, upload-time = "2023-08-31T06:11:58.822Z" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -808,6 +817,9 @@ eval = [
     { name = "numpy" },
     { name = "scipy" },
 ]
+local-ai = [
+    { name = "llama-cpp-python" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -822,6 +834,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", specifier = "~=1.2" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
+    { name = "llama-cpp-python", marker = "extra == 'local-ai'", specifier = ">=0.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "~=1.13" },
     { name = "numpy", marker = "extra == 'eval'", specifier = "~=2.4" },
     { name = "platformdirs", specifier = ">=4.0" },
@@ -839,7 +852,7 @@ requires-dist = [
     { name = "thefuzz", extras = ["speedup"], specifier = "~=0.22" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = "~=2.32" },
 ]
-provides-extras = ["eval", "dev"]
+provides-extras = ["eval", "local-ai", "dev"]
 
 [[package]]
 name = "jsonschema"
@@ -914,6 +927,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/e8/6f65f3e565d4ac212cddddd552eacc8035ffdf941ca0ad6fe945a211d41f/librt-0.10.0-cp314-cp314t-win_amd64.whl", hash = "sha256:56ded2d66010203a0cb5af063b609e3f079531a0e5e576d618dece859fd2e1af", size = 68649, upload-time = "2026-05-05T16:31:01.778Z" },
     { url = "https://files.pythonhosted.org/packages/51/78/a0705a67cacd81e5fa01a5035b3adbdfbb43a7b8d4bd27e2b282ae61baf2/librt-0.10.0-cp314-cp314t-win_arm64.whl", hash = "sha256:1ee63f30abf18ed4830fdbaf87b2b6f4bba1e198d46085c314edde4045e56715", size = 58247, upload-time = "2026-05-05T16:31:03.191Z" },
 ]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.23"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diskcache" },
+    { name = "jinja2" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/fb/3932d67b89eb7d8f451719b40b67034e031e04b8b598a7f65d13e255ebfb/llama_cpp_python-0.3.23.tar.gz", hash = "sha256:85493cd887b543588941e8704640fef6a54c057443292e527559c30728375ffd", size = 68300621, upload-time = "2026-05-11T10:12:21.665Z" }
 
 [[package]]
 name = "lxml"

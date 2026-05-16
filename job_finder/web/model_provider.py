@@ -20,7 +20,7 @@ from typing import Any
 import requests
 from jsonschema import ValidationError, validate
 
-from job_finder.config import DEFAULT_MODEL_HIGH, DEFAULT_MODEL_LOW, DEFAULT_MODEL_MID
+# DEFAULT_MODEL_* imports removed in Phase 39 (replaced by _PROVIDER_DEFAULTS)
 from job_finder.web.claude_client import (  # noqa: F401 — record_cost re-exported for test patching
     FREE_PROVIDERS,
     BudgetExceededError,
@@ -30,16 +30,34 @@ from job_finder.web.claude_client import (  # noqa: F401 — record_cost re-expo
 
 logger = logging.getLogger(__name__)
 
-_TIER_DEFAULTS: dict[str, str] = {
-    # Plan 4 Commit E: 'scoring' is the v3.0 single tier for job scoring.
-    # The 'low', 'mid', and 'high' tiers remain for non-scoring callers --
-    # enrichment_tiers, careers_scraper, ai_career_navigator,
-    # company_research, description_reformatter -- which still route
-    # short/cheap vs long/deep reasoning through tier names.
-    "scoring": DEFAULT_MODEL_MID,
-    "low": DEFAULT_MODEL_LOW,
-    "mid": DEFAULT_MODEL_MID,
-    "high": DEFAULT_MODEL_HIGH,
+_VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
+
+# Phase 39: nested provider -> workload -> model defaults.
+# - quick:  every non-scoring LLM call (extraction, parsing, navigation, research, reformatting, agentic enricher).
+# - score:  full ordinal-rubric job scoring.
+# - triage: pre-scoring gate; uses the `quick` model with a triage-specific prompt.
+# Triage entries are absent here (resolved as identical to `quick` at lookup time).
+_PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    "claude_code_cli": {"quick": "claude-haiku-4-5",       "score": "claude-sonnet-4-6"},
+    "anthropic":       {"quick": "claude-haiku-4-5",       "score": "claude-sonnet-4-6"},
+    "gemini":          {"quick": "gemini-2.0-flash",       "score": "gemini-2.0-pro"},
+    "gemini_cli":      {"quick": "gemini-2.0-flash",       "score": "gemini-2.0-pro"},
+    "ollama":          {"quick": "qwen2.5:14b",            "score": "qwen2.5:14b"},
+    "local_bundled":   {"quick": "<bundled-gguf>",         "score": "<bundled-gguf>"},
+    "groq":            {"quick": "llama-3.3-70b-versatile", "score": "llama-3.3-70b-versatile"},
+    "cerebras":        {"quick": "llama3.3-70b",            "score": "llama3.3-70b"},
+}
+
+# Phase 39: legacy-tier translation. Deleted in Phase 40 after all callers are renamed.
+_LEGACY_TIER_MAP: dict[str, str] = {
+    "low":     "quick",
+    "mid":     "score",
+    "high":    "score",
+    "scoring": "score",
+    # Forward-compat passthrough:
+    "quick":   "quick",
+    "score":   "score",
+    "triage":  "triage",
 }
 
 # Daily usage tracking — module-level state for rate limiting.
@@ -174,8 +192,19 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
                 "fallback": _donor.get("fallback"),
             }
 
+    # Phase 39: translate legacy tier names ("low"/"mid"/"high"/"scoring") to
+    # workload names ("quick"/"score"/"triage"). Deleted in Phase 40.
+    workload = _LEGACY_TIER_MAP.get(tier, tier)
+
+    # Look up the per-provider default for this workload. Fall back to the
+    # anthropic[score] entry if the provider is unknown (e.g., a typo'd
+    # config name); the cascade catches the resulting ValueError downstream.
+    provider_defaults = _PROVIDER_DEFAULTS.get(
+        tier_cfg.get("provider", "anthropic"),
+        _PROVIDER_DEFAULTS["anthropic"],
+    )
     scoring_model = config.get("scoring", {}).get("models", {}).get(tier)
-    default_model = scoring_model or _TIER_DEFAULTS.get(tier, DEFAULT_MODEL_MID)
+    default_model = scoring_model or provider_defaults.get(workload) or provider_defaults["quick"]
 
     provider = tier_cfg.get("provider", "anthropic")
     model = tier_cfg.get("model") or default_model
@@ -209,6 +238,9 @@ _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
         "gemini",
         "ollama",
         "openrouter",
+        "claude_code_cli",
+        "gemini_cli",
+        "local_bundled",
     }
 )
 
@@ -451,6 +483,27 @@ def _make_adapter(
         from job_finder.web.providers.openrouter_provider import OpenRouterProvider
 
         return OpenRouterProvider(config=config)
+    if provider_name == "claude_code_cli":
+        from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
+
+        return ClaudeCodeCLIProvider(config=config)
+    if provider_name == "gemini_cli":
+        from job_finder.web.providers.gemini_cli import GeminiCLIProvider
+
+        return GeminiCLIProvider(config=config)
+    if provider_name == "local_bundled":
+        from job_finder.web.providers.local_bundled import LocalBundledProvider
+
+        lp_cfg = (config or {}).get("providers", {}).get("local_bundled", {})
+        model_path = lp_cfg.get("model_path", "")
+        if not model_path:
+            raise ValueError("providers.local_bundled.model_path not configured")
+        return LocalBundledProvider(
+            model_path=model_path,
+            n_ctx=lp_cfg.get("n_ctx", 4096),
+        )
+
+    raise ValueError(f"No adapter dispatch branch for provider: {provider_name!r}")
 
 
 def _maybe_record_cost(
@@ -593,7 +646,7 @@ def call_model(
                     job_id=job_id,
                     purpose=purpose,
                 )
-            except (ValueError, RuntimeError) as exc:
+            except (ValueError, RuntimeError, ImportError) as exc:
                 logger.warning("Cascade: %s unavailable: %s", entry_provider, exc)
                 continue
 

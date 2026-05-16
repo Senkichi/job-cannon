@@ -76,6 +76,18 @@ eval = [
     "numpy~=2.4",
     "scipy~=1.17",
 ]
+# CPU-local LLM inference via llama-cpp-python.
+#
+# Windows: pre-built wheels are available on PyPI for cp313-win_amd64; no
+# MSVC toolchain is required for CPU-only inference. GPU acceleration
+# (CUDA / ROCm / Vulkan) requires platform-specific build flags and is
+# out of scope for v5.0.
+#
+# Recommended GGUF: Qwen2.5-3B-Instruct-Q4_K_M (~2GB). Phase 39 ships the
+# provider; the wizard-driven download lives in Phase 42.
+local-ai = [
+    "llama-cpp-python>=0.2.0",
+]
 # Test + tooling deps.
 #
 # ruff is intentionally not pinned here — it runs via `uvx ruff`, which

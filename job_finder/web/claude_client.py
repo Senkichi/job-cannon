@@ -57,12 +57,16 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # Providers that incur no per-call cost.  Used by cost_gate() to exclude
 # free/subscription spend from budget calculations, and by record_cost()
 # to record $0 for these providers.
-# "claude_cli" = calls routed through the Claude Code CLI (subscription-based).
+# - "claude_cli" = legacy call_claude() internal path (kept for backward compat).
+# - "claude_code_cli" / "gemini_cli" / "local_bundled" = Phase 39 new providers.
 FREE_PROVIDERS: frozenset[str] = frozenset(
     {
         "gemini",
         "ollama",
-        "claude_cli",
+        "claude_cli",        # existing — internal call_claude() path
+        "claude_code_cli",   # NEW — ClaudeCodeCLIProvider (Plan 02)
+        "gemini_cli",        # NEW — GeminiCLIProvider (Plan 03)
+        "local_bundled",     # NEW — LocalBundledProvider (Plan 04)
     }
 )
 

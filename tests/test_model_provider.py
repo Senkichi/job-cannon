@@ -138,10 +138,11 @@ def test_resolve_provider_scoring_tier_default():
 
 
 def test_resolve_provider_high_tier():
+    """Phase 39: 'high' tier now translates to 'score' workload (sonnet), not opus."""
     config = {}
     result = resolve_provider_config("high", config)
     assert result["provider"] == "anthropic"
-    assert result["model"] == "claude-opus-4-6"
+    assert result["model"] == "claude-sonnet-4-6"
 
 
 # --- Cascade config parsing tests (TEST-01) ---
@@ -895,6 +896,89 @@ def test_cascade_prompt_variant_no_longer_overrides_system(tmp_path, _reset_dail
     call_args = mock_adapter.call.call_args
     actual_system = call_args[0][1]  # positional: model, system, messages, ...
     assert actual_system == "original system prompt"
+
+
+# ---------------------------------------------------------------------------
+# Phase 39: _PROVIDER_DEFAULTS + _VALID_WORKLOADS membership + legacy-tier
+# translation regression tests (STRANGE-PROV-01).
+# ---------------------------------------------------------------------------
+from job_finder.web.model_provider import (
+    _LEGACY_TIER_MAP,
+    _PROVIDER_DEFAULTS,
+    _VALID_WORKLOADS,
+)
+
+
+def test_provider_defaults_contains_all_eight_providers():
+    assert set(_PROVIDER_DEFAULTS) >= {
+        "claude_code_cli",
+        "anthropic",
+        "gemini",
+        "gemini_cli",
+        "ollama",
+        "local_bundled",
+        "groq",
+        "cerebras",
+    }
+
+
+def test_valid_workloads_set_is_quick_score_triage():
+    assert _VALID_WORKLOADS == frozenset({"quick", "score", "triage"})
+
+
+def test_provider_defaults_has_no_legacy_tier_keys_in_inner_maps():
+    flat_keys: set[str] = set()
+    for mapping in _PROVIDER_DEFAULTS.values():
+        flat_keys.update(mapping.keys())
+    assert flat_keys.isdisjoint(
+        {"low", "mid", "high", "scoring", "haiku", "sonnet", "opus"}
+    )
+
+
+def test_legacy_tier_map_translates_low_to_quick():
+    assert _LEGACY_TIER_MAP["low"] == "quick"
+    assert _LEGACY_TIER_MAP["mid"] == "score"
+    assert _LEGACY_TIER_MAP["high"] == "score"
+    assert _LEGACY_TIER_MAP["scoring"] == "score"
+    # Forward-compat passthrough
+    assert _LEGACY_TIER_MAP["quick"] == "quick"
+    assert _LEGACY_TIER_MAP["score"] == "score"
+    assert _LEGACY_TIER_MAP["triage"] == "triage"
+
+
+def test_resolve_low_tier_returns_quick_workload_model_for_anthropic():
+    cfg = {"providers": {"low": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("low", cfg)
+    assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["quick"]
+
+
+def test_resolve_scoring_tier_returns_score_workload_model_for_anthropic():
+    cfg = {"providers": {"scoring": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("scoring", cfg)
+    assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["score"]
+
+
+def test_resolve_mid_tier_returns_score_workload_model():
+    cfg = {"providers": {"mid": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("mid", cfg)
+    assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["score"]
+
+
+def test_resolve_forward_compat_quick_passes_through():
+    cfg = {"providers": {"quick": {"provider": "anthropic", "fallback_chain": []}}}
+    result = resolve_provider_config("quick", cfg)
+    assert result["model"] == _PROVIDER_DEFAULTS["anthropic"]["quick"]
+
+
+def test_resolve_with_explicit_model_still_overrides_defaults():
+    # Sanity: caller-provided model wins over _PROVIDER_DEFAULTS lookup.
+    cfg = {
+        "providers": {
+            "low": {"provider": "anthropic", "model": "claude-custom-99", "fallback_chain": []}
+        }
+    }
+    result = resolve_provider_config("low", cfg)
+    assert result["model"] == "claude-custom-99"
 
 
 def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state):
