@@ -101,5 +101,5 @@ A few specific anti-patterns are documented in
 ## Reporting issues
 
 See [SECURITY.md](SECURITY.md) for vulnerability reports
-(senkichi92@gmail.com, no public issue). For non-security bugs and
+(security@example.com, no public issue). For non-security bugs and
 feature requests, open a GitHub issue using the templates.

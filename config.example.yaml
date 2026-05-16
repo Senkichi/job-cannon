@@ -56,6 +56,13 @@ sources:
       glassdoor: noreply@glassdoor.com
       indeed: alert@indeed.com
       ziprecruiter: no-reply@ziprecruiter.com
+  imap:
+    # Alternative IMAP configuration for Gmail or other email providers
+    enabled: false
+    host: imap.gmail.com
+    port: 993
+    email: your.email@example.com
+    app_password: your_gmail_app_password_here
   serpapi:
     # Optional: SerpAPI for Google Jobs search (requires paid API key)
     enabled: false
@@ -232,6 +239,15 @@ ats:
   scan_days: mon,fri
   # Hour of day to run scans (24-hour format)
   scan_hour: 8
+  # ATS company identity (URL evidence → live verify → hit)
+  # See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
+  # ``pending``; reconciliation promotes to ``hit`` only after API verification.
+  identity_reconcile:
+    enabled: true
+    # When true, run ranking + probes but do not UPDATE companies (shadow metrics).
+    shadow: false
+    max_unique_urls_per_company: 500
+    max_companies_per_promote_run: 500
 
 # --- Development server ---
 server:
@@ -273,17 +289,6 @@ staleness:
   cascade_parallel_workers: 10
   # Phase C: per-request HTTP timeout (seconds).
   cascade_request_timeout_seconds: 8
-
-# --- ATS company identity (URL evidence → live verify → hit) ---
-# See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
-# ``pending``; reconciliation promotes to ``hit`` only after API verification.
-ats:
-  identity_reconcile:
-    enabled: true
-    # When true, run ranking + probes but do not UPDATE companies (shadow metrics).
-    shadow: false
-    max_unique_urls_per_company: 500
-    max_companies_per_promote_run: 500
 
 # --- Filtering ---
 filters:

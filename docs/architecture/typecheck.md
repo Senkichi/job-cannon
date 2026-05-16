@@ -374,7 +374,7 @@ Found 106 errors in 36 files (checked 191 source files)
 
 pyright tail:
 ```
-c:\Users\senki\repos\job-cannon\job_finder\web\scoring_orchestrator.py:131:9 - error: Argument of type "Unknown | None" cannot be assigned to parameter "dedup_key" of type "str" in function "persist_job_assessment"
+c:\Users\yourname\repos\job-cannon\job_finder\web\scoring_orchestrator.py:131:9 - error: Argument of type "Unknown | None" cannot be assigned to parameter "dedup_key" of type "str" in function "persist_job_assessment"
 45 errors, 0 warnings, 0 informations
 ```
 

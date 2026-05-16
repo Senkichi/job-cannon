@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-Email **senkichi92@gmail.com** with details. Please don't open public
+Email **security@example.com** with details. Please don't open public
 issues for vulnerabilities — reach out by email so we can discuss the
 issue privately and coordinate disclosure before any public mention.
 
