@@ -29,6 +29,7 @@ from job_finder.config import (
     DEFAULT_MODEL_MID,
     load_config,
 )
+from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import close_db
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.description_formatter import format_description_filter
@@ -103,19 +104,33 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     if config is None:
         from job_finder.settings import migrate_config_keys
 
-        migrate_config_keys(config_path)
-        cfg = load_config(config_path)
+        user_data_dirs.ensure_user_data_dir()
+        # Use user-data config path if legacy default string is passed
+        if config_path == "config.yaml":
+            cfg = load_config(allow_missing=True)
+        else:
+            migrate_config_keys(config_path)
+            cfg = load_config(config_path, allow_missing=True)
     else:
         cfg = config
 
     app.config["JF_CONFIG"] = cfg
-    app.config["DB_PATH"] = cfg.get("db", {}).get("path", "jobs.db")
+    # DB path: explicit config wins, otherwise use user_data_dirs.db_path()
+    explicit_db_path = cfg.get("db", {}).get("path")
+    if explicit_db_path:
+        app.config["DB_PATH"] = explicit_db_path
+    else:
+        app.config["DB_PATH"] = str(user_data_dirs.db_path())
     if "TESTING" in cfg:
         app.config["TESTING"] = cfg["TESTING"]
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
     # --- Database setup ---
-    run_migrations(app.config["DB_PATH"])
+    # Pass user_data_root for default runtime path, preserve test behavior for explicit config
+    if explicit_db_path:
+        run_migrations(app.config["DB_PATH"])
+    else:
+        run_migrations(app.config["DB_PATH"], user_data_root=str(user_data_dirs.user_data_root()))
     app.teardown_appcontext(close_db)
 
     # --- One-time background passes (TESTING-guarded) ---

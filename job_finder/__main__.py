@@ -11,15 +11,13 @@ from job_finder.config import (
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     load_config,
-    resolve_config_path,
 )
 from job_finder.web import create_app
 
 
 def main() -> None:
     """Resolve config, build the Flask app, and start the dev server."""
-    cfg_path = resolve_config_path()
-    cfg = load_config(cfg_path)
+    cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
     server = cfg.get("server", {})
     app.run(
