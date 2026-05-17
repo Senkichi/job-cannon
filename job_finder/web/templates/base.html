@@ -38,6 +38,27 @@
   <!-- Main content area -->
   <div id="main-content" class="flex-1 flex flex-col h-screen overflow-y-auto transition-all duration-300" style="min-width: 0;">
 
+    {% block update_banner %}
+      {% if update_banner %}
+        <div id="update-banner"
+             class="px-4 py-2 bg-indigo-900/50 text-indigo-100 border-b border-indigo-700 text-sm flex items-center justify-between">
+          <a href="https://github.com/Senkichi/job-cannon/releases/tag/{{ update_banner.latest_version }}"
+             target="_blank" rel="noopener"
+             class="hover:underline">
+            Update available: {{ update_banner.latest_version }} — see release notes
+          </a>
+          <button type="button"
+                  aria-label="Dismiss update notice"
+                  hx-post="{{ url_for('updates.dismiss', version=update_banner.latest_version) }}"
+                  hx-target="#update-banner"
+                  hx-swap="delete"
+                  class="ml-4 text-indigo-300 hover:text-indigo-100">
+            &times;
+          </button>
+        </div>
+      {% endif %}
+    {% endblock %}
+
     <!-- Flash messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

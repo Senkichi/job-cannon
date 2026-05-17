@@ -14,7 +14,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
-from flask import Flask, redirect, url_for
+from flask import Flask, g, redirect, request, url_for
 
 load_dotenv()
 
@@ -202,6 +202,28 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(settings_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(updates_bp)
+
+    # --- Update banner context (Phase 43) ---
+    @app.before_request
+    def _inject_update_banner():
+        """Lazy-fetch update check (D-01) + per-request banner context (D-05/D-08b)."""
+        # Suppress on the entire /onboarding/* tree (D-05 + D-08b)
+        if request.path.startswith("/onboarding/"):
+            g.update_banner = None
+            return
+
+        # Kick off the background fetch if the 24h window has elapsed (D-01).
+        # No-op when TESTING=True or cache is fresh.
+        from job_finder.web.update_check import (
+            banner_context,
+            kick_off_background_check_if_due,
+        )
+        kick_off_background_check_if_due(app.config)
+        g.update_banner = banner_context()
+
+    @app.context_processor
+    def _update_banner_ctx():
+        return {"update_banner": getattr(g, "update_banner", None)}
 
     # --- Phase 42: Onboarding wizard blueprint + before_request gate ---
     from job_finder.web.onboarding.blueprint import onboarding_bp
