@@ -187,6 +187,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.blueprints.profile import profile_bp
     from job_finder.web.blueprints.settings import settings_bp
     from job_finder.web.blueprints.sync import sync_bp
+    from job_finder.web.blueprints.updates import updates_bp
 
     # companies_bp, costs_bp registered BEFORE jobs_bp (catch-all route) to prevent route shadowing
     app.register_blueprint(companies_bp)
@@ -200,6 +201,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(profile_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(updates_bp)
 
     # --- Phase 42: Onboarding wizard blueprint + before_request gate ---
     from job_finder.web.onboarding.blueprint import onboarding_bp
