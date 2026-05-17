@@ -157,7 +157,7 @@ def _get_quick_actions_context(conn, config):
         unscored_count = count_scorable(conn, config)
 
     client = _get_anthropic_client()
-    scoring_available = _cached_tier_available("scoring", config, client)
+    scoring_available = _cached_tier_available("score", config, client)
 
     return {
         "active_sync": active_sync,
