@@ -155,58 +155,52 @@ scoring:
     low: claude-haiku-4-5
     mid: claude-sonnet-4-6
 
-# --- Multi-provider model routing (optional) ---
-# By default, all tiers route to Anthropic using the models specified above.
-# Configure providers here to route specific tiers to Gemini or Ollama.
-# Requires: google-genai package (for Gemini), or local Ollama server.
+# --- Multi-provider model routing (Phase 40 flat schema) ---
+# Every call_model() invocation is cascaded: the primary provider is tried
+# first, then each entry in fallback_chain in order. Models for each
+# workload (quick / score / triage) come from _PROVIDER_DEFAULTS in
+# job_finder/web/model_provider.py unless overridden below.
+#
+# Valid provider names (must match _PROVIDER_DEFAULTS keys):
+#   ollama | anthropic | gemini | groq | cerebras | local_bundled |
+#   gemini_cli | claude_code_cli
+#
+providers:
+  primary: ollama              # Provider tried first for every call
+  fallback_chain:              # Tried in order if primary fails / schema-invalidates / hits a daily limit
+    - groq
+    - cerebras
+    - gemini
+    - anthropic
+  overrides: {}                # Optional: per-provider per-workload model override, e.g. {ollama: {score: "llama3.1:70b"}}
+  daily_limits: {}             # Optional: {provider_name: max_requests_per_day}
+  throttle_delays: {}          # Optional: {provider_name: seconds_between_calls}
+
+# --- Cascade recipes (uncomment ONE to replace the providers: block above) ---
+#
+# Recipe 1 — Ollama-primary cascade (production default per CLAUDE.md).
+# Local qwen2.5:14b handles every call at $0; falls through free hosted
+# providers before touching paid Anthropic. Requires Ollama running locally.
 #
 # providers:
-#   # Balanced tier — deep evaluation, resume generation, enrichment
-#   mid:
-#     provider: anthropic          # "anthropic" | "gemini" | "ollama"
-#     model: claude-sonnet-4-6     # Provider-specific model ID
-#     fallback: anthropic          # Fall back to Anthropic on schema validation failure
+#   primary: ollama
+#   fallback_chain: [groq, cerebras, gemini, anthropic]
+#   overrides:
+#     ollama:    {score: qwen2.5:14b}
+#     anthropic: {score: claude-sonnet-4-6}
 #
-#   # Cheap tier — fast scoring, description reformatting, careers scraping
-#   low:
-#     provider: anthropic
-#     model: claude-haiku-4-5
-#     fallback: null               # No fallback (null = disabled)
-#
-#   # High tier — profile extraction, interview prep, rejection analysis
-#   high:
-#     provider: anthropic
-#     model: claude-opus-4-6
-#     fallback: null
-#
-# Example: Route mid tier to Gemini free tier for zero-cost evaluation
-# providers:
-#   mid:
-#     provider: gemini
-#     model: gemini-2.0-flash
-#     fallback: anthropic
-#
-# Example: Cascade through providers before falling back to paid Anthropic.
-# Each provider is tried in order; exhausted/unavailable providers are skipped.
-# The single 'scoring' tier (v3.0 ordinal scoring per Phase 34) supersedes
-# the legacy haiku/sonnet two-tier split. qwen2.5:14b is the Phase 33
-# shootout winner. Cascade falls through Ollama -> Groq -> Cerebras ->
-# Gemini -> Anthropic, daily_limits is a sibling of tier configs.
+# Recipe 2 — Anthropic-only (paid, simplest). No fallback chain.
 #
 # providers:
-#   scoring:
-#     provider: ollama
-#     model: qwen2.5:14b
-#     fallback_chain:
-#       - provider: groq
-#         model: llama-3.3-70b-versatile
-#       - provider: cerebras
-#         model: llama3.3-70b
-#       - provider: gemini
-#         model: gemini-2.0-flash
-#       - provider: anthropic
-#         model: claude-sonnet-4-6
-#   daily_limits: {}
+#   primary: anthropic
+#   fallback_chain: []
+#
+# Recipe 3 — Gemini-primary free cascade. Best when Ollama isn't installed
+# and you want to stay on free tiers. Anthropic is the paid safety net.
+#
+# providers:
+#   primary: gemini
+#   fallback_chain: [groq, cerebras, anthropic]
 
 # --- Output settings ---
 output:
