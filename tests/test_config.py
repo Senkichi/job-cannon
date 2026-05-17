@@ -1,6 +1,6 @@
 """Tests for config.py functions."""
 import pytest
-from job_finder.config import ConfigError, ConfigNotFoundError, resolve_triage_enabled, load_config
+from job_finder.config import ConfigError, resolve_triage_enabled, load_config
 
 
 def test_resolve_triage_enabled_auto_true_for_paid_primaries():
@@ -37,3 +37,39 @@ def test_old_providers_scoring_schema_raises_error():
     cfg = {"providers": {"scoring": {"primary": "ollama"}}, "profile": {}, "sources": {}, "scoring": {}, "db": {}}
     with pytest.raises(ConfigError, match="Old config schema detected"):
         validate_required_sections(cfg)
+
+
+def test_load_config_validates_populated_config_even_with_allow_missing(tmp_path):
+    """Pins Fix 1 (2026-05-17 hotfix): allow_missing=True must only suppress
+    the "file is missing" error, not skip schema validation on a populated
+    config. Before the fix, a populated old-shape config loaded silently and
+    the broken cascade went undetected for ~24h.
+    """
+    import yaml
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "profile": {},
+                "sources": {},
+                "scoring": {},
+                "db": {},
+                # The Phase 40 trap: nested providers.scoring shape.
+                "providers": {"scoring": {"provider": "ollama"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="Old config schema detected"):
+        load_config(cfg_path, allow_missing=True)
+
+
+def test_load_config_returns_empty_when_file_missing_and_allow_missing(tmp_path):
+    """Counterpart to the above: the file-not-found case must still return
+    {} silently when allow_missing=True. This is the onboarding wizard's
+    legitimate use case — preserved by Fix 1's split.
+    """
+    missing = tmp_path / "does_not_exist.yaml"
+    assert load_config(missing, allow_missing=True) == {}

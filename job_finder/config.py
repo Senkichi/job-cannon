@@ -135,6 +135,7 @@ def validate_required_sections(config: dict) -> None:
         raise ConfigError(
             "Old config schema detected: providers.scoring key found. "
             "Phase 40 migrated to flat providers: schema. "
+            "Run: uv run python -m job_finder.migrate_config\n"
             "See .planning/phases/40-workload-tiers-cascade-rewire-canary/40-CONTEXT.md for migration instructions."
         )
 
@@ -188,8 +189,10 @@ def load_config(
     Args:
         config_path: Optional custom path to config.yaml. Accepts str or PathLike;
             internally coerced to Path so callers can pass either.
-        allow_missing: If True, skip validation to allow onboarding wizard to run
-            with incomplete or missing config.
+        allow_missing: If True, return ``{}`` when the file is missing instead of
+            raising ConfigNotFoundError. Schema validation still applies to
+            populated configs — the onboarding wizard handles ConfigError by
+            routing to the migration UI.
 
     Returns:
         Configuration dictionary, or {} if allow_missing=True and file doesn't exist.
@@ -197,6 +200,8 @@ def load_config(
     Raises:
         ConfigNotFoundError: If config file not found and allow_missing=False.
         ValueError: If config file contains invalid YAML or is empty.
+        ConfigError: If a populated config fails schema validation, regardless
+            of allow_missing.
     """
     from job_finder.web import user_data_dirs
 
@@ -255,10 +260,11 @@ def load_config(
             f"See config.example.yaml for the expected structure."
         )
 
-    # Skip validation if allow_missing=True (onboarding case)
-    # This allows the app to start with incomplete config for the onboarding wizard.
-    if allow_missing:
-        return cfg
-
+    # An absent file already returned {} above. If we reached here with a
+    # populated dict, the user has a config — validate it, even when
+    # allow_missing=True (the onboarding wizard handles ConfigError by
+    # routing to the migration UI). Phase 40 hotfix (2026-05-17): conflating
+    # "file missing" with "skip every schema check" let an old-shape config
+    # load silently and broke the LLM cascade for ~24h.
     validate_required_sections(cfg)
     return cfg
