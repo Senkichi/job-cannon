@@ -39,10 +39,23 @@ def _check_backup_recent(user_data_root: str | None = None) -> None:
     The env var override exists so operators who use alternate backup schemes
     (time-machine snapshots, zfs datasets, manual .backup copies) can proceed
     after accepting responsibility for the rollback path. Fail-closed default.
+
+    Fresh install bypass: If the jobs.db file doesn't exist, skip the backup check
+    since there's no data to migrate from.
     """
     if os.environ.get("GSD_BACKUP_CONFIRMED") == "1":
         return
     root = user_data_root if user_data_root is not None else os.getcwd()
+
+    # Check if this is a fresh install (no database exists)
+    # If so, skip backup check since there's nothing to migrate from
+    from job_finder.web.user_data_dirs import db_path
+
+    db_file = db_path()
+    if not db_file.exists():
+        # Fresh install - no database to migrate, skip backup check
+        return
+
     pattern = os.path.join(root, "backup_userdata_*.tar.gz")
     backups = sorted(glob.glob(pattern), reverse=True)
     if not backups:

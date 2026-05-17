@@ -7,6 +7,7 @@ codebase.  Import the constant you need rather than hard-coding a number.
 import os
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -175,18 +176,28 @@ def write_config(data: dict) -> Path:
     return config_path
 
 
-def load_config(config_path: str | os.PathLike[str] | None = None, *, allow_missing: bool = False) -> dict:
-    """Load configuration from YAML file.
+def load_config(
+    config_path: Optional[Path] = None,
+    allow_missing: bool = False,
+) -> dict:
+    """Load config.yaml from the user-data directory or a custom path.
+
+    Path resolution order:
+    1. If ``config_path`` is provided, use it.
+    2. If ``$JOB_CANNON_CONFIG`` env var is set, use it.
+    3. Default to user_data_dirs.config_path().
 
     Args:
-        config_path: Path to config.yaml. If None, uses platformdirs default.
-        allow_missing: If True, returns {} when config doesn't exist.
+        config_path: Optional custom path to config.yaml.
+        allow_missing: If True, skip validation to allow onboarding wizard to run
+            with incomplete or missing config.
 
     Returns:
         Configuration dictionary, or {} if allow_missing=True and file doesn't exist.
 
     Raises:
         ConfigNotFoundError: If config file not found and allow_missing=False.
+        ValueError: If config file contains invalid YAML or is empty.
     """
     from job_finder.web import user_data_dirs
 
@@ -203,7 +214,7 @@ def load_config(config_path: str | os.PathLike[str] | None = None, *, allow_miss
         else:
             path = user_data_dirs.config_path()
     else:
-        path = Path(config_path)
+        path = config_path
 
     # File existence check
     if not path.exists():
@@ -241,6 +252,11 @@ def load_config(config_path: str | os.PathLike[str] | None = None, *, allow_miss
             f"Config file is empty or contains only comments: {path}\n"
             f"See config.example.yaml for the expected structure."
         )
+
+    # Skip validation if allow_missing=True (onboarding case)
+    # This allows the app to start with incomplete config for the onboarding wizard.
+    if allow_missing:
+        return cfg
 
     validate_required_sections(cfg)
     return cfg
