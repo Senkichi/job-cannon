@@ -286,8 +286,13 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   1. On Windows 11, `pipx install job-cannon` succeeds, `job-cannon` is on PATH, and `job-cannon --help` returns help text; the wizard runs to completion against a real Gmail IMAP account
   2. On macOS Sonoma+ (15.x acceptable), the same flow works; any ad-hoc-signing workarounds for `llama-cpp-python` shared libs are documented in INSTALL.md
   3. On Ubuntu 22.04+, the same flow works; Linux-specific install paths (apt-installed Python, system pipx) are noted in INSTALL.md
-  4. At least 5 strangers (not the author) have installed via `pipx install job-cannon`, completed onboarding, and run at least one ingest+score cycle — recorded as attestations in `.planning/v5.0/PYPI-GATE-attestations.md`. If gate is blocking for milestone close, the install-pipeline portion (criteria 1-3) closes the phase; the 5-strangers count defers to an operational follow-up issue.
-**Plans**: TBD
+  4. At least 5 strangers (not the author) have installed via `pipx install job-cannon`, completed onboarding, and run at least one ingest+score cycle — recorded as attestations in `.planning/v5.0/PYPI-GATE-attestations.md`. Per D-11 (CONTEXT.md): STRICT gate; no operational-follow-up deferral.
+**Plans**: 5 plans
+  - [ ] 45-01-PLAN.md — Wave-0 internal artifacts: PYPI-GATE-attestations.md skeleton + HYPER-V-VM-BRINGUP.md runbook (wave 1)
+  - [ ] 45-02-PLAN.md — install-attestation.yml GitHub issue form (wave 1)
+  - [ ] 45-03-PLAN.md — release.yml smoke matrix (windows/macos/ubuntu + Windows [local-ai]) + INSTALL.md community-supported sections + attestation CTA (wave 2)
+  - [ ] 45-04-PLAN.md — MANUAL: author wizard runs on Windows 11 host + Hyper-V Ubuntu 22.04 LTS VM (wave 3)
+  - [ ] 45-05-PLAN.md — MANUAL/open-ended: recruitment posts + 5-stranger attestation collection per D-11 strict gate (wave 4)
 
 ## Progress
 
