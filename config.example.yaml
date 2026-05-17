@@ -44,8 +44,16 @@ profile:
 
 # --- Job sources ---
 sources:
+  imap:
+    # IMAP email source (stranger-friendly default - uses app password, no OAuth)
+    enabled: true
+    host: imap.gmail.com
+    port: 993
+    email: ""
+    app_password: ""
+    folder: INBOX
   gmail:
-    # Set to true once you've run: python -m job_finder.gmail_auth
+    # Gmail API source (OAuth power-user path - requires python -m job_finder.gmail_auth)
     enabled: false
     # How many days back to search for job alert emails
     lookback_days: 7
@@ -56,13 +64,6 @@ sources:
       glassdoor: noreply@glassdoor.com
       indeed: alert@indeed.com
       ziprecruiter: no-reply@ziprecruiter.com
-  imap:
-    # Alternative IMAP configuration for Gmail or other email providers
-    enabled: false
-    host: imap.gmail.com
-    port: 993
-    email: your.email@example.com
-    app_password: your_gmail_app_password_here
   serpapi:
     # Optional: SerpAPI for Google Jobs search (requires paid API key)
     enabled: false

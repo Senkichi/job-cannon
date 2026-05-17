@@ -30,6 +30,11 @@ try:
 except ImportError:
     GmailSource = None  # type: ignore[assignment,misc]
 
+try:
+    from job_finder.sources.imap_source import ImapSource
+except ImportError:
+    ImapSource = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,6 +149,56 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         # Log the failure
         _log_to_email_parse_log(conn, run_id, "gmail", 0, error_msg)
 
+        return []
+
+
+def _fetch_imap(config: dict, summary: dict) -> list[Job]:
+    """Fetch jobs from IMAP with server-flag deduplication.
+
+    IMAP uses the \\Seen server flag for dedup - no database tracking required.
+    This is the stranger-friendly default (app password, no OAuth).
+
+    Args:
+        config: Full config dict.
+        summary: Mutable summary dict to update.
+
+    Returns:
+        List of Job objects parsed from IMAP.
+    """
+    imap_config = config.get("sources", {}).get("imap", {})
+    if not imap_config.get("enabled", False):
+        logger.debug("IMAP source disabled in config.")
+        return []
+
+    # Require non-empty credentials
+    email = imap_config.get("email", "")
+    app_password = imap_config.get("app_password", "")
+    if not email or not app_password:
+        logger.warning("IMAP source enabled but credentials missing")
+        summary["imap_errors"].append("IMAP credentials missing")
+        return []
+
+    host = imap_config.get("host", "imap.gmail.com")
+    port = imap_config.get("port", 993)
+    folder = imap_config.get("folder", "INBOX")
+
+    try:
+        source = ImapSource(
+            host=host,
+            port=port,
+            email_address=email,
+            app_password=app_password,
+            folder=folder,
+        )
+        jobs, _ = source.fetch_jobs()
+        summary["imap_fetched"] = len(jobs)
+
+        logger.info("IMAP: fetched %d jobs", len(jobs))
+        return jobs
+    except Exception as e:
+        error_msg = str(e)
+        summary["imap_errors"].append(error_msg)
+        logger.warning("IMAP ingestion failed: %s", error_msg)
         return []
 
 

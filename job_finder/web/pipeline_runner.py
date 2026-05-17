@@ -41,6 +41,7 @@ except ImportError:
 from job_finder.web.ingestion_runner import (  # noqa: F401
     _collect_dataforseo_results,
     _fetch_gmail,
+    _fetch_imap,
     _fetch_portal_search,
     _fetch_serpapi,
     _fetch_thordata,
@@ -92,6 +93,8 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
     summary = {
         "gmail_fetched": 0,
         "gmail_errors": [],
+        "imap_fetched": 0,
+        "imap_errors": [],
         "serpapi_fetched": 0,
         "serpapi_errors": [],
         "thordata_fetched": 0,
@@ -122,8 +125,13 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         # Other sources run while DataForSEO processes server-side (~60-90s).
         dfse_task_ids, dfse_source = _submit_dataforseo_tasks(config, summary)
 
-        # --- Gmail ingestion ---
-        gmail_jobs = _fetch_gmail(config, runner_conn, summary)
+        # --- Email ingestion: IMAP (default) or Gmail (opt-in) ---
+        if config.get("sources", {}).get("imap", {}).get("enabled", False):
+            imap_jobs = _fetch_imap(config, summary)
+            gmail_jobs = []
+        else:
+            gmail_jobs = _fetch_gmail(config, runner_conn, summary)
+            imap_jobs = []
 
         # --- SerpAPI ingestion ---
         serpapi_jobs = _fetch_serpapi(config, summary)
@@ -136,7 +144,9 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
         dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)
 
         # --- Combine all jobs ---
-        all_jobs = gmail_jobs + serpapi_jobs + thordata_jobs + portal_jobs + dataforseo_jobs
+        all_jobs = (
+            imap_jobs + gmail_jobs + serpapi_jobs + thordata_jobs + portal_jobs + dataforseo_jobs
+        )
 
         # --- Score and persist each job (per-job error isolation) ---
         for job in all_jobs:
@@ -151,6 +161,12 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
                 log_run(runner_conn, "gmail", summary["gmail_fetched"], jobs_new, jobs_scored)
             except Exception as e:
                 logger.warning("Failed to log Gmail run: %s", e)
+
+        if summary["imap_fetched"] > 0 or summary["imap_errors"]:
+            try:
+                log_run(runner_conn, "imap", summary["imap_fetched"], jobs_new, jobs_scored)
+            except Exception as e:
+                logger.warning("Failed to log IMAP run: %s", e)
 
         if summary["serpapi_fetched"] > 0 or summary["serpapi_errors"]:
             try:
