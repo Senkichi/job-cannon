@@ -7,10 +7,13 @@ path components like %APPDATA%\JobCannon\JobCannon\).
 Tests override the root by setting JOB_CANNON_USER_DATA_DIR environment variable.
 """
 
+import logging
 import os
 from pathlib import Path
 
 import platformdirs
+
+logger = logging.getLogger(__name__)
 
 _APP_NAME = "JobCannon"
 _APP_AUTHOR = False
@@ -85,3 +88,49 @@ def update_check_path() -> Path:
         Path to update_check.json under the user data root.
     """
     return user_data_root() / "update_check.json"
+
+
+def warn_if_data_split(cwd: Path | None = None) -> bool:
+    """Warn at startup when an unset env var is silently shadowing real data.
+
+    Failure mode this catches: the developer's persisted ``JOB_CANNON_USER_DATA_DIR``
+    is missing from a new shell, so ``user_data_root()`` falls back to platformdirs,
+    the app starts a fresh onboarding flow at that empty location, and the real
+    ``jobs.db`` at the repo checkout becomes invisible.
+
+    Detection is intentionally narrow — warns iff *all three* hold:
+        1. ``JOB_CANNON_USER_DATA_DIR`` is unset.
+        2. The resolved data root differs from ``cwd``.
+        3. ``cwd / "jobs.db"`` exists.
+
+    Args:
+        cwd: Override for the current working directory (for test isolation).
+            Defaults to ``Path.cwd()``.
+
+    Returns:
+        True if a warning was emitted, False otherwise. The return value is the
+        test seam; production callers can ignore it.
+    """
+    if os.environ.get("JOB_CANNON_USER_DATA_DIR"):
+        return False
+
+    here = (cwd if cwd is not None else Path.cwd()).resolve()
+    resolved = user_data_root().resolve()
+    if here == resolved:
+        return False
+
+    here_db = here / "jobs.db"
+    if not here_db.exists():
+        return False
+
+    logger.warning(
+        "JOB_CANNON_USER_DATA_DIR is unset. The app is reading user data from %s "
+        "(platformdirs default), but a jobs.db exists at the current working "
+        "directory: %s. If you intended to use the cwd database, set "
+        "JOB_CANNON_USER_DATA_DIR=%s and restart. This warning is only emitted at "
+        "startup.",
+        resolved,
+        here_db,
+        here,
+    )
+    return True

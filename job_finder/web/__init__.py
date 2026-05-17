@@ -140,6 +140,12 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
         _setup_file_logging()
 
+        # Warn loudly if the env var is unset and a jobs.db exists at cwd that the
+        # app is about to ignore. Targets the failure mode where a developer's
+        # persisted JOB_CANNON_USER_DATA_DIR is missing in a new shell and the app
+        # silently starts a fresh onboarding flow at platformdirs.
+        user_data_dirs.warn_if_data_split()
+
         from job_finder.web.startup_backfills import (
             run_data_backfills_once,
             run_description_reformat_once,

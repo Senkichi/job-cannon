@@ -1,5 +1,6 @@
 """Tests for platformdirs-backed user data directory helpers."""
 
+import logging
 import os
 
 import pytest
@@ -65,3 +66,97 @@ def test_user_data_root_uses_platformdirs_without_override(monkeypatch):
     assert captured_app_name == "JobCannon"
     assert captured_appauthor is False
     assert result == user_data_dirs.Path("/fake/user/data/dir")
+
+
+# --- warn_if_data_split: regression tests for the env-var-missing failure mode ---
+#
+# Failure mode this guards against: a developer's persisted JOB_CANNON_USER_DATA_DIR
+# disappears from a new PowerShell shell. The app falls back to platformdirs,
+# silently runs the onboarding wizard against an empty location, and the real
+# jobs.db at the repo checkout becomes invisible. Pre-fix, this state was caught
+# only by a human noticing "where did my 8,894 jobs go?" — the tests below close
+# that loop by asserting the warning fires iff all three preconditions hold.
+
+
+def _make_resolved_root(tmp_path, monkeypatch):
+    """Force user_data_root() to a controlled tmp path with no env var override.
+    Returns the resolved Path.
+    """
+    monkeypatch.delenv("JOB_CANNON_USER_DATA_DIR", raising=False)
+    resolved = tmp_path / "resolved_root"
+    resolved.mkdir()
+    monkeypatch.setattr(
+        user_data_dirs.platformdirs, "user_data_dir", lambda *_args, **_kw: str(resolved)
+    )
+    return resolved
+
+
+def test_warn_no_op_when_env_var_is_set(tmp_path, monkeypatch, caplog):
+    """If the env var is set, the user knows where their data is — no warning,
+    even when a stray jobs.db sits at cwd."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "jobs.db").write_bytes(b"")  # presence is enough; size doesn't matter
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "elsewhere"))
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.user_data_dirs"):
+        warned = user_data_dirs.warn_if_data_split(cwd=cwd)
+
+    assert warned is False
+    assert caplog.records == []
+
+
+def test_warn_no_op_when_cwd_has_no_db(tmp_path, monkeypatch, caplog):
+    """No jobs.db at cwd means there's no orphaned data to warn about."""
+    _make_resolved_root(tmp_path, monkeypatch)
+    cwd = tmp_path / "empty_cwd"
+    cwd.mkdir()
+    # deliberately no jobs.db at cwd
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.user_data_dirs"):
+        warned = user_data_dirs.warn_if_data_split(cwd=cwd)
+
+    assert warned is False
+    assert caplog.records == []
+
+
+def test_warn_no_op_when_cwd_equals_resolved_root(tmp_path, monkeypatch, caplog):
+    """Degenerate case: cwd happens to be the resolved data root. The DB the
+    app is reading and the DB at cwd are literally the same file — no drift to
+    warn about."""
+    monkeypatch.delenv("JOB_CANNON_USER_DATA_DIR", raising=False)
+    root = tmp_path / "single_root"
+    root.mkdir()
+    (root / "jobs.db").write_bytes(b"")
+    monkeypatch.setattr(
+        user_data_dirs.platformdirs, "user_data_dir", lambda *_args, **_kw: str(root)
+    )
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.user_data_dirs"):
+        warned = user_data_dirs.warn_if_data_split(cwd=root)
+
+    assert warned is False
+    assert caplog.records == []
+
+
+def test_warns_when_env_unset_and_cwd_has_orphan_db(tmp_path, monkeypatch, caplog):
+    """The exact regression: env var unset, cwd has a jobs.db, resolved root is
+    elsewhere. Without this warning, the app silently boots onto the empty
+    resolved root and the cwd database is invisible."""
+    resolved = _make_resolved_root(tmp_path, monkeypatch)
+    cwd = tmp_path / "real_data"
+    cwd.mkdir()
+    (cwd / "jobs.db").write_bytes(b"x" * 1024)  # mark as 'populated'
+
+    with caplog.at_level(logging.WARNING, logger="job_finder.web.user_data_dirs"):
+        warned = user_data_dirs.warn_if_data_split(cwd=cwd)
+
+    assert warned is True
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    # The message must name both paths so the developer can act on it.
+    message = record.getMessage()
+    assert str(resolved) in message
+    assert str(cwd) in message
+    assert "JOB_CANNON_USER_DATA_DIR" in message
