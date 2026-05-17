@@ -263,7 +263,12 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   2. `LICENSE` contains the full AGPL-3.0 text; `pyproject.toml` license expression is `AGPL-3.0-only`
   3. `PRIVACY.md`, `AUP.md`, `SECURITY.md` are committed at repo root and linked from README; PRIVACY.md describes the local-only data flow + threat model, AUP.md prohibits scraping at scale + ATS-ToS violations, SECURITY.md sets responsible-disclosure expectations with no SLA
   4. At least one stranger (not the author) fresh-clones the repo on a machine that has never run job-cannon, runs `uv sync && uv run job-cannon`, completes the wizard with their own Gmail + provider, and confirms at least one scored job appears in their dashboard — recorded as a brief attestation in `.planning/v5.0/STRANGE-GATE-attestation.md`
-**Plans**: TBD
+**Plans**: 5 plans
+  - [ ] 43-01-PLAN.md — Legal docs (pyproject AGPL-3.0-only + PRIVACY + AUP + SECURITY surgical + README Legal section) (STRANGE-LEGAL-01..04) [wave 1]
+  - [ ] 43-02-PLAN.md — updater.py core (version + GitHub Releases fetch + atomic JSON cache + silent-fail) (STRANGE-UPDATE-01) [wave 1]
+  - [ ] 43-03-PLAN.md — Banner UI (updates blueprint + _update_banner.html + base.html block + __init__.py wiring + HTMX dismiss endpoint) [wave 2]
+  - [ ] 43-04-PLAN.md — Tests (test_updater.py + test_updates_blueprint.py) [wave 3]
+  - [ ] 43-05-PLAN.md — Strangerify exit gate (attestation template + real-stranger run, autonomous=false) (STRANGE-GATE-01) [wave 3]
 **UI hint**: yes
 
 ### Phase 44: PyPI Release Pipeline & Install Docs
@@ -344,7 +349,7 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 0/? | Not started | - |
 | 41. Strangerify Data Sources | v5.0 | 0/? | Not started | - |
 | 42. Onboarding Wizard | v5.0 | 0/? | Not started | - |
-| 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 0/? | Not started | - |
+| 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 0/5 | Not started | - |
 | 44. PyPI Release Pipeline & Install Docs | v5.0 | 0/? | Not started | - |
 | 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 0/? | Not started | - |
 
