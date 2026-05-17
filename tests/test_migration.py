@@ -382,11 +382,14 @@ def test_migration_count_is_thirteen():
     jobs.rejection_reviewed column.
     Migration 50: rename vestigial enrichment_tier strings haiku/sonnet -> low/mid.
     Migration 51: consolidate user_activity actions batch_score_haiku/sonnet -> batch_score.
+    Migration 52: scoring_costs.schema_valid for canary telemetry.
+    Migration 53: create onboarding_state table (Phase 42).
+    Migration 54: onboarding_state.wizard_data for inter-step wizard state (Phase 42).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 53
+    assert len(MIGRATIONS) == 54
 
 
 class TestMigration27:
@@ -910,8 +913,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 51 entries (through Migration 51: consolidate actions)."""
-        assert len(MIGRATIONS) == 53
+        """MIGRATIONS list has 54 entries (through Migration 54: onboarding wizard_data)."""
+        assert len(MIGRATIONS) == 54
 
 
 class TestMigration40:
@@ -1355,9 +1358,11 @@ class TestMigration52And53:
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
 
-        # Check PRAGMA user_version is 53
+        # Check PRAGMA user_version matches the final migration (54: wizard_data column).
+        # run_migrations() applies all migrations, not just up to 53; this test confirms
+        # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 53, f"Expected PRAGMA user_version=53, got: {version}"
+        assert version == 54, f"Expected PRAGMA user_version=54, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(

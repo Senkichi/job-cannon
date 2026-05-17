@@ -7,8 +7,6 @@ codebase.  Import the constant you need rather than hard-coding a number.
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
-
 import yaml
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -177,7 +175,7 @@ def write_config(data: dict) -> Path:
 
 
 def load_config(
-    config_path: Optional[Path] = None,
+    config_path: str | os.PathLike[str] | None = None,
     allow_missing: bool = False,
 ) -> dict:
     """Load config.yaml from the user-data directory or a custom path.
@@ -188,7 +186,8 @@ def load_config(
     3. Default to user_data_dirs.config_path().
 
     Args:
-        config_path: Optional custom path to config.yaml.
+        config_path: Optional custom path to config.yaml. Accepts str or PathLike;
+            internally coerced to Path so callers can pass either.
         allow_missing: If True, skip validation to allow onboarding wizard to run
             with incomplete or missing config.
 
@@ -214,7 +213,10 @@ def load_config(
         else:
             path = user_data_dirs.config_path()
     else:
-        path = config_path
+        # Coerce to Path so str/PathLike callers all reach the .exists() branch safely.
+        # Commit 9869675 narrowed the param to Optional[Path] but did not update the
+        # body; tests and callers still pass str (e.g. test_config_resolution).
+        path = Path(config_path)
 
     # File existence check
     if not path.exists():
