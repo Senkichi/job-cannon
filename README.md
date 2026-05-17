@@ -181,6 +181,13 @@ keys needed for unit / integration. The e2e tier requires
   style, scope check
 - **[Security policy](SECURITY.md)** — threat model, reporting
 
+## Legal
+
+- **[License (AGPL-3.0)](LICENSE)** — license text
+- **[Privacy policy](PRIVACY.md)** — what data the app touches, where it lives, what it sends out
+- **[Acceptable use](AUP.md)** — prohibited uses and operator responsibilities
+- **[Security policy](SECURITY.md)** — reporting channel, scope, disclosure
+
 ## License
 
-[GNU AGPL v3.0 or later](LICENSE) — see LICENSE.
+[GNU AGPL v3.0](LICENSE) — see LICENSE.
