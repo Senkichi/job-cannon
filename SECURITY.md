@@ -2,9 +2,12 @@
 
 ## Reporting a Vulnerability
 
-Email **security@example.com** with details. Please don't open public
-issues for vulnerabilities — reach out by email so we can discuss the
-issue privately and coordinate disclosure before any public mention.
+Submit through **[GitHub Security Advisories](https://github.com/Senkichi/job-cannon/security/advisories/new)**.
+Please don't open public issues for vulnerabilities — using the GitHub
+Security Advisories channel keeps the report private until a fix lands
+and provides a built-in audit trail. The maintainer's personal email
+is **not** a security disclosure channel; reports there will be
+redirected.
 
 ## Scope
 
@@ -38,6 +41,9 @@ narrow:
 
 ## Responsible Disclosure
 
-Disclosure timeline: 30 days from initial report to public
-acknowledgement after a fix lands on `main`. Earlier disclosure may be
-appropriate for actively-exploited issues — coordinate by email.
+This is a single-maintainer, single-user, localhost-only project.
+There is no service-level agreement on response or fix time.
+Best-effort acknowledgement and triage happens when the maintainer
+next sees the advisory. Earlier public disclosure may be appropriate
+for actively-exploited issues — coordinate through the Security
+Advisory thread.
