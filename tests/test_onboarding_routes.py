@@ -1,0 +1,288 @@
+"""Integration tests for the onboarding blueprint routes (STRANGE-WIZ-02 + STRANGE-WIZ-05).
+
+Parametrized GET smoke covers all 8 routes (success criterion 2 — each renders with a
+unique marker string). Targeted tests cover resume upload security (T-42-03/T-42-07),
+IMAP failure re-render (D-08), and wizard_data write semantics (D-13).
+"""
+
+import io
+import sqlite3
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# The 8 routes + their marker strings (success criterion 2)
+_ROUTE_TO_MARKER = [
+    ("/onboarding/welcome", "WIZARD_STEP_WELCOME_MARKER"),
+    ("/onboarding/provider_select", "WIZARD_STEP_PROVIDER_SELECT_MARKER"),
+    ("/onboarding/provider_credentials", "WIZARD_STEP_PROVIDER_CREDENTIALS_MARKER"),
+    ("/onboarding/resume_upload", "WIZARD_STEP_RESUME_UPLOAD_MARKER"),
+    ("/onboarding/profile_edit", "WIZARD_STEP_PROFILE_EDIT_MARKER"),
+    ("/onboarding/imap_credentials", "WIZARD_STEP_IMAP_CREDENTIALS_MARKER"),
+    ("/onboarding/schedule", "WIZARD_STEP_SCHEDULE_MARKER"),
+    ("/onboarding/done", "WIZARD_STEP_DONE_MARKER"),
+]
+
+
+@pytest.mark.parametrize("path,marker", _ROUTE_TO_MARKER)
+def test_each_step_renders(client, path, marker):
+    """GET each step returns 200 + contains the unique marker string (success criterion 2)."""
+    resp = client.get(path)
+    assert resp.status_code == 200, f"{path} returned {resp.status_code}"
+    body = resp.get_data(as_text=True)
+    assert marker in body, f"{path} response missing marker {marker}"
+
+
+def test_welcome_renders_system_check_results(client):
+    """Welcome GET invokes system_check.run_all() and renders each result."""
+    resp = client.get("/onboarding/welcome")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # The 3 default check names from system_check.run_all
+    assert "DB writable" in body
+    assert "Port 5000" in body
+    assert "Network reachable" in body
+
+
+def test_step_indicator_renders(client):
+    """Step indicator passes step_num and step_label to _base.html."""
+    resp = client.get("/onboarding/welcome")
+    body = resp.get_data(as_text=True)
+    assert "Step 1 of 7" in body
+    assert "Welcome" in body
+
+    resp = client.get("/onboarding/schedule")
+    body = resp.get_data(as_text=True)
+    assert "Step 6 of 7" in body
+    assert "Schedule" in body
+
+
+def test_welcome_post_redirects_to_provider_select(client):
+    """POST /onboarding/welcome → 302 to /onboarding/provider_select."""
+    resp = client.post("/onboarding/welcome", data={})
+    assert resp.status_code == 302
+    assert "/onboarding/provider_select" in resp.headers["Location"]
+
+
+def test_provider_select_post_writes_wizard_data_and_redirects(client, app):
+    """POST /onboarding/provider_select writes {provider: {name}} to wizard_data, redirects to credentials."""
+    resp = client.post("/onboarding/provider_select", data={"provider_name": "ollama"})
+    assert resp.status_code == 302
+    assert "/onboarding/provider_credentials" in resp.headers["Location"]
+
+    # Verify wizard_data was written
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        assert row is not None
+        import json
+        data = json.loads(row[0])
+        assert data["provider"]["name"] == "ollama"
+    finally:
+        conn.close()
+
+
+def test_provider_credentials_no_creds_for_free_clis(client, app):
+    """provider_credentials GET for ollama renders the 'no credentials needed' card."""
+    # First write a provider choice to wizard_data
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"}}' WHERE id=1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/provider_credentials")
+    body = resp.get_data(as_text=True)
+    assert "No credentials needed" in body
+    assert "ollama" in body
+
+
+def test_provider_credentials_api_key_form_for_anthropic(client, app):
+    """provider_credentials GET for anthropic renders an API-key form."""
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"anthropic\"}}' WHERE id=1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/provider_credentials")
+    body = resp.get_data(as_text=True)
+    assert 'type="password"' in body
+    assert 'name="api_key"' in body
+
+
+def test_resume_upload_rejects_non_pdf_docx(client):
+    """POST /onboarding/resume_upload with .exe extension returns 200 + error message (T-42-03)."""
+    data = {"resume": (io.BytesIO(b"fake exe data"), "malicious.exe")}
+    resp = client.post("/onboarding/resume_upload", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 200  # re-renders with error, not 302
+    body = resp.get_data(as_text=True)
+    assert "Only .pdf and .docx files are supported" in body
+
+
+def test_resume_upload_skip_advances_without_file(client):
+    """POST /onboarding/resume_upload with skip=1 → 302 to profile_edit, no file required."""
+    resp = client.post("/onboarding/resume_upload", data={"skip": "1"})
+    assert resp.status_code == 302
+    assert "/onboarding/profile_edit" in resp.headers["Location"]
+
+
+def test_resume_upload_unlinks_temp_file(client, monkeypatch):
+    """POST /onboarding/resume_upload calls os.unlink in the finally block regardless of parse outcome (T-42-07)."""
+    unlinked = []
+    original_unlink = __import__("os").unlink
+
+    def tracking_unlink(p):
+        unlinked.append(str(p))
+        return original_unlink(p)
+
+    monkeypatch.setattr("job_finder.web.onboarding.blueprint.os.unlink", tracking_unlink)
+    # Mock parse_resume to avoid needing real pdfplumber
+    monkeypatch.setattr(
+        "job_finder.web.onboarding.blueprint.resume_parser.parse_resume",
+        lambda p: {"skills": ["python"]},
+    )
+
+    fake_pdf = b"%PDF-1.4 fake content"
+    data = {"resume": (io.BytesIO(fake_pdf), "resume.pdf")}
+    resp = client.post("/onboarding/resume_upload", data=data, content_type="multipart/form-data")
+
+    assert resp.status_code == 302  # success → redirect
+    assert len(unlinked) == 1, f"Expected exactly 1 unlink call, got {unlinked}"
+
+
+def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch):
+    """D-08: POST /onboarding/imap_credentials with bad creds → HTTP 200 + error + preserved email."""
+    from job_finder.web.onboarding.imap_test import ImapTestResult
+
+    monkeypatch.setattr(
+        "job_finder.web.onboarding.blueprint.imap_test.check_imap",
+        lambda **kwargs: ImapTestResult(ok=False, error_kind="auth", message="Authentication failed — check your app password"),
+    )
+
+    resp = client.post(
+        "/onboarding/imap_credentials",
+        data={"email": "user@gmail.com", "app_password": "wrong pass word here"},
+    )
+    # D-08: re-render same page with HTTP 200, NOT redirect
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Authentication failed" in body
+    assert "user@gmail.com" in body  # preserved
+
+
+def test_imap_credentials_post_success_redirects_to_schedule(client, monkeypatch, app):
+    """POST /onboarding/imap_credentials with valid creds → 302 to /onboarding/schedule + wizard_data persisted."""
+    from job_finder.web.onboarding.imap_test import ImapTestResult
+
+    monkeypatch.setattr(
+        "job_finder.web.onboarding.blueprint.imap_test.check_imap",
+        lambda **kwargs: ImapTestResult(ok=True, error_kind=None, message="ok", folder_count=8),
+    )
+
+    resp = client.post(
+        "/onboarding/imap_credentials",
+        data={"email": "user@gmail.com", "app_password": "good pass word here"},
+    )
+    assert resp.status_code == 302
+    assert "/onboarding/schedule" in resp.headers["Location"]
+
+    import json
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert data["imap"]["email"] == "user@gmail.com"
+        assert data["imap"]["verified"] is True
+    finally:
+        conn.close()
+
+
+def test_imap_skip_persists_credentials_unverified(client, app):
+    """D-08: skip-for-now saves creds but marks verified=False."""
+    resp = client.post(
+        "/onboarding/imap_credentials",
+        data={"email": "user@gmail.com", "app_password": "xxxx", "skip": "1"},
+    )
+    assert resp.status_code == 302
+    assert "/onboarding/schedule" in resp.headers["Location"]
+
+    import json
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert data["imap"]["verified"] is False
+    finally:
+        conn.close()
+
+
+def test_schedule_post_writes_cadence_and_redirects_to_done(client, app):
+    """POST /onboarding/schedule writes {schedule: {cadence_preset}}, redirects to /onboarding/done."""
+    resp = client.post("/onboarding/schedule", data={"cadence_preset": "heavy"})
+    assert resp.status_code == 302
+    assert "/onboarding/done" in resp.headers["Location"]
+
+    import json
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert data["schedule"]["cadence_preset"] == "heavy"
+    finally:
+        conn.close()
+
+
+def test_schedule_invalid_preset_defaults_to_standard(client, app):
+    """Unknown preset value gets sanitized to 'standard' (defensive — should never happen from real form)."""
+    resp = client.post("/onboarding/schedule", data={"cadence_preset": "evil_value"})
+    assert resp.status_code == 302
+
+    import json
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        data = json.loads(row[0])
+        assert data["schedule"]["cadence_preset"] == "standard"
+    finally:
+        conn.close()
+
+
+def test_done_get_renders_summary(client, app):
+    """GET /onboarding/done renders the review summary card with wizard_data values."""
+    conn = sqlite3.connect(app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"},\"imap\":{\"email\":\"x@y.com\"},\"schedule\":{\"cadence_preset\":\"light\"}}' WHERE id=1"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.get("/onboarding/done")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "ollama" in body
+    assert "x@y.com" in body
+    assert "light" in body
+
+
+def test_done_post_redirects_to_jobs(client):
+    """Done POST handler (plan 42-06) returns 302 redirect to /jobs with flash banner."""
+    # Seed minimal wizard_data so done handler doesn't fail
+    import sqlite3
+    import json
+    conn = sqlite3.connect(client.application.config["DB_PATH"])
+    try:
+        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"}}' WHERE id=1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    resp = client.post("/onboarding/done")
+    # Plan 42-06 replaced the 501 stub with full atomic-finish implementation
+    assert resp.status_code == 302
+    assert "/jobs" in resp.headers["Location"]

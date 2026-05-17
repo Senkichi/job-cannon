@@ -266,6 +266,12 @@ class TestCallSiteIntegration:
         )
         conn.commit()
 
+        # Seed onboarding_state to bypass the @before_request gate (plan 42-01)
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 1)"
+        )
+        conn.commit()
+
         yield app, db_path, conn
 
         conn.close()

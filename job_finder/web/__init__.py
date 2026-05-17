@@ -201,6 +201,13 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(settings_bp)
     app.register_blueprint(admin_bp)
 
+    # --- Phase 42: Onboarding wizard blueprint + before_request gate ---
+    from job_finder.web.onboarding.blueprint import onboarding_bp
+    from job_finder.web.onboarding.state import gate_onboarding
+
+    app.register_blueprint(onboarding_bp)
+    app.before_request(gate_onboarding)
+
     # --- Root redirect: / -> /jobs (Job Board is the default landing page) ---
     @app.route("/")
     def index():

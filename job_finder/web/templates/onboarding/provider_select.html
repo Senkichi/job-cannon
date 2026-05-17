@@ -1,0 +1,39 @@
+{% extends "onboarding/_base.html" %}
+{% block title %}Choose your AI provider — Onboarding{% endblock %}
+{% block content %}
+<!-- WIZARD_STEP_PROVIDER_SELECT_MARKER -->
+<h1 class="text-2xl font-bold text-slate-100 mb-4">Choose your AI provider</h1>
+<p class="text-slate-300 mb-6">These power job scoring. We auto-detected which CLIs you have installed; the top one is recommended.</p>
+{% if providers %}
+  <form method="post" action="{{ url_for('onboarding.provider_select') }}" class="space-y-3">
+    {% for p in providers %}
+      <label class="flex items-start gap-3 p-3 rounded border border-slate-700 hover:border-blue-500 cursor-pointer">
+        <input type="radio" name="provider_name" value="{{ p.name }}" {% if loop.first %}checked{% endif %} class="mt-1">
+        <div>
+          <div class="text-slate-200 font-medium">{{ p.name }}</div>
+          <div class="text-slate-400 text-xs">{{ p.cost_label }} - detected at {{ p.binary_path }}</div>
+        </div>
+      </label>
+    {% endfor %}
+    <div class="flex gap-2 pt-4">
+      <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Continue</button>
+      <button type="submit" name="redetect" value="1" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded">Re-detect</button>
+    </div>
+  </form>
+{% else %}
+  <div class="p-4 bg-amber-900/30 border border-amber-700 rounded mb-4">
+    <p class="text-amber-200 text-sm">No subscription-leveraged CLIs detected. You can:</p>
+    <ul class="list-disc list-inside text-amber-100 text-sm mt-2 space-y-1">
+      <li>Install claude-code CLI (Claude Pro subscription)</li>
+      <li>Install gemini CLI (free tier available)</li>
+      <li>Install Ollama (fully local)</li>
+      <li>Or proceed with Anthropic API (BYO key)</li>
+    </ul>
+  </div>
+  <form method="post" action="{{ url_for('onboarding.provider_select') }}">
+    <input type="hidden" name="provider_name" value="anthropic">
+    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Use Anthropic API</button>
+    <button type="submit" name="redetect" value="1" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded">Re-detect</button>
+  </form>
+{% endif %}
+{% endblock %}

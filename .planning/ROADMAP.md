@@ -251,7 +251,13 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   3. `onboarding/system_check.py` returns specific diagnostic strings on failure: DB-not-writable names the file path, port-conflict names the conflicting port, no-network names the host that failed
   4. `onboarding/imap_test.py` logs into Gmail IMAP with the entered app password, lists at least one folder, logs out, and returns a clear success or a specific-error message (auth/host/timeout) to the wizard
   5. Submitting the final wizard step writes config to user-data dir via atomic write, sets `onboarding_complete=true`, kicks off the first ingest via the scheduler, and redirects to `/dashboard` with a "Welcome — first ingest in progress" banner
-**Plans**: TBD
+**Plans**: 6 plans
+  - [ ] 42-01-PLAN.md — Wave 0 test infrastructure (conftest seed + 10 stub test files)
+  - [ ] 42-02-PLAN.md — Wave 1: Migration 54 + onboarding/state.py + before_request gate + blueprint scaffold (STRANGE-WIZ-01)
+  - [ ] 42-03-PLAN.md — Wave 2: onboarding/system_check.py + tests (STRANGE-WIZ-03)
+  - [ ] 42-04-PLAN.md — Wave 2: onboarding/imap_test.py + mocked + live smoke tests (STRANGE-WIZ-04)
+  - [ ] 42-05-PLAN.md — Wave 3: blueprint.py (8 routes) + 9 templates + route tests (STRANGE-WIZ-02, STRANGE-WIZ-05)
+  - [ ] 42-06-PLAN.md — Wave 4: Done step atomicity + first-ingest kickoff + scheduler config (STRANGE-WIZ-06)
 **UI hint**: yes
 
 ### Phase 43: Update Check, Legal, Strangerify Exit Gate

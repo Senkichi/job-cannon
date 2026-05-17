@@ -17,6 +17,27 @@ import pytest
 os.environ.setdefault("GSD_BACKUP_CONFIRMED", "1")
 
 
+def _seed_onboarding_complete(db_path: str) -> None:
+    """Seed onboarding_state(id=1, onboarding_complete=1) so the @before_request gate does not redirect tests to /onboarding/welcome.
+
+    Called by every fixture that returns a Flask app from create_app(). Test files that
+    need the gate to redirect (e.g., test_onboarding_gate.py) use the app_unconfigured
+    fixture below, which UPDATEs the row back to 0.
+
+    Note: wizard_data column is added in Migration 54 (plan 42-02); this helper only
+    seeds columns that exist in Migration 53.
+    """
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 1)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def tmp_db_path():
     """Create a temporary SQLite database file, yield path, clean up after."""
@@ -173,6 +194,7 @@ def app(tmp_db_path):
         "output": {"default_format": "cli", "max_results": 50},
     }
     application = create_app(config=test_config)
+    _seed_onboarding_complete(tmp_db_path)
     application.config["TESTING"] = True
     return application
 
@@ -181,6 +203,46 @@ def app(tmp_db_path):
 def client(app):
     """Flask test client from the shared app fixture."""
     return app.test_client()
+
+
+@pytest.fixture
+def app_unconfigured(tmp_db_path):
+    """Flask app with onboarding_complete=0 so @before_request gate redirects to /onboarding/welcome.
+
+    Used by tests/test_onboarding_gate.py to verify the redirect lifecycle. Mirrors the
+    standard `app` fixture but UPDATEs onboarding_state back to 0 after seeding (which
+    run_migrations may have already triggered an INSERT for).
+    """
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    application = create_app(config=test_config)
+
+    import sqlite3
+    conn = sqlite3.connect(tmp_db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 0)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    application.config["TESTING"] = True
+    return application
 
 
 @pytest.fixture

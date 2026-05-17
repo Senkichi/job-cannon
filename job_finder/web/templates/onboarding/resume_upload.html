@@ -1,0 +1,18 @@
+{% extends "onboarding/_base.html" %}
+{% block title %}Upload your resume — Onboarding{% endblock %}
+{% block content %}
+<!-- WIZARD_STEP_RESUME_UPLOAD_MARKER -->
+<h1 class="text-2xl font-bold text-slate-100 mb-4">Upload your resume (optional)</h1>
+<p class="text-slate-300 mb-6">PDF or DOCX - we will auto-fill skills + suggest target roles. Skip if you would rather fill it manually.</p>
+{% if error %}
+  <div class="p-3 bg-red-900/50 border border-red-700 rounded mb-4 text-red-200 text-sm">{{ error }}</div>
+{% endif %}
+<form method="post" action="{{ url_for('onboarding.resume_upload') }}" enctype="multipart/form-data" class="space-y-3">
+  <input type="file" name="resume" accept=".pdf,.docx" class="block w-full text-slate-300">
+  <p class="text-xs text-slate-500">Max 10 MB. The file is parsed in-memory and deleted immediately.</p>
+  <div class="flex gap-2 pt-2">
+    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Upload &amp; continue</button>
+    <button type="submit" name="skip" value="1" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded">Skip - I will fill manually</button>
+  </div>
+</form>
+{% endblock %}

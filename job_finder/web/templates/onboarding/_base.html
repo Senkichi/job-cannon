@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>{% block title %}Onboarding — Job Cannon{% endblock %}</title>
+  <!-- HTMX 2.0.8 -->
+  <script src="https://unpkg.com/htmx.org@2.0.8/dist/htmx.min.js"></script>
+  <!-- Tailwind v4.0.6 -->
+  <script src="https://unpkg.com/@tailwindcss/browser@4.0.6"></script>
+  <style type="text/tailwindcss">@custom-variant dark (&:where(.dark, .dark *));</style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <div class="max-w-2xl mx-auto py-12 px-4">
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="mb-6 space-y-2">
+          {% for category, message in messages %}
+            <div class="px-4 py-3 rounded-lg text-sm
+              {% if category == 'error' %}bg-red-900/50 text-red-200 border border-red-700
+              {% elif category == 'success' %}bg-green-900/50 text-green-200 border border-green-700
+              {% else %}bg-slate-700/50 text-slate-200 border border-slate-600{% endif %}">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- Step indicator (D-21) -->
+    {% if step_num is defined and step_label is defined %}
+      <div class="mb-6">
+        <p class="text-sm text-slate-400">Step {{ step_num }} of 7 &bull; {{ step_label }}</p>
+        <div class="mt-2 h-1 bg-slate-700 rounded overflow-hidden">
+          <div class="h-1 bg-blue-500" style="width: {{ (step_num * 100 / 7) | round(0, 'floor') }}%"></div>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- Card -->
+    <div class="bg-slate-800/60 border border-slate-700 rounded-lg p-6 shadow-lg">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

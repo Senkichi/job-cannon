@@ -250,6 +250,10 @@ ats:
     max_unique_urls_per_company: 500
     max_companies_per_promote_run: 500
 
+# --- Scheduler cadence (Phase 42 wizard writes this; Settings allows custom edits) ---
+scheduler:
+  cadence_preset: standard  # one of: light (1x/day 08:00), standard (3x/day 0/8/16), heavy (6x/day every 4h)
+
 # --- Development server ---
 server:
   # Host to bind Flask to (use 0.0.0.0 to accept connections from other machines)

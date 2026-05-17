@@ -1,0 +1,22 @@
+{% extends "onboarding/_base.html" %}
+{% block title %}Welcome — Job Cannon Onboarding{% endblock %}
+{% block content %}
+<!-- WIZARD_STEP_WELCOME_MARKER -->
+<h1 class="text-2xl font-bold text-slate-100 mb-4">Welcome to Job Cannon</h1>
+<p class="text-slate-300 mb-6">A 7-step setup so the app can score and surface jobs that match your profile.</p>
+<h2 class="text-lg font-semibold text-slate-200 mb-3">Your machine check</h2>
+<ul class="space-y-2 mb-6">
+  {% for check in checks %}
+    <li class="flex items-start gap-2">
+      {% if check.ok %}<span class="text-green-400">OK</span>{% else %}<span class="text-amber-400">!</span>{% endif %}
+      <div class="text-sm">
+        <div class="text-slate-200">{{ check.name }}</div>
+        <div class="text-slate-400 text-xs">{{ check.detail }}</div>
+      </div>
+    </li>
+  {% endfor %}
+</ul>
+<form method="post" action="{{ url_for('onboarding.welcome') }}">
+  <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Get started</button>
+</form>
+{% endblock %}
