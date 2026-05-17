@@ -76,3 +76,12 @@ def cache_path() -> Path:
         Path to cache directory under the user data root.
     """
     return user_data_root() / "cache"
+
+
+def update_check_path() -> Path:
+    """Return the path to the update_check.json cache file.
+
+    Returns:
+        Path to update_check.json under the user data root.
+    """
+    return user_data_root() / "update_check.json"
