@@ -13,12 +13,12 @@ packages = ["job_finder"]
 
 [project]
 name = "job-cannon"
-version = "4.0.0"
+version = "5.0.0"
 description = "Personal job search command center — Flask, Gmail ingestion, AI scoring, pipeline tracking"
 requires-python = ">=3.13"
 authors = [{ name = "Senkichi", email = "Senkichi@users.noreply.github.com" }]
 readme = "README.md"
-license = { text = "AGPL-3.0-or-later" }
+license = "AGPL-3.0-only"
 keywords = [
     "job-search",
     "flask",
@@ -33,7 +33,7 @@ classifiers = [
     "Environment :: Web Environment",
     "Framework :: Flask",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
@@ -255,7 +255,7 @@ pythonVersion = "3.13"
 # ── Commitizen (Version Bumping + Changelog) ──────────────────
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "4.0.0"
+version = "5.0.0"
 version_files = ["pyproject.toml:project.version"]
 tag_format = "v$version"
 update_changelog_on_bump = true
