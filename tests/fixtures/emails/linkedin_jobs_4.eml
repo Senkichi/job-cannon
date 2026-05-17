@@ -1,0 +1,1659 @@
+Received: by 2002:a05:6500:4317:b0:2f6:a183:3832 with SMTP id ch23csp730097lqb;
+        Wed, 25 Mar 2026 09:10:22 -0700 (PDT)
+Received: from mailb-dc.linkedin.com (mailb-dc.linkedin.com. [2620:109:c003:104::155])
+        by mx.google.com with ESMTPS id 41be03b00d2f7-c7451aa7d0csi24790633a12.225.2026.03.25.09.10.20
+        for <REDACTED@example.com>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Wed, 25 Mar 2026 09:10:21 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mailb.linkedin.com;
+	s=d2048-202308-0b; t=1774455018;
+	bh=gUX1/P/FwKxYeoFUPO+W4LExGC3QJF2lOA4V3zPZg/s=;
+	h=Date:From:Subject:MIME-Version:Content-Type:To:X-LinkedIn-Class:
+	 X-LinkedIn-Template:X-LinkedIn-fbl;
+	b=XYFfumMbBPHRV3uHYz5xzmMvB8fyvCdTuEj6NiubEe2ZmVe5iVfpcdT8iRTGrX3Ts
+	 x5zWhO+zydwHWz2m6z198RGzxg2XCv6lX7hIjXpgSlS5FOH1XPVbOZYN8ZdWHW9wMR
+	 EOJsuhA7MPSGPZe20d7oo22CQeiQF8BQNnc5TYwbwZZuGJ634GRzmljCN5rMJe6HUD
+	 IDbC+6p4O2UrlYvmaUfG2Iv82/NBzt2fTyjoAgJr8QSvGYfvdJIKMb0fM6WrS3z+S3
+	 ZeWLI6iOgtJHmbQw9EMrBClG4GuUY4twRxymPwMFM+rNdIsxxBncq8Ip1UtBlUmfWO
+	 6UoBKNtq7vwhQ=DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=linkedin.com;
+	s=d2048-202308-00; t=1774455018;
+	bh=gUX1/P/FwKxYeoFUPO+W4LExGC3QJF2lOA4V3zPZg/s=;
+	h=Date:From:Subject:MIME-Version:Content-Type:To:X-LinkedIn-Class:
+	 X-LinkedIn-Template:X-LinkedIn-fbl;
+	b=P5cuEgJRQlHWHNPrRWmSQnXvkU8D5hLNVYOQXRnZCcT9L74hYLGmb173kdpRcy4cM
+	 aEnJhjcbaOgd7A+KIHp/nmBis2klxOkxRoIQ1vEb69B/2HcXkq3d48lvaXOEhtl3Gc
+	 dkCk+mZ9AqoWlFQrVoAhAi3iuT5KYSdeB36fwWBE4w26zxHdO1o0AwdT+6uH5wtTUZ
+	 7QdSlhwNz5liohVQhin+RWnvyjrC49ZtEOz0tg6fS/avtp+xzekGs618Nu9iHzldoI
+	 yfIj+AdiffG1GDbT90mS4t0OS7UzIaKsXixVJK7B2eGWBOaMrLRwZP+mqPDH0nRdvG
+	 lhETxokFnjrRw=Date: Wed, 25 Mar 2026 16:10:17 +0000 (UTC)
+From: LinkedIn <jobs-noreply@linkedin.com>
+Subject: =?UTF-8?Q?Explore_new_jobs_for_=E2=80=9Csenior_data_scientist=E2=80=9D?MIME-Version: 1.0
+Content-Type: multipart/alternative; 
+	boundary="----=_Part_5009620_1843647311.1774455017575"
+X-LinkedIn-Class: JOBS-TO-MBR
+X-LinkedIn-Template: email_jobs_facet_suggestions
+Feedback-ID: email_jobs_facet_suggestions:linkedin
+Require-Recipient-Valid-Since: REDACTED@example.com; Thu, 3 Jul 2014 00:59:06 +0000
+
+------=_Part_5009620_1843647311.1774455017575
+Content-Type: text/plain;charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+Content-ID: text-body
+
+Expand your search
+
+Recommendations based on your activity.
+ =20
+
+           =20
+Remote jobs
+https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dsenior+data+scientist+remote&f_TPR=3Dr86400&geoId=3D90000084&refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4389267750,4387503632&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_272001_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+     =20
+Senior Data Scientist II
+Alma
+United States
+View job: https://www.linkedin.com/comm/jobs/view/4389267750/?trackingId=3DWW5I0GQbNtYv99sIOT3bIg%3D%3D&refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+     =20
+Senior Data Scientist - Experimentation & Measurement
+Ladders
+United States
+View job: https://www.linkedin.com/comm/jobs/view/4387503632/?trackingId=3DF7srkg8SpiSdrnJoBlM%2FHQ%3D%3D&refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+
+View all jobs: https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dsenior+data+scientist+remote&f_TPR=3Dr86400&geoId=3D90000084&refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4389267750,4387503632&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+ =20
+
+           =20
+Medical jobs
+https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dmedical+senior+data+scientist&f_TPR=3Dr86400&geoId=3D90000084&refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4388984872,4389733645&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_279008_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+     =20
+Senior Data Scientist, Research, Search Health
+Google
+Mountain View
+View job: https://www.linkedin.com/comm/jobs/view/4388984872/?trackingId=3DTZ9Q0Kad3%2FIXxS8%2BbTDENw%3D%3D&refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+     =20
+Lead Data Scientist
+Smith Hanley Associates
+San Francisco Bay Area
+Apply with resume & profile
+View job: https://www.linkedin.com/comm/jobs/view/4389733645/?trackingId=3Dve8FYlSnXV1HnUsL7diz2Q%3D%3D&refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+
+View all jobs: https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dmedical+senior+data+scientist&f_TPR=3Dr86400&geoId=3D90000084&refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4388984872,4389733645&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+ =20
+
+           =20
+AI/ML jobs
+https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dai%2Fml+senior+data+scientist&f_TPR=3Dr86400&geoId=3D90000084&refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4377799924,4389431188&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_281006_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-title_link_text_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+     =20
+Senior, Data Scientist
+Walmart
+Sunnyvale
+View job: https://www.linkedin.com/comm/jobs/view/4377799924/?trackingId=3DONDbPY12%2BJH9q%2BDcBpCh2w%3D%3D&refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+     =20
+Staff Applied Scientist
+The RealReal
+San Francisco
+View job: https://www.linkedin.com/comm/jobs/view/4389431188/?trackingId=3DYOIGZ1H2BnGR3aWnTWDoYg%3D%3D&refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-view_job-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+---------------------------------------------------------
+ =20
+
+View all jobs: https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dai%2Fml+senior+data+scientist&f_TPR=3Dr86400&geoId=3D90000084&refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&originToLandingJobPostings=3D4377799924,4389431188&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4&trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+ =20
+
+     =20
+
+----------------------------------------
+
+This email was intended for REDACTED REDACTED (Lead, Data Analytics)
+Learn why we included this: https://www.linkedin.com/help/linkedin/answer/4788?lang=3Den&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-SecurityHelp-0-textfooterglimmer&trkEmail=3Deml-email_jobs_facet_suggestions-SecurityHelp-0-textfooterglimmer-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+You are receiving Jobs You Might Be Interested In emails.
+
+
+Manage recommendations: https://www.linkedin.com/comm/jobs/alerts?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-footer-0-manage_recommendations_button_text&trkEmail=3Deml-email_jobs_facet_suggestions-footer-0-manage_recommendations_button_text-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+     =20
+Unsubscribe: https://www.linkedin.com/comm/psettings/email-unsubscribe?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-unsubscribe-0-textfooterglimmer&trkEmail=3Deml-email_jobs_facet_suggestions-unsubscribe-0-textfooterglimmer-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&loid=3DAQGekMqqcF2KlwAAAZ0lws5jF79mtlSpOE0tmrd9oNc2nQNaBt0XA1e9FutAyUWXUb61FpJlE3sCFskVcrbDUSEfM0Kvf3crDbQAufv2aqz2TCYHESuv
+Help: https://www.linkedin.com/help/linkedin/answer/67?lang=3Den&lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&midToken=REDACTED&midSig=REDACTED&trk=3Deml-email_jobs_facet_suggestions-help-0-textfooterglimmer&trkEmail=3Deml-email_jobs_facet_suggestions-help-0-textfooterglimmer-null-5utk17~mn68lnag~t4-null-null&eid=3D5utk17-mn68lnag-t4&otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D
+
+=C2=A9 2026 LinkedIn Corporation, 1zwnj000 West Maude Avenue, Sunnyvale, CA 94085.
+LinkedIn and the LinkedIn logo are registered trademarks of LinkedIn.
+------=_Part_5009620_1843647311.1774455017575
+Content-Type: text/html;charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+Content-ID: html-body
+
+<html xmlns=3D"http://www.w3.org/1999/xhtml" lang=3D"en" xml:lang=3D"en"> <head> <meta http-equiv=3D"Content-Type" content=3D"text/html;charset=3Dutf-8"> <meta name=3D"HandheldFriendly" content=3D"true"> <meta name=3D"viewport" content=3D"width=3Ddevice-width; initial-scale=3D0.666667; user-scalable=3D0"> <meta name=3D"viewport" content=3D"width=3Ddevice-width"> <title></title> <style>
+              @media (max-width: 512px) { .mercado-container { width: 100% !important; } }
+            </style> <style>
+            @media (max-width: 480px) { .inline-button, .inline-button table { display: none !important; }
+            .full-width-button, .full-width-button table { display: table !important; } } @media (max-width: 320px) {
+            .games-notification-badge { display: none !important; } }
+          </style> <style>body {font-family: -apple-system, system-ui, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+            'Fira Sans', Ubuntu, Oxygen, 'Oxygen Sans', Cantarell, 'Droid Sans', 'Apple Color Emoji', 'Segoe UI Emoji',
+            'Segoe UI Emoji', 'Segoe UI Symbol', 'Lucida Grande', Helvetica, Arial, sans-serif;}</style> <!--[if mso]><style type=3D"text/css"> </style><![endif]--> <!--[if IE]><style type=3D"text/css"> </style><![endif]--> <style>
+@media (max-width: 480px) {
+  .inline-button,
+.inline-button table {
+    display: none !important;
+  }
+
+  .full-width-button,
+.full-width-button table {
+    display: table !important;
+  }
+}
+@media (min-width: 512px) {
+  .container {
+    max-width: 512px;
+  }
+}
+@media (min-width: 576px) {
+  .container {
+    max-width: 576px;
+  }
+}
+@media (min-width: 768px) {
+  .container {
+    max-width: 768px;
+  }
+}
+@media (min-width: 992px) {
+  .container {
+    max-width: 992px;
+  }
+}
+@media (min-width: 1128px) {
+  .container {
+    max-width: 1128px;
+  }
+}
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1200px;
+  }
+}
+@media (min-width: 1440px) {
+  .container {
+    max-width: 1440px;
+  }
+}
+@media (min-width: 1680px) {
+  .container {
+    max-width: 1680px;
+  }
+}
+@media (min-width: 1920px) {
+  .container {
+    max-width: 1920px;
+  }
+}
+@media (min-width: 768px) {
+  .notification-toasts.banner.dismiss {
+    transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+  }
+
+  @media (max-width: 767px) {
+    .notification-toasts.banner.dismiss {
+      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+    }
+
+    @media (max-width: 767px) {
+      .notification-toasts.banner.dismiss {
+        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+      }
+
+      @media (min-width: 768px) {
+        .notification-toasts.banner.dismiss {
+          transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        }
+
+        @media (max-width: 767px) {
+          .notification-toasts.banner.dismiss {
+            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+          }
+
+          @media (max-width: 767px) {
+            .notification-toasts.banner.dismiss {
+              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+            }
+
+            @media (min-width: 768px) {
+              .notification-toasts.banner.dismiss {
+                transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+              }
+
+              @media (max-width: 767px) {
+                .notification-toasts.banner.dismiss {
+                  transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                }
+
+                @media (max-width: 767px) {
+                  .notification-toasts.banner.dismiss {
+                    transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                  }
+
+                  @media (min-width: 768px) {
+                    .notification-toasts.banner.dismiss {
+                      transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                    }
+
+                    @media (max-width: 767px) {
+                      .notification-toasts.banner.dismiss {
+                        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                      }
+
+                      @media (max-width: 767px) {
+                        .notification-toasts.banner.dismiss {
+                          transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                        }
+
+                        @media (min-width: 768px) {
+                          .notification-toasts.banner.dismiss {
+                            transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                          }
+
+                          @media (max-width: 767px) {
+                            .notification-toasts.banner.dismiss {
+                              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                            }
+
+                            @media (max-width: 767px) {
+                              .notification-toasts.banner.dismiss {
+                                transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                              }
+
+                              @media (min-width: 768px) {
+                                .notification-toasts.banner.dismiss {
+                                  transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                }
+
+                                @media (max-width: 767px) {
+                                  .notification-toasts.banner.dismiss {
+                                    transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                  }
+
+                                  @media (max-width: 767px) {
+                                    .notification-toasts.banner.dismiss {
+                                      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                    }
+
+                                    @media (min-width: 768px) {
+                                      .notification-toasts.banner.dismiss {
+                                        transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                      }
+
+                                      @media (max-width: 767px) {
+                                        .notification-toasts.banner.dismiss {
+                                          transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                        }
+
+                                        @media (max-width: 767px) {
+                                          .notification-toasts.banner.dismiss {
+                                            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                          }
+
+                                          @media (min-width: 768px) {
+                                            .notification-toasts.banner.dismiss {
+                                              transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                            }
+
+                                          }
+
+                                        }
+
+                                      }
+
+                                    }
+
+                                  }
+
+                                }
+
+                              }
+
+                            }
+
+                          }
+
+                        }
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+}
+@media (max-width: 767px) {
+  .notification-toasts.banner.dismiss {
+    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+  }
+
+  @media (max-width: 767px) {
+    .notification-toasts.banner.dismiss {
+      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+    }
+
+    @media (max-width: 767px) {
+      .notification-toasts.banner.dismiss {
+        transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+      }
+
+      @media (min-width: 768px) {
+        .notification-toasts.banner.dismiss {
+          transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        }
+
+        @media (max-width: 767px) {
+          .notification-toasts.banner.dismiss {
+            transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+          }
+
+          @media (max-width: 767px) {
+            .notification-toasts.banner.dismiss {
+              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+            }
+
+            @media (min-width: 768px) {
+              .notification-toasts.banner.dismiss {
+                transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+              }
+
+              @media (max-width: 767px) {
+                .notification-toasts.banner.dismiss {
+                  transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                }
+
+                @media (max-width: 767px) {
+                  .notification-toasts.banner.dismiss {
+                    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                  }
+
+                  @media (min-width: 768px) {
+                    .notification-toasts.banner.dismiss {
+                      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                    }
+
+                    @media (max-width: 767px) {
+                      .notification-toasts.banner.dismiss {
+                        transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                      }
+
+                      @media (max-width: 767px) {
+                        .notification-toasts.banner.dismiss {
+                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                        }
+
+                        @media (min-width: 768px) {
+                          .notification-toasts.banner.dismiss {
+                            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                          }
+
+                          @media (max-width: 767px) {
+                            .notification-toasts.banner.dismiss {
+                              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                            }
+
+                            @media (max-width: 767px) {
+                              .notification-toasts.banner.dismiss {
+                                transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                              }
+
+                              @media (min-width: 768px) {
+                                .notification-toasts.banner.dismiss {
+                                  transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                }
+
+                                @media (max-width: 767px) {
+                                  .notification-toasts.banner.dismiss {
+                                    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                  }
+
+                                  @media (max-width: 767px) {
+                                    .notification-toasts.banner.dismiss {
+                                      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                    }
+
+                                    @media (min-width: 768px) {
+                                      .notification-toasts.banner.dismiss {
+                                        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                      }
+
+                                      @media (max-width: 767px) {
+                                        .notification-toasts.banner.dismiss {
+                                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                        }
+
+                                        @media (max-width: 767px) {
+                                          .notification-toasts.banner.dismiss {
+                                            transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                          }
+
+                                          @media (min-width: 768px) {
+                                            .notification-toasts.banner.dismiss {
+                                              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                            }
+
+                                            @media transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+     (max-width: 767px) {
+                                              .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                              }
+
+                                              @media (max-width: 767px) {
+                                                .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                  transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                }
+
+                                                @media (max-width: 767px) {
+                                                  .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                    transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                  }
+
+                                                  @media (max-width: 767px) {
+                                                    .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                    }
+
+                                                    @media (max-width: 767px) {
+                                                      .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                      }
+
+                                                      @media (max-width: 767px) {
+                                                        .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                        }
+
+                                                        @media (max-width: 767px) {
+                                                          .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                            transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                          }
+
+                                                          @media (max-width: 767px) {
+                                                            .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                              transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                            }
+
+                                                            @media (max-width: 767px) {
+                                                              .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                              }
+
+                                                              @media (max-width: 767px) {
+                                                                .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                  transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                }
+
+                                                                @media (max-width: 767px) {
+                                                                  .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                    transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                  }
+
+                                                                  @media (max-width: 767px) {
+                                                                    .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                    }
+
+                                                                    @media (max-width: 767px) {
+                                                                      .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                      }
+
+                                                                      @media (max-width: 767px) {
+                                                                        .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                        }
+
+                                                                        @media transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+     (max-width: 767px) {
+                                                                          .notification-toasts.banner.dismiss {
+                                                                            transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                          }
+
+                                                                          @media (max-width: 767px) {
+                                                                            .notification-toasts.banner.dismiss {
+                                                                              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                            }
+
+                                                                            @media (min-width: 768px) {
+                                                                              .notification-toasts.banner.dismiss {
+                                                                                transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                              }
+
+                                                                              @media (max-width: 767px) {
+                                                                                .notification-toasts.banner.dismiss {
+                                                                                  transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                }
+
+                                                                                @media (max-width: 767px) {
+                                                                                  .notification-toasts.banner.dismiss {
+                                                                                    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                  }
+
+                                                                                  @media (min-width: 768px) {
+                                                                                    .notification-toasts.banner.dismiss {
+                                                                                      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                    }
+
+                                                                                    @media (max-width: 767px) {
+                                                                                      .notification-toasts.banner.dismiss {
+                                                                                        transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                      }
+
+                                                                                      @media (max-width: 767px) {
+                                                                                        .notification-toasts.banner.dismiss {
+                                                                                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                        }
+
+                                                                                        @media (min-width: 768px) {
+                                                                                          .notification-toasts.banner.dismiss {
+                                                                                            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                          }
+
+                                                                                          @media (max-width: 767px) {
+                                                                                            .notification-toasts.banner.dismiss {
+                                                                                              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                            }
+
+                                                                                            @media (max-width: 767px) {
+                                                                                              .notification-toasts.banner.dismiss {
+                                                                                                transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                              }
+
+                                                                                              @media (min-width: 768px) {
+                                                                                                .notification-toasts.banner.dismiss {
+                                                                                                  transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                }
+
+                                                                                                @media (max-width: 767px) {
+                                                                                                  .notification-toasts.banner.dismiss {
+                                                                                                    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                  }
+
+                                                                                                  @media (max-width: 767px) {
+                                                                                                    .notification-toasts.banner.dismiss {
+                                                                                                      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                    }
+
+                                                                                                    @media (min-width: 768px) {
+                                                                                                      .notification-toasts.banner.dismiss {
+                                                                                                        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                      }
+
+                                                                                                      @media (max-width: 767px) {
+                                                                                                        .notification-toasts.banner.dismiss {
+                                                                                                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                        }
+
+                                                                                                        @media (max-width: 767px) {
+                                                                                                          .notification-toasts.banner.dismiss {
+                                                                                                            transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                          }
+
+                                                                                                          @media (min-width: 768px) {
+                                                                                                            .notification-toasts.banner.dismiss {
+                                                                                                              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                            }
+
+                                                                                                            @media (max-width: 767px) {
+                                                                                                              .notification-toasts.banner.dismiss {
+                                                                                                                transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                              }
+
+                                                                                                              @media (max-width: 767px) {
+                                                                                                                .notification-toasts.banner.dismiss {
+                                                                                                                  transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                }
+
+                                                                                                                @media (min-width: 768px) {
+                                                                                                                  .notification-toasts.banner.dismiss {
+                                                                                                                    transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                  }
+
+                                                                                                                  @media transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+     (max-width: 767px) {
+                                                                                                                    .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                    }
+
+                                                                                                                    @media (max-width: 767px) {
+                                                                                                                      .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                      }
+
+                                                                                                                      @media (max-width: 767px) {
+                                                                                                                        .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                        }
+
+                                                                                                                        @media (max-width: 767px) {
+                                                                                                                          .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                            transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                          }
+
+                                                                                                                          @media (max-width: 767px) {
+                                                                                                                            .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                              transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                            }
+
+                                                                                                                            @media (max-width: 767px) {
+                                                                                                                              .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                              }
+
+                                                                                                                              @media (max-width: 767px) {
+                                                                                                                                .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                  transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                }
+
+                                                                                                                                @media (max-width: 767px) {
+                                                                                                                                  .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                    transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                  }
+
+                                                                                                                                  @media (max-width: 767px) {
+                                                                                                                                    .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                    }
+
+                                                                                                                                    @media (max-width: 767px) {
+                                                                                                                                      .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                      }
+
+                                                                                                                                      @media (max-width: 767px) {
+                                                                                                                                        .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                        }
+
+                                                                                                                                        @media (max-width: 767px) {
+                                                                                                                                          .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                            transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                          }
+
+                                                                                                                                          @media (max-width: 767px) {
+                                                                                                                                            .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                              transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                            }
+
+                                                                                                                                            @media (max-width: 767px) {
+                                                                                                                                              .notification-toasts.notification-toasts--top.banner.dismiss {
+                                                                                                                                                transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                                                              }
+
+                                                                                                                                            }
+
+                                                                                                                                          }
+
+                                                                                                                                        }
+
+                                                                                                                                      }
+
+                                                                                                                                    }
+
+                                                                                                                                  }
+
+                                                                                                                                }
+
+                                                                                                                              }
+
+                                                                                                                            }
+
+                                                                                                                          }
+
+                                                                                                                        }
+
+                                                                                                                      }
+
+                                                                                                                    }
+
+                                                                                                                  }
+
+                                                                                                                }
+
+                                                                                                              }
+
+                                                                                                            }
+
+                                                                                                          }
+
+                                                                                                        }
+
+                                                                                                      }
+
+                                                                                                    }
+
+                                                                                                  }
+
+                                                                                                }
+
+                                                                                              }
+
+                                                                                            }
+
+                                                                                          }
+
+                                                                                        }
+
+                                                                                      }
+
+                                                                                    }
+
+                                                                                  }
+
+                                                                                }
+
+                                                                              }
+
+                                                                            }
+
+                                                                          }
+
+                                                                        }
+
+                                                                      }
+
+                                                                    }
+
+                                                                  }
+
+                                                                }
+
+                                                              }
+
+                                                            }
+
+                                                          }
+
+                                                        }
+
+                                                      }
+
+                                                    }
+
+                                                  }
+
+                                                }
+
+                                              }
+
+                                            }
+
+                                          }
+
+                                        }
+
+                                      }
+
+                                    }
+
+                                  }
+
+                                }
+
+                              }
+
+                            }
+
+                          }
+
+                        }
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+}
+@media visibility: hidden;
+    max-height: 0px;
+    overflow: hidden;
+
+ screen and (min-width: 1163px) {
+  .base-detail-page__header .nav {
+    margin-left: auto;
+    margin-right: auto;
+    width: 1128px;
+  }
+
+  .main {
+    width: 1128px;
+  }
+}
+@media screen and (max-width: 991px) {
+  @media (max-width: 991px) {
+    .search-bar.isExpanded .search-bar__placeholder {
+      display: none;
+    }
+
+    .search-bar.isExpanded .base-search-bar__form {
+      display: flex;
+    }
+
+    position: fixed;
+        top: 0px;
+        bottom: 0px;
+        left: 0px;
+        right: 0px;
+        z-index: 1000;
+        margin-bottom: 0px;
+        height: 100%;
+        background-color: #ffffff;
+    .search-bar.isExpanded .switcher-tabs__cancel-btn,
+.search-bar.isExpanded .switcher-tabs {
+      display: inherit;
+    }
+
+  }
+}
+@media (min-width: 768px) {
+  .notification-toasts.invisible {
+    transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+  }
+
+  @media (max-width: 767px) {
+    .notification-toasts.invisible {
+      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+    }
+
+    @media (min-width: 768px) {
+      .notification-toasts.invisible {
+        transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+      }
+
+      @media (max-width: 767px) {
+        .notification-toasts.invisible {
+          transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        }
+
+        @media (min-width: 768px) {
+          .notification-toasts.invisible {
+            transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+          }
+
+          @media (max-width: 767px) {
+            .notification-toasts.invisible {
+              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+            }
+
+            @media (min-width: 768px) {
+              .notification-toasts.invisible {
+                transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+              }
+
+              @media (max-width: 767px) {
+                .notification-toasts.invisible {
+                  transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                }
+
+                @media (min-width: 768px) {
+                  .notification-toasts.invisible {
+                    transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                  }
+
+                  @media (max-width: 767px) {
+                    .notification-toasts.invisible {
+                      transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                    }
+
+                    @media (min-width: 768px) {
+                      .notification-toasts.invisible {
+                        transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                      }
+
+                      @media (max-width: 767px) {
+                        .notification-toasts.invisible {
+                          transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                        }
+
+                        @media (min-width: 768px) {
+                          .notification-toasts.invisible {
+                            transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                          }
+
+                          @media (max-width: 767px) {
+                            .notification-toasts.invisible {
+                              transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                            }
+
+                            @media (min-width: 768px) {
+                              .notification-toasts.invisible {
+                                transform: translate(-100%, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                              }
+
+                              @media z-index: -100;
+        min-height: 0px;
+        transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        opacity: 0;
+        transition-property: all;
+        transition-duration: 500ms;
+        transition-timing-function: cubic-bezier(0.34, 0, 0.21, 1);
+     (min-width: 768px) {
+                                .toast--notification.toast--hidden {
+                                  transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                }
+
+                                @media (min-width: 768px) {
+                                  .toast--notification.toast--hidden {
+                                    transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                  }
+
+                                  @media (min-width: 768px) {
+                                    .toast--notification.toast--hidden {
+                                      transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                    }
+
+                                    @media (min-width: 768px) {
+                                      .toast--notification.toast--hidden {
+                                        transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                      }
+
+                                      @media (min-width: 768px) {
+                                        .toast--notification.toast--hidden {
+                                          transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                        }
+
+                                        @media (min-width: 768px) {
+                                          .toast--notification.toast--hidden {
+                                            transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                          }
+
+                                          @media (min-width: 768px) {
+                                            .toast--notification.toast--hidden {
+                                              transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                            }
+
+                                            @media (min-width: 768px) {
+                                              .toast--notification.toast--hidden {
+                                                transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                              }
+
+                                              @media (min-width: 768px) {
+                                                .toast--notification.toast--hidden {
+                                                  transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                }
+
+                                                @media (min-width: 768px) {
+                                                  .toast--notification.toast--hidden {
+                                                    transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                  }
+
+                                                  @media (min-width: 768px) {
+                                                    .toast--notification.toast--hidden {
+                                                      transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                    }
+
+                                                    @media (min-width: 768px) {
+                                                      .toast--notification.toast--hidden {
+                                                        transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                      }
+
+                                                      @media (min-width: 768px) {
+                                                        .toast--notification.toast--hidden {
+                                                          transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                        }
+
+                                                        @media (min-width: 768px) {
+                                                          .toast--notification.toast--hidden {
+                                                            transform: translate(-100%, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                          }
+
+                                                          @media transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        opacity: 1;
+        transition-property: all;
+        transition-duration: 560ms;
+        transition-timing-function: cubic-bezier(0.34, 0, 0.21, 1);
+     (max-width: 767px) {
+                                                            .notification-toasts.animate {
+                                                              transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                            }
+
+                                                            @media (min-width: 768px) {
+                                                              .notification-toasts.animate {
+                                                                transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                              }
+
+                                                              @media (max-width: 767px) {
+                                                                .notification-toasts.animate {
+                                                                  transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                }
+
+                                                                @media (min-width: 768px) {
+                                                                  .notification-toasts.animate {
+                                                                    transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                  }
+
+                                                                  @media (max-width: 767px) {
+                                                                    .notification-toasts.animate {
+                                                                      transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                    }
+
+                                                                    @media (min-width: 768px) {
+                                                                      .notification-toasts.animate {
+                                                                        transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                      }
+
+                                                                      @media (max-width: 767px) {
+                                                                        .notification-toasts.animate {
+                                                                          transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                        }
+
+                                                                        @media (min-width: 768px) {
+                                                                          .notification-toasts.animate {
+                                                                            transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                          }
+
+                                                                          @media (max-width: 767px) {
+                                                                            .notification-toasts.animate {
+                                                                              transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                            }
+
+                                                                            @media (min-width: 768px) {
+                                                                              .notification-toasts.animate {
+                                                                                transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                              }
+
+                                                                              @media (max-width: 767px) {
+                                                                                .notification-toasts.animate {
+                                                                                  transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                }
+
+                                                                                @media (min-width: 768px) {
+                                                                                  .notification-toasts.animate {
+                                                                                    transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                  }
+
+                                                                                  @media (max-width: 767px) {
+                                                                                    .notification-toasts.animate {
+                                                                                      transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                    }
+
+                                                                                    @media (min-width: 768px) {
+                                                                                      .notification-toasts.animate {
+                                                                                        transform: translate(0px, 0) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                      }
+
+                                                                                    }
+
+                                                                                  }
+
+                                                                                }
+
+                                                                              }
+
+                                                                            }
+
+                                                                          }
+
+                                                                        }
+
+                                                                      }
+
+                                                                    }
+
+                                                                  }
+
+                                                                }
+
+                                                              }
+
+                                                            }
+
+                                                          }
+
+                                                        }
+
+                                                      }
+
+                                                    }
+
+                                                  }
+
+                                                }
+
+                                              }
+
+                                            }
+
+                                          }
+
+                                        }
+
+                                      }
+
+                                    }
+
+                                  }
+
+                                }
+
+                              }
+
+                            }
+
+                          }
+
+                        }
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+}
+@media (max-width: 767px) {
+  .notification-toasts.invisible {
+    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+  }
+
+  @media (max-width: 767px) {
+    .notification-toasts.invisible {
+      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+    }
+
+    @media (min-width: 768px) {
+      .notification-toasts.invisible {
+        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+      }
+
+      @media (max-width: 767px) {
+        .notification-toasts.invisible {
+          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        }
+
+        @media (min-width: 768px) {
+          .notification-toasts.invisible {
+            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+          }
+
+          @media (max-width: 767px) {
+            .notification-toasts.invisible {
+              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+            }
+
+            @media (min-width: 768px) {
+              .notification-toasts.invisible {
+                transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+              }
+
+              @media (max-width: 767px) {
+                .notification-toasts.invisible {
+                  transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                }
+
+                @media (min-width: 768px) {
+                  .notification-toasts.invisible {
+                    transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                  }
+
+                  @media (max-width: 767px) {
+                    .notification-toasts.invisible {
+                      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                    }
+
+                    @media (min-width: 768px) {
+                      .notification-toasts.invisible {
+                        transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                      }
+
+                      @media (max-width: 767px) {
+                        .notification-toasts.invisible {
+                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                        }
+
+                        @media (min-width: 768px) {
+                          .notification-toasts.invisible {
+                            transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                          }
+
+                          @media (max-width: 767px) {
+                            .notification-toasts.invisible {
+                              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                            }
+
+                            @media (min-width: 768px) {
+                              .notification-toasts.invisible {
+                                transform: translate(-100%, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                              }
+
+                              @media transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+     (max-width: 767px) {
+                                .notification-toasts.notification-toasts--top.invisible {
+                                  transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                }
+
+                                @media (max-width: 767px) {
+                                  .notification-toasts.notification-toasts--top.invisible {
+                                    transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                  }
+
+                                  @media (max-width: 767px) {
+                                    .notification-toasts.notification-toasts--top.invisible {
+                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                    }
+
+                                    @media (max-width: 767px) {
+                                      .notification-toasts.notification-toasts--top.invisible {
+                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                      }
+
+                                      @media (max-width: 767px) {
+                                        .notification-toasts.notification-toasts--top.invisible {
+                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                        }
+
+                                        @media (max-width: 767px) {
+                                          .notification-toasts.notification-toasts--top.invisible {
+                                            transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                          }
+
+                                          @media (max-width: 767px) {
+                                            .notification-toasts.notification-toasts--top.invisible {
+                                              transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                            }
+
+                                            @media z-index: -100;
+        min-height: 0px;
+        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        opacity: 0;
+        transition-property: all;
+        transition-duration: 500ms;
+        transition-timing-function: cubic-bezier(0.34, 0, 0.21, 1);
+     (max-width: 767px) {
+                                              .toast--notification.toast-notification--top.toast--hidden {
+                                                transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                              }
+
+                                              @media (max-width: 767px) {
+                                                .toast--notification.toast-notification--top.toast--hidden {
+                                                  transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                }
+
+                                                @media (max-width: 767px) {
+                                                  .toast--notification.toast-notification--top.toast--hidden {
+                                                    transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                  }
+
+                                                  @media (max-width: 767px) {
+                                                    .toast--notification.toast-notification--top.toast--hidden {
+                                                      transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                    }
+
+                                                    @media (max-width: 767px) {
+                                                      .toast--notification.toast-notification--top.toast--hidden {
+                                                        transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                      }
+
+                                                      @media (max-width: 767px) {
+                                                        .toast--notification.toast-notification--top.toast--hidden {
+                                                          transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                        }
+
+                                                        @media (max-width: 767px) {
+                                                          .toast--notification.toast-notification--top.toast--hidden {
+                                                            transform: translate(0, -100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                          }
+
+                                                          @media z-index: -100;
+        min-height: 0px;
+        transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        opacity: 0;
+        transition-property: all;
+        transition-duration: 500ms;
+        transition-timing-function: cubic-bezier(0.34, 0, 0.21, 1);
+     (max-width: 767px) {
+                                                            .toast--notification.toast-notification--bottom.toast--hidden {
+                                                              transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                            }
+
+                                                            @media (max-width: 767px) {
+                                                              .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                              }
+
+                                                              @media (max-width: 767px) {
+                                                                .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                  transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                }
+
+                                                                @media (max-width: 767px) {
+                                                                  .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                    transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                  }
+
+                                                                  @media (max-width: 767px) {
+                                                                    .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                      transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                    }
+
+                                                                    @media (max-width: 767px) {
+                                                                      .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                        transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                      }
+
+                                                                      @media (max-width: 767px) {
+                                                                        .toast--notification.toast-notification--bottom.toast--hidden {
+                                                                          transform: translate(0, 100%) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                        }
+
+                                                                        @media transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+        opacity: 1;
+        transition-property: all;
+        transition-duration: 560ms;
+        transition-timing-function: cubic-bezier(0.34, 0, 0.21, 1);
+     (max-width: 767px) {
+                                                                          .notification-toasts.animate {
+                                                                            transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                          }
+
+                                                                          @media (min-width: 768px) {
+                                                                            .notification-toasts.animate {
+                                                                              transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                            }
+
+                                                                            @media (max-width: 767px) {
+                                                                              .notification-toasts.animate {
+                                                                                transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                              }
+
+                                                                              @media (min-width: 768px) {
+                                                                                .notification-toasts.animate {
+                                                                                  transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                }
+
+                                                                                @media (max-width: 767px) {
+                                                                                  .notification-toasts.animate {
+                                                                                    transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                  }
+
+                                                                                  @media (min-width: 768px) {
+                                                                                    .notification-toasts.animate {
+                                                                                      transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                    }
+
+                                                                                    @media (max-width: 767px) {
+                                                                                      .notification-toasts.animate {
+                                                                                        transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                      }
+
+                                                                                      @media (min-width: 768px) {
+                                                                                        .notification-toasts.animate {
+                                                                                          transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                        }
+
+                                                                                        @media (max-width: 767px) {
+                                                                                          .notification-toasts.animate {
+                                                                                            transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                          }
+
+                                                                                          @media (min-width: 768px) {
+                                                                                            .notification-toasts.animate {
+                                                                                              transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                            }
+
+                                                                                            @media (max-width: 767px) {
+                                                                                              .notification-toasts.animate {
+                                                                                                transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                              }
+
+                                                                                              @media (min-width: 768px) {
+                                                                                                .notification-toasts.animate {
+                                                                                                  transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                }
+
+                                                                                                @media (max-width: 767px) {
+                                                                                                  .notification-toasts.animate {
+                                                                                                    transform: translate(0, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                  }
+
+                                                                                                  @media (min-width: 768px) {
+                                                                                                    .notification-toasts.animate {
+                                                                                                      transform: translate(0px, 0px) rotate(0) skewX(0) skewY(0) scaleX(1) scaleY(1);
+                                                                                                    }
+
+                                                                                                  }
+
+                                                                                                }
+
+                                                                                              }
+
+                                                                                            }
+
+                                                                                          }
+
+                                                                                        }
+
+                                                                                      }
+
+                                                                                    }
+
+                                                                                  }
+
+                                                                                }
+
+                                                                              }
+
+                                                                            }
+
+                                                                          }
+
+                                                                        }
+
+                                                                      }
+
+                                                                    }
+
+                                                                  }
+
+                                                                }
+
+                                                              }
+
+                                                            }
+
+                                                          }
+
+                                                        }
+
+                                                      }
+
+                                                    }
+
+                                                  }
+
+                                                }
+
+                                              }
+
+                                            }
+
+                                          }
+
+                                        }
+
+                                      }
+
+                                    }
+
+                                  }
+
+                                }
+
+                              }
+
+                            }
+
+                          }
+
+                        }
+
+                      }
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+}
+@media (-ms-high-contrast: active), (forced-colors: active) {
+  .collapsible-dropdown button {
+    border-style: solid;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"] .pub-entity-img {
+    width: 48px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"][data-entity-type=3D"organization"] .pub-entity-img img {
+    height: 48px;
+    width: 48px;
+    border-radius: 0px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"][data-entity-type=3D"member"] .pub-entity-img img {
+    height: 56px;
+    width: 56px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"] .pub-entity-text {
+    padding-left: 12px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"] .pub-entity-text h1 {
+    margin-bottom: 2px;
+    font-size: 20px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"] .pub-entity-text h3 {
+    margin-bottom: 2px;
+    font-size: 20px;
+  }
+}
+@media (max-width: 767px) {
+  .series-article-body [data-type=3D"entityEmbed"] .pub-entity-text p {
+    margin-bottom: 2px;
+    font-size: 14px;
+  }
+}
+@media (min-width: 992px) {
+  .filter .collapsible-dropdown__list {
+    max-height: 400px;
+  }
+}
+@media only screen and (min-width: 30.06em) {
+  .card-cta-container-mobile {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+  }
+
+  .card-cta-container-desktop {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    visibility: visible !important;
+    overflow: visible !important;
+  }
+}
+@media (min-width: 512px) {
+  .email-md\:text-sm {
+    font-size: 14px;
+  }
+
+  .email-md\:text-xl {
+    font-size: 24px;
+  }
+}
+</style></head> <body dir=3D"ltr" class=3D"font-sans bg-color-background-canvas w-full m-0 p-0 pt-1" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; margin: 0px; width: 100%; background-color: #f3f2f0; padding: 0px; padding-top: 8px; font-family: -apple-system, system-ui, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Fira Sans', Ubuntu, Oxygen, 'Oxygen Sans', Cantarell, 'Droid Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Lucida Grande', Helvetica, Arial, sans-serif;"> <div class=3D"h-0 opacity-0 text-transparent invisible overflow-hidden w-0 max-h-[0]" style=3D"visibility: hidden; height: 0px; max-height: 0; width: 0px; overflow: hidden; opacity: 0; mso-hide: all;" data-email-preheader=3D"true">Discover roles that match your interests</div> <div class=3D"h-0 opacity-0 text-transparent invisible overflow-hidden w-0 max-h-[0]" style=3D"visibility: hidden; height: 0px; max-height: 0; width: 0px; overflow: hidden; opacity: 0; mso-hide: all;"> =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 =CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0=CD=8F=C2=A0 </div> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"512" align=3D"center" class=3D"mercado-container w-[512px] max-w-[512px] mx-auto my-0 p-0 " style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin-left: auto; margin-right: auto; margin-top: 0px; margin-bottom: 0px; width: 512px; max-width: 512px; padding: 0px;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"bg-color-background-container " style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #ffffff;"> <tbody> <tr> <td class=3D"text-center p-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding: 24px; text-align: center;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"min-w-full" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; min-width: 100%;"> <tbody> <tr> <td align=3D"left" valign=3D"middle" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/feed/?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-header-0-home_glimmer_static_badging_with_count&amp;trkEmail=3Deml-email_jobs_facet_suggestions-header-0-home_glimmer_static_badging_with_count-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"w-[84px]" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; width: 84px;"> <img class=3D"h-[37px] w-[101px]" alt=3D"LinkedIn" src=3D"https://static.licdn.com/aero-v1/sc/h/2fp5x7ci191mxbdy1eynscn59" data-test-header-static-badging-img style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 37px; width: 101px;" width=3D"101" height=3D"37"> </a> </td> <td valign=3D"middle" align=3D"right" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"auto" data-test-header-notification-badges style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td align=3D"right" valign=3D"middle" class=3D"px-0.5" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-left: 4px; padding-right: 4px;"> <a href=3D"https://www.linkedin.com/comm/messaging/?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-header-0-messaging_glimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-header-0-messaging_glimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"h-[25px]" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; height: 25px;"> <img alt=3D"Messaging icon" src=3D"https://static.licdn.com/aero-v1/sc/h/4zo4b28tqisx2lerkp2qoioke" class=3D"h-[25px]" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 25px;" height=3D"25"> </a> </td> <td align=3D"right" valign=3D"middle" class=3D"px-0.5" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-left: 4px; padding-right: 4px;"> <a href=3D"https://www.linkedin.com/comm/mynetwork/?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-header-0-my_network_glimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-header-0-my_network_glimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"h-[25px]" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; height: 25px;"> <img alt=3D"Mynetwork icon" src=3D"https://static.licdn.com/aero-v1/sc/h/90lul9r9eny8abld0lh202esc" class=3D"h-[25px]" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 25px;" height=3D"25"> </a> </td> <td align=3D"right" valign=3D"middle" class=3D"px-0.5" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-left: 4px; padding-right: 4px;"> <a href=3D"https://www.linkedin.com/comm/notifications/?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-header-0-notifications_glimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-header-0-notifications_glimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"h-[25px]" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; height: 25px;"> <img alt=3D"Notifications icon" src=3D"https://static.licdn.com/aero-v1/sc/h/eh1e9j5bszh6p379hn269p3ps" class=3D"h-[25px]" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 25px;" height=3D"25"> </a> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> <tr> <td class=3D"px-3 pb-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-left: 24px; padding-right: 24px; padding-bottom: 24px;"> <div> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"leading-regular" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; line-height: 1.25;"> <tbody> <tr data-test-id=3D"email-generic-section"> <td data-test-id=3D"section-HEADER_SUBHEADER" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <div data-test-id=3D"email-generic-section-HEADER_SUBHEADER"> <tr data-test-id=3D"email-generic-section-HEADER_SUBHEADER-header"> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <h1 class=3D"text-xl font-normal text-color-text" style=3D"margin: 0; font-size: 24px; font-weight: 400; color: rgba(0, 0, 0, 0.9);"> <span data-test-id=3D"header-text"> <span class=3D"font-semibold" style=3D"font-weight: 600;">Expand your search</span> </span> </h1> </td> </tr> <tr data-test-id=3D"email-generic-section-HEADER_SUBHEADER-subtitle"> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <p class=3D"text-md font-normal text-color-text pt-0.5 pb-0.5" style=3D"margin: 0; padding-top: 4px; padding-bottom: 4px; font-size: 16px; font-weight: 400; color: rgba(0, 0, 0, 0.9);"> <span data-test-id=3D"subtitle-text"> Recommendations based on your activity. </span> </p> </td> </tr> </div> </td> </tr> <tr data-test-id=3D"email-generic-section"> <td data-test-id=3D"section-JOBS_POSTING_SECTION" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-title"> <td class=3D"text-lg font-normal pt-2 pb-1 text-color-text" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 8px; padding-top: 16px; font-size: 20px; font-weight: 400; color: rgba(0, 0, 0, 0.9);"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dsenior+data+scientist+remote&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4389267750,4387503632&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-title_link_sectionid_272001_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-title_link_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"text-color-text" data-test-id=3D"title-link" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: rgba(0, 0, 0, 0.9);"> Remote jobs </a> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4389267750/?trackingId=3DWW5I0GQbNtYv99sIOT3bIg%3D%3D&amp;refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-job_card_0_sectionid_272001_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-job_card_0_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/C4E0BAQHgMDQ4Zxv07Q/company-logo_100_100/company-logo_100_100/0/1630626511483/helloalma_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3DhJK7TCncf4NKLpCSaIoIKPq0-rrt9If2so4cNHEnXdA" alt=3D"Alma" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Senior Data Scientist II </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> Alma &middot; United States (Remote) </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4387503632/?trackingId=3DF7srkg8SpiSdrnJoBlM%2FHQ%3D%3D&amp;refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-job_card_1_sectionid_272001_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-job_card_1_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/D560BAQEs_sVBV9wZ_g/company-logo_100_100/B56Zfr3KMzGUAQ-/0/1752008795231/ladders_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3DcgNj6A7LLzsGCUT3Kq5ZYIrPg2bYgoOznfh0n6DU0Xs" alt=3D"Ladders" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Senior Data Scientist - Experimentation &amp; Measurement </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> Ladders &middot; United States (Remote) </p> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-70 text-xs leading-regular mt-0.5" style=3D"margin: 0; font-weight: 400; margin-top: 4px; font-size: 12px; line-height: 1.25; color: #666666;"> $179K-$268K / year </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-buttons"> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr> <td class=3D"pt-1 pb-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 8px; padding-bottom: 24px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"email-button " data-test-id=3D"email-button" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td valign=3D"middle" align=3D"left" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dsenior+data+scientist+remote&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4389267750,4387503632&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" aria-label=3D"View all jobs" class=3D"align-top no-underline " style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; vertical-align: top; text-decoration-line: none;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"auto" class=3D"border-separate " style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: separate;"> <tbody> <tr> <td class=3D"btn-md btn-primary border-color-brand button-link leading-regular !min-h-[auto] !shadow-none border-1 border-solid" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; height: min-content; border-radius: 24px; padding-top: 12px; padding-bottom: 12px; padding-left: 24px; padding-right: 24px; text-align: center; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration-line: none; background-color: #0a66c2; color: #ffffff; border-width: 1px; border-style: solid; border-color: #0a66c2; line-height: 1.25; min-height: auto !important; box-shadow: 0 0 #0000, 0 0 #0000, 0 0 #0000 !important;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dsenior+data+scientist+remote&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DGONplHLsdA1KhgN1mWN%2Fjg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4389267750,4387503632&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_1-0-primary_0_sectionid_272001_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" tabindex=3D"-1" aria-hidden=3D"true" class=3D"no-underline" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-decoration-line: none;"> <span class=3D"no-underline text-white" style=3D"color: #ffffff; text-decoration-line: none;"> View all jobs </span> </a> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> </table> </td> </tr> </table> </td> </tr> <tr data-test-id=3D"email-generic-section"> <td data-test-id=3D"section-JOBS_POSTING_SECTION" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-title"> <td class=3D"text-lg font-normal pt-2 pb-1 text-color-text" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 8px; padding-top: 16px; font-size: 20px; font-weight: 400; color: rgba(0, 0, 0, 0.9);"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dmedical+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4388984872,4389733645&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-title_link_sectionid_279008_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-title_link_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"text-color-text" data-test-id=3D"title-link" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: rgba(0, 0, 0, 0.9);"> Medical jobs </a> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4388984872/?trackingId=3DTZ9Q0Kad3%2FIXxS8%2BbTDENw%3D%3D&amp;refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-job_card_0_sectionid_279008_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-job_card_0_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/D4E0BAQGv3cqOuUMY7g/company-logo_100_100/B4EZmhegXHGcAU-/0/1759350753990/google_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3DkVDVa3DnbUKASJdkPCfTp5Ucx26CVzU2xASTq-DJ6Vg" alt=3D"Google" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Senior Data Scientist, Research, Search Health </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> Google &middot; Mountain View, CA (On-site) </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4389733645/?trackingId=3Dve8FYlSnXV1HnUsL7diz2Q%3D%3D&amp;refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-job_card_1_sectionid_279008_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-job_card_1_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/D560BAQE7-JJqQOZS4Q/company-logo_100_100/company-logo_100_100/0/1713988113048/smith_hanley_associates_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3DMWkCVfhW1hNgeUsJlZswVnl8BZoLa5TYbrg6TBqPuy0" alt=3D"Smith Hanley Associates" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Lead Data Scientist </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> Smith Hanley Associates &middot; San Francisco Bay Area (On-site) </p> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-70 text-xs leading-regular mt-0.5" style=3D"margin: 0; font-weight: 400; margin-top: 4px; font-size: 12px; line-height: 1.25; color: #666666;"> $170K-$190K / year </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><tr> <td style=3D"padding-top: 4px;"><![endif]--> <table class=3D"inline-block" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; display: inline-block;"> <tr> <td class=3D"job-card-flavor__container_redesign_shaded_background" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin-top: 4px; margin-right: 4px; display: inline-block; border-radius: 4px; background-color: #f5f7f9; padding: 4px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-0.5 w-1" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 8px; padding-right: 4px;" width=3D"8">  </td> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <p class=3D"job-card-flavor__detail" style=3D"margin: 0; font-weight: 400; font-family: -apple-system, system-ui, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Fira Sans', Ubuntu, Oxygen, 'Oxygen Sans', Cantarell, 'Droid Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Lucida Grande', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.25; color: #666666;"> Easy Apply </p> </td> </tr> </tbody> </table> </td> </tr> </table> <!--[if (gte mso 9)|(IE)]></td> </tr><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-buttons"> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr> <td class=3D"pt-1 pb-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 8px; padding-bottom: 24px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"email-button " data-test-id=3D"email-button" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td valign=3D"middle" align=3D"left" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dmedical+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4388984872,4389733645&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" aria-label=3D"View all jobs" class=3D"align-top no-underline " style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; vertical-align: top; text-decoration-line: none;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"auto" class=3D"border-separate " style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: separate;"> <tbody> <tr> <td class=3D"btn-md btn-secondary-emphasis border-color-brand button-link leading-regular !min-h-[auto] !shadow-none border-1 border-solid" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; height: min-content; border-radius: 24px; padding-top: 12px; padding-bottom: 12px; padding-left: 24px; padding-right: 24px; text-align: center; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration-line: none; background-color: rgba(0, 0, 0, 0); color: #0a66c2; border-width: 1px; border-style: solid; border-color: #0a66c2; line-height: 1.25; min-height: auto !important; box-shadow: 0 0 #0000, 0 0 #0000, 0 0 #0000 !important;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dmedical+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DccQnN7ZOa2cvQmWLQawzBw%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4388984872,4389733645&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_2-0-secondary_0_sectionid_279008_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" tabindex=3D"-1" aria-hidden=3D"true" class=3D"no-underline" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-decoration-line: none;"> <span class=3D"no-underline text-color-brand" style=3D"color: #0a66c2; text-decoration-line: none;"> View all jobs </span> </a> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> </table> </td> </tr> </table> </td> </tr> <tr data-test-id=3D"email-generic-section"> <td data-test-id=3D"section-JOBS_POSTING_SECTION" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-title"> <td class=3D"text-lg font-normal pt-2 pb-1 text-color-text" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 8px; padding-top: 16px; font-size: 20px; font-weight: 400; color: rgba(0, 0, 0, 0.9);"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dai%2Fml+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4377799924,4389431188&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-title_link_sectionid_281006_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-title_link_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"text-color-text" data-test-id=3D"title-link" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: rgba(0, 0, 0, 0.9);"> AI/ML jobs </a> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4377799924/?trackingId=3DONDbPY12%2BJH9q%2BDcBpCh2w%3D%3D&amp;refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-job_card_0_sectionid_281006_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-job_card_0_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/D560BAQHZkPdlecGssw/company-logo_100_100/company-logo_100_100/0/1736779000209/walmart_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3DpfTgf4Wd8wB5xw9LmVLyxM_zbHFECpQJS_7wpoq-Aoc" alt=3D"Walmart" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Senior, Data Scientist </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> Walmart &middot; Sunnyvale, CA (On-site) </p> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-70 text-xs leading-regular mt-0.5" style=3D"margin: 0; font-weight: 400; margin-top: 4px; font-size: 12px; line-height: 1.25; color: #666666;"> $117K-$234K / year </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr> <td class=3D"pt-1.5 pb-1.5" data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-job-cards" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 12px; padding-bottom: 12px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/view/4389431188/?trackingId=3DYOIGZ1H2BnGR3aWnTWDoYg%3D%3D&amp;refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-job_card_1_sectionid_281006_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-job_card_1_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pr-1 w-6" valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 48px; padding-right: 8px;" width=3D"48"> <img class=3D"inline-block relative bg-color-entity-ghost-background w-6 h-6 rounded-[2px]" src=3D"https://media.licdn.com/dms/image/v2/D4E0BAQF5K_0VqDXPgQ/company-logo_100_100/B4EZftMp7PGcAY-/0/1752031207399/the_realreal_logo?e=3D1776297600&amp;v=3Dbeta&amp;t=3Dw2Ci36Gv2-UEVp3h_AbyjxIUMmOZ_wTPxIFeL57a-kk" alt=3D"The RealReal" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; position: relative; display: inline-block; height: 48px; width: 48px; border-radius: 2px; background-color: #eae6df;" width=3D"48" height=3D"48"> </td> <td valign=3D"top" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <div class=3D"font-bold text-md leading-regular text-system-blue-50" style=3D"font-size: 16px; font-weight: 600; line-height: 1.25;"> Staff Applied Scientist </div> </td> </tr> <tr> <td class=3D"pb-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 0px;"> <p class=3D"text-system-gray-100 text-xs leading-regular mt-0.5 line-clamp-1 text-ellipsis" style=3D"margin: 0; font-weight: 400; margin-top: 4px; text-overflow: ellipsis; font-size: 12px; line-height: 1.25; color: #1f1f1f; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;"> The RealReal &middot; San Francisco, CA (Remote) </p> </td> </tr> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 0;" align=3D"left"> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> <!--[if (gte mso 9)|(IE)]><table cellpadding=3D"0" cellspacing=3D"0" border=3D"0" role=3D"presentation" style=3D"width: 100%;"><![endif]--> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> <tr data-test-id=3D"email-generic-section-JOBS_POSTING_SECTION-buttons"> <td style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <table style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width=3D"100%"> <tr> <td class=3D"pt-1 pb-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 8px; padding-bottom: 24px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"email-button " data-test-id=3D"email-button" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td valign=3D"middle" align=3D"left" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dai%2Fml+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4377799924,4389431188&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" aria-label=3D"View all jobs" class=3D"align-top no-underline " style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; vertical-align: top; text-decoration-line: none;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"auto" class=3D"border-separate " style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: separate;"> <tbody> <tr> <td class=3D"btn-md btn-secondary-emphasis border-color-brand button-link leading-regular !min-h-[auto] !shadow-none border-1 border-solid" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; height: min-content; border-radius: 24px; padding-top: 12px; padding-bottom: 12px; padding-left: 24px; padding-right: 24px; text-align: center; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration-line: none; background-color: rgba(0, 0, 0, 0); color: #0a66c2; border-width: 1px; border-style: solid; border-color: #0a66c2; line-height: 1.25; min-height: auto !important; box-shadow: 0 0 #0000, 0 0 #0000, 0 0 #0000 !important;"> <a href=3D"https://www.linkedin.com/comm/jobs/search-results/?keywords=3Dai%2Fml+senior+data+scientist&amp;f_TPR=3Dr86400&amp;geoId=3D90000084&amp;refId=3DE0czC9ynU7R2rurMHakrHg%3D%3D&amp;origin=3DFACET_SUGGESTIONS_COMMS_EMAIL&amp;originToLandingJobPostings=3D4377799924,4389431188&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4&amp;trkEmail=3Deml-email_jobs_facet_suggestions-JOBS_POSTING_SECTION_3-0-secondary_0_sectionid_281006_fmid_5utk17~mn68lnag~t4-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" tabindex=3D"-1" aria-hidden=3D"true" class=3D"no-underline" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; text-decoration-line: none;"> <span class=3D"no-underline text-color-brand" style=3D"color: #0a66c2; text-decoration-line: none;"> View all jobs </span> </a> </td> </tr> </tbody> </table> </a> </td> </tr> </tbody> </table> </td> </tr> </table> </td> </tr> </table> </td> </tr> </tbody> </table> </div> </td> </tr> <tr> <td class=3D"bg-color-background-canvas p-3" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #f3f2f0; padding: 24px;"> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> <tbody> <tr> <td class=3D"text-center pb-2" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 16px; text-align: center;"> <h2 class=3D"text-lg text-teal-80" style=3D"margin: 0; font-weight: 500; font-size: 20px; color: #114951;"> Get the new LinkedIn desktop app </h2> </td> </tr> <tr> <td class=3D"text-center pb-2" data-test-id=3D"footer-app-store-icon" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 16px; text-align: center;"> <a href=3D"https://apps.microsoft.com/store/detail/9WZDNCRFJ4Q7?launch=3Dtrue&amp;cid=3Dlinkedin_email_upsell&amp;mode=3Dfull" target=3D"_blank" rel=3D"noopener noreferrer" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <img alt=3D"Get it from Microsoft" src=3D"https://static.licdn.com/aero-v1/sc/h/ejpkkpwvqks31a3cjqokb7fbm" class=3D"h-[40px] w-[112px]" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 40px; width: 112px;" width=3D"112" height=3D"40"> </a> </td> </tr> <tr> <td class=3D"text-center pb-2" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 16px; text-align: center;"> <h2 class=3D"text-md text-teal-80" style=3D"margin: 0; font-weight: 500; font-size: 16px; color: #114951;"> Also available on mobile </h2> </td> </tr> <tr> <td class=3D"text-center" data-test-id=3D"footer-app-store-icon" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; text-align: center;"> <a href=3D"https://itunes.apple.com/us/app/linkedin/id288429040?pt=3D10746&amp;ct=3Dst_appsite_flagship&amp;mt=3D8" target=3D"_blank" rel=3D"noopener noreferrer" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <img alt=3D"Download on the App Store" src=3D"https://static.licdn.com/aero-v1/sc/h/76yzkd0h5kiv27lrd4yaenylk" class=3D"h-[40px] w-[120px] pr-1" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 40px; width: 120px; padding-right: 8px;" width=3D"120" height=3D"40"> </a> <a href=3D"https://play.google.com/store/apps/details?id=3Dcom.linkedin.android&amp;referrer=3Dst_appsite_flagship" target=3D"_blank" rel=3D"noopener noreferrer" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <img alt=3D"Get it on Google Play" src=3D"https://static.licdn.com/aero-v1/sc/h/142qudwblp58zwmc9vkqfplug" class=3D"h-[40px] w-[134px]" style=3D"outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; height: 40px; width: 134px;" width=3D"134" height=3D"40"> </a> </td> </tr> <tr> <td class=3D"py-2" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-top: 16px; padding-bottom: 16px;"><hr class=3D"border-none bg-[#e0dfdd] h-[1px]" style=3D"height: 1px; border-style: none; background-color: #e0dfdd;"></td> </tr> </tbody> </table> <table role=3D"presentation" valign=3D"top" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" width=3D"100%" class=3D"text-xs" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; font-size: 12px;"> <tbody> <tr> <td class=3D"pb-1 m-0" data-test-id=3D"email-footer__intended" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin: 0px; padding-bottom: 8px;"> This email was intended for REDACTED REDACTED (Lead, Data Analytics) </td> </tr> <tr> <td class=3D"pb-1 m-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin: 0px; padding-bottom: 8px;"> <a href=3D"https://www.linkedin.com/help/linkedin/answer/4788?lang=3Den&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-SecurityHelp-0-footerglimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-SecurityHelp-0-footerglimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" class=3D"text-inherit underline" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: inherit; text-decoration-line: underline;">Learn why we included this.</a> </td> </tr> <tr> <td class=3D"pb-1 m-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin: 0px; padding-bottom: 8px;">You are receiving Jobs You Might Be Interested In emails.</td> </tr> <tr> <td class=3D"pb-1 m-0" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; margin: 0px; padding-bottom: 8px;"> <a href=3D"https://www.linkedin.com/comm/jobs/alerts?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-footer-0-manage_recommendations_button&amp;trkEmail=3Deml-email_jobs_facet_suggestions-footer-0-manage_recommendations_button-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" data-test-id=3D"footer-manage-recommendations-link" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> Manage recommendations </a> =C2=A0=C2=A0=C2=B7=C2=A0=C2=A0 <a href=3D"https://www.linkedin.com/comm/psettings/email-unsubscribe?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-unsubscribe-0-footerGlimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-unsubscribe-0-footerGlimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;loid=3DAQGekMqqcF2KlwAAAZ0lws5jF79mtlSpOE0tmrd9oNc2nQNaBt0XA1e9FutAyUWXUb61FpJlE3sCFskVcrbDUSEfM0Kvf3crDbQAufv2aqz2TCYHESuv" target=3D"_blank" class=3D"text-inherit underline" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: inherit; text-decoration-line: underline;">Unsubscribe</a> =C2=A0=C2=A0=C2=B7=C2=A0=C2=A0 <a href=3D"https://www.linkedin.com/help/linkedin/answer/67?lang=3Den&amp;lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-help-0-footerglimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-help-0-footerglimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" data-test-help-link class=3D"text-inherit underline" style=3D"cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; color: inherit; text-decoration-line: underline;">Help</a> </td> </tr> <tr> <td class=3D"pb-1" style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt; padding-bottom: 8px;"> <a href=3D"https://www.linkedin.com/comm/feed/?lipi=3Durn%3Ali%3Apage%3Aemail_email_jobs_facet_suggestions%3BMTT2avmAQRy4Ha6woErw4A%3D%3D&amp;midToken=REDACTED&amp;midSig=REDACTED&amp;trk=3Deml-email_jobs_facet_suggestions-footer-0-logoGlimmer&amp;trkEmail=3Deml-email_jobs_facet_suggestions-footer-0-logoGlimmer-null-5utk17~mn68lnag~t4-null-null&amp;eid=3D5utk17-mn68lnag-t4&amp;otpToken=3DMTEwMDFhZTAxYjI2Y2FjMGIzMjQwNGVkNDExYWUzYjE4YWNlZDE0Njk5YTk4NzYxNzBjNzA2Njg0YzVjNWRmNGY1ZGRkZmJlNDllZWYxZTM0MzkzY2VmYzU5MDU3MDkyMWU5YjM5NDBlZjc5YTUxZTAyZDExOCwxLDE%3D" target=3D"_blank" style=3D"color: #0a66c2; cursor: pointer; display: inline-block; text-decoration: none; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;"> <img src=3D"https://static.licdn.com/aero-v1/sc/h/9ehe6n39fa07dc5edzv0rla4e" alt=3D"LinkedIn" class=3D"block h-[14px] w-[56px] image-rendering-crisp" style=3D"outline: none; text-decoration: none; image-rendering: -moz-crisp-edges; image-rendering: -o-crisp-edges; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; -ms-interpolation-mode: nearest-neighbor; display: block; height: 14px; width: 56px;" width=3D"56" height=3D"14"> </a> </td> </tr> <tr> <td data-test-copyright-text style=3D"-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; mso-table-lspace: 0pt; mso-table-rspace: 0pt;"> =C2=A9 2026 LinkedIn Corporation, 1&zwnj;000 West Maude Avenue, Sunnyvale, CA 94085. <span data-test-trademarks-text> LinkedIn and the LinkedIn logo are registered trademarks of LinkedIn. </span> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table> </td> </tr> </tbody> </table>  </body> </html>
+------=_Part_5009620_1843647311.1774455017575--
+

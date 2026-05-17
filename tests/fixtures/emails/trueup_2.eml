@@ -1,0 +1,402 @@
+Received: by 2002:a89:22c:0:b0:301:244b:5129 with SMTP id t44csp1443427lqk;
+        Wed, 13 May 2026 13:57:49 -0700 (PDT)
+Received: from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.220.41])
+        by mx.google.com with SMTPS id a640c23a62f3a-bd4f4c35787sor14316466b.8.2026.05.13.13.57.49
+        for <REDACTED@example.com>
+        (Google Transport Security);
+        Wed, 13 May 2026 13:57:49 -0700 (PDT)
+Received: by 2002:a17:907:6d19:b0:bd1:fe0f:1c74 with SMTP id sa25csp1510306ejc;
+        Wed, 13 May 2026 13:57:47 -0700 (PDT)
+Received: from s.pnkfpknx.outbound-mail.sendgrid.net (s.pnkfpknx.outbound-mail.sendgrid.net. [50.31.49.42])
+        by mx.google.com with ESMTPS id 98e67ed59e1d1-368ede27624si7851531a91.4.2026.05.13.13.57.46
+        for <REDACTED@example.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Wed, 13 May 2026 13:57:47 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=trueup.io;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=s1; t=1778705865;
+	bh=vOsn7DRzbkRKDC/oNxlkPQhkydaNKm4euSEnyD+BY40=;
+	b=Kq79U4gWrxDMn4qUQZntuRv9COw4jiniMgYGuRujFjcDi6VD0tXPBNx9hPaZUjm1e28g
+	dOh2Of3AXAEm/vict1fcP2BP7n5c36yuUZatPJPysEcMEUmpvcKgeIUWGjZbjU0VIH1Vip
+	Kh8/tc69aPHazc/2RTOI5E9ZQiTdfYBeGvem2AnGG84J3+0QhjMIM6tPXnUgeeDELI9bZ3
+	UYGE0sbvmZL5Z68aSMM4Dphx1Od1cDHjHv0j+u50AE3AHBF5PuBqph3PGFuFCiMa2cJTH/
+	z9fo5HzkumrrnKT2EK1cPHOxcpHuzPDHevj+GyNTL+MIvisx+1vCViJ4K7YLBtSg=DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=sendgrid.info;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=smtpapi; t=1778705865;
+	bh=vOsn7DRzbkRKDC/oNxlkPQhkydaNKm4euSEnyD+BY40=;
+	b=eWWWof7eSrjNe0pHLKXyEnr2o8aU0p7vxvKMPpOmUdW/xZLT3OwPutq9Remv9NgvkFTV
+	KzyqOsO2Gap6oVGCjauf4CAlRrnG50ZIsHdzohPtORx8ykL4HAFWQsm771mKdQNvdvSAKK
+	JeJtVXWyfk3/GVE+x/Q6m1CgzgPk1pkesReceived: by recvd-5b548d86f6-5bgfl with SMTP id recvd-5b548d86f6-5bgfl-1-6A04E5C9-73
+	2026-05-13 20:57:45.678270886 +0000 UTC m=+1293604.644202653
+Received: from MjM4OTUzMjU (unknown)
+	by geopod-ismtpd-11 (SG) with HTTP
+	id bXvBbBRNRPGyt0X7Bf6uFg
+	Wed, 13 May 2026 20:57:45.655 +0000 (UTC)
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=utf-8
+Date: Wed, 13 May 2026 20:57:45 +0000 (UTC)
+From: TrueUp <hello@trueup.io>
+Mime-Version: 1.0
+Subject: 182 new jobs for you this week
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset=3D"utf-8">
+  <meta name=3D"viewport" content=3D"width=3Ddevice-width,initial-scale=3D1">
+  <title>Your Weekly Job Alert from TrueUp</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=3DOpen+Sans:ital,wght@0,300..800;1,300..800&display=3Dswap');
+  </style>
+  <!--[if mso]>
+  <style type=3D"text/css">
+    body, table, td {font-family: Arial, Helvetica, sans-serif !important;}
+  </style>
+  <![endif]-->
+</head>
+<body style=3D"margin:0;padding:0;background:#fff;font-family:'Open Sans',Roboto,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <span style=3D"display:none;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">Turing, Brigit, Microsoft, Zscaler, Block, Waymo, Roblox, Chime, reddit, Oracle, Instacart, Plata, Twitch, Dropbox, Axtria, DISCO, Bugcrowd, MongoDB, Aurora. 695 total open tech jobs that match your profile.</span>
+ =20
+  <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"background:#fff;">
+    <tr>
+      <td style=3D"padding:0;">
+        <table width=3D"540" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:0 auto;background:#fff;max-width:540px;font-size:16px;" align=3D"center">
+         =20
+          <!-- Content (includes logo) -->
+          <tr>
+            <td style=3D"padding:0 6px;">
+             =20
+              <!-- Logo -->
+              <div style=3D"margin-top:10px; margin-bottom:10px;">
+                <a href=3D"https://trueup.io" style=3D"display:block;">
+        <img src=3D"https://trueup-public-assets.s3.us-west-2.amazonaws.com/trueup_email_header_outline.png" style=3D"display:block;height:32px;width:auto;max-width:100%!important;" alt=3D"TrueUp"/>
+      </a>
+              </div>
+             =20
+             =20
+             =20
+              <div style=3D"margin:40px 0 10px;font-size:20px;font-weight:600;line-height:1.3;">
+                <a href=3D"https://www.trueup.io/myjobs?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#000;text-decoration:none;">
+                  182 new jobs
+                </a> for you <em>this&nbsp;week</em>
+              </div>
+             =20
+              <div style=3D"padding:0 0 30px 2px;font-size:16px;">
+                All open jobs that fit your profile:&nbsp;695
+              </div>
+             =20
+             =20
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/turing.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Turing logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://job-boards.greenhouse.io/turing/jobs/5822287004" style=3D"color:#000;text-decoration:none;">
+                  Frontier Data Lead - RL&nbsp;Gyms
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/turing" style=3D"color:#000;text-decoration:none;">
+                  Turing
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Hiring remote&nbsp;developers</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SAN FRANCISCO, CALIFORNIA, UNITED STATES
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=A6=84 Unicorn<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $2B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Total funding $270M<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Last raised 14mo ago ($111M Series E)<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">8 yrs old<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">TrueUp Future of Work 50</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/hellobrigit.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Brigit logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://jobs.ashbyhq.com/brigit/d5b9418c-023d-47c5-aebb-154686b11c9d" style=3D"color:#000;text-decoration:none;">
+                  Lead Data Analyst,&nbsp;Product
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/brigit-finance" style=3D"color:#000;text-decoration:none;">
+                  Brigit
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Personal&nbsp;finance</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                NEW YORK CITY (HYBRID) / REMOTE
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Today
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=8C=B1 Early-stage startup<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Total funding $115M<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">=E2=9A=A0 Last raised 6y ago<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">9 yrs old<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">130 employees</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/microsoft.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Microsoft logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://apply.careers.microsoft.com/careers/job/1970393556863528" style=3D"color:#000;text-decoration:none;">
+                  Strategy and Analytics Lead - Windows&nbsp;Commercial
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/microsoft" style=3D"color:#000;text-decoration:none;">
+                  Microsoft
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Business software and&nbsp;infrastructure</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                MOUNTAIN VIEW, CA, US
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                4 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 8mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/zscaler.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Zscaler logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://job-boards.greenhouse.io/zscaler/jobs/5068701007" style=3D"color:#000;text-decoration:none;">
+                  Senior Product Manager, AI / Data&nbsp;Classification
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/zscaler" style=3D"color:#000;text-decoration:none;">
+                  Zscaler
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Cybersecurity</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SAN JOSE, CALIFORNIA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">Valuation $21B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">8,000 employees<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">TrueUp Security 50</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/block.xyz?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Block logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://block.xyz/careers/jobs/5059582008?gh_jid=3D5059582008" style=3D"color:#000;text-decoration:none;">
+                  Senior Growth Marketing&nbsp;Analyst
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/square" style=3D"color:#000;text-decoration:none;">
+                  Block
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Payment and point-of-sale&nbsp;solutions</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                BAY AREA, CA, UNITED STATES OF AMERICA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                6 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 76d ago<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $41B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">12K employees<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">TrueUp E-Commerce 50<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">=F0=9F=8C=8E TrueUp Remote 200</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/waymo.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Waymo logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://careers.withwaymo.com/jobs?gh_jid=3D7826686" style=3D"color:#000;text-decoration:none;">
+                  Senior FP&A Analyst - Technical&nbsp;Infrastructure
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/waymo" style=3D"color:#000;text-decoration:none;">
+                  Waymo
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Self-driving&nbsp;cars</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                MOUNTAIN VIEW, CA, USA=20
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=A6=84 Unicorn<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $126B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Total funding $10.5B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Last raised 1.8y ago ($5.0B)<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">17 yrs old<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">3,000 employees</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/roblox.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Roblox logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://careers.roblox.com/jobs/7514942?gh_jid=3D7514942" style=3D"color:#000;text-decoration:none;">
+                  Senior Risk Data&nbsp;Analyst
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/roblox" style=3D"color:#000;text-decoration:none;">
+                  Roblox
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Gaming</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SAN MATEO, CA, UNITED STATES
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">Valuation $40B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">2,000 employees<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">TrueUp Digital Media 50</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/chime.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Chime logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://boards.greenhouse.io/chime/jobs/8443192002?gh_jid=3D8443192002" style=3D"color:#000;text-decoration:none;">
+                  Senior Manager, Marketing&nbsp;Analytics
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/chime" style=3D"color:#000;text-decoration:none;">
+                  Chime
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Online fee-free full-service bank&nbsp;account</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SAN FRANCISCO, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                5 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">Valuation $8B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">2,000 employees</span>
+        </div>
+      </div>
+             =20
+              <!-- Button -->
+              <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:30px 0;">
+                <tr>
+                  <td align=3D"center" style=3D"">
+                    <a href=3D"https://www.trueup.io/myjobs?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly"=20
+                      style=3D"background:#000;color:#fff;display:inline-block;font-weight:600;padding:8px 16px;text-decoration:none;border-radius:6px;">
+                      View all open jobs  =E2=86=92
+                    </a>
+                  </td>
+                </tr>
+              </table>
+             =20
+              <div style=3D"padding:32px 0;font-size:14px;">
+                Visit <a href=3D"https://www.trueup.io?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#000;text-decoration:underline;">My TrueUp</a> to update your job profile and&nbsp;preferences.
+              </div>
+             =20
+             =20
+
+              <!-- Footer -->
+              <div style=3D"padding:24px 18px;margin-bottom:10px;font-size:12px;background:#E9ECEF;color:#6c757d;line-height:1.5;border-radius:10px;">
+                <p style=3D"margin:0;">Feedback for us? =F0=9F=92=AC</p>
+                <p style=3D"margin:0 0 12px;">We're always looking to improve. Just reply to this email with your thoughts.</p>
+                <p style=3D"margin:0 0 12px;">You are receiving this email because you created a <a href=3D"https://www.trueup.io/?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#6c757d;text-decoration:underline;">TrueUp</a> account.</p>
+                <p style=3D"margin:0 0 12px;">Want to change how you receive these emails?<br>
+                You can <a href=3D"https://www.trueup.io/?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#6c757d;text-decoration:underline;">update preferences</a> or <a href=3D"https://2wbjuww73c.execute-api.us-west-2.amazonaws.com/prod/user/unsubscribe?userEmailToken=REDACTED&emailType=3Demails_job_alerts" style=3D"color:#6c757d;text-decoration:underline;">unsubscribe</a> from job emails.</p>
+                <p style=3D"margin:0;color:#6c757d;">=C2=A9 TrueUp</p>
+                <p style=3D"margin:0;color:#6c757d;">16 East 34th Street, New York, NY 10016</p>
+              </div>
+             =20
+            </td>
+           =20
+          </tr>     =20
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

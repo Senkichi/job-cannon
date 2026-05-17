@@ -1,0 +1,219 @@
+Received: by 2002:a89:8b:0:b0:2eb:67c0:5236 with SMTP id e11csp664175lqh;
+        Thu, 29 Jan 2026 08:05:04 -0800 (PST)
+Received: from a14-58.smtp-out.amazonses.com (a14-58.smtp-out.amazonses.com. [54.240.14.58])
+        by mx.google.com with ESMTPS id d75a77b69052e-503380d9173si61055631cf.337.2026.01.29.08.05.02
+        for <REDACTED@example.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Thu, 29 Jan 2026 08:05:03 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=girq7m667jzzhhak23drqua5car4q4yw; d=us.greenhouse-jobs.com;
+	t=1769702702;
+	h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type:List-Unsubscribe:List-Unsubscribe-Post;
+	bh=JSwFaCACMC2e0KtX4cse1o3HdowAB7QiVBgY46oNBuY=;
+	b=sfKl3mISGmpeD2M2bFZB83uzKztOByhNd+KZp8TBnhUMVtaMyTRHjBZJpfrDq6cY
+	5Ax5e5ahU2vM7Pj82TDCk8X5D/PGQeQu5yLG2kyFOZORMN12qm5nFf+dOIu22O5T1N9
+	d9XXGeZXtWo6pDEJxWSlPXR7Oz7PETYfGaHxEuP48UqllWhlRvYjSSaXuITjCZyb5hA
+	4X1CgQmp6Mh8LAb8TVpnvQCVjvXL0inX62SNyvkBWiiwCL8xStrR/HaK+n6xAaRIjLW
+	7h4Ip98+6bOczmIqoaP5VfIX1odiuBfxKg244cQhcZnxxLUa8ChSSag0ABluYavrPXm
+	PrkcXTOKjA=DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=6gbrjpgwjskckoa6a5zn6fwqkn67xbtw; d=amazonses.com; t=1769702702;
+	h=Date:From:To:Message-ID:Subject:MIME-Version:Content-Type:List-Unsubscribe:List-Unsubscribe-Post:Feedback-ID;
+	bh=JSwFaCACMC2e0KtX4cse1o3HdowAB7QiVBgY46oNBuY=;
+	b=TSc6O8KW/W02O+JiJBqI3AUYIM/o1mKx5ebVUII5tCMPpujNcbhsR+A3KSA/IIPJ
+	byrpCBHl+pA+PpYtetyECAPgdn16bkPVORqRDEMWdU9khPqqbz+JPi9C5S+YiMQo7on
+	QXbtihyHlj8YD2vEkOmsEcVPLX7h+XkbH6c4aJ9kDate: Thu, 29 Jan 2026 16:05:02 +0000
+From: no-reply@us.greenhouse-jobs.com
+Subject: New Jobs at ParetoHealth
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="--==_mimepart_697b852e5caac_29b97820692d"
+X-GH-Messaging-Service-Client: Job Seekers (Prod)
+X-GH-Messaging-Service-Instance: messaging-service/prod/use1/prod
+X-GH-Messaging-Service-Oidc-Subject: system:serviceaccount:job-seekers:prod-prod-job-seekers
+X-GH-Messaging-Service-Version: 75747ff10c1747c6ace270ee400661b03f3ad6c5
+X-GH-Messaging-Service-Provider: aws-ses
+Feedback-ID: ::1.us-east-1.s3Rmu4WPd/amBSR4d6BNJJ2BkR9S/1b3Q9gA2Ci+UTA=:AmazonSES
+X-SES-Outgoing: 2026.01.29-54.240.14.58
+
+----==_mimepart_697b852e5caac_29b97820692d
+Content-Type: text/plain;
+ charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Greenhouse=0D
+=0D
+Here's your weekly update about new roles. If you see a job=0D
+that's a good fit, apply early to help your application stand=0D
+out.=0D
+=0D
+ParetoHealth logo=0D
+=0D
+Lead Data Analyst =0D
+( https://job-boards.greenhouse.io/paretocaptiveservicesllc/jobs/4647776006?gh_src=3Dmyjobs.greenhouse )=0D
+=0D
+ParetoHealth=0D
+Tech=0D
+=0D
+We'll send your next job alert soon - but why wait? Get a head=0D
+start by searching MyGreenhouse Jobs and find your next role=0D
+faster.=0D
+=0D
+Sincerely,=0D
+Greenhouse=0D
+=0D
+Search MyGreenhouse Jobs ( https://my.greenhouse.io/jobs )=0D
+=0D
+Unsubscribe =0D
+( https://my.greenhouse.io/unsubscribe?token=3Da8ReWcBNdVpsE3ZkuQAD8k1F )=0D
+=0D
+=0D
+=C2=A9 2026 Greenhouse=0D
+=0D
+250 W 34th Street, Suite 329, New York, NY 10119, USA
+----==_mimepart_697b852e5caac_29b97820692d
+Content-Type: text/html;
+ charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+
+<html style=3D"--red: #b52617; --light-red: #ff574a; --extra-light-red: #fff7f8; --pink: #e8736b; --light-pink: #f3aca7; --poppy-e50: #ffe5e3; --orange: #fe7838; --light-orange: #ffb490; --marigold-25: #fff6eb; --marigold-e50: #ffecd4; --marigold-e400: #ffc77d; --yellow: #f2cd00; --light-yellow: #ffe607; --yellow-e25: #fffbd7; --green: #008561; --light-green: #4cb398; --extra-light-green: #f3fffb; --bright-green: #3ec144; --green-e50: #e6fff8; --green-100: #c9f0e6; --green-500: #57A28C; --green-700: #047957; --dark-green: #15372c; --evergreen-600: #335247; --deep-blue: #054ab2; --blue: #3574d6; --light-blue: #578bdd; --pale-blue: #ecf3ff; --iris-e50: #d6e6ff; --purple: #7b05b2; --light-purple: #d09ee8; --dark-gray: #222222; --gray: #424242; --medium-gray: #666666; --gray-600: #e0e5e3; --gray-700: #ccd4d1; --gray-800: #677d76; --light-gray: #c8c8c8; --lighter-gray: #e1e1e1; --lightest-gray: #fafafa; --pale-gray: #f3f3f3; --smoke-gray: #e0e5e3; --green-gray: #eff1f0; --white: #ffffff; --label: #526b63; --outline-gray: #e1e1e1; --error-red: #d8372a; --dropdown-selection: #a6d4c8; --object-fills-grey: #f9faf9;">
+
+  <head>
+
+    <meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+
+
+
+   =20
+
+  </head>
+
+  <body style=3D"font-family: 'Nunito Sans',Helvetica,Arial,sans-serif; font-size: 14px; color: #15372C;">
+
+    <div style=3D"background-color: #F9FAF9; padding: 0px 24px;">
+
+      <div style=3D"background-color: #F9FAF9; padding-top: 20px; margin: 8px auto;" align=3D"center">
+
+        <img alt=3D"Greenhouse" class=3D"greenhouse-logo" src=3D"https://job-seekers.cdn.greenhouse.io/assets/greenhouse-recruiting-email-header-logo-zvQm4Xod.png" style=3D"max-width: 75vw; width: 360px;">
+
+      </div>
+
+      <div id=3D"content" style=3D"background-color: #fff; overflow-x: auto; max-width: 800px; margin: 0 auto; padding: 24px;">
+
+       =20
+
+
+
+<div class=3D"subscription-email" style=3D"font-family: Nunito Sans,sans-serif;">
+
+  <div>Here's your weekly update about new roles. If you see a job that's a good fit, apply early to help your application stand out.</div>
+
+
+
+  <div class=3D"subscription-email__post-wrapper" style=3D"padding: 24px 0;">
+
+    <table style=3D"border-collapse: collapse; width: 100%;">
+
+
+
+          <tr class=3D"subscription-email__post" style=3D"border-bottom-width: 1px; border-bottom-color: #EFF1F0; border-bottom-style: solid;">
+
+
+            <td style=3D"padding: 18px 0;">
+
+              <div class=3D"subscription-email__logo" style=3D"width: 60px; height: 60px; padding-right: 20px;">
+
+                  <img src=3D"https://s6-recruiting.cdn.greenhouse.io/job_board_renderer/job_board_configurations/small_logos/400/024/300/original/logo?1748351581" alt=3D"ParetoHealth logo" style=3D"max-width: 100%; max-height: 100%; object-fit: contain;">
+
+              </div>
+
+            </td>
+
+            <td class=3D"subscription-email__post-data" style=3D"width: 100%; line-height: 1.25; padding: 18px 0;">
+
+              <div>
+
+                <a href=3D"https://job-boards.greenhouse.io/paretocaptiveservicesllc/jobs/4647776006?gh_src=3Dmyjobs.greenhouse" class=3D"subscription-email__link" style=3D"color: var(--green-700); font-size: 18px; font-weight: 500;">Lead Data Analyst</a>
+
+                <div>ParetoHealth</div>
+
+                <div class=3D"subscription-email__department" style=3D"color: var(--label);">Tech</div>
+
+              </div>
+
+            </td>
+
+          </tr>
+
+    </table>
+
+  </div>
+
+
+
+  <div>We'll send your next job alert soon - but why wait? Get a head start by searching MyGreenhouse Jobs and find your next role faster.</div>
+
+
+
+
+  <div class=3D"subscription-email__conclusion" style=3D"padding-top: 24px;">
+
+    <div>Sincerely,</div>
+
+    <div>Greenhouse</div>
+
+  </div>
+
+
+
+  <div class=3D"subscription-email__center-wrapper subscription-email__button-wrapper" style=3D"width: 100%; padding: 24px 0;" align=3D"center">
+
+
+    <a class=3D"subscription-email__button subscription-email__button--primary" target=3D"_blank" =3D"true" href=3D"https://my.greenhouse.io/jobs" style=3D"display: block; justify-content: center; align-items: center; border-radius: 25px; text-align: center; font-size: 16px; font-style: normal; font-weight: 400; line-height: 20px; width: fit-content; text-decoration: none; background-color: #3574d6; color: #fff; padding: 8px 24px; border-style: none;">Search MyGreenhouse Jobs</a>
+
+  </div>
+
+
+
+  <div class=3D"subscription-email__center-wrapper" style=3D"width: 100%;" align=3D"center">
+
+    <a class=3D"subscription-email__unsubscribe" target=3D"_blank" =3D"true" href=3D"https://my.greenhouse.io/unsubscribe?token=3Da8ReWcBNdVpsE3ZkuQAD8k1F" style=3D"color: #078361; font-size: 16px;">Unsubscribe</a>
+
+  </div>
+
+</div>
+
+
+
+      </div>
+
+      <div style=3D"width: 100%; color: #9D9D9D;" align=3D"center">
+
+        <div style=3D"padding: 40px;">
+
+          <p>
+
+            =C2=A9 2026 Greenhouse
+
+          </p>
+
+          <address style=3D"font-style: normal;">
+
+            250 W 34th Street, Suite 329, New York, NY 10119, USA
+
+          </address>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  
+</body>
+
+</html>
+
+
+----==_mimepart_697b852e5caac_29b97820692d--

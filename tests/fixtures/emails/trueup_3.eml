@@ -1,0 +1,391 @@
+Received: by 2002:a05:6500:8054:b0:2fb:5935:d243 with SMTP id 20csp99443lqc;
+        Wed, 1 Apr 2026 15:02:32 -0700 (PDT)
+Received: from s.xtrwnvrh.outbound-mail.sendgrid.net (s.xtrwnvrh.outbound-mail.sendgrid.net. [167.89.40.80])
+        by mx.google.com with ESMTPS id af79cd13be357-8d2a99e42c4si144309185a.435.2026.04.01.15.02.31
+        for <REDACTED@example.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Wed, 01 Apr 2026 15:02:31 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=trueup.io;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=s1; t=1775080950; bh=UjKOgntpsl0UBuaGdCbsxHu12jdutXWcVnL9/88NyQ8=;
+	b=dqfwPlJYH/zFGiG6p7ETwbASBos2zGxqPBelouQhOscA2VH4LFGRVFI9OiJx8KB+ZaOz
+	wTf2Cw6+0Vam/IxdsEadcIHxjc7nG8HvZNYlOhEyifTyxUvEr6LYAn7BFauiA88YNFJS1P
+	hSintmucBBil3PAlMre0oBjUwlVj4Wz6rjU376G1Tl9M2AuVD53JYKsAwDO8T0dkqcjdXv
+	vqh1Kf75qSzm4WcoSQnbD44rCrFXwdKyGcaPUmOiTVyS/2OHIeUVzb1c0ZAbsSszT5+d13
+	sdc8Yn4chGQFWkqK2XlEl4Zt3mb3/+E/kOvTB66dM0GM/qzJMzkX4JJJXVHjQPoA=DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=sendgrid.info;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=smtpapi; t=1775080950; bh=UjKOgntpsl0UBuaGdCbsxHu12jdutXWcVnL9/88NyQ8=;
+	b=QoBSHYGgEyq2ipTCufI6wPklXQA8+fSWe68f6SQg0hGCnvfy73ebXQpSRWbOxlzBgxTp
+	pbxn0flNA3SLu6eMQYlCyCJOnsnOc0OU8aVCprFsJB3MX/mfvzDtwLiIh1PPnIanRX1ySV
+	4kv8GegIXpfVdSsjUzUjMjfwq/iWz5KkoReceived: by recvd-7b54d655fd-9g76f with SMTP id recvd-7b54d655fd-9g76f-1-69CD95F6-102
+	2026-04-01 22:02:30.629623669 +0000 UTC m=+176754.319094596
+Received: from MjM4OTUzMjU (unknown)
+	by geopod-ismtpd-4 (SG) with HTTP
+	id 4LjIhJDDS0WQJRMmt0igxQ
+	Wed, 01 Apr 2026 22:02:30.597 +0000 (UTC)
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=utf-8
+Date: Wed, 01 Apr 2026 22:02:30 +0000 (UTC)
+From: TrueUp <hello@trueup.io>
+Mime-Version: 1.0
+Subject: 105 new jobs for you this week
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset=3D"utf-8">
+  <meta name=3D"viewport" content=3D"width=3Ddevice-width,initial-scale=3D1">
+  <title>Your Weekly Job Alert from TrueUp</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=3DOpen+Sans:ital,wght@0,300..800;1,300..800&display=3Dswap');
+  </style>
+  <!--[if mso]>
+  <style type=3D"text/css">
+    body, table, td {font-family: Arial, Helvetica, sans-serif !important;}
+  </style>
+  <![endif]-->
+</head>
+<body style=3D"margin:0;padding:0;background:#fff;font-family:'Open Sans',Roboto,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <span style=3D"display:none;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">Meta, Google, Apple, Tesla, Amazon, NVIDIA, GitHub, Microsoft. 231 total open tech jobs that match your profile.</span>
+ =20
+  <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"background:#fff;">
+    <tr>
+      <td style=3D"padding:0;">
+        <table width=3D"540" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:0 auto;background:#fff;max-width:540px;font-size:16px;" align=3D"center">
+         =20
+          <!-- Content (includes logo) -->
+          <tr>
+            <td style=3D"padding:0 6px;">
+             =20
+              <!-- Logo -->
+              <div style=3D"margin-top:10px; margin-bottom:10px;">
+                <img src=3D"https://trueup-public-assets.s3.us-west-2.amazonaws.com/trueup_email_header_outline.png" style=3D"display:block;max-width:100%!important;width:110px;height:auto!important;" alt=3D"TrueUp"/>
+              </div>
+             =20
+             =20
+             =20
+              <div style=3D"margin:40px 0 10px;font-size:20px;font-weight:600;line-height:1.3;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgUpBROXpg9wuu7unWRz-2FuMp0zvrX02LaG5BpVtUeBK1bhqh5FCkbxln2QrLycUwgE-2FIgjL5Bo3IYWSUFI0B1F0NEl5qkCtImGkRPVfNT8UgvWiEATZ5m7IUv6gaHkTvn-2BQ-3D-3DH8XT_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JogtKesUpJxcxbRk0hOavh7xfTPN-2B59l7DWPd8MBG2-2Fj-2BWoIRTyE1SDEMyv8UiF-2FBkikxHHToXoQwur6cQBcFLby4SxkAumieVODqUgptW24J0Rw8e7vK80D-2FPE1nk8yEk8rZL1OeKTLPWK7PDYwF4m4daqXsL035Fn1uaYkwDvxY" style=3D"color:#000;text-decoration:none;">
+                  105 new jobs
+                </a> for you <em>this&nbsp;week</em>
+              </div>
+             =20
+              <div style=3D"padding:0 0 30px 2px;font-size:16px;">
+                All open jobs that fit your profile:&nbsp;231
+              </div>
+             =20
+             =20
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/meta.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Meta logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgTLVh6t-2FPwJgnkXadFAW1fgZskXURpqPd6MyR0KD9sEpf9V8AlGqmgY3ZFDa3yMU1Q-3D-3DZDF__MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JonHYBYqUV2XR4i8HKP14qFjQ-2F2GUEs7gCFyP8Mr9fePkJja-2FslVEsYHnaJ6BkDvQ2pKrbOeSTe2Ma6Y5OHhakPREyufYruHNmIjvCqmK2RwTGDg0BLudi6NoRfrrd1Rkgp-2Fl9ZbOVLXBOH6QRONbv1RCaMNnMxwa2-2BeZftcX9cop" style=3D"color:#000;text-decoration:none;">
+                  Area Schedule Lead, Leased Data&nbsp;Centers
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOk1ISAXhowRngjv3Lneqvkglc-n_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JovZwBvUk1H0mt3Mm-2B8nit8uPzlu0nWXXzT-2F52hV5WB5zSoQDUGOUyPUW4c-2FqLx3Uz2pMk8HfH9xP9j87pAjsXFKqXDD-2FW-2BGvP5TSrfO5A9JYhj3AxgJmMSIN7FoaZ5CIZuDZUxC57JUikj7-2FMZNI32qAcjQBWtYvKndFJpNn8Xwt" style=3D"color:#000;text-decoration:none;">
+                  Meta
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Social networking (Facebook, Instagram,&nbsp;WhatsApp)</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                MENLO PARK, CA / REMOTE, US
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 7d ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/google.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Google logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgcMxsF34mwLsilN0G63dqcNeJVV35X1YSjQuJh0YU180nPQhiLHlFc3d3vLPQVFEeFrlnhDgtB9WIzAQRwwDzd5ER3M2zWosqFmkhwJVnIE1Lleg55fgRXe29HrTLrcCYcD2UKYgnBJBHfNix4nKk8HJroS-2BuixmEwSXA8BMif8FwUnnfDvpjnzaGqK7ToJG2A-3D-3D7zPY_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JogAH3BRt43kDXRzOyJxAE3fFu6lZfV29rK2zvN7lRKJwJ3Mu-2BSM7jm6JR1LYSN9322MvBhX1iOlEuEl5n2hLDJ-2FONegRQTgs7YiIa3-2FBegRi2IF4dlUt8upXb01KdrZK-2B5KHbDJPBJzbqvM0UV8NhWsqwhyBKYr8weqRpma0im5K" style=3D"color:#000;text-decoration:none;">
+                  Senior Business Analyst, Primary Research and Insights,&nbsp;YouTube
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOn3K6YtRzp7JVbpOiRAE2Sh9T6j_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0Jogg9YDLD7-2B2UnztR6PdXVci-2BiNnEQmcm6KmKWTJBK9bwOvuFB5JFgQyjaCkpF-2BoSKQox2GyWxuIIjLoz-2FNqSVqmGRoirSDZHW3CAWQmbBDfBW1KYzJzXZX0qclw9RQ7293EaSPFlJ6vOEiov9iTsDmUizJnwacs9wZe-2Fxs2iR3lZ" style=3D"color:#000;text-decoration:none;">
+                  Google
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Search, ads, and consumer&nbsp;apps</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                ; SAN BRUNO, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 4mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/apple.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Apple logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgTEOxduEcU14lcgh1Dm2P8Q39QhNAuzdMahN9Jhg8C5rAX-2BH4atBzGB3Zxz6M7DQGw-3D-3DtNK1_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JolyWH6xnXcjNOlh8up-2BnHuRC6qHTskof3di-2BM0oLmtHsW6-2BStdgL-2BwlWbWOX7gXXffLcaDf8Mzhal1VZ-2B1ImYXInenqXK0MgNfaOYAmMR27kByG9Sv44FcmtsxcSS-2FQrWlBdNxpTy3-2Bhe-2BNdIRZ9jqOPxRi-2BI17945WJsuBpqmHb" style=3D"color:#000;text-decoration:none;">
+                  Lead: Strategy, Analytics & Monetization, Apple&nbsp;Maps
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOkreyVDRuaQhOinpt05T4xT7kN2_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JokHsUuzAYFkKjR29i3pEHdH7BV-2FaM0nrS7jM4mEGTpm-2FsKi7ycSzySRkXbbzOEQCHFPDXOM0udXJkMk948CiBS5gT9fyUDqaA-2FE77DT2Ur2CjkXpn18tnUKGx9x6tFsjULR6dmS8PFYksEiYYPo8izR1AQmnVvCgxV7W6QSuotMr" style=3D"color:#000;text-decoration:none;">
+                  Apple
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Smartphones and other consumer&nbsp;electronics</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                CUPERTINO, UNITED STATES OF AMERICA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                7 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 4mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/tesla.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Tesla logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7Jgd-2BQxhp-2FL5EWuVuJsaZ5R-2FYs5cmMsjeeEePnOPNT-2Brqz7fLXJZ6cwEpgT2TBAg8XJg-3D-3DOP9K_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JoqNOwBVJ-2B-2FNkDjzEBFnofSYE-2FtkYrb13Mvndj-2ByLSA7pA41VnShMkph9a12PPiLxi27vTj02rvbtSTCUnA21uo90jnmSpa4vuo84nXE2cHvgBTCvXOmR8o-2BgUwerwJnzTIgNzLxC3SCNh-2Fah-2FaRkxCV0A3-2F2Cgyhap3Y-2BTu7cHnw" style=3D"color:#000;text-decoration:none;">
+                  Sr. Product Manager, Cost Modeling &amp;&nbsp;Analytics
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOmBqZO91OZCZG1z-2FZxbTgXEaYNb_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0Jolgh6ai4vphFh-2BmK9ruQvkF3NJfBrz4htW2aeQxAsLK2AEjq08JC-2FJcL3L3oAGyfsMUVOQ-2B9jNR0PybUR5AgVd7KoXmqeDQ3QGP1Vv5is-2Fne0KTUKhcmR-2BwGp9W1jvTGzZsXRMAkJAVbY8m9STH3abx8C1DBRiwivWutrz5oQ8Ew" style=3D"color:#000;text-decoration:none;">
+                  Tesla
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Electric&nbsp;vehicles</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                FREMONT, CALIFORNIA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">TrueUp ClimateTech 50</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/amazon.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Amazon logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgT0uUk27TYwg9XXstWSlo3XDqY1z4ikMT8B5EAT75-2Ba33Wsn0bMNRvDxT956VTbju78EAQ5bEwUCz9sCXzuiRxdvlzNvM1jTflVMuZ0BQov8u6DRqxpfPfB39njQ0oVvzA-3D-3DsSuo_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JooAgypA07UdFLGM6hVv6XrMJaqOICO9t-2FsGGqyhvjMVBzS-2BEz9ZgJQXvKlRAVNwSaw0cK1Tvw79y7WKA0NA-2BPDumXh05QlcQrvnOcMqNqLtQisi10qHJNTrZcpFr6pYqa1QsLgXtH4QVjqepba2M6OkMJnASdY-2FK3UXyA2ItHtQB" style=3D"color:#000;text-decoration:none;">
+                  Sr. Financial Analyst, DaS Finance Ops & Product&nbsp;Dev
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOkmxpYr-2BHxvcOtuIKABWboQdFCn_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JomNIJN-2F4-2FoiZA-2FNSUn8rPWddofTylarQiD-2B0cNCyz59myoHtSIbNxzXLf8oLwZ-2F2jzPifKLoyKK3Q8DBEl6Ps7ZrpeTE9FgxHtz8DFSxTw6Smi7utWWt5snJzNgC9I3evn-2B-2BzNEp4cGVo2ud78X0I-2BxpI17KA-2FeOyB-2BpXwts8Tkf6XNkWOJfuS0r9stzWMO8pA-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Amazon
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">E-commerce (Amazon.com) and cloud computing&nbsp;(AWS)</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SUNNYVALE, CALIFORNIA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                7 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 28d ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/meta.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Meta logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgTLVh6t-2FPwJgnkXadFAW1fjvqucsvxTYfDcdDW1G7rtG1blVYcAJxJQN4PGsc8xo2g-3D-3D8R4m_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0Jojkp-2Fc2S0HApZ8-2BgHF2boCCcpVHB4fEDA135ojOAYJYrpx4JvNx2dNefEyNePAlj0neKyUklv5sV0XJdZVv-2BkfRfxWDPGCiT9L7Was-2Ft5XR3ESFzbhb-2FOTYhkhX4HhMWQIf-2FjxxOXy3ZuNUT5kgf9mJlcnIRyuBU8gUGJVaPSS7qJV5EfGJjd3iFgKYlNW-2B9dQ-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Strategic Planning, Operations and Analytics&nbsp;Lead
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOk1ISAXhowRngjv3Lneqvkg8Kpr_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JolNYNFE4dExyEBB3pR-2BSpnnycOgRlfKDd6RVc-2BpQd3fxpBqwdXK1-2FM3wiZTjhz4gZJy3eMdVSodtCONViQUd8oN-2B3d2YV0x82AR-2FN-2B7R54PFl-2BES3O-2FaQmEXBWJlP37uvx6lVpxJEhJ5Ba-2BRyMkoGQWi83nhhN-2FZIiuJtdglc5qHElQJQ6yVnZjRfZIDMJRRTA-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Meta
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Social networking (Facebook, Instagram,&nbsp;WhatsApp)</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SAN FRANCISCO, CA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 7d ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/nvidia.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"NVIDIA logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgRgcfTMyESO7-2FP-2BxdXBkU4FDev-2Btw6aWCCi-2B5UP-2Fmdg-2BSodiX42vGC6PRsRkUe0jJ5GMI4DtPssgY-2FHh0v2ojhmDXrx5XP1JPZWAQoXHdRlTbZBO7CkVTRKMrfcM2ePwOZpB3XMXBhXGDuAiY2nC7RePgtIxHs382bUrSMth0V3KDgn5_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JoqZfKn1baE6V-2FI0h6eSxehNQt7v9Wb8uxyuV-2B8TBwY1kT2X5pO-2BsCSCsU-2F7S4zFE-2FCbq5Fop0jUU0ogzhIcf6nuWia2Io27g-2BmZj9QoHZjVyY7jMOZE6wX35mysFsKJU0YRQJgStkbWy2LWiJfjBDqnRoxAVSLYnzOWOP-2FJe1Pw6yl8K65jj1WDSumnXu9P4cw-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Senior Financial&nbsp;Analyst
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOlqfpw7xw8wdN26hxI7jkPLkYWS_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JootrzJ2C6HUDIhgO7E9LenDAIKQJxmX3jsHH7mwcbNN-2BJDZ3HsCqzAbD-2BmSKpSNsXJHLi5cZgDhlL1EI-2F1hnNZDwqmcJAJcC5tWsvyCOD-2FR2oXLuhTs2beTvEuKCnbsayIobzQhYcz6TEh-2BhcgM8tdT3-2BSRSMem9w1vIYKzp2v-2FVqnsH0djQkHjmbxNLjz2Exw-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  NVIDIA
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">GPU&nbsp;design</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                US, CA, SANTA CLARA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=8C=8E TrueUp Remote 200</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/google.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Google logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgcMxsF34mwLsilN0G63dqcNeJVV35X1YSjQuJh0YU180nPQhiLHlFc3d3vLPQVFEeOgimy-2F6iCHVSTx53Rvx7PHE6CnJX21PY4BqMN0VolYfRBLIgmmUz0OvlwbsJ2yTK3cAm-2Fq6D-2Fx7P8JCKi0K2kWWh12qc7N8C1Kexq3gpvQETGmr_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JovusJs3WOIoYtcUKLYoWaSVNTNbaXYmDUqUKJ0tce-2BQ2MAg21ks7ck1Azq5t5AEmiXj7gz-2FwQb1KOnA7CaphcfQ4j33PfyQ4f2k96SDXUmFwcIbpI6Ga5N1UxhClKByWA-2FAVLPUo8-2BG7lHEAmBACQLyaqT8UhrBKdWEOuNxqHCXtI0-2FAH2S6Hi5nvM-2FhqTqaMQ-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Strategy and Operations Senior&nbsp;Analyst
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgeGWN-2FWVsZaIx3IO5XJZFOn3K6YtRzp7JVbpOiRAE2Shi9JL_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JoldgZCJatSL5vma63-2F0-2B87EVieurmdlfV0gvHRKRuc1uD657LXk72vrUtu7wvTsMXFkXBOtclzlXrSK-2FiPSB4M-2FxgHuBBGrNsi7HLtSwuLbet-2BnNaMBn87hx5tOKlHpj18PTER9yGSk28-2BmXMTwFzDe-2BaiCjYzrAzpcI0ORf8F0Bg88BQXrfpNDY6wggBXjBOQ-3D-3D" style=3D"color:#000;text-decoration:none;">
+                  Google
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Search, ads, and consumer&nbsp;apps</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                ; SAN FRANCISCO, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 4mo ago</span>
+        </div>
+      </div>
+             =20
+              <!-- Button -->
+              <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:30px 0;">
+                <tr>
+                  <td align=3D"center" style=3D"">
+                    <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgUpBROXpg9wuu7unWRz-2FuMp0zvrX02LaG5BpVtUeBK1bhqh5FCkbxln2QrLycUwgE-2FIgjL5Bo3IYWSUFI0B1F0NEl5qkCtImGkRPVfNT8UgvWiEATZ5m7IUv6gaHkTvn-2BQ-3D-3DpdUW_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JoqhxDtmDAf2h-2FZzimdtN9aIpAGZPik-2FyAkaRdhNHW7d9YjoVu0M8ydEd5-2B357Y569pb4yvoxOGn9cmqlq9sifKQ-2FE3uTyLPNC8F5u3O-2BsiN9eEOIVtUTGM6ry4IRjtJxHXaUE88Ai7mhHgAtMSOmVijsUY8nWJBxPCF1l8ny-2BhOswN9XY06y2sCIw01PigTV6g-3D-3D"=20
+                      style=3D"background:#000;color:#fff;display:inline-block;font-weight:600;padding:8px 16px;text-decoration:none;border-radius:6px;">
+                      View all open jobs  =E2=86=92
+                    </a>
+                  </td>
+                </tr>
+              </table>
+             =20
+              <div style=3D"padding:32px 0;font-size:14px;">
+                Visit <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgaNTI312ZIq8C6Crk772TNz1n2imFXzCUKdv56KqL4-2Byufk9W-2BQ-2BSNBj71aCVMhfEVCdsluJd27uLCU7A5B4jzrGPVIFrLG5-2B6sLAvCwm95FHDuv_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JolSvzTKqKu9BiD-2BU4AkrKXm01-2FwMz3Gzce17S8WvXX278jQ8Q03h-2FqNiyOPU8MuHvHT-2FoVK-2FbHiwq1PuY-2FkUSr1Ga5mCtU8-2BZpBTerFlW-2F8XxtVVRFZEI1VAdii-2F7e7Uv4gfnnJSmoXa6rdDi5WuFdHe0Fhp1nh3BJWMadIg939RpOYQkKyaC9-2FMLLAyu7xIsg-3D-3D" style=3D"color:#000;text-decoration:underline;">My TrueUp</a> to update your job profile and&nbsp;preferences.
+              </div>
+             =20
+             =20
+
+              <!-- Footer -->
+              <div style=3D"padding:24px 18px;margin-bottom:10px;font-size:12px;background:#E9ECEF;color:#6c757d;line-height:1.5;border-radius:10px;">
+                <p style=3D"margin:0;">Feedback for us? =F0=9F=92=AC</p>
+                <p style=3D"margin:0 0 12px;">We're always looking to improve. Just reply to this email with your thoughts.</p>
+                <p style=3D"margin:0 0 12px;">You are receiving this email because you created a <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgVjiCZiT0xQ9Cr-2FfVyePWbpDOmbOxFyRBfFb81keKZcO6n0gp4WBPn8gEd9BP-2FtyakF-2F4JPMGjsvWOzT-2BO7i09mDWb-2FT6vOly-2BimXg3Bvcu7xrk__MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JolxtikxPn-2BTu18aGV1yBTGNnCzdKmSop1TQZQlrjDFhbo-2BQ0qw76vDHXXA2pTbbgVtVD45J7OfE5sQophrf72gH8bES8DXRklSrC4sYaIYiMEZ6DgEW6B0q8F7OoZHkOku-2FpGyBST8FmIwzdFqScv7P119JfezhhLF7Gxv5UiPFRoOiXSzyXw8w9Nkr-2FA2q-2BUA-3D-3D" style=3D"color:#6c757d;text-decoration:underline;">TrueUp</a> account.</p>
+                <p style=3D"margin:0 0 12px;">Want to change how you receive these emails?<br>
+                You can <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgVjiCZiT0xQ9Cr-2FfVyePWbpDOmbOxFyRBfFb81keKZcO6n0gp4WBPn8gEd9BP-2FtyakF-2F4JPMGjsvWOzT-2BO7i09mDWb-2FT6vOly-2BimXg3Bvcu77Wt2_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0Jou980qp-2BEj30yA1EjA-2Bg4MbeC112FYiM-2Bcmc8IfWQCH7MG5WjtAFizqkjtViR-2B2b5-2BSQUEVE0dQlAfToj1AOqbRGAy5RoQm-2FfG9lW-2FS4twCGLknH-2BFvxRojHO9raee9DzO-2FEnnHOXph4oz5eVEnl9YoNAMITGgvozqBCfB1bQJzgf94Tafi0oZa8ixHHl2jR3A-3D-3D" style=3D"color:#6c757d;text-decoration:underline;">update preferences</a> or <a href=3D"http://url3500.trueup.io/ls/click?upn=3Du001.lwFGo7k1VVdbQOG1iV7JgdtRUcZjzlDr6h-2F-2B5awJK-2FF0MpNGLk35Ppzy6eSBUiBOYem8BPWKnka48F4L17ft0YccImCx2GVklMw56-2BSQYU3XBRQlT-2FxrRLEQ-2B8XQ06tBNf-2FBWUGpVgSJ1I0-2F3MGzObLNWPcfByOMyiX8VLemMPS-2F2t4jRxiDgjwDf5xmHES6ZFZFetGc-2BPoqbD73-2B5-2BlKHwsKeqbtqxdfrP0a9HWPco-3DsY5L_MjAhclRA0hH-2F1a1m8v8T4p7Ax3Msk-2FXvXZr-2Fx0q7y2nbNz03wCmKv13PFFHlDV8u8j9wdSZ0b75ZA4Tl-2BF0JonzmZl3f8KxNlHV-2FWsxVQs3OmrGaoMJhMSfM0agtIauvdZoX41Pd7-2FcwZBr4Jy2Za2iQ40Hp-2BneDvV5mWf0n5N8LoHlUgQlX0dmqGnAuZEJrFKHYAP6M67IPhhkTys7-2FAEFKTEeCFyarg-2Bxl79908-2BJOdOMhihuIVXCm5M4libpZuzNopARuOKy-2FJB-2BOz7YHVw-3D-3D" style=3D"color:#6c757d;text-decoration:underline;">unsubscribe</a> from job emails.</p>
+                <p style=3D"margin:0;color:#6c757d;">=C2=A9 TrueUp</p>
+                <p style=3D"margin:0;color:#6c757d;">16 East 34th Street, New York, NY 10016</p>
+              </div>
+             =20
+            </td>
+           =20
+          </tr>     =20
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

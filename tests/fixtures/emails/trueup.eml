@@ -1,0 +1,393 @@
+Received: by 2002:a89:b49:0:b0:2fb:567c:77c4 with SMTP id bq9csp433845lqb;
+        Wed, 29 Apr 2026 16:30:25 -0700 (PDT)
+Received: from pnkfpfqs.outbound-mail.sendgrid.net (pnkfpfqs.outbound-mail.sendgrid.net. [50.31.63.70])
+        by mx.google.com with ESMTPS id d75a77b69052e-5101ae7b9c7si42559021cf.160.2026.04.29.16.30.24
+        for <REDACTED@example.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Wed, 29 Apr 2026 16:30:25 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=trueup.io;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=s1; t=1777505424; bh=IAEREC/quv20h2FI0oS8FP8PmWxiTcWKjzdmRxBHZQQ=;
+	b=YZcHwML/uyDv682HkxBSBSsh+SQyhwGx/mhxiPMO3Cli3Jm7ZxcT8RXx+79SA9YYqgIB
+	9So8tD8MeBLeriQicBzaktXY8DWFSamDeqvUMP2znqUc4qL6FI23AAU4ztI/y1rh1VS5Op
+	mb1jRC86hVsZAdWB2ClL3FB05U+rwSgMRhtve31hpiwAwIJRIvQrk+WdB48OpiNALxLN7v
+	ZZvTBZWZ8ipEcxRyqpV59jgN82n4bdgOCDPydpubv8vcGhtOU70i/QPYfQZmjsR1ikPRND
+	StPo5DRhyt+1/Dws4ug4bCYCkF2FUC9oH4+SPF7lLvwWL0661iahOJHZCg0fBL2A=DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=sendgrid.info;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:feedback-id:from:subject:to;
+	s=smtpapi; t=1777505424; bh=IAEREC/quv20h2FI0oS8FP8PmWxiTcWKjzdmRxBHZQQ=;
+	b=eR/H7WTcBV4vX5Q/KtxNZCNbmW2xNgiGM5CvUxgQlc+Ff9X9gjVA2c+rOvQfipB+0zLU
+	4JuvLWp3rv3jLWRTsftv4BJ2NB8+dTGMuLSy+FwKrzwvYH212cGxkL2tQ79AoXVnylJ3En
+	EltSpc0Mk3K7Yv0/6xd7Ees8ujB+tLa0gReceived: by recvd-6dcc959bcb-tvbs5 with SMTP id recvd-6dcc959bcb-tvbs5-1-69F29490-95
+	2026-04-29 23:30:24.38874363 +0000 UTC m=+93425.684512315
+Received: from MjM4OTUzMjU (unknown)
+	by geopod-ismtpd-20 (SG) with HTTP
+	id 1DNk3jKyQRaVXoYYRftKtg
+	Wed, 29 Apr 2026 23:30:24.356 +0000 (UTC)
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=utf-8
+Date: Wed, 29 Apr 2026 23:30:24 +0000 (UTC)
+From: TrueUp <hello@trueup.io>
+Mime-Version: 1.0
+Subject: 96 new jobs for you this week
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset=3D"utf-8">
+  <meta name=3D"viewport" content=3D"width=3Ddevice-width,initial-scale=3D1">
+  <title>Your Weekly Job Alert from TrueUp</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=3DOpen+Sans:ital,wght@0,300..800;1,300..800&display=3Dswap');
+  </style>
+  <!--[if mso]>
+  <style type=3D"text/css">
+    body, table, td {font-family: Arial, Helvetica, sans-serif !important;}
+  </style>
+  <![endif]-->
+</head>
+<body style=3D"margin:0;padding:0;background:#fff;font-family:'Open Sans',Roboto,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <span style=3D"display:none;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">Google, AlphaSense, Sunbit, Okta, Blackbaud, Meta, Nutanix, Verily, Chime, Hewlett Packard Enterprise, Tesla, NVIDIA, Axtria, Zoox, Cardlytics. 239 total open tech jobs that match your profile.</span>
+ =20
+  <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"background:#fff;">
+    <tr>
+      <td style=3D"padding:0;">
+        <table width=3D"540" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:0 auto;background:#fff;max-width:540px;font-size:16px;" align=3D"center">
+         =20
+          <!-- Content (includes logo) -->
+          <tr>
+            <td style=3D"padding:0 6px;">
+             =20
+              <!-- Logo -->
+              <div style=3D"margin-top:10px; margin-bottom:10px;">
+                <a href=3D"https://trueup.io" style=3D"display:block;">
+        <img src=3D"https://trueup-public-assets.s3.us-west-2.amazonaws.com/trueup_email_header_outline.png" style=3D"display:block;height:32px;width:auto;max-width:100%!important;" alt=3D"TrueUp"/>
+      </a>
+              </div>
+             =20
+             =20
+             =20
+              <div style=3D"margin:40px 0 10px;font-size:20px;font-weight:600;line-height:1.3;">
+                <a href=3D"https://www.trueup.io/myjobs?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#000;text-decoration:none;">
+                  96 new jobs
+                </a> for you <em>this&nbsp;week</em>
+              </div>
+             =20
+              <div style=3D"padding:0 0 30px 2px;font-size:16px;">
+                All open jobs that fit your profile:&nbsp;239
+              </div>
+             =20
+             =20
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/google.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Google logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://www.google.com/about/careers/applications/jobs/results/90752443096146630-senior-financial-analyst-google-one-ai-subscriptions" style=3D"color:#000;text-decoration:none;">
+                  Senior Financial Analyst, Google One AI&nbsp;Subscriptions
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/google" style=3D"color:#000;text-decoration:none;">
+                  Google
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Search, ads, and consumer&nbsp;apps</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                MOUNTAIN VIEW, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 5mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/alpha-sense.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"AlphaSense logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://job-boards.greenhouse.io/alphasense/jobs/8292394002" style=3D"color:#000;text-decoration:none;">
+                  Director, AI Governance, Automation &&nbsp;Analytics
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/alphasense" style=3D"color:#000;text-decoration:none;">
+                  AlphaSense
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Enterprise search&nbsp;engine</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                REMOTE - UNITED STATES
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                2 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=A6=84 Unicorn<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $4B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Total funding $1.4B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Last raised 1.9y ago ($650M Series F)<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">15 yrs old<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">1,900 employees</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/google.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Google logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://www.google.com/about/careers/applications/jobs/results/86359363714720454-business-development-lead-data-for-gemini" style=3D"color:#000;text-decoration:none;">
+                  Business Development Lead, Data for&nbsp;Gemini
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/google" style=3D"color:#000;text-decoration:none;">
+                  Google
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Search, ads, and consumer&nbsp;apps</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                ; MOUNTAIN VIEW, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 5mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/google.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Google logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://www.google.com/about/careers/applications/jobs/results/135863914830144198-cloud-senior-financial-analyst-gemini-enterprise-and-agents" style=3D"color:#000;text-decoration:none;">
+                  Cloud Senior Financial Analyst, Gemini Enterprise and&nbsp;Agents
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/google" style=3D"color:#000;text-decoration:none;">
+                  Google
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Search, ads, and consumer&nbsp;apps</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                SUNNYVALE, CA, USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 5mo ago</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/sunbit.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Sunbit logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://sunbit.com/careers/?job=3D4C.86C" style=3D"color:#000;text-decoration:none;">
+                  Director of Growth Analytics,&nbsp;Merchant
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/sunbit" style=3D"color:#000;text-decoration:none;">
+                  Sunbit
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Installment payments for&nbsp;commerce</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                LOS ANGELES HQ (REMOTE)
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                2 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=F0=9F=A6=84 Unicorn<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $1.1B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Total funding $460M<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">=E2=9A=A0 Last raised 5y ago<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">10 yrs old<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">500 employees</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/okta.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Okta logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://www.okta.com/company/careers/opportunity/7792010?gh_jid=3D7792010" style=3D"color:#000;text-decoration:none;">
+                  Staff Data&nbsp;Analyst
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/okta" style=3D"color:#000;text-decoration:none;">
+                  Okta
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Identity-management&nbsp;software</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                BELLEVUE, WASHINGTON; SAN FRANCISCO, CALIFORNIA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                3 days ago
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $14B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">6,000 employees<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">TrueUp Security 50<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">=F0=9F=8C=8E TrueUp Remote 200</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/blackbaud.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Blackbaud logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://blackbaud.wd1.myworkdayjobs.com/en-US/ExternalCareers/job/Remote---Anywhere---USA/Product-Manager--Data-and-AI-Platform_R0013844" style=3D"color:#000;text-decoration:none;">
+                  Principal Product Manager, Data and AI&nbsp;Platform
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/blackbaud" style=3D"color:#000;text-decoration:none;">
+                  Blackbaud
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Cloud software for&nbsp;nonprofits</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                REMOTE - ANYWHERE - USA
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">Public<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">Valuation $1.8B<span style=3D"color:#d7d2d2;">&nbsp;=E2=80=A2</span></span> <span style=3D"white-space:nowrap;">3,000 employees</span>
+        </div>
+      </div>
+      <div style=3D"margin-bottom:16px;padding:16px;padding-bottom:10px;border:1px solid #ddd;border-radius:10px;">
+        <table style=3D"width:100%;border-spacing:0;">
+          <tr>
+            <td style=3D"vertical-align:top;padding-right:20px;width:48px;">
+              <img src=3D"https://img.logo.dev/meta.com?token=3Dpk_VAZ6tvAVQHCDwKeaNRVyjQ"=20
+                style=3D"width:48px;height:48px;background:#fff;object-fit:contain;border-radius:4px;"
+                alt=3D"Meta logo">
+            </td>
+            <td style=3D"vertical-align:top;">
+              <div style=3D"font-weight:600;font-size:16px;margin-bottom:6px;">
+                <a href=3D"https://www.metacareers.com/jobs/945080131354140" style=3D"color:#000;text-decoration:none;">
+                  Area Project Controls Lead, Leased Data&nbsp;Centers
+                </a>
+              </div>
+              <div style=3D"font-size:16px;margin-bottom:10px;">
+                <a href=3D"https://www.trueup.io/co/facebook" style=3D"color:#000;text-decoration:none;">
+                  Meta
+                </a>
+                <div style=3D"font-size:14px;color:#6c757d;margin-top:4px;">Social networking (Facebook, Instagram,&nbsp;WhatsApp)</div>
+              </div>
+              <div style=3D"font-size:14px;font-weight:500;color:#6c757d;margin-bottom:10px;">
+                RESTON, VA / MENLO PARK, CA / REMOTE, US
+              </div>
+              <div style=3D"font-size:14px;color:#6c757d;">
+                Yesterday
+              </div>
+            </td>
+          </tr>
+        </table>
+       =20
+        <div style=3D"font-size:12px;color:#6c757d;margin-top:1rem;padding-top:10px;border-top:1px solid #d7d2d2;line-height:1.8;">
+          <span style=3D"white-space:nowrap;">=E2=9A=A0=EF=B8=8F Layoff 6d ago</span>
+        </div>
+      </div>
+             =20
+              <!-- Button -->
+              <table width=3D"100%" cellpadding=3D"0" cellspacing=3D"0" style=3D"margin:30px 0;">
+                <tr>
+                  <td align=3D"center" style=3D"">
+                    <a href=3D"https://www.trueup.io/myjobs?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly"=20
+                      style=3D"background:#000;color:#fff;display:inline-block;font-weight:600;padding:8px 16px;text-decoration:none;border-radius:6px;">
+                      View all open jobs  =E2=86=92
+                    </a>
+                  </td>
+                </tr>
+              </table>
+             =20
+              <div style=3D"padding:32px 0;font-size:14px;">
+                Visit <a href=3D"https://www.trueup.io?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#000;text-decoration:underline;">My TrueUp</a> to update your job profile and&nbsp;preferences.
+              </div>
+             =20
+             =20
+
+              <!-- Footer -->
+              <div style=3D"padding:24px 18px;margin-bottom:10px;font-size:12px;background:#E9ECEF;color:#6c757d;line-height:1.5;border-radius:10px;">
+                <p style=3D"margin:0;">Feedback for us? =F0=9F=92=AC</p>
+                <p style=3D"margin:0 0 12px;">We're always looking to improve. Just reply to this email with your thoughts.</p>
+                <p style=3D"margin:0 0 12px;">You are receiving this email because you created a <a href=3D"https://www.trueup.io/?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#6c757d;text-decoration:underline;">TrueUp</a> account.</p>
+                <p style=3D"margin:0 0 12px;">Want to change how you receive these emails?<br>
+                You can <a href=3D"https://www.trueup.io/?utm_source=3Dtrueup&utm_medium=3Demail&utm_campaign=3Djobs_weekly" style=3D"color:#6c757d;text-decoration:underline;">update preferences</a> or <a href=3D"https://2wbjuww73c.execute-api.us-west-2.amazonaws.com/prod/user/unsubscribe?userEmailToken=REDACTED&emailType=3Demails_job_alerts" style=3D"color:#6c757d;text-decoration:underline;">unsubscribe</a> from job emails.</p>
+                <p style=3D"margin:0;color:#6c757d;">=C2=A9 TrueUp</p>
+                <p style=3D"margin:0;color:#6c757d;">16 East 34th Street, New York, NY 10016</p>
+              </div>
+             =20
+            </td>
+           =20
+          </tr>     =20
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
