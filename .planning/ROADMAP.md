@@ -278,10 +278,17 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 **Success Criteria** (what must be TRUE):
   1. The PyPI name `job-cannon` is registered on pypi.org under the author's account; trusted publishing is configured (GitHub Actions OIDC identity → `pypi/job-cannon`)
   2. `pyproject.toml` contains complete metadata: `project.urls` (homepage + repository + issues), full classifier list (Python 3.13, OS-independent, AGPL-3.0-only, Intended Audience), `[project.scripts]` entry point for `job-cannon`, long-description from README, license expression `AGPL-3.0-only`
-  3. Pushing a tag like `v5.0.0` triggers `.github/workflows/release.yml` which runs `uv build`, `twine check dist/*`, and publishes via OIDC trusted publishing — verifiable by a tag push that lands on PyPI
+  3. Pushing a tag like `v5.0.0` triggers `.github/workflows/release.yml` which runs `uv build`, `twine check dist/*`, and publishes via OIDC trusted publishing — verifiable by a tag push that lands on PyPI **(Naming reconciliation: the actual tag-triggered workflow per D-01 is `publish.yml`; `release.yml` is retained as the `workflow_dispatch` bumper.)**
   4. `INSTALL.md` documents three install paths in order: `pipx install job-cannon` (primary, with troubleshooting for pipx-not-installed), `git clone && uv sync` (secondary, for contributors), P3-deferred installer (placeholder section noting "coming in v5.1")
   5. `README.md` opens with the pipx install one-liner; the clone-and-uv-sync path is in a "For Contributors" section; the dashboard's update banner is documented in the README features list
-**Plans**: TBD
+**Plans**: 7 plans
+  - [ ] 44-01-PLAN.md — pyproject.toml audit: SPDX license + classifiers + URLs + python-dotenv to core deps (PYPI-02)
+  - [ ] 44-02-PLAN.md — `__main__.py` argparse short-circuit for --help/--version (PYPI-03 / D-09 blocker fix)
+  - [ ] 44-03-PLAN.md — Wave 0 test stubs: tests/test_packaging.py + tests/test_main_cli.py (PYPI-02, PYPI-03)
+  - [ ] 44-04-PLAN.md — Workflows: publish.yml + publish-testpypi.yml + release.yml edit (PYPI-01, PYPI-03)
+  - [ ] 44-05-PLAN.md — INSTALL.md (PYPI-07)
+  - [ ] 44-06-PLAN.md — README.md restructure: pipx-first + For Contributors + Update-banner mention (PYPI-08)
+  - [ ] 44-07-PLAN.md — PHASE-44-RELEASE-CHECKLIST.md + manual one-time setup checkpoint (PYPI-01, PYPI-03, autonomous=false)
 
 ### Phase 45: Cross-Platform pipx Validation & Exit Gate
 **Goal**: `pipx install job-cannon` works on Windows 11, macOS Sonoma+, and Ubuntu 22.04+; ≥5 strangers have installed and run the app successfully.
