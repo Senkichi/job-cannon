@@ -101,18 +101,21 @@ def test_resolve_provider_with_fallback():
     assert result["fallback_chain"][0]["provider"] == "ollama"
 
 
-def test_resolve_provider_missing_falls_back_to_anthropic():
+def test_resolve_provider_missing_primary_raises():
+    """2026-05-17 hotfix Fix 4a: the silent 'anthropic' default was the
+    symptom that masked the Phase 40 schema regression. Missing
+    providers.primary now raises ValueError so misconfiguration fails loud.
+    """
     config = {}
-    result = resolve_provider_config("score", config)
-    assert result["provider"] == "anthropic"
-    assert result["model"] == "claude-sonnet-4-6"
+    with pytest.raises(ValueError, match="providers.primary is not configured"):
+        resolve_provider_config("score", config)
 
 
-def test_resolve_provider_no_providers_section():
+def test_resolve_provider_no_providers_section_raises():
+    """Same as above — no providers section at all also raises (Fix 4a)."""
     config = {}
-    result = resolve_provider_config("score", config)
-    assert result["provider"] == "anthropic"
-    assert result["model"] == "claude-sonnet-4-6"
+    with pytest.raises(ValueError, match="providers.primary is not configured"):
+        resolve_provider_config("score", config)
 
 
 def test_resolve_provider_tier_model_missing_uses_score_models():
@@ -126,16 +129,21 @@ def test_resolve_provider_tier_model_missing_uses_score_models():
 
 def test_resolve_provider_score_tier_default():
     """v3.0 single tier name 'score' falls back to the Sonnet default
-    when no providers.score config is present."""
-    config = {}
+    when providers.primary is anthropic and no override is present.
+    (Phase 40 hotfix 2026-05-17 removed the implicit anthropic default —
+    the test now sets primary explicitly.)
+    """
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
 
 
 def test_resolve_provider_score_tier():
-    """Phase 39: 'score' tier now translates to 'score' workload (sonnet), not opus."""
-    config = {}
+    """Phase 39: 'score' tier now translates to 'score' workload (sonnet), not opus.
+    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     result = resolve_provider_config("score", config)
     assert result["provider"] == "anthropic"
     assert result["model"] == "claude-sonnet-4-6"
@@ -375,10 +383,12 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
 
 
 def test_call_model_checks_budget_for_anthropic(tmp_path):
-    """call_model calls cost_gate when provider is anthropic."""
+    """call_model calls cost_gate when provider is anthropic.
+    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """
     from job_finder.web.model_provider import call_model
 
-    config = {}  # default: anthropic
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     mock_client = MagicMock()
 
@@ -398,24 +408,30 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
     mock_cost_gate.assert_called_once_with(conn, config, "score")
 
 
-def test_call_model_raises_budget_exceeded(tmp_path):
-    """call_model raises BudgetExceededError when cost_gate returns False for anthropic."""
-    from job_finder.web.claude_client import BudgetExceededError
-    from job_finder.web.model_provider import call_model
+def test_call_model_raises_cascade_exhausted_when_budget_blocks_only_provider(tmp_path):
+    """Single-provider Anthropic cascade with budget gate closed exhausts the
+    chain and raises ProviderCascadeExhaustedError.
+    (Phase 40 hotfix 2026-05-17 Fix 4b: the back-compat path that raised
+    BudgetExceededError directly was removed. The cascade skips over-budget
+    providers — the canonical 'no provider' signal is exhaustion.)
+    """
+    from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
-    config = {}  # default: anthropic
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     with patch("job_finder.web.model_provider.cost_gate", return_value=False):
-        with pytest.raises(BudgetExceededError):
+        with pytest.raises(ProviderCascadeExhaustedError):
             call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
 
 def test_call_model_no_record_cost_for_anthropic(tmp_path):
-    """call_model does NOT call record_cost for anthropic provider (avoids double-recording)."""
+    """call_model does NOT call record_cost for anthropic provider (avoids double-recording).
+    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """
     from job_finder.web.model_provider import call_model
 
-    config = {}  # default: anthropic
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
     mock_client = MagicMock()
     anthropic_result = ModelResult(
@@ -471,9 +487,14 @@ def test_call_model_records_cost_for_gemini(tmp_path):
     assert row["cost_usd"] == 0.0
 
 
-def test_call_model_raises_on_no_fallback(tmp_path):
-    """call_model raises RuntimeError when retry fails and no fallback configured."""
-    from job_finder.web.model_provider import call_model
+def test_call_model_raises_cascade_exhausted_on_single_provider_schema_failure(tmp_path):
+    """Single-provider chain where the provider's output fails schema after
+    retry exhausts the cascade and raises ProviderCascadeExhaustedError.
+    (Phase 40 hotfix 2026-05-17 Fix 4b: the back-compat 'plain RuntimeError
+    when no fallback' branch was removed; the cascade loop handles a
+    one-entry chain the same way as a longer one.)
+    """
+    from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
     config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
@@ -493,7 +514,7 @@ def test_call_model_raises_on_no_fallback(tmp_path):
         mock_adapter.call.return_value = bad_result
         mock_make_adapter.return_value = mock_adapter
 
-        with pytest.raises(RuntimeError, match="no fallback"):
+        with pytest.raises(ProviderCascadeExhaustedError):
             call_model(
                 "score",
                 "sys",
@@ -1102,38 +1123,14 @@ def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily
             call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG)
 
 
-def test_non_cascade_schema_failure_raises_plain_runtime_error(tmp_path):
-    """Non-cascade path schema failure raises plain RuntimeError, not ProviderCascadeExhaustedError."""
-    from job_finder.web.model_provider import call_model
-
-    config = {"providers": {"primary": "gemini", "fallback_chain": []}}
-    conn = _migrated_conn(tmp_path)
-    schema = {
-        "type": "object",
-        "required": ["score"],
-        "properties": {"score": {"type": "integer"}},
-    }
-    bad_result = _make_result(data={"wrong_key": 1})
-
-    with (
-        patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
-        patch("job_finder.web.model_provider.cost_gate", return_value=True),
-        patch("job_finder.web.model_provider.record_cost"),
-    ):
-        mock_adapter = MagicMock()
-        mock_adapter.call.return_value = bad_result
-        mock_make_adapter.return_value = mock_adapter
-
-        with pytest.raises(RuntimeError) as exc_info:
-            call_model(
-                "score",
-                "sys",
-                [{"role": "user", "content": "hi"}],
-                conn,
-                config,
-                output_schema=schema,
-            )
-        assert not isinstance(exc_info.value, ProviderCascadeExhaustedError)
+# Deleted in 2026-05-17 hotfix (Fix 4b):
+# test_non_cascade_schema_failure_raises_plain_runtime_error pinned the
+# back-compat path's "plain RuntimeError, not ProviderCascadeExhaustedError"
+# distinction. That path no longer exists — every call_model invocation now
+# goes through the cascade loop, and schema failure on a one-entry chain
+# raises ProviderCascadeExhaustedError (covered by
+# test_call_model_raises_cascade_exhausted_on_single_provider_schema_failure
+# above).
 
 
 # ---------------------------------------------------------------------------
@@ -1151,23 +1148,34 @@ def test_tier_has_provider_non_anthropic_with_key():
 
 
 def test_tier_has_provider_anthropic_only_no_client():
-    """Anthropic-only chain + client=None -> False."""
-    config = {}
+    """Anthropic-only chain + client=None -> False.
+    (Phase 40 hotfix 2026-05-17: explicit providers.primary required —
+    the silent 'anthropic' default this test originally relied on was
+    removed by Fix 4a.)
+    """
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     assert tier_has_configured_provider("quick", config, client=None) is False
 
 
 def test_tier_has_provider_anthropic_only_with_client():
-    """Anthropic-only chain + client present -> True."""
-    config = {}
+    """Anthropic-only chain + client present -> True.
+    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """
+    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     mock_client = MagicMock()
     assert tier_has_configured_provider("quick", config, client=mock_client) is True
 
 
 def test_tier_has_provider_typo_no_client():
-    """Typo provider name + client=None -> False."""
+    """Typo provider name + client=None -> False.
+    The function's contract is a predicate; under 2026-05-17 hotfix
+    tier_has_configured_provider catches the ValueError that
+    resolve_provider_config raises for unknown providers and returns False
+    (the docstring's stated behavior). Prior code raised; the test body now
+    matches the function's documented predicate semantics.
+    """
     config = {"providers": {"primary": "gorq", "fallback_chain": []}}
-    with pytest.raises(ValueError):
-        tier_has_configured_provider("quick", config, client=None)
+    assert tier_has_configured_provider("quick", config, client=None) is False
 
 
 def test_tier_has_provider_missing_api_key():

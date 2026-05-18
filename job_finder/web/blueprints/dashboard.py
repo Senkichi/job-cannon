@@ -105,15 +105,22 @@ def _cached_tier_available(tier: str, config: dict, client) -> bool:
     if entry and (now - entry[1]) < _PROVIDER_CACHE_TTL:
         return entry[0]
 
-    # Fast path: Anthropic client exists and is in the chain → available
+    # Fast path: Anthropic client exists and is in the chain → available.
+    # resolve_provider_config raises ValueError when providers.primary is unset
+    # (2026-05-17 hotfix Fix 4a) — fall through to the boolean predicate which
+    # translates that to False.
     if client is not None:
         from job_finder.web.model_provider import resolve_provider_config
 
-        resolved = resolve_provider_config(tier, config)
-        providers = [resolved["provider"]] + [e["provider"] for e in resolved["fallback_chain"]]
-        if "anthropic" in providers:
-            _provider_cache[tier] = (True, now)
-            return True
+        try:
+            resolved = resolve_provider_config(tier, config)
+        except ValueError:
+            resolved = None
+        if resolved is not None:
+            providers = [resolved["provider"]] + [e["provider"] for e in resolved["fallback_chain"]]
+            if "anthropic" in providers:
+                _provider_cache[tier] = (True, now)
+                return True
 
     result = tier_has_configured_provider(tier, config, client)
     _provider_cache[tier] = (result, now)

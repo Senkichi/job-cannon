@@ -21,7 +21,7 @@ import requests
 from jsonschema import ValidationError, validate
 
 # DEFAULT_MODEL_* imports removed in Phase 39 (replaced by _PROVIDER_DEFAULTS)
-from job_finder.web.claude_client import (  # noqa: F401 — record_cost re-exported for test patching
+from job_finder.web.claude_client import (  # noqa: F401 — record_cost + BudgetExceededError re-exported for callers/tests
     FREE_PROVIDERS,
     BudgetExceededError,
     cost_gate,
@@ -65,7 +65,17 @@ def resolve_workload_routing(workload: str, config: dict) -> dict:
         raise ValueError(f"Unknown workload: {workload!r}. Valid: {sorted(_VALID_WORKLOADS)}")
 
     providers_cfg = config.get("providers", {})
-    primary_name = providers_cfg.get("primary", "anthropic")
+    primary_name = providers_cfg.get("primary")
+    if not primary_name:
+        # Fail fast — the silent default to "anthropic" was the prior
+        # symptom that masked the Phase 40 schema regression (2026-05-17).
+        # ValueError (not ConfigError) avoids a circular import with
+        # job_finder.config; the error propagates to call_model's caller,
+        # which logs it.
+        raise ValueError(
+            "providers.primary is not configured. "
+            "See config.example.yaml for the Phase 40 schema."
+        )
     overrides = providers_cfg.get("overrides", {})
     fallback_names = providers_cfg.get("fallback_chain", [])
 
@@ -279,8 +289,16 @@ def tier_has_configured_provider(
     conn is accepted for API symmetry with call_model() callers but is not used
     during validation — _make_adapter() only uses conn for AnthropicProvider, which
     is short-circuited via the client-is-not-None check before _make_adapter() is called.
+
+    Returns False (not raises) when providers.primary is unset — the predicate's
+    contract is "is there a routable provider?" and the honest answer to that on
+    an unconfigured config is no. resolve_provider_config raises ValueError in
+    that case per Fix 4a (2026-05-17 hotfix); we translate it back to False here.
     """
-    resolved = resolve_provider_config(tier, config)
+    try:
+        resolved = resolve_provider_config(tier, config)
+    except ValueError:
+        return False
     primary = resolved["provider"]
     chain = resolved["fallback_chain"]
     all_providers = [primary] + [entry["provider"] for entry in chain]
@@ -593,100 +611,125 @@ def call_model(
 
     Raises:
         BudgetExceededError: If cost_gate blocks an Anthropic call.
-        RuntimeError: If schema validation fails after retry and no fallback
-            is configured.
-        RuntimeError: If all cascade providers are exhausted (when fallback_chain is configured).
+        ProviderCascadeExhaustedError: If all configured providers (primary +
+            fallbacks) fail or are unavailable.
     """
     resolved = resolve_provider_config(tier, config)
     provider_name: str = resolved["provider"]
     model: str = resolved["model"]
     primary_variant: str | None = resolved["prompt_variant"]
-    fallback: str | None = resolved["fallback"]
     fallback_chain: list[dict] = resolved["fallback_chain"]
     daily_limits: dict[str, int] = resolved["daily_limits"]
     throttle_delays: dict[str, float] = resolved["throttle_delays"]
 
-    # --- Cascade path (non-empty fallback_chain) ---
-    if fallback_chain:
-        _ensure_usage_current(conn)
+    # --- Cascade is the only path (Phase 40 hotfix 2026-05-17). Previously
+    # an empty fallback_chain skipped the cascade entirely and direct-
+    # dispatched to provider_name, which made cascade-bypass invisible. The
+    # cascade loop already handles a one-entry chain correctly. ---
+    _ensure_usage_current(conn)
 
-        chain: list[dict] = [
-            {"provider": provider_name, "model": model, "prompt_variant": primary_variant}
-        ] + list(fallback_chain)
+    chain: list[dict] = [
+        {"provider": provider_name, "model": model, "prompt_variant": primary_variant}
+    ] + list(fallback_chain)
 
-        # Audit-log the cascade the caller is about to try. Paired with the
-        # "call_model ROUTED" entry below, this gives operators end-to-end
-        # visibility into which provider actually handled which tier/purpose.
-        logger.info(
-            "call_model CASCADE: tier=%s chain=[%s] purpose=%s job_id=%s",
-            tier,
-            ", ".join(f"{e['provider']}:{e['model']}" for e in chain),
-            purpose,
-            job_id,
-        )
+    # Audit-log the cascade the caller is about to try. Paired with the
+    # "call_model ROUTED" entry below, this gives operators end-to-end
+    # visibility into which provider actually handled which tier/purpose.
+    logger.info(
+        "call_model CASCADE: tier=%s chain=[%s] purpose=%s job_id=%s",
+        tier,
+        ", ".join(f"{e['provider']}:{e['model']}" for e in chain),
+        purpose,
+        job_id,
+    )
 
-        # Track last-call time per provider for inter-request throttling
-        _last_call: dict[str, float] = {}
+    # Track last-call time per provider for inter-request throttling
+    _last_call: dict[str, float] = {}
 
-        for entry in chain:
-            entry_provider = entry["provider"]
-            entry_model = entry["model"]
+    for entry in chain:
+        entry_provider = entry["provider"]
+        entry_model = entry["model"]
 
-            # Skip if daily limit exhausted
-            if not _check_daily_limit(entry_provider, daily_limits):
-                logger.info("Cascade: %s exhausted, skipping", entry_provider)
+        # Skip if daily limit exhausted
+        if not _check_daily_limit(entry_provider, daily_limits):
+            logger.info("Cascade: %s exhausted, skipping", entry_provider)
+            continue
+
+        # Skip if adapter creation fails (missing API key -> ValueError,
+        # Ollama unreachable -> RuntimeError)
+        try:
+            adapter = _make_adapter(
+                entry_provider,
+                client,
+                conn,
+                config,
+                job_id=job_id,
+                purpose=purpose,
+            )
+        except (ValueError, RuntimeError, ImportError) as exc:
+            logger.warning("Cascade: %s unavailable: %s", entry_provider, exc)
+            continue
+
+        # Budget gate for paid providers
+        if entry_provider not in _FREE_PROVIDERS:
+            if not cost_gate(conn, config, tier):
+                logger.info("Cascade: %s over budget, skipping", entry_provider)
                 continue
 
-            # Skip if adapter creation fails (missing API key -> ValueError,
-            # Ollama unreachable -> RuntimeError)
+        # CASC-05's per-provider variant prompt is gone alongside
+        # PROMPT_VARIANTS (deleted with sonnet_evaluator in Plan 4).
+        # All scoring callers now use the single v3 system prompt.
+        effective_system = system
+
+        # Inter-request throttle: respect per-provider delay from config
+        delay = throttle_delays.get(entry_provider, 0)
+        if delay > 0:
+            last = _last_call.get(entry_provider, 0)
+            elapsed = time.monotonic() - last
+            if elapsed < delay:
+                wait = delay - elapsed
+                logger.debug("Cascade: throttling %s for %.1fs", entry_provider, wait)
+                time.sleep(wait)
+
+        # 429 retry with backoff (up to 2 retries)
+        max_retries = 2
+        for attempt in range(1 + max_retries):
             try:
-                adapter = _make_adapter(
-                    entry_provider,
-                    client,
-                    conn,
-                    config,
-                    job_id=job_id,
-                    purpose=purpose,
+                _last_call[entry_provider] = time.monotonic()
+                result = adapter.call(
+                    entry_model,
+                    effective_system,
+                    messages,
+                    output_schema,
+                    max_tokens,
+                    timeout,
                 )
-            except (ValueError, RuntimeError, ImportError) as exc:
-                logger.warning("Cascade: %s unavailable: %s", entry_provider, exc)
-                continue
-
-            # Budget gate for paid providers
-            if entry_provider not in _FREE_PROVIDERS:
-                if not cost_gate(conn, config, tier):
-                    logger.info("Cascade: %s over budget, skipping", entry_provider)
-                    continue
-
-            # CASC-05's per-provider variant prompt is gone alongside
-            # PROMPT_VARIANTS (deleted with sonnet_evaluator in Plan 4).
-            # All scoring callers now use the single v3 system prompt.
-            effective_system = system
-
-            # Inter-request throttle: respect per-provider delay from config
-            delay = throttle_delays.get(entry_provider, 0)
-            if delay > 0:
-                last = _last_call.get(entry_provider, 0)
-                elapsed = time.monotonic() - last
-                if elapsed < delay:
-                    wait = delay - elapsed
-                    logger.debug("Cascade: throttling %s for %.1fs", entry_provider, wait)
-                    time.sleep(wait)
-
-            # 429 retry with backoff (up to 2 retries)
-            max_retries = 2
-            for attempt in range(1 + max_retries):
-                try:
+                # Sanitize output for non-Anthropic providers (strip extra keys, coerce types)
+                if entry_provider != "anthropic" and isinstance(result.data, dict):
+                    sanitized = _sanitize_output(result.data, output_schema)
+                    if sanitized is not result.data:
+                        result = ModelResult(
+                            data=sanitized,
+                            cost_usd=result.cost_usd,
+                            input_tokens=result.input_tokens,
+                            output_tokens=result.output_tokens,
+                            model=result.model,
+                            provider=result.provider,
+                            schema_valid=result.schema_valid,
+                        )
+                # Schema validation + retry (per-provider, using original messages)
+                errors = _validate_schema(result.data, output_schema)
+                if errors:
+                    augmented = _augment_with_errors(messages, errors)
                     _last_call[entry_provider] = time.monotonic()
                     result = adapter.call(
                         entry_model,
                         effective_system,
-                        messages,
+                        augmented,
                         output_schema,
                         max_tokens,
                         timeout,
                     )
-                    # Sanitize output for non-Anthropic providers (strip extra keys, coerce types)
                     if entry_provider != "anthropic" and isinstance(result.data, dict):
                         sanitized = _sanitize_output(result.data, output_schema)
                         if sanitized is not result.data:
@@ -699,131 +742,62 @@ def call_model(
                                 provider=result.provider,
                                 schema_valid=result.schema_valid,
                             )
-                    # Schema validation + retry (per-provider, using original messages)
                     errors = _validate_schema(result.data, output_schema)
-                    if errors:
-                        augmented = _augment_with_errors(messages, errors)
-                        _last_call[entry_provider] = time.monotonic()
-                        result = adapter.call(
-                            entry_model,
-                            effective_system,
-                            augmented,
-                            output_schema,
-                            max_tokens,
-                            timeout,
-                        )
-                        if entry_provider != "anthropic" and isinstance(result.data, dict):
-                            sanitized = _sanitize_output(result.data, output_schema)
-                            if sanitized is not result.data:
-                                result = ModelResult(
-                                    data=sanitized,
-                                    cost_usd=result.cost_usd,
-                                    input_tokens=result.input_tokens,
-                                    output_tokens=result.output_tokens,
-                                    model=result.model,
-                                    provider=result.provider,
-                                    schema_valid=result.schema_valid,
-                                )
-                        errors = _validate_schema(result.data, output_schema)
-                    if not errors:
-                        _increment_usage(entry_provider)
-                        try:
-                            _maybe_record_cost(result, conn, job_id, purpose)
-                        except Exception as cost_exc:
-                            # Cost recording is non-fatal — don't discard a good
-                            # scoring result because of a transient DB lock.
-                            logger.warning(
-                                "Cascade: %s cost recording failed (non-fatal): %s",
-                                entry_provider,
-                                cost_exc,
-                            )
-                        logger.info(
-                            "call_model ROUTED: tier=%s provider=%s model=%s purpose=%s job_id=%s",
-                            tier,
-                            result.provider,
-                            result.model,
-                            purpose,
-                            job_id,
-                        )
-                        return result
-                    # Schema still invalid after retry — skip to next provider
-                    logger.warning(
-                        "Cascade: %s schema invalid after retry, skipping",
-                        entry_provider,
-                    )
-                    break  # Don't retry schema failures
-                except requests.HTTPError as exc:
-                    if exc.response is not None and exc.response.status_code == 429:
-                        if attempt < max_retries:
-                            backoff = (2**attempt) * 2  # 2s, 4s
-                            logger.warning(
-                                "Cascade: %s rate limited (429), retry %d/%d after %ds",
-                                entry_provider,
-                                attempt + 1,
-                                max_retries,
-                                backoff,
-                            )
-                            time.sleep(backoff)
-                            continue
-                        # Exhausted retries — mark provider as done for today
+                if not errors:
+                    _increment_usage(entry_provider)
+                    try:
+                        _maybe_record_cost(result, conn, job_id, purpose)
+                    except Exception as cost_exc:
+                        # Cost recording is non-fatal — don't discard a good
+                        # scoring result because of a transient DB lock.
                         logger.warning(
-                            "Cascade: %s rate limited (429) after %d retries, marking exhausted",
+                            "Cascade: %s cost recording failed (non-fatal): %s",
                             entry_provider,
-                            max_retries,
+                            cost_exc,
                         )
-                        _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
-                        break
-                    logger.warning("Cascade: %s HTTP error: %s", entry_provider, exc)
-                    break  # Non-429 HTTP errors — don't retry
-                except Exception as exc:
-                    logger.warning("Cascade: %s error: %s", entry_provider, exc)
-                    break  # Unknown errors — don't retry
+                    logger.info(
+                        "call_model ROUTED: tier=%s provider=%s model=%s purpose=%s job_id=%s",
+                        tier,
+                        result.provider,
+                        result.model,
+                        purpose,
+                        job_id,
+                    )
+                    return result
+                # Schema still invalid after retry — skip to next provider
+                logger.warning(
+                    "Cascade: %s schema invalid after retry, skipping",
+                    entry_provider,
+                )
+                break  # Don't retry schema failures
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 429:
+                    if attempt < max_retries:
+                        backoff = (2**attempt) * 2  # 2s, 4s
+                        logger.warning(
+                            "Cascade: %s rate limited (429), retry %d/%d after %ds",
+                            entry_provider,
+                            attempt + 1,
+                            max_retries,
+                            backoff,
+                        )
+                        time.sleep(backoff)
+                        continue
+                    # Exhausted retries — mark provider as done for today
+                    logger.warning(
+                        "Cascade: %s rate limited (429) after %d retries, marking exhausted",
+                        entry_provider,
+                        max_retries,
+                    )
+                    _daily_usage[entry_provider] = daily_limits.get(entry_provider, 999999)
+                    break
+                logger.warning("Cascade: %s HTTP error: %s", entry_provider, exc)
+                break  # Non-429 HTTP errors — don't retry
+            except Exception as exc:
+                logger.warning("Cascade: %s error: %s", entry_provider, exc)
+                break  # Unknown errors — don't retry
 
-        raise ProviderCascadeExhaustedError(
-            f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
-            f"Providers tried: {[e['provider'] for e in chain]}"
-        )
-
-    # --- Backward-compat path (empty fallback_chain) — UNCHANGED from Phase 26 ---
-
-    # Budget gate — skip entirely for free providers (INFRA-04)
-    if provider_name not in _FREE_PROVIDERS:
-        if not cost_gate(conn, config, tier):
-            raise BudgetExceededError(f"Budget cap reached. Tier: {tier}")
-
-    # Instantiate and make first attempt
-    adapter = _make_adapter(provider_name, client, conn, config, job_id=job_id, purpose=purpose)
-    result = adapter.call(model, system, messages, output_schema, max_tokens, timeout)
-
-    # Schema validation — attempt 1
-    errors = _validate_schema(result.data, output_schema)
-    if not errors:
-        _maybe_record_cost(result, conn, job_id, purpose)
-        return result
-
-    # Retry with augmented prompt (INFRA-02)
-    augmented = _augment_with_errors(messages, errors)
-    result = adapter.call(model, system, augmented, output_schema, max_tokens, timeout)
-    errors = _validate_schema(result.data, output_schema)
-    if not errors:
-        _maybe_record_cost(result, conn, job_id, purpose)
-        return result
-
-    # Fallback to Anthropic when retry fails (INFRA-03)
-    if fallback and client is not None:
-        from job_finder.web.providers.anthropic_provider import AnthropicProvider
-
-        fallback_adapter = AnthropicProvider(
-            client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
-        )
-        # Use empty config to get Anthropic default model (not the Gemini/Ollama model name)
-        fallback_model = resolve_provider_config(tier, {})["model"]
-        # AnthropicProvider handles cost_gate + record_cost internally via call_claude()
-        result = fallback_adapter.call(
-            fallback_model, system, messages, output_schema, max_tokens, timeout
-        )
-        return result
-
-    raise RuntimeError(
-        f"Schema validation failed after retry and no fallback available for tier: {tier}"
+    raise ProviderCascadeExhaustedError(
+        f"All providers in cascade exhausted or unavailable for tier: {tier!r}. "
+        f"Providers tried: {[e['provider'] for e in chain]}"
     )
