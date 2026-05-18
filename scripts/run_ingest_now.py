@@ -15,9 +15,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ingest_now")
 
+from job_finder.config import load_config
 from job_finder.web import create_app
 
-app = create_app()
+# 2026-05-17 hotfix Fix 7: set TESTING=True so create_app's scheduler-skip
+# guard fires. This script is a one-shot ingest — it has no reason to
+# start a scheduler, and starting one races the live Flask app for the
+# pidfile (which the portalocker rewrite from Fix 6 will now reject
+# loudly instead of silently overwriting).
+cfg = load_config()
+cfg["TESTING"] = True
+app = create_app(config=cfg)
 
 with app.app_context():
     from job_finder.web.db_helpers import get_config_snapshot
