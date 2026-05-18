@@ -54,7 +54,7 @@ def test_anthropic_provider_is_base_provider_subclass():
 def test_call_returns_model_result(provider):
     with patch(
         "job_finder.web.providers.anthropic_provider.call_claude",
-        return_value=({"score": 75}, 0.003),
+        return_value=({"score": 75}, 0.003, True),
     ):
         result = provider.call(
             model="claude-haiku-4-5",
@@ -77,7 +77,7 @@ def test_call_passes_all_params_to_call_claude(provider, mock_client, mock_conn)
 
     with patch(
         "job_finder.web.providers.anthropic_provider.call_claude",
-        return_value=({"result": "ok"}, 0.001),
+        return_value=({"result": "ok"}, 0.001, True),
     ) as mock_call:
         provider.call(
             model="claude-sonnet-4-6",
@@ -108,7 +108,7 @@ def test_call_with_schema(provider):
 
     with patch(
         "job_finder.web.providers.anthropic_provider.call_claude",
-        return_value=({"score": 90}, 0.005),
+        return_value=({"score": 90}, 0.005, True),
     ) as mock_call:
         result = provider.call(
             model="claude-haiku-4-5",
@@ -117,7 +117,6 @@ def test_call_with_schema(provider):
             output_schema=schema,
         )
 
-    _, call_kwargs = mock_call.call_args
     assert mock_call.call_args.kwargs["output_schema"] == schema
     assert result.data == {"score": 90}
 
@@ -125,7 +124,7 @@ def test_call_with_schema(provider):
 def test_call_without_schema(provider):
     with patch(
         "job_finder.web.providers.anthropic_provider.call_claude",
-        return_value=({"text": "plain response"}, 0.002),
+        return_value=({"text": "plain response"}, 0.002, True),
     ) as mock_call:
         provider.call(
             model="claude-haiku-4-5",
