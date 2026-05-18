@@ -164,42 +164,27 @@ def _find_careers_url_with_low_tier(
         }
     ]
 
-    use_dispatcher = True  # Always use dispatcher with new cascade
-
     try:
-        if use_dispatcher:
-            try:
-                model_result = call_model(
-                    tier="quick",
-                    system=system,
-                    messages=messages,
-                    conn=conn,
-                    config=config,
-                    output_schema=_CAREERS_URL_SCHEMA,
-                    job_id=None,
-                    purpose="find_careers_url",
-                    max_tokens=256,
-                    client=_CLI_CLIENT_STUB,
-                )
-                result = model_result.data
-            except ProviderCascadeExhaustedError:
-                logger.warning(
-                    "careers_scrape: cascade exhausted for URL discovery of '%s', retrying via CLI",
-                    homepage_url,
-                )
-                result, _cost, _schema_valid = call_claude(
-                    system=system,
-                    messages=messages,
-                    output_schema=_CAREERS_URL_SCHEMA,
-                    conn=conn,
-                    job_id=None,
-                    purpose="find_careers_url",
-                    config=config,
-                    max_tokens=256,
-                )
-        else:
+        try:
+            model_result = call_model(
+                tier="quick",
+                system=system,
+                messages=messages,
+                conn=conn,
+                config=config,
+                output_schema=_CAREERS_URL_SCHEMA,
+                job_id=None,
+                purpose="find_careers_url",
+                max_tokens=256,
+                client=_CLI_CLIENT_STUB,
+            )
+            result = model_result.data
+        except ProviderCascadeExhaustedError:
+            logger.warning(
+                "careers_scrape: cascade exhausted for URL discovery of '%s', retrying via CLI",
+                homepage_url,
+            )
             result, _cost, _schema_valid = call_claude(
-                model=call_claude,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_URL_SCHEMA,
@@ -297,42 +282,27 @@ def _extract_jobs_with_low_tier(
         }
     ]
 
-    use_dispatcher = True  # Always use dispatcher with new cascade
-
     try:
-        if use_dispatcher:
-            try:
-                model_result = call_model(
-                    tier="quick",
-                    system=system,
-                    messages=messages,
-                    conn=conn,
-                    config=config,
-                    output_schema=_CAREERS_JOBS_SCHEMA,
-                    job_id=None,
-                    purpose="extract_jobs",
-                    max_tokens=1024,
-                    client=_CLI_CLIENT_STUB,
-                )
-                result = model_result.data
-            except ProviderCascadeExhaustedError:
-                logger.warning(
-                    "careers_scrape: cascade exhausted for job extraction at '%s', retrying via CLI",
-                    careers_url,
-                )
-                result, _cost, _schema_valid = call_claude(
-                    system=system,
-                    messages=messages,
-                    output_schema=_CAREERS_JOBS_SCHEMA,
-                    conn=conn,
-                    job_id=None,
-                    purpose="extract_jobs",
-                    config=config,
-                    max_tokens=1024,
-                )
-        else:
+        try:
+            model_result = call_model(
+                tier="quick",
+                system=system,
+                messages=messages,
+                conn=conn,
+                config=config,
+                output_schema=_CAREERS_JOBS_SCHEMA,
+                job_id=None,
+                purpose="extract_jobs",
+                max_tokens=1024,
+                client=_CLI_CLIENT_STUB,
+            )
+            result = model_result.data
+        except ProviderCascadeExhaustedError:
+            logger.warning(
+                "careers_scrape: cascade exhausted for job extraction at '%s', retrying via CLI",
+                careers_url,
+            )
             result, _cost, _schema_valid = call_claude(
-                model=call_claude,
                 system=system,
                 messages=messages,
                 output_schema=_CAREERS_JOBS_SCHEMA,
