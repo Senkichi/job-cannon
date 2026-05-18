@@ -42,28 +42,16 @@ def _score_new_jobs(
         return
 
     try:
-        from job_finder.web.model_provider import tier_has_configured_provider
-    except ImportError:
-        logger.debug("model_provider not available — skipping scoring")
-        return
-
-    try:
         from job_finder.web.data_enricher import enrich_job
     except ImportError:
         enrich_job = None  # type: ignore[assignment]
 
-    # Build scoring client
-    _scoring_client = None
-    try:
-        import anthropic
-
-        _scoring_client = anthropic.Anthropic()
-    except (ImportError, Exception):
-        pass
-
-    if not tier_has_configured_provider("score", config, _scoring_client):
-        logger.debug("No routable scoring provider — skipping careers_crawl scoring")
-        return
+    # 2026-05-17 hotfix Fix 5: dropped the tier_has_configured_provider
+    # pre-flight check. After Fix 4, ProviderCascadeExhaustedError is the
+    # canonical "no provider" signal and is caught by the orchestrator's
+    # per-job try/except at job_scorer.py — same posture as
+    # ats_scanner/_run.py. Eliminating the asymmetry removes a class of
+    # cascade-bypass regressions.
 
     serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
 
