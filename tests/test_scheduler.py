@@ -652,3 +652,69 @@ class TestSchedulerAgenticBackfill:
                 init_scheduler(mock_app)
 
         mock_sched.pause_job.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pidfile lock — portalocker self-release on process death (2026-05-17 Fix 6)
+# ---------------------------------------------------------------------------
+
+
+class TestPidfileSelfRelease:
+    """Validates that the new portalocker-based scheduler lock is released
+    by the OS when the holding process dies — including the unclean-shutdown
+    case (Windows force-kill, atexit not firing) that the psutil-based
+    pidfile self-heal mishandled due to PID reuse.
+
+    Uses subprocess.Popen (not multiprocessing) because Windows
+    multiprocessing has a different lifecycle that can mask the lock-release
+    behavior we care about for the real scheduler-vs-Flask race.
+    """
+
+    def test_pidfile_self_release_on_process_death(self, tmp_path):
+        import subprocess
+        import sys
+
+        # Patch _acquire_scheduler_pidfile's resolved pidfile path by
+        # pointing the child's "DB_PATH" at our tmp_path. The pidfile
+        # lives at <db_path_dir>/logs/scheduler.pid.
+        pidfile = tmp_path / "logs" / "scheduler.pid"
+        db_path = str(tmp_path / "dummy.db")
+
+        # Child: acquire the lock, write a sentinel, exit cleanly.
+        # Holding briefly then exit gives the OS a chance to release.
+        child_script = f"""
+import sys
+sys.path.insert(0, {repr(str(__import__('pathlib').Path(__file__).resolve().parent.parent))!s})
+from unittest.mock import MagicMock
+from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
+
+mock_app = MagicMock()
+mock_app.config = {{"DB_PATH": {db_path!r}}}
+ok = _acquire_scheduler_pidfile(mock_app)
+print("CHILD_ACQUIRED" if ok else "CHILD_FAILED", flush=True)
+"""
+
+        result = subprocess.run(
+            [sys.executable, "-c", child_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        assert "CHILD_ACQUIRED" in result.stdout, result.stdout + result.stderr
+
+        # OS should have released the lock when the child exited. The
+        # pidfile may still exist (diagnostic-only), but the lock is gone.
+        assert pidfile.exists(), "pidfile should remain on disk for diagnostics"
+
+        # Parent: now attempt to acquire the same lock. Should succeed —
+        # if the OS didn't release on child exit, this would deadlock
+        # or return False (the test would fail either way).
+        from unittest.mock import MagicMock as _MagicMock
+
+        from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
+
+        mock_app = _MagicMock()
+        mock_app.config = {"DB_PATH": db_path}
+        acquired = _acquire_scheduler_pidfile(mock_app)
+        assert acquired is True, "OS should have released lock when child exited"

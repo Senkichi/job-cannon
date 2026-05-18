@@ -69,6 +69,10 @@ dependencies = [
     "ruamel-yaml>=0.19.1",
     # Cross-platform user data directories
     "platformdirs>=4.0",
+    # OS-level file lock for the scheduler pidfile. Replaces the PID-tracking
+    # advisory pidfile which was vulnerable to PID reuse on Windows + to
+    # atexit-not-firing on force-kill (2026-05-17 hotfix Fix 6).
+    "portalocker>=2.10",
 ]
 
 [project.optional-dependencies]

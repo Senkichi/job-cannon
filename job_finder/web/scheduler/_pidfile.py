@@ -1,8 +1,18 @@
-"""Cross-process pidfile lock for the background scheduler.
+"""Cross-process file lock for the background scheduler.
 
-Prevents two independent Python processes from both running the 0,8,16 cron
-schedule, which previously caused the 16:00 PT ingestion to fire twice and
-double-bill Gmail/SerpAPI/DataForSEO.
+Replaces the prior PID-tracking advisory pidfile (2026-05-17 hotfix Fix 6),
+which was vulnerable to two failure modes on Windows:
+
+1. PID reuse — the OS aggressively recycles PIDs, so an unrelated process
+   landing on the dead scheduler's old PID made the psutil-based liveness
+   check return True and refuse to start the scheduler.
+2. atexit not firing on force-kill / unclean shutdown, leaving the pidfile
+   on disk indefinitely.
+
+portalocker acquires an OS-level file lock that the kernel releases when
+the holding process terminates — including SIGKILL, Ctrl+C interruption
+mid-shutdown, and Windows force-kill paths. The lock IS the liveness
+signal; the pidfile contents are diagnostic-only.
 
 Public-surface contract: ``_acquire_scheduler_pidfile`` is patched by
 ``tests/conftest.py`` via the package attribute path
@@ -11,73 +21,68 @@ Public-surface contract: ``_acquire_scheduler_pidfile`` is patched by
 ``init_scheduler`` looks up.
 """
 
-import atexit
+from __future__ import annotations
+
 import logging
 import os
 from pathlib import Path
 
+import portalocker
+
 logger = logging.getLogger(__name__)
 
-# Module-level state mirrors the legacy scheduler.py shape: the atexit
-# cleanup closure needs to know which path WE wrote.
-_pidfile_path: Path | None = None
+# Module-level: holds the lock file handle for the lifetime of this process.
+# OS releases the lock automatically when this process terminates (any cause).
+# Do NOT close in atexit — explicit close races with shutdown ordering and
+# the OS release is the contract.
+_lock_handle = None
 
 
 def _acquire_scheduler_pidfile(app) -> bool:
-    """Acquire a cross-process pidfile lock before starting the scheduler.
-
-    Self-heals stale pidfiles: if the recorded PID is no longer alive, the
-    lock is taken cleanly. Cross-process liveness check uses psutil.
+    """Acquire a cross-process OS file lock before starting the scheduler.
 
     Returns:
         True if the lock was acquired (safe to start scheduler), False if
-        another live instance is already running (caller must skip).
+        another live process is already holding it (caller must skip).
     """
-    global _pidfile_path
+    global _lock_handle
 
     db_path = app.config.get("DB_PATH", "jobs.db")
     pidfile = Path(db_path).resolve().parent / "logs" / "scheduler.pid"
-
-    if pidfile.exists():
-        try:
-            existing_pid = int(pidfile.read_text().strip())
-        except (ValueError, OSError):
-            existing_pid = None  # corrupt pidfile — treat as stale
-
-        if existing_pid and existing_pid != os.getpid():
-            try:
-                import psutil
-
-                alive = psutil.pid_exists(existing_pid)
-            except Exception:
-                alive = False
-
-            if alive:
-                logger.warning(
-                    "Scheduler: another instance (PID %d) is already running — "
-                    "this process will NOT start a scheduler to prevent duplicate cron firings",
-                    existing_pid,
-                )
-                return False
-
     pidfile.parent.mkdir(parents=True, exist_ok=True)
-    pidfile.write_text(str(os.getpid()))
-    _pidfile_path = pidfile
 
-    def _cleanup_pidfile() -> None:
+    # Open for read/write so we can both lock and rewrite the PID. Mode "a+"
+    # creates the file if absent without truncating an existing one.
+    fh = open(pidfile, "a+", encoding="utf-8")  # noqa: SIM115 — must outlive function
+    try:
+        portalocker.lock(fh, portalocker.LOCK_EX | portalocker.LOCK_NB)
+    except (portalocker.exceptions.LockException, OSError) as exc:
         try:
-            if _pidfile_path and _pidfile_path.exists():
-                # Only remove if WE still own it (avoid racing with another process
-                # that may have taken over after a crash).
-                try:
-                    owner_pid = int(_pidfile_path.read_text().strip())
-                except Exception:
-                    owner_pid = None
-                if owner_pid == os.getpid():
-                    _pidfile_path.unlink()
+            fh.seek(0)
+            existing = fh.read().strip()
+        except OSError:
+            existing = "<unreadable>"
+        logger.warning(
+            "Scheduler: another instance is already running "
+            "(pidfile=%s, contents=%s, error=%s) — this process will NOT "
+            "start a scheduler",
+            pidfile,
+            existing,
+            exc,
+        )
+        try:
+            fh.close()
         except Exception:
-            pass  # best-effort cleanup; next start self-heals via liveness check
+            pass
+        return False
 
-    atexit.register(_cleanup_pidfile)
-    logger.info("Scheduler: acquired pidfile lock at %s (PID %d)", pidfile, os.getpid())
+    # Lock acquired. Rewrite the pidfile with our PID for diagnostics —
+    # liveness itself is the lock, not the file contents.
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+
+    _lock_handle = fh  # keep alive for process lifetime so the lock persists
+    logger.info("Scheduler: acquired lock at %s (PID %d)", pidfile, os.getpid())
     return True
