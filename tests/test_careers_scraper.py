@@ -854,31 +854,18 @@ class TestFindCareersUrlCascade:
             )
 
         mock_cm.assert_called_once()
-        assert mock_cm.call_args.kwargs["tier"] == "low"
+        assert mock_cm.call_args.kwargs["tier"] == "quick"
         assert mock_cm.call_args.kwargs["purpose"] == "find_careers_url"
         mock_cc.assert_not_called()
         assert result == "https://example.com/careers"
 
-    def test_uses_call_claude_when_no_providers(self, migrated_db):
-        from job_finder.web.careers_scraper import _find_careers_url_with_low_tier
-
-        _path, conn = migrated_db
-
-        with (
-            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
-            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
-        ):
-            mock_cc.return_value = ({"url": "https://example.com/careers"}, 0.001, True)
-            result = _find_careers_url_with_low_tier(
-                "https://example.com/",
-                "<html></html>",
-                conn,
-                config={},
-            )
-
-        mock_cm.assert_not_called()
-        mock_cc.assert_called_once()
-        assert result == "https://example.com/careers"
+    # NOTE: test_uses_call_claude_when_no_providers was removed (2026-05-18).
+    # Commit d1c5ffb made the cascade unconditional -- call_model is invoked
+    # regardless of whether providers are configured. The "no providers ->
+    # skip cascade and call_claude directly" code path no longer exists.
+    # The fallback semantics it used to cover (cascade exhausted ->
+    # call_claude) are now covered by test_cascade_exhausted_falls_back_to_cli
+    # below, which exercises the only remaining path into call_claude.
 
     def test_cascade_exhausted_falls_back_to_cli(
         self,
@@ -968,35 +955,19 @@ class TestExtractJobsCascade:
             )
 
         mock_cm.assert_called_once()
-        assert mock_cm.call_args.kwargs["tier"] == "low"
+        assert mock_cm.call_args.kwargs["tier"] == "quick"
         assert mock_cm.call_args.kwargs["purpose"] == "extract_jobs"
         mock_cc.assert_not_called()
         titles = [j["title"] for j in results]
         assert "Data Scientist" in titles
         assert "Junior Analyst" not in titles  # excluded
 
-    def test_uses_call_claude_when_no_providers(self, migrated_db):
-        from job_finder.web.careers_scraper import _extract_jobs_with_low_tier
-
-        _path, conn = migrated_db
-
-        with (
-            patch("job_finder.web.careers_scraper.call_model") as mock_cm,
-            patch("job_finder.web.careers_scraper.call_claude") as mock_cc,
-        ):
-            mock_cc.return_value = (self._JOBS_PAYLOAD, 0.001, True)
-            results = _extract_jobs_with_low_tier(
-                "https://example.com/careers",
-                "<html></html>",
-                target_titles=["data scientist"],
-                exclusions=[],
-                conn=conn,
-                config={},
-            )
-
-        mock_cm.assert_not_called()
-        mock_cc.assert_called_once()
-        assert results and results[0]["title"] == "Data Scientist"
+    # NOTE: test_uses_call_claude_when_no_providers was removed (2026-05-18).
+    # See the matching note in TestFindCareersUrlCascade above -- commit
+    # d1c5ffb made the cascade unconditional, so the "no providers ->
+    # call_claude directly" path no longer exists. Cascade-exhausted
+    # fallback is still covered by test_cascade_exhausted_falls_back_to_cli
+    # below.
 
     def test_cascade_exhausted_falls_back_to_cli(
         self,

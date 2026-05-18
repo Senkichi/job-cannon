@@ -156,7 +156,8 @@ def test_loads_legacy_tier_keys(tmp_path):
     cfg_path = tmp_path / "legacy.yaml"
     cfg_path.write_text(
         "# tier rename migration comment\n"
-        "profile: {}\n"
+        "profile:\n"
+        "  target_titles: [staff]  # required by validate_target_titles\n"
         "sources: {}\n"
         "providers:\n"
         "  haiku:  # inline\n"

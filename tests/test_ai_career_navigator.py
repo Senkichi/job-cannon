@@ -434,34 +434,17 @@ class TestDiscoverNavigationRecipeCascade:
             recipe = self._run_discovery(cascade_config_low)
 
         mock_cm.assert_called_once()
-        assert mock_cm.call_args.kwargs["tier"] == "low"
+        assert mock_cm.call_args.kwargs["tier"] == "quick"
         assert mock_cm.call_args.kwargs["purpose"] == "ai_nav_discovery"
         mock_cc.assert_not_called()
         assert recipe is not None
         assert recipe["extraction"]["method"] == "links_in_page"
 
-    def test_uses_call_claude_when_no_providers(self):
-        with (
-            patch("job_finder.web.ai_career_navigator.standalone_connection") as mock_sc,
-            patch("job_finder.web.ai_career_navigator.call_model") as mock_cm,
-            patch("job_finder.web.ai_career_navigator.call_claude") as mock_cc,
-            patch(
-                "job_finder.web.ai_career_navigator._take_snapshot",
-                return_value="<snapshot text more than fifty chars to pass guard>",
-            ),
-            patch(
-                "job_finder.web.ai_career_navigator._extract_with_recipe",
-                side_effect=[[], [{"title": "Data Scientist", "url": "/jobs/1"}]],
-            ),
-        ):
-            self._stub_connection(mock_sc)
-            mock_cc.return_value = (self._RECIPE, 0.001)
-
-            recipe = self._run_discovery(config={})
-
-        mock_cm.assert_not_called()
-        mock_cc.assert_called_once()
-        assert recipe is not None
+    # NOTE: test_uses_call_claude_when_no_providers was removed (2026-05-18).
+    # Commit d1c5ffb made the cascade unconditional; the "no providers ->
+    # call_claude directly" path no longer exists. Cascade-exhausted
+    # fallback semantics are still covered by
+    # test_cascade_exhausted_falls_back_to_cli below.
 
     def test_cascade_exhausted_falls_back_to_cli(self, cascade_config_low):
         from job_finder.web.model_provider import ProviderCascadeExhaustedError
@@ -481,7 +464,9 @@ class TestDiscoverNavigationRecipeCascade:
         ):
             self._stub_connection(mock_sc)
             mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
-            mock_cc.return_value = (self._RECIPE, 0.001)
+            # call_claude returns (result, cost_usd, schema_valid) -- 3-tuple,
+            # not the legacy 2-tuple this mock used pre-cascade rewrite.
+            mock_cc.return_value = (self._RECIPE, 0.001, True)
 
             recipe = self._run_discovery(cascade_config_low)
 

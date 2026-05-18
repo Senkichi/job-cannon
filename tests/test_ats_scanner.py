@@ -260,6 +260,116 @@ class TestTitleMatches:
 
 
 # ---------------------------------------------------------------------------
+# Tests: _title_matches (abbreviation expansion + word-boundary)
+# ---------------------------------------------------------------------------
+
+
+class TestTitleMatchesAbbreviations:
+    """Tests for the abbreviation-expansion + word-boundary matcher upgrade."""
+
+    def test_sr_abbreviation_matches_senior_keyword(self):
+        """'Sr DS' should match a keyword of 'Senior Data Scientist'."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("Sr DS, Growth", ["Senior Data Scientist"], []) is True
+
+    def test_sr_with_period_matches(self):
+        """'Sr. DS' (with period) should also match."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("Sr. DS", ["Senior Data Scientist"], []) is True
+
+    def test_pm_abbreviation_matches_product_manager(self):
+        """'PM' standalone should match 'Product Manager' keyword."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("PM, Platform", ["Product Manager"], []) is True
+
+    def test_mle_matches_machine_learning_engineer(self):
+        """'MLE' should match 'Machine Learning Engineer' keyword."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("Senior MLE", ["Machine Learning Engineer"], []) is True
+
+    def test_keyword_with_abbreviation_normalizes_too(self):
+        """A config keyword written as 'Sr DS' should match a title spelled out."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("Senior Data Scientist", ["Sr DS"], []) is True
+
+    def test_word_boundary_rejects_substring_inside_other_word(self):
+        """'Lead' should NOT match 'Leadership Coach' (word boundary)."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        # 'Lead' as a keyword should match 'Tech Lead' but not 'Leadership'.
+        assert _title_matches("Tech Lead", ["Lead"], []) is True
+        assert _title_matches("Leadership Coach", ["Lead"], []) is False
+
+    def test_word_boundary_rejects_data_inside_database(self):
+        """'Data' keyword should not match 'Database Administrator'."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        assert _title_matches("Database Administrator", ["Data"], []) is False
+        assert _title_matches("Data Engineer", ["Data"], []) is True
+
+    def test_exclusion_uses_word_boundary_too(self):
+        """Exclusion 'Lead' should not reject 'Leadership Trainee'."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        # The exclusion check should use word boundaries, so 'Lead' in the
+        # exclusions list does NOT match the substring 'Lead' inside
+        # 'Leadership Trainee'.
+        assert (
+            _title_matches("Leadership Trainee", ["Trainee"], exclusions=["Lead"])
+            is True
+        )
+
+    def test_exclusion_with_abbreviation_normalized(self):
+        """Exclusion list also benefits from abbreviation expansion."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        # Title is 'Sr DS Intern'. Inclusion via 'Data Scientist' would
+        # accept, but exclusion 'Intern' should reject.
+        assert _title_matches("Sr DS Intern", ["Data Scientist"], ["Intern"]) is False
+
+    def test_abbreviation_does_not_overmatch_random_letters(self):
+        """'DS' should not match inside 'KIDS' or 'NURSING'."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        # 'Data Scientist' keyword. Title 'KIDS Specialist' contains the
+        # letters 'DS' inside 'KIDS' but word-boundary prevents the
+        # abbreviation expansion from firing inside another word.
+        assert _title_matches("KIDS Specialist", ["Data Scientist"], []) is False
+        # 'NURSING Manager' contains 'SE' inside 'NURSING' -- the SE -> Software
+        # Engineer expansion should not fire mid-word.
+        assert _title_matches("NURSING Manager", ["Software Engineer"], []) is False
+
+    def test_normalize_is_idempotent(self):
+        """Calling _normalize_title twice yields the same result as once."""
+        from job_finder.web.ats_platforms import _normalize_title
+
+        once = _normalize_title("Sr DS, Growth")
+        twice = _normalize_title(once)
+        # Comma collapses into the space that follows it -- punctuation runs
+        # become single spaces so multi-word keywords match across
+        # post-abbreviation punctuation.
+        assert once == twice == "senior data scientist growth"
+
+    def test_existing_substring_behavior_preserved_for_multiword_keys(self):
+        """Multi-word keywords still match within longer titles."""
+        from job_finder.web.ats_scanner import _title_matches
+
+        # Pre-upgrade behavior preserved: 'Data Scientist' matches inside
+        # 'Senior Staff Data Scientist, Search'.
+        assert (
+            _title_matches(
+                "Senior Staff Data Scientist, Search", ["Data Scientist"], []
+            )
+            is True
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tests: upsert_company
 # ---------------------------------------------------------------------------
 

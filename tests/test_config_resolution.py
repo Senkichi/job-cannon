@@ -18,12 +18,23 @@ class TestLoadConfig:
     def test_env_var_set_and_file_exists_returns_env_path(self, monkeypatch, tmp_path):
         """$JOB_CANNON_CONFIG set and file exists — use that path."""
         target = tmp_path / "alt-config.yaml"
-        target.write_text("profile: {}\nsources: {}\nscoring: {}\ndb: {}\n", encoding="utf-8")
+        # allow_unfiltered_scan opts out of validate_target_titles so this
+        # minimal fixture (which exercises path resolution, not validation)
+        # does not trip the ATS-scan empty-filter safety check.
+        target.write_text(
+            "profile: {allow_unfiltered_scan: true}\nsources: {}\nscoring: {}\ndb: {}\n",
+            encoding="utf-8",
+        )
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(target))
 
         cfg = load_config()
 
-        assert cfg == {"profile": {}, "sources": {}, "scoring": {}, "db": {}}
+        assert cfg == {
+            "profile": {"allow_unfiltered_scan": True},
+            "sources": {},
+            "scoring": {},
+            "db": {},
+        }
 
     def test_env_var_set_but_file_missing_raises(self, monkeypatch, tmp_path):
         """$JOB_CANNON_CONFIG set but missing raises ConfigNotFoundError."""
@@ -53,12 +64,20 @@ class TestLoadConfig:
     def test_explicit_path_overrides_env(self, monkeypatch, tmp_path):
         """Explicit config_path parameter wins over environment."""
         target = tmp_path / "my-config.yaml"
-        target.write_text("profile: {}\nsources: {}\nscoring: {}\ndb: {}\n", encoding="utf-8")
+        target.write_text(
+            "profile: {allow_unfiltered_scan: true}\nsources: {}\nscoring: {}\ndb: {}\n",
+            encoding="utf-8",
+        )
         monkeypatch.setenv("JOB_CANNON_CONFIG", str(tmp_path / "other.yaml"))
 
         cfg = load_config(str(target))
 
-        assert cfg == {"profile": {}, "sources": {}, "scoring": {}, "db": {}}
+        assert cfg == {
+            "profile": {"allow_unfiltered_scan": True},
+            "sources": {},
+            "scoring": {},
+            "db": {},
+        }
 
 
 class TestWriteConfig:
@@ -84,9 +103,11 @@ class TestWriteConfig:
         """Config written by write_config can be read by load_config."""
         monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path))
 
+        # allow_unfiltered_scan opts out of validate_target_titles -- this
+        # roundtrip is about write/read fidelity, not validation.
         data = {
             "server": {"port": 5050},
-            "profile": {},
+            "profile": {"allow_unfiltered_scan": True},
             "sources": {},
             "scoring": {},
             "db": {},

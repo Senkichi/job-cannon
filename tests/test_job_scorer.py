@@ -188,15 +188,15 @@ class TestHappyPath:
         # The classification field is a sentinel; real value is derived at persist time.
         assert result.data.classification == ""
 
-    def test_call_model_invoked_with_tier_scoring(self, mock_conn, config):
-        """call_model is called with tier='scoring' (NOT 'haiku' or 'sonnet')."""
+    def test_call_model_invoked_with_tier_score(self, mock_conn, config):
+        """call_model is called with tier='score' (renamed from 'scoring' in commit abeecf9)."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
             score_job(_good_job(), mock_conn, config)
 
         assert mock_call.call_count == 1
         kwargs = mock_call.call_args.kwargs
-        assert kwargs.get("tier") == "scoring"
+        assert kwargs.get("tier") == "score"
 
     def test_call_model_invoked_with_job_assessment_schema(self, mock_conn, config):
         """call_model receives output_schema=JOB_ASSESSMENT_SCHEMA (identity-equal)."""

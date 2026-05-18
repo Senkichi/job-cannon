@@ -6,7 +6,9 @@ Extracted from ats_scanner.py (Plan 02 split).
 
 import json
 import logging
+import re
 import time
+from functools import lru_cache
 
 import requests
 
@@ -20,30 +22,135 @@ logger = logging.getLogger(__name__)
 _DETAIL_FETCH_SLEEP_S = 0.1
 
 
-def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) -> bool:
-    """Return True if title matches any target keyword and no exclusion keyword.
+# ---------------------------------------------------------------------------
+# Title normalization + word-boundary matching
+# ---------------------------------------------------------------------------
+# Recruiters use shorthand ("Sr DS", "ML Eng", "PM, Growth") that the old
+# verbatim-substring matcher missed entirely. _normalize_title expands the
+# common abbreviations BEFORE the keyword check, so a config keyword of
+# "Data Scientist" hits both "Senior Data Scientist" and "Sr DS".
+#
+# Order does not matter -- patterns are non-overlapping. Add new entries
+# here when a new abbreviation shows up in a posting you would have wanted
+# to catch.
+#
+# Each entry is (compiled regex, replacement). Regexes use \b word boundaries
+# so "DS" does not match "DSP" or "SDS"; the replacement is the canonical
+# spelled-out form lowercased once at module load.
+_TITLE_EXPANSIONS: list[tuple[re.Pattern, str]] = [
+    (re.compile(rf"\b{abbr}\b", re.IGNORECASE), full.lower())
+    for abbr, full in [
+        (r"Sr\.?",  "Senior"),
+        (r"Jr\.?",  "Junior"),
+        (r"Mgr\.?", "Manager"),
+        (r"Mgmt\.?","Management"),
+        (r"Eng\.?", "Engineer"),
+        (r"Engr\.?","Engineer"),
+        (r"Dev\.?", "Developer"),
+        (r"Arch\.?","Architect"),
+        (r"Ops\b",  "Operations"),
+        (r"Admin\b","Administrator"),
+        (r"Dir\.?", "Director"),
+        (r"VP\b",   "Vice President"),
+        (r"DS\b",   "Data Scientist"),
+        (r"DA\b",   "Data Analyst"),
+        (r"DE\b",   "Data Engineer"),
+        (r"PM\b",   "Product Manager"),
+        (r"TPM\b",  "Technical Program Manager"),
+        (r"EM\b",   "Engineering Manager"),
+        (r"MLE\b",  "Machine Learning Engineer"),
+        (r"ML\b",   "Machine Learning"),
+        (r"AI\b",   "Artificial Intelligence"),
+        (r"SRE\b",  "Site Reliability Engineer"),
+        (r"SWE\b",  "Software Engineer"),
+        (r"SE\b",   "Software Engineer"),
+        (r"IC\b",   "Individual Contributor"),
+        (r"QA\b",   "Quality Assurance"),
+        (r"UX\b",   "User Experience"),
+        (r"UI\b",   "User Interface"),
+    ]
+]
 
-    Pure Python case-insensitive substring matching. Zero AI API calls.
-    Used by Plan 02 (ATS scan functions) and Plan 03 (careers scraper).
+
+_PUNCT_RUN = re.compile(r"[^\w\s]+")
+_WS_RUN = re.compile(r"\s+")
+
+
+def _normalize_title(title: str) -> str:
+    """Lowercase, expand common recruiter abbreviations, normalize whitespace.
+
+    After abbreviation expansion ("Sr." -> "Senior"), the original
+    punctuation may strand inside a multi-word keyword's match window
+    -- "Sr. DS" expands to "Senior. Data Scientist", which a literal-space
+    regex for "Senior Data Scientist" will not match. We therefore collapse
+    runs of punctuation to a single space and runs of whitespace to one
+    space before lowercasing.
+
+    Idempotent: applying twice produces the same output as applying once.
+    The expansions never produce abbreviations the same regexes would
+    re-match, and the whitespace collapse is already at a fixed point.
+    """
+    out = title
+    for pat, sub in _TITLE_EXPANSIONS:
+        out = pat.sub(sub, out)
+    out = _PUNCT_RUN.sub(" ", out)
+    out = _WS_RUN.sub(" ", out).strip()
+    return out.lower()
+
+
+@lru_cache(maxsize=512)
+def _compile_word_boundary(keyword: str) -> re.Pattern:
+    r"""Return a compiled \bkeyword\b regex (case-insensitive).
+
+    Cached because the same target_titles list is reused across every job
+    in a scan -- a single scan of 850 companies x ~50 jobs each compiles
+    each keyword's pattern once, not 42,500 times.
+
+    The keyword is normalized through _normalize_title first so that a
+    config entry of "Sr Data Scientist" gets matched as
+    "senior data scientist" -- consistent with how candidate titles are
+    matched. re.escape() is applied AFTER normalization to defang any
+    regex metacharacters that survive normalization.
+    """
+    norm = _normalize_title(keyword)
+    return re.compile(rf"\b{re.escape(norm)}\b", re.IGNORECASE)
+
+
+def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) -> bool:
+    r"""Return True if title matches any target keyword and no exclusion keyword.
+
+    Two-stage matcher:
+
+    1. **Normalize**: both the candidate title and each keyword are passed
+       through _normalize_title, which lowercases and expands common
+       abbreviations (Sr -> Senior, DS -> Data Scientist, MLE -> Machine
+       Learning Engineer, etc.). This lets "Sr DS, Growth" match a
+       configured keyword of "Senior Data Scientist".
+
+    2. **Word-boundary match**: \bkeyword\b regex instead of plain
+       substring. Prevents short keywords like "Lead" from matching inside
+       "Leadership" or "Misleading", and short ones like "Data" from
+       matching "Database".
 
     Args:
         title: Job title to evaluate.
-        target_titles: List of keywords; title must match at least one
-                        (OR semantics). If empty, all titles pass.
-        exclusions: List of keywords; title must match none (AND NOT semantics).
+        target_titles: Keywords; title must match at least one (OR
+            semantics). If empty, all titles pass -- but configs reaching
+            this code path with an empty list have bypassed the
+            config.validate_target_titles guard.
+        exclusions: Keywords; title must match none (AND NOT semantics).
+            Exclusion wins over inclusion.
 
     Returns:
         True if title should be included in results, False if filtered out.
     """
-    title_lower = title.lower()
+    normalized = _normalize_title(title)
 
-    # Must match at least one target title keyword (empty = no filter)
     if target_titles:
-        if not any(t.lower() in title_lower for t in target_titles):
+        if not any(_compile_word_boundary(t).search(normalized) for t in target_titles):
             return False
 
-    # Must not match any exclusion keyword
-    return not any(ex.lower() in title_lower for ex in exclusions)
+    return not any(_compile_word_boundary(ex).search(normalized) for ex in exclusions)
 
 
 def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:

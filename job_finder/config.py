@@ -113,6 +113,45 @@ def get_company_denylist(config: dict) -> frozenset[str]:
     return COMPANY_DENYLIST | extra
 
 
+def validate_target_titles(config: dict) -> None:
+    """Reject configs where profile.target_titles is empty without an explicit override.
+
+    An empty target_titles list disables the substring filter inside
+    ats_platforms._title_matches (the ``if target_titles:`` branch is
+    skipped) and causes every ATS-API scanner -- Greenhouse, Lever, Ashby,
+    Workday, SmartRecruiters -- plus the careers_crawler tiers to ingest
+    every open posting on every scanned company's board. On 2026-05-18 a
+    single off-cadence run with an accidentally-cleared target_titles
+    inserted 45,623 rows in one pass.
+
+    Override: set ``profile.allow_unfiltered_scan: true`` when you
+    intentionally want full-board ingestion (e.g. ATS coverage testing,
+    relying on the LLM cascade for downstream filtering).
+
+    Raises:
+        ConfigError: If profile.target_titles is missing or empty and
+            profile.allow_unfiltered_scan is not True.
+    """
+    profile = config.get("profile", {})
+    if profile.get("allow_unfiltered_scan") is True:
+        return
+
+    titles = profile.get("target_titles")
+    # Treat missing, None, [] all as "empty". Explicit non-list values are
+    # also rejected -- the call sites assume an iterable of strings.
+    if not titles or not isinstance(titles, list):
+        raise ConfigError(
+            "profile.target_titles is empty or missing.\n\n"
+            "An empty list disables the ATS-scan title filter and causes "
+            "whole-board ingestion from every scanned company (Greenhouse, "
+            "Lever, Ashby, Workday, SmartRecruiters). This has previously "
+            "inserted 45,000+ rows in a single off-cadence scan.\n\n"
+            "Either populate the list with the title keywords you care about, "
+            "or set profile.allow_unfiltered_scan: true to acknowledge that "
+            "you want full-board ingestion."
+        )
+
+
 def validate_required_sections(config: dict) -> None:
     """Validate that all required top-level sections are present in config.
 
@@ -121,6 +160,8 @@ def validate_required_sections(config: dict) -> None:
 
     Raises:
         ValueError: If any required section is missing, naming the missing section(s).
+        ConfigError: If profile.target_titles is empty without an explicit override
+            (see validate_target_titles).
     """
     required = ["profile", "sources", "scoring", "db"]
     missing = [s for s in required if s not in config]
@@ -138,6 +179,8 @@ def validate_required_sections(config: dict) -> None:
             "Run: uv run python -m job_finder.migrate_config\n"
             "See .planning/phases/40-workload-tiers-cascade-rewire-canary/40-CONTEXT.md for migration instructions."
         )
+
+    validate_target_titles(config)
 
 
 def write_config(data: dict) -> Path:
