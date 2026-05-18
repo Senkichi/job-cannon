@@ -24,6 +24,7 @@ import logging
 import re
 from typing import Any
 
+from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
@@ -136,7 +137,7 @@ def reformat_description(
             except ProviderCascadeExhaustedError:
                 logger.warning("description_reformat: cascade exhausted, retrying via CLI")
                 result, _cost, _schema_valid = call_claude(
-                    model=model,
+                    model="claude-haiku-4-5",
                     system=_SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": description[:4000]}],
                     output_schema=_REFORMAT_SCHEMA,
@@ -148,7 +149,7 @@ def reformat_description(
                 )
         else:
             result, _cost, _schema_valid = call_claude(
-                model=model,
+                model="claude-haiku-4-5",
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": description[:4000]}],
                 output_schema=_REFORMAT_SCHEMA,
