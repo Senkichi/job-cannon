@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final
 
+import yaml
 from flask import (
     Blueprint,
     current_app,
@@ -36,7 +37,7 @@ from flask import (
     url_for,
 )
 
-from job_finder.config import load_config
+from job_finder.config import ConfigError, ConfigNotFoundError, load_config
 from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import get_db
 from job_finder.web.onboarding import imap_test, resume_parser, state, system_check
@@ -353,6 +354,21 @@ def done():
 
     if request.method == "POST":
         db = _db()
+
+        # Re-entry guard: an already-completed onboarding submission (manual nav back
+        # to /onboarding/welcome → walk wizard → POST /done, browser cache replay,
+        # accidental refresh) would otherwise overwrite config.yaml with a slice
+        # built from defaulted wizard_data. On 2026-05-18 a re-entry produced a
+        # 16-line stub that wiped scoring/db/filters/output sections from a healthy
+        # config; the only path to that exact stub state was an unguarded POST here.
+        if state.is_onboarding_complete(db):
+            flash(
+                "Onboarding is already complete. Use the Settings page to change "
+                "your configuration.",
+                "warning",
+            )
+            return redirect(url_for("jobs.index"))
+
         wizard_data = state.read_wizard_data(db)
 
         # --- Build the config slice from wizard_data ---
@@ -395,11 +411,29 @@ def done():
             config_slice["providers"]["api_keys"] = {provider_block["name"]: provider_block["api_key"]}
 
         # --- Side effect 1: atomic config.yaml write (D-15) ---
+        # When load_config raises ConfigError (e.g. validate_target_titles fails on
+        # an existing-but-broken file), the previous except-Exception fallback set
+        # existing_cfg = {} and the merge produced just the slice — wiping scoring,
+        # db, filters, output, etc. Now: only fall back to {} when the file is
+        # genuinely absent. If the file exists but failed validation, read raw YAML
+        # so the merge preserves user data; an unvalidated merged write is far
+        # better than a slice-only wipe.
         config_path = user_data_dirs.config_path()
         try:
             existing_cfg = load_config(str(config_path), allow_missing=True) or {}
-        except Exception:
+        except ConfigNotFoundError:
             existing_cfg = {}
+        except (ConfigError, ValueError) as e:
+            logger.warning(
+                "onboarding done: existing config failed validation (%s); "
+                "reading raw YAML to preserve user data for merge",
+                e,
+            )
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    existing_cfg = yaml.safe_load(f) or {}
+            except (OSError, yaml.YAMLError):
+                existing_cfg = {}
         merged_cfg = state._deep_merge(existing_cfg, config_slice)
         state._write_config(merged_cfg, config_path)  # atomic temp+rename (CLAUDE.md mandate)
         logger.info("onboarding done: wrote %s atomically", config_path)

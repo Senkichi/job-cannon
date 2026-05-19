@@ -309,4 +309,122 @@ def test_done_get_renders_summary_from_wizard_data(configured_app):
     body = resp.get_data(as_text=True)
     assert "ollama" in body
     assert "x@y.com" in body
-    assert "heavy" in body
+
+
+def test_done_post_blocked_when_onboarding_already_complete(configured_app):
+    """Regression (2026-05-18): POST /onboarding/done must refuse to overwrite config
+    when onboarding_complete=1. A re-entry (manual nav back to /welcome, browser
+    cache replay, accidental refresh) previously walked the wizard with mostly
+    default wizard_data and POSTed /done; the slice it built then wiped scoring,
+    db, filters, and output sections of an otherwise-healthy config.
+
+    Contract: when onboarding_complete=1, /done POST is a no-op write — config
+    must be byte-identical before and after, and wizard_data must not be cleared.
+    """
+    # Seed a healthy existing config (multiple sections beyond the slice's reach)
+    cfg_path: Path = configured_app._test_cfg_path
+    healthy = {
+        "providers": {"primary": "ollama"},
+        "sources": {"imap": {"enabled": True, "email": "real@user.com"}},
+        "profile": {"target_titles": ["Staff Engineer"], "skills": ["python"]},
+        "scoring": {"monthly_budget_usd": 50},
+        "db": {"path": "jobs.db"},
+        "filters": {"company_denylist": ["BadCo"]},
+        "output": {"max_results": 100},
+    }
+    cfg_path.write_text(yaml.safe_dump(healthy), encoding="utf-8")
+    healthy_bytes = cfg_path.read_bytes()
+
+    # Seed wizard_data with a fresh-looking re-entry payload, AND mark complete=1
+    wizard_payload = {"provider": {"name": "ollama"}}
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete, wizard_data) VALUES (1, 1, ?)",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=MagicMock()):
+        resp = configured_app.test_client().post("/onboarding/done")
+
+    # Guarded: redirect away, no rewrite, wizard_data preserved (not cleared to '{}')
+    assert resp.status_code == 302
+    assert "/jobs" in resp.headers["Location"]
+    assert cfg_path.read_bytes() == healthy_bytes, (
+        "config.yaml was modified despite onboarding_complete=1 — the re-entry "
+        "guard at blueprint.py:done() did not fire."
+    )
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        row = conn.execute(
+            "SELECT onboarding_complete, wizard_data FROM onboarding_state WHERE id=1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == 1
+    assert row[1] != "{}", "wizard_data was cleared even though POST should have been refused"
+
+
+def test_done_post_preserves_existing_sections_when_load_config_raises(configured_app):
+    """Regression (2026-05-18): when load_config raises ConfigError (e.g. empty
+    target_titles trips validate_target_titles) the previous except-Exception
+    fallback set existing_cfg = {} and the merged write wiped scoring/db/filters
+    sections. The fix reads raw YAML on validation failure so the merge
+    preserves user data.
+    """
+    # Seed a config that exists but fails validation (empty target_titles).
+    # All other sections are present and must survive the merge.
+    cfg_path: Path = configured_app._test_cfg_path
+    invalid_but_present = {
+        "providers": {"primary": "ollama"},
+        "sources": {"imap": {"enabled": True, "email": "real@user.com"}},
+        "profile": {
+            "target_titles": [],  # this trips validate_target_titles → ConfigError
+            "skills": ["python", "flask"],
+        },
+        "scoring": {"monthly_budget_usd": 50, "fallback_chain": ["ollama"]},
+        "db": {"path": "jobs.db"},
+        "filters": {"company_denylist": ["BadCo"], "company_allowlist": ["GoodCo"]},
+        "output": {"max_results": 100, "min_score_threshold": 7},
+    }
+    cfg_path.write_text(yaml.safe_dump(invalid_but_present), encoding="utf-8")
+
+    # Wizard slice will provide non-empty target_titles, fixing the validation error
+    wizard_payload = {
+        "provider": {"name": "ollama"},
+        "imap": {"email": "x@y.com", "app_password": "xxxx"},
+        "profile_edit": {"target_titles": "Staff Engineer", "skills": "python"},
+        "resume_profile": {},
+        "schedule": {"cadence_preset": "standard"},
+    }
+    _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=MagicMock()):
+        resp = configured_app.test_client().post("/onboarding/done")
+
+    assert resp.status_code == 302
+    assert "/jobs" in resp.headers["Location"]
+
+    # All preserved sections must still be in the merged write
+    merged = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert merged["scoring"]["monthly_budget_usd"] == 50, "scoring section wiped"
+    assert merged["scoring"]["fallback_chain"] == ["ollama"], "scoring.fallback_chain wiped"
+    assert merged["db"]["path"] == "jobs.db", "db section wiped"
+    assert merged["filters"]["company_denylist"] == ["BadCo"], "filters section wiped"
+    assert merged["filters"]["company_allowlist"] == ["GoodCo"], "filters.allowlist wiped"
+    assert merged["output"]["max_results"] == 100, "output section wiped"
+    assert merged["output"]["min_score_threshold"] == 7, "output.min_score_threshold wiped"
+    # Slice fields applied
+    assert "Staff Engineer" in merged["profile"]["target_titles"]
