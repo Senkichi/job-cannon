@@ -590,19 +590,18 @@ def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
         deleted += 1
     conn.commit()
 
-    # Recalibrate jobs_found_total for all remaining companies
-    recalibrated = 0
-    rows = conn.execute("SELECT id FROM companies").fetchall()
-    for r in rows:
-        cid = r[0]
-        actual = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id = ?", (cid,)).fetchone()[
-            0
-        ]
-        conn.execute(
-            "UPDATE companies SET jobs_found_total = ? WHERE id = ?",
-            (actual, cid),
-        )
-        recalibrated += 1
+    # Recalibrate jobs_found_total for all remaining companies in a single
+    # correlated UPDATE. Acquires the SQLite writer once instead of once per
+    # company row (~thousands of writer-lock acquires under heavy registries).
+    conn.execute(
+        """
+        UPDATE companies
+           SET jobs_found_total = (
+               SELECT COUNT(*) FROM jobs WHERE jobs.company_id = companies.id
+           )
+        """
+    )
+    recalibrated = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
     conn.commit()
 
     return {"orphans_deleted": deleted, "recalibrated_total": recalibrated}
@@ -636,22 +635,28 @@ def cleanup_invalid_company_data(
     denylist = get_company_denylist(config or {})
     normalized_count = 0
 
-    # Phase 1: Null out company_id for jobs linked to denylist companies
+    # Phase 1: Null out company_id for jobs linked to denylist companies.
+    # Collect dedup_keys first, then issue chunked UPDATEs so the writer is
+    # acquired once per chunk instead of once per row.
     rows = conn.execute(
-        """SELECT j.dedup_key, j.company, j.company_id, c.name
+        """SELECT j.dedup_key, c.name
            FROM jobs j
            JOIN companies c ON j.company_id = c.id"""
     ).fetchall()
+    denylist_keys = [row[0] for row in rows if row[1] in denylist]
 
-    for row in rows:
-        company_name = row[3]  # companies.name (normalized)
-        if company_name in denylist:
-            conn.execute(
-                "UPDATE jobs SET company_id = NULL WHERE dedup_key = ?",
-                (row[0],),
-            )
+    _BATCH = 500
+    for i in range(0, len(denylist_keys), _BATCH):
+        chunk = denylist_keys[i : i + _BATCH]
+        placeholders = ", ".join("?" * len(chunk))
+        conn.execute(
+            f"UPDATE jobs SET company_id = NULL WHERE dedup_key IN ({placeholders})",
+            chunk,
+        )
 
-    # Phase 2: Re-normalize unlinked jobs
+    # Phase 2: Re-normalize unlinked jobs. Each row may require a new company
+    # upsert, so writes stay per-row, but they're committed once at the end so
+    # the writer is held continuously instead of acquired+released per row.
     unlinked = conn.execute(
         "SELECT dedup_key, company FROM jobs WHERE company_id IS NULL AND company IS NOT NULL"
     ).fetchall()

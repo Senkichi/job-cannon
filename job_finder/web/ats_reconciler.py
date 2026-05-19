@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 import re
 
-from job_finder.db import persist_job_expiry_state, update_pipeline_status
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.web.ats_platforms import (
     scan_ashby,
@@ -250,6 +249,11 @@ def reconcile_company(conn, company_row: dict) -> dict:
 
     now = utc_now_iso()
 
+    # Phase 1: classify every tracked job into live | expired | unparseable.
+    # No writes here — read-only set membership check.
+    live_keys: list[str] = []
+    expired_keys: list[str] = []
+
     for row in rows:
         dedup_key = row["dedup_key"]
         source_urls = safe_json_load(row["source_urls"], default=[]) or []
@@ -267,29 +271,82 @@ def reconcile_company(conn, company_row: dict) -> dict:
             continue
 
         if job_ids & live_id_set:
-            persist_job_expiry_state(conn, dedup_key, LIVE, now)
-            conn.execute(
-                "UPDATE jobs SET last_seen = ?, is_stale = 0 WHERE dedup_key = ?",
-                (now, dedup_key),
-            )
-            conn.commit()
-            result["live"] += 1
+            live_keys.append(dedup_key)
         else:
-            persist_job_expiry_state(conn, dedup_key, EXPIRED, now)
-            update_pipeline_status(
-                conn,
-                dedup_key,
-                "archived",
-                source="ats_reconciler",
-                evidence="ats_batch_reconcile missing_from_board",
+            expired_keys.append(dedup_key)
+
+    # Phase 2: apply all writes in a single transaction so the SQLite writer
+    # is acquired once per company instead of once (or twice) per job-row.
+    # The previous per-row commit pattern blew past the 2-retry budget in
+    # persist_job_expiry_state under concurrent-write contention (orphan +
+    # registry + staleness running in the same window). Inlining the SQL
+    # bypasses the helpers' internal commits without changing semantics:
+    # the same columns are written, and the from_status == 'archived' skip
+    # in update_pipeline_status is reproduced here explicitly.
+    _BATCH = 500
+
+    # Live: batched UPDATE (expiry_status + expiry_checked_at + last_seen + is_stale).
+    for i in range(0, len(live_keys), _BATCH):
+        chunk = live_keys[i : i + _BATCH]
+        placeholders = ", ".join("?" * len(chunk))
+        conn.execute(
+            f"""UPDATE jobs
+                   SET expiry_status = 'live',
+                       expiry_checked_at = ?,
+                       last_seen = ?,
+                       is_stale = 0
+                 WHERE dedup_key IN ({placeholders})""",
+            [now, now, *chunk],
+        )
+    result["live"] = len(live_keys)
+
+    # Expired: batched expiry write first, then per-row pipeline_status +
+    # pipeline_events (event insert needs each row's from_status). All
+    # statements stay in the same implicit transaction; one commit at the end.
+    for i in range(0, len(expired_keys), _BATCH):
+        chunk = expired_keys[i : i + _BATCH]
+        placeholders = ", ".join("?" * len(chunk))
+        conn.execute(
+            f"""UPDATE jobs
+                   SET expiry_status = 'expired',
+                       expiry_checked_at = ?
+                 WHERE dedup_key IN ({placeholders})""",
+            [now, *chunk],
+        )
+
+    if expired_keys:
+        placeholders = ", ".join("?" * len(expired_keys))
+        current_statuses = {
+            r["dedup_key"]: r["pipeline_status"]
+            for r in conn.execute(
+                f"SELECT dedup_key, pipeline_status FROM jobs WHERE dedup_key IN ({placeholders})",
+                expired_keys,
+            ).fetchall()
+        }
+        for dk in expired_keys:
+            from_status = current_statuses.get(dk)
+            if from_status is None or from_status == "archived":
+                continue
+            conn.execute(
+                "UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key = ?",
+                (dk,),
             )
-            result["expired"] += 1
+            conn.execute(
+                """INSERT INTO pipeline_events
+                       (job_id, from_status, to_status, timestamp, source, evidence)
+                   VALUES (?, ?, 'archived', ?, 'ats_reconciler',
+                           'ats_batch_reconcile missing_from_board')""",
+                (dk, from_status, now),
+            )
             logger.info(
                 "reconcile_company: archived %s (missing from %s/%s board)",
-                dedup_key,
+                dk,
                 platform,
                 slug,
             )
+    result["expired"] = len(expired_keys)
+
+    conn.commit()
 
     logger.info(
         "reconcile_company: %s/%s checked=%d live=%d expired=%d unparseable=%d",
