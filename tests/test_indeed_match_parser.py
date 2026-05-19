@@ -216,6 +216,154 @@ class TestIndeedMatchMultiJob:
 
 
 # ---------------------------------------------------------------------------
+# New-format single-job (2026-04+): structured block + "View job:" anchor
+# ---------------------------------------------------------------------------
+
+# Derived from data/parse_failures/match_indeed_com_2026-05-18T20-15-01.html
+# (real GoodRx Lead Data Analyst match email). URLs shortened for fixture
+# readability; structural layout (blank-line paragraph breaks, indented
+# Benefits items, field labels) preserved verbatim.
+SAMPLE_NEW_FORMAT_FULL = """\
+Hi SAMUEL,
+
+Your background in analytics leadership and experience with SQL and Python \
+could be a great fit for this Lead Data Analyst role at GoodRx. If you're \
+interested in applying your skills to healthcare analytics, feel free to \
+apply now or view the job description for more information.
+
+Lead Data Analyst
+GoodRx
+Remote
+Salary: $131,000 - $229,000 a year
+Job type: Full-time
+
+Benefits:
+  - Health insurance
+  - Dental insurance
+  - 401(k) matching
+
+View job: https://cts.indeed.com/v3/H4sIAAAAAAAA_GOODRX_VIEW_JOB_TOKEN/AAAAA
+Apply now: https://cts.indeed.com/v3/H4sIAAAAAAAA_GOODRX_APPLY_TOKEN/BBBBB
+
+Do you want to get more jobs like this?
+No: https://cts.indeed.com/v3/H4sIAAAAAAAA_NO_TOKEN/CCCCC
+"""
+
+# Derived from data/parse_failures/match_indeed_com_2026-04-29T00-00-07.html.
+# Single-bounded salary ("From $160,000 a year") falls outside the existing
+# range parser, so salary_min/max stays None — a no-regression case.
+SAMPLE_NEW_FORMAT_SINGLE_BOUND_SALARY = """\
+Hi SAMUEL,
+
+Your background in product analytics and proficiency with Python and SQL \
+could be a great match for this Lead Systems Architect role. CASS NV, LLC \
+is looking for someone to build their data pipeline.
+
+Lead Systems Architect
+CASS NV,LLC
+Oakland, CA 94607
+Salary: From $160,000 a year
+Job type: Full-time
+Work setting: Factory, In-person
+
+Benefits:
+  - Paid time off
+
+View job: https://cts.indeed.com/v3/H4sIAAAAAAAA_CASS_VIEW_TOKEN/DDDDD
+"""
+
+# Variant: no Salary/Job type lines at all (3-line structured block).
+# Intro mirrors real Indeed multi-sentence wording so the intro detector trips.
+SAMPLE_NEW_FORMAT_NO_FIELDS = """\
+Hi SAMUEL,
+
+Your skills in distributed systems could be a great match for this Data \
+Engineer role at Acme Corp. If you're interested in modern data tooling, \
+feel free to apply now or learn more in the job description.
+
+Data Engineer
+Acme Corp
+San Francisco, CA
+
+View job: https://cts.indeed.com/v3/H4sIAAAAAAAA_ACME_VIEW_TOKEN/EEEEE
+"""
+
+
+class TestIndeedMatchNewSingleFormat:
+    """2026-04+ structured-block format from donotreply@match.indeed.com."""
+
+    def test_parses_single_job(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert len(jobs) == 1
+
+    def test_title(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].title == "Lead Data Analyst"
+
+    def test_company(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].company == "GoodRx"
+
+    def test_location(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].location == "Remote"
+
+    def test_salary_range(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].salary_min == 131000
+        assert jobs[0].salary_max == 229000
+
+    def test_source(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].source == "indeed"
+
+    def test_source_url_is_view_job_url(self):
+        """Authoritative URL is the 'View job:' link, not 'Apply now:'."""
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert "GOODRX_VIEW_JOB_TOKEN" in jobs[0].source_url
+        assert "GOODRX_APPLY_TOKEN" not in jobs[0].source_url
+
+    def test_source_id_extracted(self):
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert jobs[0].source_id  # non-empty
+
+    def test_email_date_propagated(self):
+        date = datetime(2026, 5, 18)
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL, email_date=date)
+        assert jobs[0].posted_date == date
+
+    def test_intro_paragraph_not_in_title(self):
+        """The personalized 'Your background...' intro should not be parsed."""
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert "background" not in jobs[0].title.lower()
+        assert "samuel" not in jobs[0].title.lower()
+
+    def test_benefits_not_in_title(self):
+        """The Benefits paragraph should not be picked up as the job block."""
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_FULL)
+        assert "health insurance" not in jobs[0].title.lower()
+        assert "benefits" not in jobs[0].title.lower()
+
+    def test_single_bound_salary_no_range(self):
+        """'From $160,000 a year' has no range — salary should be None."""
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_SINGLE_BOUND_SALARY)
+        assert len(jobs) == 1
+        assert jobs[0].title == "Lead Systems Architect"
+        assert jobs[0].company == "CASS NV,LLC"
+        assert jobs[0].location == "Oakland, CA 94607"
+        assert jobs[0].salary_min is None
+        assert jobs[0].salary_max is None
+
+    def test_no_field_lines(self):
+        """Block with only title/company/location (no Salary/Job type) parses."""
+        jobs = parse_indeed_match_alert(SAMPLE_NEW_FORMAT_NO_FIELDS)
+        assert len(jobs) == 1
+        assert jobs[0].title == "Data Engineer"
+        assert jobs[0].company == "Acme Corp"
+        assert jobs[0].location == "San Francisco, CA"
+
+
+# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 

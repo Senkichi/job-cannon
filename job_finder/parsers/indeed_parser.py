@@ -72,17 +72,33 @@ INDEED_CTS_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Match email: single-job intro sentence extraction
+# Match email: single-job intro sentence extraction (legacy format)
 _SINGLE_MATCH_INTRO_RE = re.compile(
     r"job for an?\s+(.+?)\s+at\s+(.+?)\s+in\s+(.+?)\s+paying\s+(.+?)\s+would",
     re.IGNORECASE | re.DOTALL,
 )
 
-# Match email: single-job intro without salary
+# Match email: single-job intro without salary (legacy format)
 _SINGLE_MATCH_INTRO_NO_PAY_RE = re.compile(
     r"job for an?\s+(.+?)\s+at\s+(.+?)\s+in\s+(.+?)\s+would",
     re.IGNORECASE | re.DOTALL,
 )
+
+# Match email (2026-04+ format): "View job: <url>" anchor line.
+# Newer single-job format puts the job URL on its own "View job:" line below
+# a structured block of title/company/location/Salary/Job type.
+_SINGLE_MATCH_VIEW_JOB_RE = re.compile(
+    r"^View job:\s*(https://cts\.indeed\.com/\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Structured-block field labels (skip when extracting title/company/location)
+_SINGLE_MATCH_FIELD_LABELS = ("salary:", "job type:", "work setting:")
+
+# Intro-prose detector: multi-sentence text contains ". <Capital>" or "! <Capital>".
+# Structured-block lines (titles, companies, locations) are single-phrase and
+# never multi-sentence.
+_MULTI_SENTENCE_RE = re.compile(r"[.!]\s+[A-Z]")
 
 # Match email: footer markers (superset of alert footer)
 _MATCH_FOOTER_RE = re.compile(
@@ -720,24 +736,141 @@ def _parse_match_multi_job(body: str, email_date: datetime | None) -> list[Job]:
     return jobs
 
 
+def _parse_single_match_structured_block(
+    body: str, url: str, source_id: str, email_date: datetime | None
+) -> Job | None:
+    """Parse the 2026-04+ Indeed match single-job format.
+
+    Format::
+
+        Hi SAMUEL,
+
+        <personalized intro paragraph>
+
+        <TITLE>
+        <COMPANY>
+        <LOCATION>
+        Salary: <range>
+        Job type: <type>
+        Work setting: <setting>
+
+        Benefits:
+          - X
+          - Y
+
+        View job: <cts.indeed.com URL>
+
+    Algorithm: anchor on the "View job:" line, then walk backwards through
+    blank-line-separated paragraphs (skipping any Benefits paragraph) to find
+    the structured block. The first three non-label lines of that block are
+    title / company / location; "Salary:" yields the pay range.
+
+    Returns None if the body doesn't have a "View job:" anchor line or the
+    structured block can't be located (caller should fall through to the
+    legacy intro-sentence parser).
+    """
+    view_match = _SINGLE_MATCH_VIEW_JOB_RE.search(body)
+    if not view_match:
+        return None
+
+    # Real Indeed emails double-space content (`\n\n` between every line),
+    # so paragraph-based grouping doesn't separate intro from structured block.
+    # Instead, walk lines backwards from "View job:", classifying each:
+    #   - skip blanks / benefits items / field labels (Job type / Work setting)
+    #   - extract "Salary: ..." then skip
+    #   - stop on intro-prose markers (long line, multi-sentence, greeting)
+    #   - otherwise it's a content line — prepend to keep forward order
+    before_view = body[: view_match.start()]
+    content_lines: list[str] = []
+    salary_min: int | None = None
+    salary_max: int | None = None
+
+    INTRO_LEN_THRESHOLD = 150
+
+    for raw_line in reversed(before_view.splitlines()):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+
+        # Intro detector: stop walking once we hit personalized prose
+        low = stripped.lower()
+        if (
+            len(stripped) > INTRO_LEN_THRESHOLD
+            or _MULTI_SENTENCE_RE.search(stripped)
+            or (low.startswith("hi ") and stripped.endswith(","))
+        ):
+            break
+
+        # Benefits items (start with a dash bullet after stripping leading ws)
+        if stripped.startswith("-") or stripped.startswith("•"):
+            continue
+        if low == "benefits:":
+            continue
+
+        # Salary line: extract pay then skip
+        if low.startswith("salary:"):
+            salary_text = stripped.split(":", 1)[1].strip()
+            salary_min, salary_max = _extract_salary_from_text(salary_text)
+            continue
+
+        # Other field labels: skip without inclusion
+        if any(low.startswith(label) for label in _SINGLE_MATCH_FIELD_LABELS):
+            continue
+
+        # Content line: prepend to preserve source order (title/company/location)
+        content_lines.insert(0, stripped)
+
+    if len(content_lines) < 3:
+        return None
+
+    title = content_lines[0]
+    company = content_lines[1]
+    location = content_lines[2]
+
+    # Sanity: reject obviously-wrong title/company lengths
+    if len(title) > 150 or len(company) > 100:
+        return None
+
+    return Job(
+        title=title,
+        company=company,
+        location=location,
+        source="indeed",
+        source_url=url,
+        source_id=source_id,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        posted_date=email_date,
+    )
+
+
 def _parse_single_match(body: str, email_date: datetime | None) -> list[Job]:
     """Parse a single-job Indeed match email.
 
-    Format: "We thought this job for a {title} at {company} in {location}
-    paying {salary} would be a good fit. Check out the job at {url}"
+    Tries two formats in order:
 
-    Falls back to a simpler extraction if the intro regex doesn't match.
+    1. **2026-04+ structured block**: intro paragraph followed by a
+       title/company/location/Salary/Job type block, anchored by a
+       "View job: <url>" line. See ``_parse_single_match_structured_block``.
+    2. **Legacy intro sentence**: "We thought this job for a {title} at
+       {company} in {location} paying {salary} would be a good fit. Check
+       out the job at {url}" (with a no-pay variant).
     """
     # Find the CTS URL first (we need it regardless)
     url_match = INDEED_CTS_URL_RE.search(body)
     if not url_match:
         return []
 
-    # Filter out unsubscribe URLs — take the first non-unsubscribe CTS URL
+    # First non-unsubscribe CTS URL anchors the job
     url = url_match.group(0)
     source_id = _extract_cts_source_id(url)
 
-    # Primary: extract from intro sentence with salary
+    # Primary: 2026-04+ structured block format
+    job = _parse_single_match_structured_block(body, url, source_id, email_date)
+    if job is not None:
+        return [job]
+
+    # Legacy: intro sentence with salary
     intro_match = _SINGLE_MATCH_INTRO_RE.search(body)
     if intro_match:
         title = intro_match.group(1).strip()
@@ -760,7 +893,7 @@ def _parse_single_match(body: str, email_date: datetime | None) -> list[Job]:
             )
         ]
 
-    # Fallback: intro sentence without salary
+    # Legacy: intro sentence without salary
     no_pay_match = _SINGLE_MATCH_INTRO_NO_PAY_RE.search(body)
     if no_pay_match:
         title = no_pay_match.group(1).strip()
@@ -779,7 +912,7 @@ def _parse_single_match(body: str, email_date: datetime | None) -> list[Job]:
             )
         ]
 
-    # Last resort: we have a URL but can't parse the intro
+    # Last resort: we have a URL but can't parse any known format
     logger.warning(
         "Indeed match parser: single-job format not recognized. "
         "Archive the raw email and update indeed_parser.py."
