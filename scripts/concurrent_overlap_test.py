@@ -45,6 +45,13 @@ TARGETS = {
     "ats_source_url_promote": "ATS source url promote",
 }
 
+# Lock-bound jobs: must complete in-window. These are the writers whose
+# 245s recalibration UPDATE was rev 8's bug.
+# Everything else in TARGETS is HTTP-bound (per-company ATS API calls); a
+# timeout on those does NOT indicate a lock-contention regression, so the
+# verdict logic treats them as informational rather than failing.
+LOCK_BOUND = {"orphan_cleanup", "registry_hygiene"}
+
 
 def _post(path: str) -> str:
     req = urllib.request.Request(BASE + path, method="POST")
@@ -209,16 +216,35 @@ def main() -> int:
         print(f"  {ln}")
 
     print()
-    if (completed | failed) != set(TARGETS):
-        print("VERDICT: TIMEOUT — not all jobs completed within window")
-        return 1
-    if failed:
-        print("VERDICT: AT LEAST ONE JOB FAILED")
-        return 1
+    # Lock-contention is the primary regression-test question — check first.
     if locked_lines:
         print("VERDICT: REGRESSION — lock-contention errors present")
         return 1
-    print("VERDICT: PASS — 4 concurrent writers, 0 lock-contention errors")
+
+    # Lock-bound jobs MUST complete or fail within window. Missing or failed
+    # is a regression.
+    missing_lock_bound = LOCK_BOUND - completed - failed
+    if missing_lock_bound:
+        print(
+            "VERDICT: REGRESSION — lock-bound job(s) did not complete in window: "
+            f"{sorted(missing_lock_bound)}"
+        )
+        return 1
+    if failed & LOCK_BOUND:
+        print(
+            "VERDICT: REGRESSION — lock-bound job(s) failed: "
+            f"{sorted(failed & LOCK_BOUND)}"
+        )
+        return 1
+    if failed:
+        # HTTP-bound jobs that actually emitted "<Name> failed:" lines are
+        # still a fail — just not a lock-contention regression.
+        print(f"VERDICT: FAIL — non-lock-bound job(s) failed: {sorted(failed)}")
+        return 1
+
+    http_pending = sorted(set(TARGETS) - LOCK_BOUND - completed - failed)
+    note = f" (HTTP-bound still running: {http_pending})" if http_pending else ""
+    print(f"VERDICT: PASS — 0 lock-contention errors, lock-bound jobs OK{note}")
     return 0
 
 
