@@ -469,8 +469,14 @@ class TestLoadSaveProfile:
         assert len(after["positions"]) == 1
         assert len(after["skills"]) == 4
 
-    def test_save_profile_rejects_stale_mtime(self, tmp_profile_path):
-        """POST /profile/save with stale _mtime returns 409."""
+    def test_save_profile_rejects_stale_mtime(self, client, tmp_profile_path):
+        """POST /profile/save with stale _mtime returns 409.
+
+        Uses the shared `client` fixture (real temp-file DB with migrations
+        applied + onboarding_state seeded) — `:memory:` DBs were broken here
+        because per-connection isolation meant the migrated schema disappeared
+        before any request handler could read it.
+        """
         populated = {
             "positions": [
                 {
@@ -495,29 +501,10 @@ class TestLoadSaveProfile:
         save_profile(populated, tmp_profile_path)
 
         import job_finder.web.blueprints.profile as profile_mod
-        from job_finder.web import create_app
-
-        test_config = {
-            "db": {"path": ":memory:"},
-            "scoring": {"min_score_threshold": 40},
-            "profile": {
-                "target_titles": [],
-                "target_locations": [],
-                "min_salary": 0,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": [],
-            },
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        }
-        app = create_app(config=test_config)
-        app.config["TESTING"] = True
 
         orig_path = profile_mod._PROFILE_PATH
         profile_mod._PROFILE_PATH = tmp_profile_path
         try:
-            client = app.test_client()
             payload = {
                 "positions": [
                     {
@@ -542,8 +529,12 @@ class TestLoadSaveProfile:
         finally:
             profile_mod._PROFILE_PATH = orig_path
 
-    def test_save_profile_accepts_fresh_mtime(self, tmp_profile_path):
-        """POST /profile/save with fresh _mtime succeeds."""
+    def test_save_profile_accepts_fresh_mtime(self, client, tmp_profile_path):
+        """POST /profile/save with fresh _mtime succeeds.
+
+        See ``test_save_profile_rejects_stale_mtime`` for why the shared
+        ``client`` fixture is used instead of an ad-hoc ``:memory:`` app.
+        """
         populated = {
             "positions": [
                 {
@@ -562,29 +553,10 @@ class TestLoadSaveProfile:
         current_mtime = os.path.getmtime(tmp_profile_path)
 
         import job_finder.web.blueprints.profile as profile_mod
-        from job_finder.web import create_app
-
-        test_config = {
-            "db": {"path": ":memory:"},
-            "scoring": {"min_score_threshold": 40},
-            "profile": {
-                "target_titles": [],
-                "target_locations": [],
-                "min_salary": 0,
-                "industries": [],
-                "exclusions": {"title_keywords": [], "companies": []},
-                "skills": [],
-            },
-            "sources": {},
-            "output": {"default_format": "cli", "max_results": 50},
-        }
-        app = create_app(config=test_config)
-        app.config["TESTING"] = True
 
         orig_path = profile_mod._PROFILE_PATH
         profile_mod._PROFILE_PATH = tmp_profile_path
         try:
-            client = app.test_client()
             payload = {
                 "positions": [
                     {
