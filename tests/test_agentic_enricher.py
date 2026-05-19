@@ -114,39 +114,56 @@ def _insert_job(conn: sqlite3.Connection, dedup_key: str, **kwargs) -> None:
 
 class TestGenerateQueries:
     def test_list_response_shape(self):
-        """Provider returns a JSON array — queries extracted directly."""
+        """call_model returns a JSON array — queries extracted directly."""
         from job_finder.web.agentic_enricher import _generate_queries
 
         queries = ["Acme Corp Data Scientist", "site:greenhouse.io Acme Data Scientist"]
-        provider = _make_mock_provider(queries)
-
-        result = _generate_queries("Data Scientist", "Acme Corp", n=2, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result(queries),
+        ):
+            result = _generate_queries(
+                "Data Scientist", "Acme Corp", n=2, conn=None, config={}
+            )
         assert result == queries[:2]
 
     def test_dict_queries_key(self):
-        """Provider returns {'queries': [...]} — extracts from 'queries' key."""
+        """call_model returns {'queries': [...]} — extracts from 'queries' key."""
         from job_finder.web.agentic_enricher import _generate_queries
 
-        provider = _make_mock_provider({"queries": ["q1", "q2", "q3"]})
-        result = _generate_queries("Engineer", "BetterHelp", n=3, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result({"queries": ["q1", "q2", "q3"]}),
+        ):
+            result = _generate_queries(
+                "Engineer", "BetterHelp", n=3, conn=None, config={}
+            )
         assert result == ["q1", "q2", "q3"]
 
     def test_dict_search_queries_key(self):
-        """Provider returns {'search_queries': [...]} — extracts from 'search_queries' key."""
+        """call_model returns {'search_queries': [...]} — extracts from 'search_queries' key."""
         from job_finder.web.agentic_enricher import _generate_queries
 
-        provider = _make_mock_provider({"search_queries": ["sq1", "sq2"]})
-        result = _generate_queries("ML Engineer", "Stripe", n=4, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result({"search_queries": ["sq1", "sq2"]}),
+        ):
+            result = _generate_queries(
+                "ML Engineer", "Stripe", n=4, conn=None, config={}
+            )
         assert result == ["sq1", "sq2"]
 
     def test_provider_exception_fallback(self):
-        """On OllamaProvider exception, falls back to heuristic queries."""
+        """On call_model exception, falls back to heuristic queries."""
         from job_finder.web.agentic_enricher import _fallback_queries, _generate_queries
 
-        provider = MagicMock()
-        provider.call.side_effect = RuntimeError("connection refused")
-
-        result = _generate_queries("Staff Data Scientist", "Stripe", n=4, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            side_effect=RuntimeError("connection refused"),
+        ):
+            result = _generate_queries(
+                "Staff Data Scientist", "Stripe", n=4, conn=None, config={}
+            )
         fallback = _fallback_queries("Staff Data Scientist", "Stripe")
         assert result == fallback
 
@@ -154,20 +171,30 @@ class TestGenerateQueries:
         """Unrecognized data shape falls back to heuristic queries."""
         from job_finder.web.agentic_enricher import _generate_queries
 
-        provider = _make_mock_provider({"unexpected_key": 42})
-        result = _generate_queries("Analyst", "Uber", n=3, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result({"unexpected_key": 42}),
+        ):
+            result = _generate_queries(
+                "Analyst", "Uber", n=3, conn=None, config={}
+            )
         # Should be non-empty fallback queries
         assert len(result) > 0
         assert all(isinstance(q, str) for q in result)
 
     def test_no_json_loads_called_on_result_data(self):
-        """result.data is consumed directly as dict — json.loads must NOT be called."""
+        """result.data is consumed directly — json.loads must NOT be called."""
         import job_finder.web.agentic_enricher as mod
 
-        provider = _make_mock_provider(["q1", "q2"])
         # If json.loads were called on a list, it would raise TypeError.
         # Absence of error proves no json.loads() call on result.data.
-        result = mod._generate_queries("DS", "Co", n=2, provider=provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result(["q1", "q2"]),
+        ):
+            result = mod._generate_queries(
+                "DS", "Co", n=2, conn=None, config={}
+            )
         assert result == ["q1", "q2"]
 
 
@@ -178,17 +205,22 @@ class TestGenerateQueries:
 
 class TestValidatePage:
     def test_match_true_extracts_confidence(self):
-        """Provider returns is_match=true — returns (True, confidence) correctly."""
+        """call_model returns is_match=true — returns (True, confidence) correctly."""
         from job_finder.web.agentic_enricher import _validate_page
 
-        provider = _make_mock_provider({"is_match": True, "confidence": 0.92, "reason": "exact"})
-        is_match, confidence = _validate_page(
-            "Job posting for Data Scientist at Acme Corp",
-            "Data Scientist",
-            "Acme Corp",
-            "qwen2.5:14b",
-            provider,
-        )
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result(
+                {"is_match": True, "confidence": 0.92, "reason": "exact"}
+            ),
+        ):
+            is_match, confidence = _validate_page(
+                "Job posting for Data Scientist at Acme Corp",
+                "Data Scientist",
+                "Acme Corp",
+                None,
+                {},
+            )
         assert is_match is True
         assert abs(confidence - 0.92) < 0.001
 
@@ -218,9 +250,12 @@ class TestValidatePage:
         """Validates that data is consumed as dict without json.loads()."""
         from job_finder.web.agentic_enricher import _validate_page
 
-        provider = _make_mock_provider({"is_match": True, "confidence": 0.8})
         # If json.loads were called on a dict, TypeError would propagate.
-        is_match, _ = _validate_page("some text", "title", "company", "model", provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result({"is_match": True, "confidence": 0.8}),
+        ):
+            is_match, _ = _validate_page("some text", "title", "company", None, {})
         assert is_match is True
 
 
@@ -242,18 +277,19 @@ class TestEnrichSingleJob:
 
         long_jd = "A" * 300 + " Acme Corp Data Scientist requirements..."
 
-        provider = MagicMock()
-        provider.call.side_effect = [
-            # First call: _generate_queries
-            _make_model_result(["Acme Corp Data Scientist site:linkedin.com"]),
-            # Second call: _validate_page
-            _make_model_result({"is_match": True, "confidence": 0.85, "reason": "match"}),
-        ]
-
         job_row = {"title": "Data Scientist", "company": "Acme Corp"}
         page = MagicMock()
 
         with (
+            patch(
+                "job_finder.web.model_provider.call_model",
+                side_effect=[
+                    # First call: _generate_queries
+                    _make_model_result(["Acme Corp Data Scientist site:linkedin.com"]),
+                    # Second call: _validate_page
+                    _make_model_result({"is_match": True, "confidence": 0.85, "reason": "match"}),
+                ],
+            ),
             patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
             patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
         ):
@@ -262,7 +298,7 @@ class TestEnrichSingleJob:
             ]
             mock_fetch.return_value = long_jd
 
-            result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
+            result = enrich_single_job(job_row, page, conn=None, config={})
 
         assert result is not None
         assert len(result) <= 8000  # trimmed to _MAX_JD_CHARS
@@ -271,12 +307,17 @@ class TestEnrichSingleJob:
         """When DDG returns no URLs, returns None immediately."""
         from job_finder.web.agentic_enricher import enrich_single_job
 
-        provider = _make_mock_provider(["query1"])
         job_row = {"title": "Data Scientist", "company": "Acme Corp"}
         page = MagicMock()
 
-        with patch("job_finder.web.agentic_enricher._search_ddg", return_value=[]):
-            result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
+        with (
+            patch(
+                "job_finder.web.model_provider.call_model",
+                return_value=_make_model_result(["query1"]),
+            ),
+            patch("job_finder.web.agentic_enricher._search_ddg", return_value=[]),
+        ):
+            result = enrich_single_job(job_row, page, conn=None, config={})
 
         assert result is None
 
@@ -297,25 +338,6 @@ class TestEnrichSingleJob:
 
 
 class TestRunAgenticBackfill:
-    def test_returns_zero_when_ollama_unavailable(self):
-        """When OllamaProvider raises RuntimeError (unreachable), returns 0 cleanly."""
-        from job_finder.web.agentic_enricher import run_agentic_backfill
-
-        # OllamaProvider and sync_playwright are imported LAZILY inside run_agentic_backfill.
-        # Patch the sub-modules so the lazy import gets our mock, not the real class.
-        mock_ollama_mod = MagicMock()
-        mock_ollama_mod.OllamaProvider.side_effect = RuntimeError("Ollama service unreachable")
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                "playwright.sync_api": MagicMock(),
-            },
-        ):
-            result = run_agentic_backfill(":memory:", {})
-        assert result == 0
-
     def test_enriches_exhausted_jobs(self):
         """Successfully enriches one exhausted job and writes to DB."""
         from job_finder.web.agentic_enricher import run_agentic_backfill
@@ -633,14 +655,6 @@ class TestEnrichSingleJobObservability:
 
         long_text = "X" * 3000  # > 2000 chars, no company tokens
 
-        provider = MagicMock()
-        provider.call.side_effect = [
-            # _generate_queries
-            _make_model_result(["query1"]),
-            # _validate_page — match with high confidence
-            _make_model_result({"is_match": True, "confidence": 0.85, "reason": "match"}),
-        ]
-
         job_row = {
             "title": "Data Scientist",
             "company": "Zo",
@@ -648,6 +662,15 @@ class TestEnrichSingleJobObservability:
         page = MagicMock()
 
         with (
+            patch(
+                "job_finder.web.model_provider.call_model",
+                side_effect=[
+                    # _generate_queries
+                    _make_model_result(["query1"]),
+                    # _validate_page — match with high confidence
+                    _make_model_result({"is_match": True, "confidence": 0.85, "reason": "match"}),
+                ],
+            ),
             patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
             patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
         ):
@@ -656,7 +679,7 @@ class TestEnrichSingleJobObservability:
             ]
             mock_fetch.return_value = long_text
 
-            result = enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
+            result = enrich_single_job(job_row, page, conn=None, config={})
 
         assert result is not None, (
             "enrich_single_job must return enriched text when long-page bypass fires "
@@ -669,16 +692,15 @@ class TestEnrichSingleJobObservability:
 
         from job_finder.web.agentic_enricher import enrich_single_job
 
-        provider = MagicMock()
-        provider.call.side_effect = [
-            _make_model_result(["query1"]),
-        ]
-
         job_row = {"title": "Data Scientist", "company": "Acme Corp"}
         page = MagicMock()
 
         with caplog.at_level(logging.INFO, logger="job_finder.web.agentic_enricher"):
             with (
+                patch(
+                    "job_finder.web.model_provider.call_model",
+                    return_value=_make_model_result(["query1"]),
+                ),
                 patch("job_finder.web.agentic_enricher._search_ddg") as mock_ddg,
                 patch("job_finder.web.agentic_enricher._fetch_page_text") as mock_fetch,
             ):
@@ -687,7 +709,7 @@ class TestEnrichSingleJobObservability:
                 ]
                 mock_fetch.return_value = None  # All fetches fail → auth_wall
 
-                enrich_single_job(job_row, page, model="qwen2.5:14b", provider=provider)
+                enrich_single_job(job_row, page, conn=None, config={})
 
         # Check that the INFO-level failure breakdown was logged
         info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
