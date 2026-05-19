@@ -1259,25 +1259,82 @@ class TestCompaniesPage:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def ats_app(tmp_db_path):
+    """Hermetic Flask app for ATS settings tests with explicit ats config.
+
+    The shared `app` fixture omits the `ats` section, so the previous version
+    of these tests silently depended on the hardcoded defaults inside
+    blueprints/settings.py (scan_enabled=True, scan_days="mon,wed",
+    scan_hour=7). With config supplied here, the rendering tests actually
+    exercise the wiring from JF_CONFIG → template.
+    """
+    import sqlite3
+
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+        "ats": {
+            "scan_enabled": True,
+            "scan_days": "mon,wed",
+            "scan_hour": 7,
+        },
+    }
+    application = create_app(config=test_config)
+    # Seed onboarding_complete so the @before_request gate doesn't redirect /settings.
+    conn = sqlite3.connect(tmp_db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 1)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    application.config["TESTING"] = True
+    return application
+
+
+@pytest.fixture
+def ats_client(ats_app):
+    return ats_app.test_client()
+
+
 class TestSettingsAtsScanSection:
-    def test_settings_page_renders_ats_scanning_section(self, client):
+    def test_settings_page_renders_ats_scanning_section(self, ats_client):
         """GET /settings renders ATS Scanning section with toggle."""
-        response = client.get("/settings")
+        response = ats_client.get("/settings")
         assert response.status_code == 200
         data = response.data.decode()
         assert "ATS Scanning" in data
         assert "ats_scan_enabled" in data
 
-    def test_settings_page_renders_ats_scan_days(self, client):
+    def test_settings_page_renders_ats_scan_days(self, ats_client):
         """GET /settings renders scan_days and scan_hour fields."""
-        response = client.get("/settings")
+        response = ats_client.get("/settings")
         assert response.status_code == 200
         data = response.data.decode()
         assert "ats_scan_days" in data
         assert "ats_scan_hour" in data
 
-    def test_settings_save_includes_ats_config(self, app, tmp_path):
-        """POST /settings/save with ats_scan_enabled saves ats config."""
+    def test_settings_save_includes_ats_config(self, ats_app, tmp_path, monkeypatch):
+        """POST /settings/save with ats_scan_enabled saves ats config.
+
+        Uses monkeypatch to redirect _CONFIG_PATH so the auto-revert teardown
+        restores it even if the assertion raises mid-test — replaces the
+        try/finally pattern that could leak global state on exception.
+        """
         import yaml
 
         import job_finder.web.blueprints.settings as settings_mod
@@ -1285,59 +1342,55 @@ class TestSettingsAtsScanSection:
         # Redirect writes to a temp config file so tests don't clobber the real config.yaml
         config_path = str(tmp_path / "config.yaml")
         with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(app.config["JF_CONFIG"], f, default_flow_style=False)
-        original_path = settings_mod._CONFIG_PATH
-        settings_mod._CONFIG_PATH = config_path
+            yaml.dump(ats_app.config["JF_CONFIG"], f, default_flow_style=False)
+        monkeypatch.setattr(settings_mod, "_CONFIG_PATH", config_path)
 
-        try:
-            client = app.test_client()
-            # POST with ats_scan_enabled on
-            response = client.post(
-                "/settings/save",
-                data={
-                    "ats_scan_enabled": "on",
-                    "ats_scan_days": "mon,fri",
-                    "ats_scan_hour": "8",
-                    # Include required fields to prevent KeyError
-                    "target_titles": "Data Scientist",
-                    "target_locations": "Remote",
-                    "min_salary": "150000",
-                    "industries": "",
-                    "exclusion_title_keywords": "",
-                    "exclusion_companies": "",
-                    "profile_skills": "Python\nSQL",
-                    "gmail_enabled": "",
-                    "gmail_lookback_days": "7",
-                    "serpapi_enabled": "",
-                    "jsearch_enabled": "",
-                    "weight_title_match": "0.30",
-                    "weight_seniority_alignment": "0.20",
-                    "weight_location_fit": "0.15",
-                    "weight_salary_range": "0.15",
-                    "weight_industry_relevance": "0.10",
-                    "weight_company_signals": "0.05",
-                    "weight_recency": "0.05",
-                    "min_score_threshold": "40",
-                    "daily_budget_usd": "25.0",
-                    "candidate_score_threshold": "42",
-                    "model_haiku": "claude-haiku-4-5",
-                    "model_sonnet": "claude-sonnet-4-6",
-                    "output_default_format": "cli",
-                    "output_markdown_path": "reports/",
-                    "output_max_results": "50",
-                    "db_path": "jobs.db",
-                },
-            )
-            # Should redirect to settings page
-            assert response.status_code == 302
+        client = ats_app.test_client()
+        # POST with ats_scan_enabled on
+        response = client.post(
+            "/settings/save",
+            data={
+                "ats_scan_enabled": "on",
+                "ats_scan_days": "mon,fri",
+                "ats_scan_hour": "8",
+                # Include required fields to prevent KeyError
+                "target_titles": "Data Scientist",
+                "target_locations": "Remote",
+                "min_salary": "150000",
+                "industries": "",
+                "exclusion_title_keywords": "",
+                "exclusion_companies": "",
+                "profile_skills": "Python\nSQL",
+                "gmail_enabled": "",
+                "gmail_lookback_days": "7",
+                "serpapi_enabled": "",
+                "jsearch_enabled": "",
+                "weight_title_match": "0.30",
+                "weight_seniority_alignment": "0.20",
+                "weight_location_fit": "0.15",
+                "weight_salary_range": "0.15",
+                "weight_industry_relevance": "0.10",
+                "weight_company_signals": "0.05",
+                "weight_recency": "0.05",
+                "min_score_threshold": "40",
+                "daily_budget_usd": "25.0",
+                "candidate_score_threshold": "42",
+                "model_haiku": "claude-haiku-4-5",
+                "model_sonnet": "claude-sonnet-4-6",
+                "output_default_format": "cli",
+                "output_markdown_path": "reports/",
+                "output_max_results": "50",
+                "db_path": "jobs.db",
+            },
+        )
+        # Should redirect to settings page
+        assert response.status_code == 302
 
-            # Verify config was updated in app context
-            ats_cfg = app.config.get("JF_CONFIG", {}).get("ats", {})
-            assert ats_cfg.get("scan_enabled") is True
-            assert ats_cfg.get("scan_days") == "mon,fri"
-            assert ats_cfg.get("scan_hour") == 8
-        finally:
-            settings_mod._CONFIG_PATH = original_path
+        # Verify config was updated in app context
+        ats_cfg = ats_app.config.get("JF_CONFIG", {}).get("ats", {})
+        assert ats_cfg.get("scan_enabled") is True
+        assert ats_cfg.get("scan_days") == "mon,fri"
+        assert ats_cfg.get("scan_hour") == 8
 
 
 # ---------------------------------------------------------------------------

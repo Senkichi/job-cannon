@@ -225,24 +225,33 @@ class TestValidatePage:
         assert abs(confidence - 0.92) < 0.001
 
     def test_match_false(self):
-        """Provider returns is_match=false."""
+        """call_model returns is_match=false — propagates as (False, ...)."""
         from job_finder.web.agentic_enricher import _validate_page
 
-        provider = _make_mock_provider(
-            {"is_match": False, "confidence": 0.1, "reason": "wrong role"}
-        )
-        is_match, confidence = _validate_page(
-            "Software Engineer at Some Company", "Data Scientist", "Acme Corp", "model", provider
-        )
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            return_value=_make_model_result(
+                {"is_match": False, "confidence": 0.1, "reason": "wrong role"}
+            ),
+        ):
+            is_match, _ = _validate_page(
+                "Software Engineer at Some Company",
+                "Data Scientist",
+                "Acme Corp",
+                None,
+                {},
+            )
         assert is_match is False
 
-    def test_provider_exception_returns_false_zero(self):
-        """On exception, returns (False, 0.0) without crashing."""
+    def test_call_model_exception_returns_false_zero(self):
+        """When call_model raises, _validate_page returns (False, 0.0)."""
         from job_finder.web.agentic_enricher import _validate_page
 
-        provider = MagicMock()
-        provider.call.side_effect = RuntimeError("timeout")
-        is_match, confidence = _validate_page("text", "title", "company", "model", provider)
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            side_effect=RuntimeError("timeout"),
+        ):
+            is_match, confidence = _validate_page("text", "title", "company", None, {})
         assert is_match is False
         assert confidence == 0.0
 
@@ -322,14 +331,28 @@ class TestEnrichSingleJob:
         assert result is None
 
     def test_returns_none_for_missing_title_or_company(self):
-        """Jobs with empty title or company are skipped immediately."""
+        """Jobs with empty title or company are skipped immediately.
+
+        call_model is patched to raise so we can also assert the early return
+        happens before the function would try to call the model. If the early
+        guard ever regresses, RuntimeError leaks instead of None being returned.
+        """
         from job_finder.web.agentic_enricher import enrich_single_job
 
-        provider = _make_mock_provider([])
         page = MagicMock()
 
-        assert enrich_single_job({"title": "", "company": "Acme"}, page, "model", provider) is None
-        assert enrich_single_job({"title": "DS", "company": ""}, page, "model", provider) is None
+        with patch(
+            "job_finder.web.model_provider.call_model",
+            side_effect=RuntimeError("call_model should not be reached"),
+        ):
+            assert (
+                enrich_single_job({"title": "", "company": "Acme"}, page, conn=None, config={})
+                is None
+            )
+            assert (
+                enrich_single_job({"title": "DS", "company": ""}, page, conn=None, config={})
+                is None
+            )
 
 
 # ---------------------------------------------------------------------------

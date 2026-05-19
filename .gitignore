@@ -5,6 +5,9 @@ token.json
 
 # User data (personal profile, config with API keys, resume artifacts)
 config.yaml
+# Auto-generated config backups (Phase 40 migrator + prefix-restore path)
+config.yaml.bak.*
+config.yaml.prefix-restore.*
 experience_profile.json
 experience_reference.md
 resume_style_guide.json
