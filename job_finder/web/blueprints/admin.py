@@ -80,9 +80,36 @@ def resume_job(job_id: str):
     return jsonify({"id": job_id, "paused": False, "next_run_time": next_run})
 
 
+def _job_currently_running(sched, job_id: str) -> bool:
+    """Return True if an instance of *job_id* is currently executing.
+
+    APScheduler 3.x tracks per-job concurrent-instance counts in each
+    executor's ``_instances`` defaultdict (BaseExecutor.submit_job increments
+    on submit, decrements on completion). This is the same dict that enforces
+    ``max_instances`` server-side, so reading it gives us the canonical
+    answer. The attribute is internal but stable across 3.x; we fall back to
+    "not running" if APScheduler changes shape, which preserves the legacy
+    fire-and-hope behaviour rather than crashing the admin endpoint.
+    """
+    try:
+        for executor in sched._executors.values():
+            if executor._instances.get(job_id, 0) > 0:
+                return True
+    except (AttributeError, KeyError):
+        return False
+    return False
+
+
 @admin_bp.route("/jobs/<job_id>/run-now", methods=["POST"], strict_slashes=False)
 def run_job_now(job_id: str):
-    """Trigger immediate execution by setting next_run_time to now."""
+    """Trigger immediate execution by setting next_run_time to now.
+
+    Pre-checks the executor's running-instance count; if an instance of the
+    same job is already in flight, refuses with 409 instead of stacking a
+    parallel run. Two concurrent run-now POSTs against a long-running job
+    (e.g. ``reconcile_all_companies``) was the root cause of the writer-lock
+    starvation regression chased in rev 6→8 (see ``.planning/NEXT_STEPS``).
+    """
     from datetime import datetime, timezone
 
     sched, err = _scheduler_or_503()
@@ -92,6 +119,15 @@ def run_job_now(job_id: str):
     job = sched.get_job(job_id)
     if job is None:
         return jsonify({"error": f"no such job: {job_id}"}), 404
+
+    if _job_currently_running(sched, job_id):
+        logger.info("Admin: run-now for %s rejected — instance already running", job_id)
+        return (
+            jsonify(
+                {"id": job_id, "triggered": False, "reason": "already running"}
+            ),
+            409,
+        )
 
     job.modify(next_run_time=datetime.now(timezone.utc))
     logger.warning("Admin: triggered immediate run of %s", job_id)
