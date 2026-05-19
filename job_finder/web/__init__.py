@@ -136,6 +136,13 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     # This prevents Windows sqlite3 file lock issues during pytest teardown.
     _is_testing = cfg.get("TESTING") or "pytest" in sys.modules
 
+    # Diagnostic / operational escape hatch: skip the long-running startup
+    # backfill threads (description reformat + data backfill) without entering
+    # full TESTING mode. Useful when manually monitoring scheduled jobs because
+    # the description reformat daemon competes for the SQLite write lock and
+    # can stall short cron jobs (registry_hygiene etc.) under WAL contention.
+    _skip_backfills = bool(os.environ.get("JOB_CANNON_SKIP_STARTUP_BACKFILLS"))
+
     if not _is_testing:
         # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
         _setup_file_logging()
@@ -146,13 +153,14 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         # silently starts a fresh onboarding flow at platformdirs.
         user_data_dirs.warn_if_data_split()
 
-        from job_finder.web.startup_backfills import (
-            run_data_backfills_once,
-            run_description_reformat_once,
-        )
+        if not _skip_backfills:
+            from job_finder.web.startup_backfills import (
+                run_data_backfills_once,
+                run_description_reformat_once,
+            )
 
-        run_description_reformat_once(app.config["DB_PATH"], cfg)
-        run_data_backfills_once(app.config["DB_PATH"], cfg)
+            run_description_reformat_once(app.config["DB_PATH"], cfg)
+            run_data_backfills_once(app.config["DB_PATH"], cfg)
 
     # --- Jinja2 globals: centralized config defaults ---
     app.jinja_env.globals["DEFAULT_CANDIDATE_SCORE_THRESHOLD"] = DEFAULT_CANDIDATE_SCORE_THRESHOLD
