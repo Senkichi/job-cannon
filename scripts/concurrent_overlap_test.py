@@ -1,9 +1,17 @@
-"""Concurrent-overlap re-test for the lock-contention fix (rev 7).
+"""Concurrent-overlap re-test for the lock-contention fix.
 
-Fires four write-heavy scheduled jobs simultaneously and inspects logs/app.log
-for `database is locked` errors, OperationalError, or Traceback frames.
+Fires four write-heavy scheduled jobs simultaneously and inspects the rotated
+log stream (logs/app.log + app.log.1..N) for `database is locked` errors,
+OperationalError, or Traceback frames.
 
 Expected: all four jobs complete without lock-contention failures.
+
+Rotation-safety: rev 8 of NEXT_STEPS_2026-05-19.md notes a blind spot in the
+prior implementation — RotatingFileHandler at 5MB rotates app.log mid-test,
+and the old byte-offset seek then reads from a brand-new file at offset 0,
+silently missing lock errors recorded in app.log.1. This version filters
+by timestamp prefix across all rotated files, so rotation cannot hide
+errors.
 
 Usage:
     uv run python scripts/concurrent_overlap_test.py [max_wait_seconds]
@@ -19,8 +27,14 @@ import time
 import urllib.request
 from pathlib import Path
 
-LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "app.log"
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_PATH = LOG_DIR / "app.log"
 BASE = "http://127.0.0.1:5000"
+
+# Walk rotated logs from oldest -> newest so the merged stream is monotonic.
+# RotatingFileHandler keeps backupCount=3 → app.log.{3,2,1} plus app.log.
+_ROTATION_SUFFIXES = (".3", ".2", ".1", "")
+_TS_LEN = 19  # "YYYY-MM-DD HH:MM:SS"
 
 # job_id -> human-readable name the scheduler logs as "<name>: ..." on success
 # or "<name> failed: ..." on failure.
@@ -44,6 +58,51 @@ def _fire(job_id: str, results: dict[str, str]) -> None:
         results[job_id] = f"ERROR: {exc!r}"
 
 
+def _is_timestamped(line: str) -> bool:
+    """True if the line begins with a YYYY-MM-DD HH:MM:SS timestamp prefix."""
+    if len(line) < _TS_LEN:
+        return False
+    return (
+        line[4] == "-"
+        and line[7] == "-"
+        and line[10] == " "
+        and line[13] == ":"
+        and line[16] == ":"
+    )
+
+
+def _gather_since(threshold: str) -> str:
+    """Return concatenated log lines emitted at or after `threshold`.
+
+    Reads all rotated files (app.log.3 .. app.log.1, app.log) in chronological
+    order, filters by leading timestamp prefix. Continuation lines from
+    multiline log records (tracebacks, etc.) inherit the in-window/out-of-window
+    state of the entry they belong to.
+
+    `threshold` is a "YYYY-MM-DD HH:MM:SS" string — lexical compare is correct
+    because the timestamp format is fixed-width and zero-padded.
+    """
+    kept: list[str] = []
+    in_window = False
+    for suffix in _ROTATION_SUFFIXES:
+        path = LOG_DIR / f"app.log{suffix}"
+        if not path.exists():
+            continue
+        try:
+            with open(path, "rb") as fh:
+                for raw in fh:
+                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if _is_timestamped(line):
+                        in_window = line[:_TS_LEN] >= threshold
+                    if in_window:
+                        kept.append(line)
+        except OSError as exc:
+            # Rotation can race a read; missing file is fine, real OS errors
+            # surface to stderr but don't abort the inspection.
+            print(f"[warn] could not read {path}: {exc!r}", file=sys.stderr)
+    return "\n".join(kept)
+
+
 def main() -> int:
     max_wait = float(sys.argv[1]) if len(sys.argv) > 1 else 180.0
 
@@ -60,9 +119,15 @@ def main() -> int:
             print(f"  pause {jid} FAILED: {exc!r}")
             return 1
 
-    # 2. Snapshot log size as baseline.
-    start_size = LOG_PATH.stat().st_size
-    print(f"[setup] baseline log size: {start_size} bytes")
+    # 2. Snapshot wall-clock baseline. We filter the rotated stream by
+    # timestamp prefix, which is rotation-safe (a rotation during the test
+    # cannot move an event "before" the threshold).
+    # Subtract 1 second of slack: log timestamps are second-precision while
+    # time.time() is sub-second; lines emitted in our same second should be
+    # included so a sentinel posted at T+ε is captured.
+    start_struct = time.localtime(time.time() - 1.0)
+    threshold = time.strftime("%Y-%m-%d %H:%M:%S", start_struct)
+    print(f"[setup] threshold timestamp: {threshold}")
 
     # 3. Fire 4 run-now POSTs concurrently via threads.
     print("[fire] dispatching 4 run-now requests in parallel")
@@ -81,18 +146,14 @@ def main() -> int:
     for jid, resp in results.items():
         print(f"  {jid}: {resp}")
 
-    # 4. Poll log for completion of each job.
+    # 4. Poll the rotated stream for completion of each job.
     print(f"[poll] waiting up to {max_wait}s for all 4 to finish")
     completed: set[str] = set()
     failed: set[str] = set()
     deadline = time.time() + max_wait
-    last_size = start_size
     while time.time() < deadline and (completed | failed) != set(TARGETS):
         time.sleep(2)
-        with open(LOG_PATH, "rb") as f:
-            f.seek(last_size)
-            chunk = f.read().decode("utf-8", errors="replace")
-            last_size = f.tell()
+        chunk = _gather_since(threshold)
         for jid, name in TARGETS.items():
             if jid in completed or jid in failed:
                 continue
@@ -111,10 +172,8 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  pause {jid} FAILED: {exc!r}")
 
-    # 6. Inspect full delta for lock-contention markers.
-    with open(LOG_PATH, "rb") as f:
-        f.seek(start_size)
-        full = f.read().decode("utf-8", errors="replace")
+    # 6. Inspect full delta for lock-contention markers across rotated files.
+    full = _gather_since(threshold)
 
     locked_lines = [ln for ln in full.splitlines() if "database is locked" in ln]
     op_error_lines = [
