@@ -44,12 +44,21 @@ class CorpusLoader:
         self._db_path = db_path
         self._dedup_keys_file = self._artifact_dir / "round_0" / "dedup_keys.json"
 
-    def load_round_0(self, n_per_callsite: int, conn: sqlite3.Connection) -> dict[str, list[dict]]:
+    def load_round_0(
+        self,
+        n_per_callsite: int,
+        conn: sqlite3.Connection,
+        judge_n_per_callsite: int = 10,
+    ) -> dict[str, list[dict]]:
         """Sample corpus for all 6 callsites and cache inputs.
 
         Args:
             n_per_callsite: Number of rows to sample per callsite.
             conn: Open SQLite connection to production DB.
+            judge_n_per_callsite: Sample size for judge-based callsites
+                (description_reformat, company_research). Defaults to 10 so the
+                calibration log has enough verdicts; persisted at Round 0 so
+                Round 1+ can reload them deterministically.
 
         Returns:
             Dict mapping callsite name to list of sampled rows.
@@ -73,10 +82,10 @@ class CorpusLoader:
             50, conn, round_0_dir  # Spec requires 50 companies for extract_jobs
         )
         corpus["description_reformat"] = self._sample_description_reformat(
-            n_per_callsite, conn, round_0_dir
+            judge_n_per_callsite, conn, round_0_dir
         )
         corpus["company_research"] = self._sample_company_research(
-            n_per_callsite, conn, round_0_dir
+            judge_n_per_callsite, conn, round_0_dir
         )
         corpus["ai_nav_discovery"] = self._sample_ai_nav_discovery(
             n_per_callsite, conn, round_0_dir
@@ -94,8 +103,10 @@ class CorpusLoader:
     def load_round_1(self, conn: sqlite3.Connection) -> dict[str, list[dict]]:
         """Load corpus using persisted dedup_keys from Round 0.
 
-        For judge-based callsites (description_reformat, company_research), samples
-        additional rows to reach n=10 for calibration log requirements.
+        All 6 callsites reload by their Round 0 keys — judge-based callsites
+        included — so providers in Rounds 1+ see the same inputs they saw in
+        Round 0. The calibration sample size for judge callsites is fixed at
+        Round 0 (see ``judge_n_per_callsite`` on :meth:`load_round_0`).
 
         Args:
             conn: Open SQLite connection to production DB.
@@ -121,12 +132,11 @@ class CorpusLoader:
         corpus["extract_jobs"] = self._load_by_keys(
             "companies", dedup_keys["extract_jobs"], conn
         )
-        # Sample additional rows for judge-based callsites to reach n=10
-        corpus["description_reformat"] = self._sample_description_reformat(
-            10, conn, self._artifact_dir / "round_0"
+        corpus["description_reformat"] = self._load_by_keys(
+            "jobs", dedup_keys["description_reformat"], conn
         )
-        corpus["company_research"] = self._sample_company_research(
-            10, conn, self._artifact_dir / "round_0"
+        corpus["company_research"] = self._load_by_keys(
+            "companies", dedup_keys["company_research"], conn
         )
         corpus["ai_nav_discovery"] = self._load_by_keys(
             "companies", dedup_keys["ai_nav_discovery"], conn
