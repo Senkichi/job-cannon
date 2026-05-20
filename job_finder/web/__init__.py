@@ -44,10 +44,11 @@ def _setup_file_logging() -> None:
     if any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
         return
 
-    os.makedirs("logs", exist_ok=True)
+    log_file = user_data_dirs.logs_path()
+    log_file.parent.mkdir(parents=True, exist_ok=True)
 
     file_handler = RotatingFileHandler(
-        "logs/app.log",
+        str(log_file),
         maxBytes=5 * 1024 * 1024,  # 5MB
         backupCount=3,
         encoding="utf-8",
