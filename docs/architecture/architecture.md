@@ -128,7 +128,12 @@ Job state transitions are tracked in the database:
 - `call_claude()` (`job_finder/web/claude_client.py`) — Anthropic-only adapter, used as the bottom of the cascade and for legacy non-scoring tiers
 - Pattern: Returns `ScoringResult` dataclass (or `JobAssessment`) — never None on success; raises on hard failure
 
-**Tier-name vestigial labels:** the `'haiku' | 'sonnet' | 'opus'` tiers in `_TIER_DEFAULTS` are non-scoring routing classes (cheap-fast / balanced-deep / heavy-reasoning), kept for back-compat with `enrichment_tiers`, `careers_scraper`, `ai_career_navigator`, `company_research`, and `description_reformatter`. They no longer mean Anthropic models. A future refactor will rename to `'low' | 'mid' | 'high'`.
+**Workload-class routing:** every LLM call — scoring and non-scoring alike — dispatches against a workload class, not a vendor-model tier. The three classes are:
+- `quick` — extraction, parsing, navigation, research, reformatting, and the agentic enricher.
+- `score` — full ordinal-rubric job scoring.
+- `triage` — optional pre-scoring gate; reuses the `quick` model with a triage-specific prompt.
+
+Per-provider model defaults live in `model_provider._PROVIDER_DEFAULTS` (a nested `provider → workload → model_id` dict). Users override these in `config.yaml` under `providers.overrides.<provider>.<workload>`. The legacy `'haiku' | 'sonnet' | 'opus'` and `'low' | 'mid' | 'high'` tier names are gone — both renames have shipped.
 
 **Flask Blueprints:**
 - Purpose: Modular route groups

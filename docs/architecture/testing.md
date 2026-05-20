@@ -19,7 +19,7 @@ This document describes the testing approach, fixtures, and conventions used in 
 pytest tests/                              # Run all tests
 pytest tests/test_pipeline_detector.py -v  # Run specific test file with verbose output
 pytest -x                                  # Stop on first failure
-pytest tests/test_scoring.py::TestCostComputation::test_haiku_input_pricing  # Run single test
+pytest tests/test_costs.py::TestGetDailyCostBreakdown::test_empty_when_no_rows  # Run single test
 ```
 
 ## Test File Organization
@@ -30,29 +30,29 @@ pytest tests/test_scoring.py::TestCostComputation::test_haiku_input_pricing  # R
 - No `tests/unit/` or `tests/integration/` subdivisions
 
 **Naming:**
-- `test_<module>.py` pattern: `test_scoring.py`, `test_pipeline_detector.py`, `test_costs.py`
+- `test_<module>.py` pattern: `test_costs.py`, `test_pipeline_detector.py`, `test_claude_client.py`
 - Mirror module names from `job_finder/` but without deep subdirectories
-- Example: tests for `job_finder/web/claude_client.py` are in `tests/test_costs.py` and `tests/test_scoring.py` (grouped by feature, not file)
+- Example: tests for `job_finder/web/claude_client.py` are split across `tests/test_costs.py` (cost-tracking surface) and `tests/test_claude_client.py` (record_cost / cost_gate behavior), grouped by feature rather than 1:1 with source files.
 
 **File Count:**
 - ~85 test files total
-- Large test files: `test_scoring.py`, `test_data_enricher.py`, `test_pipeline_detector.py` (hundreds of lines each)
+- Large test files: `test_data_enricher.py`, `test_pipeline_detector.py`, `test_model_provider.py` (hundreds of lines each)
 
 ## Test Structure
 
 **Suite Organization:**
 ```python
-# tests/test_scoring.py
+# tests/test_costs.py
 import pytest
 
 class TestCostComputation:
-    """Verify compute_cost math for Haiku and Sonnet pricing."""
+    """Verify compute_cost math per model id."""
 
-    def test_haiku_input_pricing(self):
+    def test_claude_haiku_4_5_input_pricing(self):
         cost = compute_cost("claude-haiku-4-5", input_tokens=1_000_000, output_tokens=0)
         assert abs(cost - 1.0) < 1e-9
 
-    def test_haiku_output_pricing(self):
+    def test_claude_haiku_4_5_output_pricing(self):
         cost = compute_cost("claude-haiku-4-5", input_tokens=0, output_tokens=1_000_000)
         assert abs(cost - 5.0) < 1e-9
 
@@ -62,7 +62,7 @@ class TestCostRecording:
 
     def test_record_cost_inserts_row(self, migrated_db):
         path, conn = migrated_db
-        record_cost(conn, job_id="job-1", purpose="haiku_score", ...)
+        record_cost(conn, job_id="job-1", purpose="scoring", ...)
         rows = conn.execute("SELECT * FROM scoring_costs").fetchall()
         assert len(rows) == 1
 ```
@@ -298,10 +298,10 @@ def test_score_tier_blocked_when_over_budget(self, migrated_db, gate_config):
 
 **Floating-point Precision:**
 ```python
-# tests/test_scoring.py (lines 32, 37, 43, 48, 53, 59)
-def test_haiku_input_pricing(self):
-    cost = compute_cost("claude-haiku-4-5", input_tokens=1_000_000, output_tokens=0)
-    assert abs(cost - 1.0) < 1e-9  # Tolerance for float comparison
+# tests/test_costs.py (TestGetDailyCostBreakdown::test_groups_by_date_and_purpose)
+result = get_daily_cost_breakdown(conn)
+haiku = next(r for r in result if r["purpose"] == "haiku_score")
+assert abs(haiku["spend"] - 0.00025) < 1e-9  # Tolerance for float comparison
 ```
 
 **List/Dict Assertions:**
