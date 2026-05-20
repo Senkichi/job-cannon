@@ -145,17 +145,12 @@
   }
 
   const FEATURE_COLORS = {
-    // v3.0 (Phase 34 Plan 3 Commit D): the unified scorer tracks cost under
-    // the 'scoring' purpose. Legacy haiku_score / sonnet_eval entries
-    // remain for historical rows written before Wave 2 flipped
-    // use_unified_scorer=true, so keep their colors as aliases.
-    //
-    // Reconciliation R7.2 (2026-05-06): 'interview_prep' mapping removed —
-    // Phase 5 was deleted in the May-2026 public-repo cleanup, no
-    // scoring_costs rows have purpose='interview_prep' in any reachable
-    // user DB. 'resume_gen' and 'rejection_analysis' are similar orphans
-    // (also 0 rows) but kept for now — they belong to the broader S9 lint
-    // cleanup pass alongside the v1/v2 'haiku_score'/'sonnet_eval' aliases.
+    // 'scoring' is the canonical post-Phase-34-Plan-3 purpose for unified
+    // scoring rows. 'haiku_score' / 'sonnet_eval' are historical-row aliases
+    // (kept so the chart renders correctly against rows written before the
+    // unified scorer landed). 'resume_gen' and 'rejection_analysis' are
+    // orphan purposes from the deleted Phase 4/5 features; 0 rows match in
+    // a reachable user DB, but the mappings are harmless.
     'scoring':            'rgba(139, 92, 246, 0.8)',
     'haiku_score':        'rgba(139, 92, 246, 0.8)',
     'sonnet_eval':        'rgba(99, 102, 241, 0.8)',

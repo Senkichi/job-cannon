@@ -6,7 +6,7 @@
 {% if budget_pct >= 100 %}
 <div class="bg-red-900/60 border border-red-700 rounded-lg px-4 py-3 flex items-center justify-between mb-4">
   <span class="text-red-200 text-sm">
-    Budget cap reached. Sonnet and Opus paused. Haiku active.
+    Budget cap reached. Paid scoring providers paused. Free tiers (Ollama, Groq, Cerebras, Gemini, Claude CLI) still active.
   </span>
   <div class="flex gap-3 text-xs">
     <button hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML"
