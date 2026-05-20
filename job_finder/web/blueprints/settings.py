@@ -20,6 +20,7 @@ from flask import (
     url_for,
 )
 
+from job_finder import secrets as jf_secrets
 from job_finder.config import (
     DEFAULT_CANDIDATE_SCORE_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,
@@ -59,10 +60,20 @@ def index():
     except OSError:
         pass
 
+    # Commit 3.5: render (set)/(not set) placeholders for password inputs
+    # instead of leaking the plaintext value to the HTML. Only checks env +
+    # keyring — a plaintext-only value would still pass the read, but showing
+    # "(set)" would mislead the user into thinking the migration ran.
+    secret_set = {
+        name: jf_secrets.get_secret(name) is not None
+        for name in ("sources.serpapi.api_key", "sources.thordata.api_key")
+    }
+
     return render_template(
         "settings/index.html",
         config=config,
         config_mtime=config_mtime,
+        secret_set=secret_set,
     )
 
 
@@ -91,6 +102,19 @@ def save():
                 pass
 
         form_config = _parse_form_to_config(request.form)
+
+        # Commit 3.5: route freshly-submitted secrets through the keyring
+        # stack. On success the form_config plaintext is cleared so the
+        # deep-merge below wipes the legacy value from config.yaml. On
+        # backend-missing (RuntimeError) the plaintext stays and we flash
+        # a warning so the user knows storage degraded gracefully.
+        _move_secret_to_keyring(
+            form_config, ("sources", "serpapi", "api_key"), "sources.serpapi.api_key"
+        )
+        _move_secret_to_keyring(
+            form_config, ("sources", "jsearch", "rapidapi_key"), "sources.jsearch.rapidapi_key"
+        )
+
         config = _deep_merge(existing, form_config)
 
         # Guard: block saves that wipe critical profile fields
@@ -231,7 +255,11 @@ def _parse_form_to_config(form) -> dict:
     serpapi = {}
     if _has("serpapi_enabled"):
         serpapi["enabled"] = form["serpapi_enabled"] == "on"
-    if _has("serpapi_api_key"):
+    # Commit 3.5: only include api_key when the user typed something. The
+    # password input now renders with value="" + a (set)/(not set) placeholder,
+    # so an empty submission means "leave existing secret alone" — including
+    # it as "" would clobber the keyring-or-plaintext value on every save.
+    if _has("serpapi_api_key") and form["serpapi_api_key"]:
         serpapi["api_key"] = form["serpapi_api_key"]
     # Sentinel hidden input marks that the queries section was rendered;
     # if present we parse queries (possibly []), otherwise preserve existing.
@@ -244,7 +272,7 @@ def _parse_form_to_config(form) -> dict:
     jsearch = {}
     if _has("jsearch_enabled"):
         jsearch["enabled"] = form["jsearch_enabled"] == "on"
-    if _has("jsearch_rapidapi_key"):
+    if _has("jsearch_rapidapi_key") and form["jsearch_rapidapi_key"]:
         jsearch["rapidapi_key"] = form["jsearch_rapidapi_key"]
     if jsearch:
         config.setdefault("sources", {})["jsearch"] = jsearch
@@ -324,6 +352,41 @@ def _parse_form_to_config(form) -> dict:
         config["ats"] = ats
 
     return config
+
+
+def _move_secret_to_keyring(
+    form_config: dict, path: tuple[str, ...], canonical: str
+) -> None:
+    """Move a freshly-submitted secret from form_config into the OS keyring.
+
+    Walks `path` through `form_config`; if a non-empty string is at the
+    leaf, writes it under `canonical` and clears the leaf so the deep-merge
+    in save() wipes the legacy plaintext from config.yaml.
+
+    On RuntimeError (no keyring backend) the leaf is left alone — the
+    plaintext value still flows through to config.yaml so the user doesn't
+    lose their secret. A flash warning informs them of the degradation.
+    """
+    node = form_config
+    for part in path[:-1]:
+        if not isinstance(node, dict) or part not in node:
+            return
+        node = node[part]
+    leaf = path[-1]
+    if not isinstance(node, dict) or leaf not in node:
+        return
+    value = node[leaf]
+    if not isinstance(value, str) or not value:
+        return
+    try:
+        jf_secrets.set_secret(canonical, value)
+        node[leaf] = ""
+    except RuntimeError:
+        flash(
+            "Couldn't write secret to OS keyring — saved to config.yaml as "
+            "plaintext fallback. See SECURITY.md.",
+            "warning",
+        )
 
 
 def _parse_serpapi_queries(form) -> list:

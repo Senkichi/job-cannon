@@ -155,7 +155,9 @@
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
               <input type="password" name="serpapi_api_key"
-                     value="{{ config.get('sources', {}).get('serpapi', {}).get('api_key', '') }}"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.serpapi.api_key') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
             </div>
           </div>
@@ -206,7 +208,9 @@
             <div>
               <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
               <input type="password" name="thordata_api_key"
-                     value="{{ config.get('sources', {}).get('thordata', {}).get('api_key', '') }}"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.thordata.api_key') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
             </div>
             <div>

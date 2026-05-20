@@ -129,6 +129,97 @@ class TestSettingsWipeGuard:
         assert config["profile"]["min_salary"] == 200000
 
 
+class TestSettingsKeyringWrite:
+    """Commit 3.5: SerpAPI / JSearch keys submitted via the Settings form
+    land in the OS keyring; the plaintext field in config.yaml is cleared on
+    success; empty submissions leave existing secrets alone (no clobber)."""
+
+    def test_save_serpapi_key_writes_to_keyring(self, settings_client, settings_app):
+        """Non-empty serpapi_api_key submission → keyring set, plaintext cleared."""
+        import keyring
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "serpapi_api_key": "sk-test-from-form-abc",
+            },
+        )
+        assert resp.status_code == 302
+
+        assert (
+            keyring.get_password("job-cannon", "sources.serpapi.api_key")
+            == "sk-test-from-form-abc"
+        )
+
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        api_key = saved.get("sources", {}).get("serpapi", {}).get("api_key", "<missing>")
+        assert api_key == "", f"plaintext should be cleared, got {api_key!r}"
+
+    def test_save_empty_serpapi_key_does_not_clobber_existing(
+        self, settings_client, settings_app
+    ):
+        """Empty serpapi_api_key (user didn't type) → existing config untouched.
+
+        With the (set)/(not set) placeholder UX, an empty submission means
+        "leave the secret alone". The save path must not include api_key="" in
+        the form_config, which would otherwise deep-merge-overwrite a real
+        existing plaintext value (or signal a clear when keyring is empty).
+        """
+        # Plant an existing plaintext value via direct config write.
+        config_path = settings_app._test_config_path
+        with open(config_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing.setdefault("sources", {})["serpapi"] = {
+            "enabled": True,
+            "api_key": "sk-already-there",
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "serpapi_api_key": "",  # empty — user did not type
+            },
+        )
+        assert resp.status_code == 302
+
+        with open(config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        assert (
+            saved["sources"]["serpapi"]["api_key"] == "sk-already-there"
+        ), "empty submission should not have wiped existing plaintext"
+
+    def test_index_passes_secret_set_with_keyring_value(self, settings_client):
+        """GET /settings → template receives secret_set reflecting keyring state."""
+        import keyring
+
+        keyring.set_password("job-cannon", "sources.serpapi.api_key", "sk-planted")
+        try:
+            resp = settings_client.get("/settings/")
+            assert resp.status_code == 200
+            body = resp.get_data(as_text=True)
+            # SerpAPI input now renders the "set" placeholder.
+            assert "(set — type to replace)" in body
+            # And does NOT leak any plaintext into the value attribute.
+            assert 'name="serpapi_api_key"' in body
+            assert "sk-planted" not in body
+        finally:
+            keyring.delete_password("job-cannon", "sources.serpapi.api_key")
+
+    def test_index_passes_secret_set_when_not_set(self, settings_client):
+        """GET /settings with no keyring entry → '(not set)' placeholder."""
+        resp = settings_client.get("/settings/")
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "(not set)" in body
+
+
 def test_parse_form_does_not_write_scoring_models():
     """Regression: 2026-05-21 TIER-RENAME-ECHO dropped scoring.models from
     config. A representative form payload with the now-deleted model_low /
