@@ -1,7 +1,8 @@
 """Judge protocol with position-swap for cascade audit (Phase 36).
 
-Implements pairwise-blind comparison using DeepSeek-V3.2 via OpenRouter,
-including position-swap validation to eliminate position bias.
+Implements pairwise-blind comparison using DeepSeek-V4-Flash via OpenRouter
+(`deepseek/deepseek-v4-flash:free`), including position-swap validation to
+eliminate position bias.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ def judge_pair(
     callsite: str,
     provider: Any,
 ) -> Verdict:
-    """Judge a single A/B pair using DeepSeek-V3.2.
+    """Judge a single A/B pair using DeepSeek-V4-Flash.
 
     Args:
         output_a: First LLM output (labeled A in prompt).

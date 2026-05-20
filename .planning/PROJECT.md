@@ -14,7 +14,7 @@ Surface the best-fit jobs fast and keep the application pipeline visible — eve
 
 **Target features:**
 
-- Local cascade audit: shadow-replay against an OpenRouter DeepSeek-V3.2 judge across the 6 non-scoring callsites (parse_structured_fields, find_careers_url, extract_jobs, description_reformat, company_research, ai_nav_discovery), producing a per-callsite routing recommendation (Case A single cascade or Case B `purpose_overrides`)
+- Local cascade audit: shadow-replay against an OpenRouter DeepSeek-V4-Flash judge across the 6 non-scoring callsites (parse_structured_fields, find_careers_url, extract_jobs, description_reformat, company_research, ai_nav_discovery), producing a per-callsite routing recommendation (Case A single cascade or Case B `purpose_overrides`)
 - `scoring_costs.schema_valid` telemetry (Migration 49) + per-callsite purpose attribution (split `careers_scrape` → `find_careers_url` + `extract_jobs`)
 - 1-week production canary post-rewire; ≥80% Anthropic-tail spend reduction target
 - Cross-platform user-data dirs via `platformdirs`; `onboarding_state` table (Migration 50) + before-request redirect

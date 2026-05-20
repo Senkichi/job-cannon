@@ -1,7 +1,7 @@
 """Cascade audit eval harness (Phase 36).
 
 Provides shadow-replay evaluation infrastructure for comparing LLM outputs
-across providers using a DeepSeek-V3.2 judge for the 6 non-scoring callsites:
+across providers using a DeepSeek-V4-Flash judge for the 6 non-scoring callsites:
 parse_structured_fields, find_careers_url, extract_jobs, description_reformat,
 company_research, ai_nav_discovery.
 """

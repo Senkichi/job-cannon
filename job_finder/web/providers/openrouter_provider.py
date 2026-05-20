@@ -1,7 +1,10 @@
-"""OpenRouter provider adapter for DeepSeek-V3.2 judge calls.
+"""OpenRouter provider adapter for cascade-audit judge calls.
 
-Implements BaseProvider to enable DeepSeek-V3.2 via OpenRouter's :free tier
-endpoint for the cascade audit judge protocol. No Anthropic spend incurred.
+Implements BaseProvider to enable OpenRouter-hosted models (currently
+DeepSeek-V4-Flash via `deepseek/deepseek-v4-flash:free`) for the cascade
+audit judge protocol. The provider itself is model-agnostic — `model=` is
+passed through to OpenRouter unchanged; see `evals/cascade_audit/judge.py`
+for the judge's chosen model id. No Anthropic spend incurred.
 
 Phase 36 deliverable — part of the cascade audit eval harness.
 """
@@ -23,7 +26,7 @@ _DEFAULT_TIMEOUT = 300.0
 
 
 class OpenRouterProvider(BaseProvider):
-    """Provider adapter for OpenRouter API (DeepSeek-V3.2 judge).
+    """Provider adapter for OpenRouter API (cascade-audit judge — currently DeepSeek-V4-Flash).
 
     Uses OPENROUTER_API_KEY environment variable. All calls are free
     (cost_usd=0.0) when using the :free tier endpoint.

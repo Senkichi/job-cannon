@@ -26,7 +26,7 @@ Audit the 6 non-scoring LLM callsites via shadow-replay methodology, then rewire
 
 - [x] **AUDIT-05**: OpenRouter provider adapter (`providers/openrouter_provider.py`) registered as judge-only path; consumes `OPENROUTER_API_KEY` env var
 - [x] **AUDIT-06**: `evals/cascade_audit/` package ships: corpus loader (replays production DB rows), verdict ADTs, report generator, judge protocol module
-- [x] **AUDIT-07**: Judge protocol implements pairwise-blind comparison + position-swap (DeepSeek-V3.2 via OpenRouter `:free` tier)
+- [x] **AUDIT-07**: Judge protocol implements pairwise-blind comparison + position-swap (DeepSeek-V4-Flash via OpenRouter `:free` tier; N-1 reconciliation 2026-05-20 — model id in code (`evals/cascade_audit/judge.py`) was always v4-flash; live OpenRouter registry confirms `deepseek/deepseek-v4-flash:free` is a real id)
 - [x] **AUDIT-08**: Per-callsite adapters present for all 6 non-scoring callsites: `parse_structured_fields`, `find_careers_url`, `extract_jobs`, `description_reformat`, `company_research`, `ai_nav_discovery`
 
 ### Audit execution

@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 class Verdict(BaseModel):
     """Judge verdict for pairwise comparison.
 
-    Represents the result of a DeepSeek-V3.2 judge comparing two LLM outputs
-    (labeled A and B) for the same input.
+    Represents the result of a DeepSeek-V4-Flash judge (`deepseek/deepseek-v4-flash:free`
+    via OpenRouter; see `judge.py`) comparing two LLM outputs (labeled A and B)
+    for the same input.
 
     Attributes:
         winner: Which output won ("A", "B", or "tie").
