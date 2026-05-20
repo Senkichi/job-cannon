@@ -31,15 +31,6 @@ from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_mo
 logger = logging.getLogger(__name__)
 
 
-# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
-# SDK. AnthropicProvider forwards this to call_claude(), which ignores
-# client and routes through the CLI — OAuth/subscription billing is preserved.
-class _CLIClientStub:
-    api_key = "cli-managed"
-
-
-_CLI_CLIENT_STUB = _CLIClientStub()
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -176,7 +167,6 @@ def _find_careers_url_with_low_tier(
                 job_id=None,
                 purpose="find_careers_url",
                 max_tokens=256,
-                client=_CLI_CLIENT_STUB,
             )
             result = model_result.data
         except ProviderCascadeExhaustedError:
@@ -294,7 +284,6 @@ def _extract_jobs_with_low_tier(
                 job_id=None,
                 purpose="extract_jobs",
                 max_tokens=1024,
-                client=_CLI_CLIENT_STUB,
             )
             result = model_result.data
         except ProviderCascadeExhaustedError:

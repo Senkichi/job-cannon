@@ -109,8 +109,7 @@ class TestRunCompanyResearchBackground:
     """run_company_research_background: service-layer behavior."""
 
     @patch("job_finder.web.company_research.call_model")
-    @patch("job_finder.web.company_research.anthropic.Anthropic")
-    def test_successful_research_sets_done(self, mock_anthropic, mock_call, research_db):
+    def test_successful_research_sets_done(self, mock_call, research_db):
         from job_finder.web.company_research import run_company_research_background
 
         path, conn = research_db
@@ -139,8 +138,7 @@ class TestRunCompanyResearchBackground:
         assert row["research_json"] is not None
 
     @patch("job_finder.web.company_research.call_model")
-    @patch("job_finder.web.company_research.anthropic.Anthropic")
-    def test_failed_research_sets_error(self, mock_anthropic, mock_call, research_db):
+    def test_failed_research_sets_error(self, mock_call, research_db):
         from job_finder.web.company_research import run_company_research_background
 
         path, conn = research_db

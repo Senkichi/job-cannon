@@ -22,15 +22,6 @@ from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_mo
 logger = logging.getLogger(__name__)
 
 
-# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
-# SDK. AnthropicProvider forwards this to call_claude(), which ignores
-# client and routes through the CLI — OAuth/subscription billing is preserved.
-class _CLIClientStub:
-    api_key = "cli-managed"
-
-
-_CLI_CLIENT_STUB = _CLIClientStub()
-
 # Stop words excluded when deriving a search term from target titles
 _TITLE_STOP_WORDS = frozenset(
     {
@@ -420,7 +411,6 @@ def discover_navigation_recipe(
                         job_id=None,
                         purpose="ai_nav_discovery",
                         max_tokens=1024,
-                        client=_CLI_CLIENT_STUB,
                     )
                     result = model_result.data
                 except ProviderCascadeExhaustedError:

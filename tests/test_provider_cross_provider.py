@@ -304,7 +304,7 @@ def test_make_adapter_dispatches_claude_code_cli():
         "job_finder.web.providers.claude_code_cli.shutil.which",
         return_value="/usr/bin/claude",
     ):
-        adapter = _make_adapter("claude_code_cli", client=None, conn=None, config={})
+        adapter = _make_adapter("claude_code_cli", conn=None, config={})
     assert isinstance(adapter, ClaudeCodeCLIProvider)
 
 
@@ -314,13 +314,13 @@ def test_make_adapter_dispatches_gemini_cli():
         "job_finder.web.providers.gemini_cli.shutil.which",
         return_value="/usr/bin/gemini",
     ):
-        adapter = _make_adapter("gemini_cli", client=None, conn=None, config={})
+        adapter = _make_adapter("gemini_cli", conn=None, config={})
     assert isinstance(adapter, GeminiCLIProvider)
 
 
 def test_make_adapter_local_bundled_requires_model_path():
     with pytest.raises(ValueError, match="providers.local_bundled.model_path not configured"):
-        _make_adapter("local_bundled", client=None, conn=None, config={})
+        _make_adapter("local_bundled", conn=None, config={})
 
 
 def test_make_adapter_local_bundled_with_model_path_constructs_provider():
@@ -336,7 +336,7 @@ def test_make_adapter_local_bundled_with_model_path_constructs_provider():
     from job_finder.web.providers.local_bundled import LocalBundledProvider
     config = {"providers": {"local_bundled": {"model_path": "/fake.gguf", "n_ctx": 4096}}}
     with patch("pathlib.Path.exists", return_value=True):
-        adapter = _make_adapter("local_bundled", client=None, conn=None, config=config)
+        adapter = _make_adapter("local_bundled", conn=None, config=config)
     assert isinstance(adapter, LocalBundledProvider)
 
 

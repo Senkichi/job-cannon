@@ -15,8 +15,6 @@ import sqlite3
 import threading
 from datetime import UTC, datetime
 
-import anthropic
-
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import call_model
 
@@ -148,7 +146,6 @@ def run_company_research_background(
                 "Provide a structured research brief."
             )
 
-            client = anthropic.Anthropic()
             result_obj = call_model(
                 tier="quick",
                 system=system_prompt,
@@ -158,7 +155,6 @@ def run_company_research_background(
                 job_id=f"company_{company_id}",
                 purpose="company_research",
                 max_tokens=2048,
-                client=client,
             )
 
             research_text = (

@@ -23,7 +23,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import Any
 
 from job_finder.db import JobAssessment
 from job_finder.web.model_provider import call_model
@@ -206,7 +205,6 @@ def score_job(
     job: dict,
     conn: sqlite3.Connection,
     config: dict,
-    client: Any | None = None,
     candidate_context: str | None = None,
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
@@ -224,8 +222,6 @@ def score_job(
         conn: Open sqlite3 connection (used by call_model for cost recording
             and rate-limit bootstrap).
         config: Application config dict.
-        client: Optional pre-constructed client for tests. Defaults to None,
-            which lets call_model build one via resolve_provider_config.
         candidate_context: Optional prompt-ready candidate-context block built
             by ``scoring_orchestrator.build_candidate_context``. When provided,
             the system prompt is assembled with the context spliced between
@@ -262,7 +258,6 @@ def score_job(
             job_id=job.get("dedup_key"),
             purpose="score_job",
             max_tokens=2048,
-            client=client,
         )
     except Exception as exc:
         log.exception(

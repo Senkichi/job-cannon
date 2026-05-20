@@ -28,7 +28,6 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
 from job_finder.json_utils import utc_now_iso
@@ -95,13 +94,12 @@ class ClaudeContext:
     """Invariant pair threaded through every call_claude invocation.
 
     Bundles the database connection and app config that every caller
-    assembles identically.  The ``client`` field is accepted for backward
-    compatibility but ignored — the CLI handles its own authentication.
+    assembles identically. The CLI handles its own authentication via env
+    vars — no Python SDK client is constructed.
     """
 
     conn: sqlite3.Connection
     config: dict
-    client: Any = None  # ignored — kept for backward compat
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +510,6 @@ def _run_oneshot(
 
 
 def call_claude(
-    client: Any | None = None,
     model: str = "",
     system: str = "",
     messages: list[dict] | None = None,
@@ -529,12 +526,11 @@ def call_claude(
     """Run a Claude CLI oneshot with budget gating and cost recording.
 
     Dispatches to ``_run_oneshot()`` which invokes ``claude -p`` as a
-    subprocess.  The ``client`` parameter is accepted for backward
-    compatibility but ignored — the CLI handles its own authentication.
+    subprocess. The CLI handles its own authentication via the
+    ``ANTHROPIC_API_KEY`` / ``JF_ANTHROPIC_API_KEY`` env vars; no Python
+    SDK client is constructed.
 
     Args:
-        client: Ignored. Kept for backward compatibility with callers
-            that still pass an Anthropic client object.
         model: Full model identifier, e.g. "claude-haiku-4-5".
         system: System prompt string.
         messages: List of message dicts [{role, content}].

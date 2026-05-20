@@ -14,11 +14,6 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from job_finder.sources.dataforseo_source import DataForSEOSource
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
-
 from job_finder.config import DEFAULT_LOOKBACK_DAYS
 from job_finder.db import upsert_job
 from job_finder.json_utils import utc_now_iso

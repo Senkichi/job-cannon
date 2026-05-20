@@ -6,6 +6,7 @@ and the call_model() dispatcher (routing, schema retry, fallback, budget bypass,
 cost recording).
 """
 
+import os
 import sqlite3
 from unittest.mock import MagicMock, patch
 
@@ -246,7 +247,7 @@ def test_call_model_routes_to_configured_provider(tmp_path):
         result = call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_make_adapter.assert_called_once_with(
-        "gemini", None, conn, config, job_id=None, purpose=""
+        "gemini", conn, config, job_id=None, purpose=""
     )
     assert result.provider == "gemini"
 
@@ -321,8 +322,6 @@ def test_call_model_fallback_to_anthropic(tmp_path):
         schema_valid=True,
     )
 
-    mock_client = MagicMock()
-
     def make_adapter_side_effect(provider_name, *args, **kwargs):
         if provider_name == "gemini":
             mock_gemini_adapter = MagicMock()
@@ -346,7 +345,6 @@ def test_call_model_fallback_to_anthropic(tmp_path):
             conn,
             config,
             output_schema=schema,
-            client=mock_client,
         )
 
     assert result.provider == "anthropic"
@@ -390,7 +388,6 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
 
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
-    mock_client = MagicMock()
 
     with (
         patch("job_finder.web.model_provider._make_adapter") as mock_make_adapter,
@@ -402,7 +399,7 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "score", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, config
         )
 
     mock_cost_gate.assert_called_once_with(conn, config, "score")
@@ -433,7 +430,6 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
 
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
-    mock_client = MagicMock()
     anthropic_result = ModelResult(
         data={"score": 70},
         cost_usd=0.01,
@@ -454,7 +450,7 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
-            "score", "sys", [{"role": "user", "content": "hi"}], conn, config, client=mock_client
+            "score", "sys", [{"role": "user", "content": "hi"}], conn, config
         )
 
     mock_record_cost.assert_not_called()
@@ -1035,7 +1031,7 @@ def test_is_supported_provider_name_unknown():
 def test_make_adapter_unknown_provider_raises():
     """_make_adapter raises ValueError for unknown provider names."""
     with pytest.raises(ValueError, match="Unknown provider"):
-        _make_adapter("deepseek", client=None, conn=None, config={})
+        _make_adapter("deepseek", conn=None, config={})
 
 
 def test_make_adapter_conn_none_for_non_anthropic():
@@ -1043,7 +1039,7 @@ def test_make_adapter_conn_none_for_non_anthropic():
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        adapter = _make_adapter("ollama", client=None, conn=None, config={})
+        adapter = _make_adapter("ollama", conn=None, config={})
     assert adapter is not None
 
 
@@ -1061,14 +1057,15 @@ def test_supported_providers_all_wired_in_make_adapter():
     """
     env_vars = {
         "GEMINI_API_KEY": "test",
+        # Anthropic is reachable when ANTHROPIC_API_KEY is set
+        # (post-2026-05-21 the SDK is not constructed; the predicate is env-only).
+        "ANTHROPIC_API_KEY": "test",
     }
-
-    mock_client = MagicMock()
 
     for provider_name in _SUPPORTED_PROVIDERS:
         with patch.dict("os.environ", env_vars, clear=False):
             try:
-                adapter = _make_adapter(provider_name, client=mock_client, conn=None, config={})
+                adapter = _make_adapter(provider_name, conn=None, config={})
             except ValueError as exc:
                 if "Unknown provider" in str(exc):
                     pytest.fail(
@@ -1139,22 +1136,30 @@ def test_cascade_raises_exhausted_error_not_runtime_error(tmp_path, _reset_daily
 
 
 def test_tier_has_provider_non_anthropic_with_key():
-    """Non-Anthropic primary + valid constructor -> True even when client=None."""
+    """Non-Anthropic primary + valid constructor -> True."""
     config = {"providers": {"primary": "ollama", "fallback_chain": []}}
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        assert tier_has_configured_provider("quick", config, client=None) is True
+        assert tier_has_configured_provider("quick", config) is True
 
 
 def test_tier_has_provider_anthropic_only_no_client():
-    """Anthropic-only chain + client=None -> False.
-    (Phase 40 hotfix 2026-05-17: explicit providers.primary required —
-    the silent 'anthropic' default this test originally relied on was
-    removed by Fix 4a.)
+    """Anthropic-only chain + no ANTHROPIC_API_KEY env -> False.
+
+    Post-2026-05-21 DASHBOARD-SDK-REFACTOR: availability is detected via
+    ``is_anthropic_available()`` (env var check). Clearing both
+    ``ANTHROPIC_API_KEY`` and ``JF_ANTHROPIC_API_KEY`` is the canonical
+    "Anthropic not configured" state.
     """
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
-    assert tier_has_configured_provider("quick", config, client=None) is False
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY")
+    }
+    with patch.dict("os.environ", env, clear=True):
+        assert tier_has_configured_provider("quick", config) is False
 
 
 def test_tier_has_provider_anthropic_only_with_client():
@@ -1162,16 +1167,14 @@ def test_tier_has_provider_anthropic_only_with_client():
 
     Post-2026-05-21 DASHBOARD-SDK-REFACTOR: availability is detected via
     ``is_anthropic_available()`` (env var check), not a passed SDK client.
-    The ``client`` parameter is accepted for backward compat but ignored.
     """
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
-    mock_client = MagicMock()
     with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=False):
-        assert tier_has_configured_provider("quick", config, client=mock_client) is True
+        assert tier_has_configured_provider("quick", config) is True
 
 
 def test_tier_has_provider_typo_no_client():
-    """Typo provider name + client=None -> False.
+    """Typo provider name -> False.
     The function's contract is a predicate; under 2026-05-17 hotfix
     tier_has_configured_provider catches the ValueError that
     resolve_provider_config raises for unknown providers and returns False
@@ -1179,14 +1182,14 @@ def test_tier_has_provider_typo_no_client():
     matches the function's documented predicate semantics.
     """
     config = {"providers": {"primary": "gorq", "fallback_chain": []}}
-    assert tier_has_configured_provider("quick", config, client=None) is False
+    assert tier_has_configured_provider("quick", config) is False
 
 
 def test_tier_has_provider_missing_api_key():
     """Recognized provider name but missing required API key -> False."""
     config = {"providers": {"primary": "gemini", "fallback_chain": []}}
     with patch.dict("os.environ", {}, clear=True):
-        assert tier_has_configured_provider("quick", config, client=None) is False
+        assert tier_has_configured_provider("quick", config) is False
 
 
 def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
@@ -1203,9 +1206,8 @@ def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
             "fallback_chain": ["anthropic"],
         }
     }
-    mock_client = MagicMock()
     with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
-        assert tier_has_configured_provider("quick", config, client=mock_client) is True
+        assert tier_has_configured_provider("quick", config) is True
 
 
 def test_tier_has_provider_conn_none_accepted():
@@ -1214,7 +1216,7 @@ def test_tier_has_provider_conn_none_accepted():
     with patch(
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__", return_value=None
     ):
-        result = tier_has_configured_provider("quick", config, client=None, conn=None)
+        result = tier_has_configured_provider("quick", config, conn=None)
     assert result is True
 
 
@@ -1225,7 +1227,7 @@ def test_tier_has_provider_ollama_unreachable():
         "job_finder.web.providers.ollama_provider.OllamaProvider.__init__",
         side_effect=RuntimeError("Connection refused"),
     ):
-        assert tier_has_configured_provider("quick", config, client=None) is False
+        assert tier_has_configured_provider("quick", config) is False
 
 
 # ---------------------------------------------------------------------------

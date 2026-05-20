@@ -13,7 +13,7 @@ from job_finder.db import (
     get_recent_pipeline_events,
     get_recent_runs,
 )
-from job_finder.web.claude_client import get_cost_stats
+from job_finder.web.claude_client import get_cost_stats, is_anthropic_available
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_scorable
 from job_finder.web.model_provider import tier_has_configured_provider
@@ -75,41 +75,30 @@ def _get_stats_context(conn, config):
     }
 
 
-def _get_anthropic_client():
-    """Return an Anthropic client instance, or None if unavailable."""
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        return None
-    try:
-        return _anthropic.Anthropic()
-    except Exception:
-        return None
-
-
 # Cache provider availability for 5 minutes to avoid Ollama health check
 # on every dashboard load (5s timeout × 2 tiers = up to 10s per page load).
 _provider_cache: dict = {}
 _PROVIDER_CACHE_TTL = 300  # seconds
 
 
-def _cached_tier_available(tier: str, config: dict, client) -> bool:
+def _cached_tier_available(tier: str, config: dict) -> bool:
     """Return tier availability from cache, refreshing every 5 minutes.
 
-    Fast-path: if an Anthropic client is available and Anthropic is anywhere
-    in the provider chain, return True immediately without probing other
-    providers (avoids 2-5s Ollama health check timeouts on cold start).
+    Fast-path: if Anthropic is in the cascade chain and the CLI is configured
+    (``ANTHROPIC_API_KEY`` or ``JF_ANTHROPIC_API_KEY`` set), short-circuit to
+    True without probing other providers — avoids 2-5s Ollama health-check
+    timeouts on cold start.
     """
     now = time.monotonic()
     entry = _provider_cache.get(tier)
     if entry and (now - entry[1]) < _PROVIDER_CACHE_TTL:
         return entry[0]
 
-    # Fast path: Anthropic client exists and is in the chain → available.
+    # Fast path: Anthropic CLI configured and in the chain → available.
     # resolve_provider_config raises ValueError when providers.primary is unset
     # (2026-05-17 hotfix Fix 4a) — fall through to the boolean predicate which
     # translates that to False.
-    if client is not None:
+    if is_anthropic_available():
         from job_finder.web.model_provider import resolve_provider_config
 
         try:
@@ -122,7 +111,7 @@ def _cached_tier_available(tier: str, config: dict, client) -> bool:
                 _provider_cache[tier] = (True, now)
                 return True
 
-    result = tier_has_configured_provider(tier, config, client)
+    result = tier_has_configured_provider(tier, config)
     _provider_cache[tier] = (result, now)
     return result
 
@@ -163,8 +152,7 @@ def _get_quick_actions_context(conn, config):
     if not active_scoring:
         unscored_count = count_scorable(conn, config)
 
-    client = _get_anthropic_client()
-    scoring_available = _cached_tier_available("score", config, client)
+    scoring_available = _cached_tier_available("score", config)
 
     return {
         "active_sync": active_sync,

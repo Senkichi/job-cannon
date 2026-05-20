@@ -6,7 +6,7 @@ points were removed in Plan 4 Commit E once all callers migrated to
 score_and_persist_job.
 
 Public API:
-    score_and_persist_job(job, conn, config, client=None,
+    score_and_persist_job(job, conn, config,
                           scorer_fn=None) -> ScoringResult | None
     load_scoring_profile(config) -> dict
 
@@ -26,7 +26,6 @@ name in the caller's module namespace).
 import logging
 import sqlite3
 from collections.abc import Callable
-from typing import Any
 
 from job_finder.db import persist_job_assessment
 
@@ -73,7 +72,6 @@ def score_and_persist_job(
     job: dict,
     conn: sqlite3.Connection,
     config: dict,
-    client: Any | None = None,
     scorer_fn: Callable | None = None,
     candidate_context: str | None = None,
 ):
@@ -106,7 +104,7 @@ def score_and_persist_job(
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
-    result = scorer_fn(job, conn, config, client=client, candidate_context=candidate_context)
+    result = scorer_fn(job, conn, config, candidate_context=candidate_context)
 
     if result is None:
         logger.info("score_and_persist_job: no result for dedup_key=%s", dedup_key)

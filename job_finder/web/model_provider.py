@@ -15,7 +15,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date as _date
-from typing import Any
 
 import requests
 from jsonschema import ValidationError, validate
@@ -274,7 +273,6 @@ def is_supported_provider_name(name: str) -> bool:
 def tier_has_configured_provider(
     tier: str,
     config: dict,
-    client: Any | None,
     conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Return True if the tier has at least one operationally-routable provider entry.
@@ -284,9 +282,9 @@ def tier_has_configured_provider(
     but does not probe model correctness or perform a live inference call.
 
     conn is accepted for API symmetry with call_model() callers but is not used
-    during validation — _make_adapter() only uses conn for AnthropicProvider, which
-    is short-circuited via the is_anthropic_available() env-var check before
-    _make_adapter() is called.
+    during validation — _make_adapter() does not need conn at construction time
+    after the 2026-05-21 DASHBOARD-SDK-REFACTOR removed the AnthropicProvider's
+    constructor-time conn requirement.
 
     Returns False (not raises) when providers.primary is unset — the predicate's
     contract is "is there a routable provider?" and the honest answer to that on
@@ -311,7 +309,7 @@ def tier_has_configured_provider(
             continue
 
         try:
-            _make_adapter(provider_name, client, conn, config)
+            _make_adapter(provider_name, conn, config)
             return True
         except (ValueError, RuntimeError, ImportError):
             continue
@@ -445,7 +443,6 @@ def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
 
 def _make_adapter(
     provider_name: str,
-    client: Any | None,
     conn: sqlite3.Connection | None = None,
     config: dict | None = None,
     job_id: str | None = None,
@@ -455,9 +452,9 @@ def _make_adapter(
 
     Args:
         provider_name: Any name in _SUPPORTED_PROVIDERS.
-        client: Anthropic client (required for anthropic, unused for others).
-        conn: Open SQLite connection. Required only for the Anthropic adapter;
-            pass None for non-Anthropic validation calls.
+        conn: Open SQLite connection. Required only for the Anthropic adapter
+            (forwarded to call_claude for cost recording); pass None for non-
+            Anthropic validation calls.
         config: Application config dict.
         job_id: Job dedup_key for cost attribution (nullable, Anthropic only).
         purpose: Feature attribution label for cost rows (Anthropic only).
@@ -480,16 +477,13 @@ def _make_adapter(
     from job_finder.web.providers.ollama_provider import OllamaProvider
 
     if provider_name == "anthropic":
-        if client is None:
-            raise ValueError("Anthropic client not provided")
-        # Detect DOA clients: anthropic.Anthropic() succeeds without an API key
-        # but every API call fails with "Could not resolve authentication method".
-        # Fail fast here so the cascade skips immediately instead of wasting time.
-        _key = getattr(client, "api_key", None)
-        if not _key:
-            raise ValueError("Anthropic client has no API key configured")
+        if not is_anthropic_available():
+            raise ValueError(
+                "Anthropic CLI not configured "
+                "(ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY missing)"
+            )
         return AnthropicProvider(
-            client=client, conn=conn, config=config, job_id=job_id, purpose=purpose
+            conn=conn, config=config, job_id=job_id, purpose=purpose
         )
     if provider_name == "gemini":
         from job_finder.web.providers.gemini_provider import GeminiProvider
@@ -581,7 +575,6 @@ def call_model(
     purpose: str = "",
     max_tokens: int = 1024,
     timeout: float | None = None,
-    client: Any | None = None,
 ) -> ModelResult:
     """Dispatch a model call to the configured provider for the given tier.
 
@@ -601,8 +594,6 @@ def call_model(
         purpose: Feature attribution label for cost rows.
         max_tokens: Maximum output tokens. Defaults to 1024.
         timeout: Request timeout in seconds. Defaults to provider default.
-        client: Anthropic client instance — required when provider is
-            "anthropic" or fallback is "anthropic".
 
     Returns:
         ModelResult from the successful adapter call.
@@ -658,7 +649,6 @@ def call_model(
         try:
             adapter = _make_adapter(
                 entry_provider,
-                client,
                 conn,
                 config,
                 job_id=job_id,

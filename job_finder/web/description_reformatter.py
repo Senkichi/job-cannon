@@ -31,15 +31,6 @@ from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_mo
 logger = logging.getLogger(__name__)
 
 
-# Satisfies _make_adapter's api_key guard without pulling in the Anthropic
-# SDK. AnthropicProvider forwards this to call_claude(), which ignores
-# client and routes through the CLI — OAuth/subscription billing is preserved.
-class _CLIClientStub:
-    api_key = "cli-managed"
-
-
-_CLI_CLIENT_STUB = _CLIClientStub()
-
 # Regex pattern for common section headers (2+ indicates already formatted)
 _SECTION_HEADER_PATTERN = re.compile(
     r"(?:About|Overview|Summary|Responsibilities|Requirements|Qualifications|Benefits|What You|Minimum|Preferred|Nice to Have|The Role|Your Role|Who You Are|What We)",
@@ -131,7 +122,6 @@ def reformat_description(
                     job_id=None,
                     purpose="description_reformat",
                     max_tokens=2048,
-                    client=_CLI_CLIENT_STUB,
                 )
                 result = model_result.data
             except ProviderCascadeExhaustedError:

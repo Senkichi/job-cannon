@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any
 
 from job_finder.web.claude_client import call_claude
 from job_finder.web.model_provider import BaseProvider, ModelResult
@@ -23,12 +22,12 @@ logger = logging.getLogger(__name__)
 class AnthropicProvider(BaseProvider):
     """Provider adapter that delegates to call_claude().
 
-    Wraps the existing Anthropic client + call_claude() path so it can
-    participate in the generic provider dispatch interface.  Token counts
-    are not re-exposed (call_claude records them internally to scoring_costs).
+    Routes Anthropic dispatch through the ``claude -p`` CLI subprocess via
+    ``call_claude`` so it can participate in the generic provider dispatch
+    interface. Token counts are not re-exposed (call_claude records them
+    internally to scoring_costs).
 
     Args:
-        client: Anthropic API client instance.
         conn: Open SQLite connection for cost recording.
         config: Application config dict.
         job_id: Job dedup_key for cost attribution (nullable).
@@ -37,13 +36,11 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(
         self,
-        client: Any,
         conn: sqlite3.Connection,
         config: dict,
         job_id: str | None = None,
         purpose: str = "",
     ) -> None:
-        self._client = client
         self._conn = conn
         self._config = config
         self._job_id = job_id
@@ -82,7 +79,6 @@ class AnthropicProvider(BaseProvider):
             RuntimeError: Propagated from call_claude() on API errors.
         """
         data, cost_usd, schema_valid = call_claude(
-            client=self._client,
             model=model,
             system=system,
             messages=messages,

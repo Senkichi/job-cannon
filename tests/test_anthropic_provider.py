@@ -23,18 +23,13 @@ from job_finder.web.providers.anthropic_provider import AnthropicProvider
 
 
 @pytest.fixture
-def mock_client():
-    return MagicMock()
-
-
-@pytest.fixture
 def mock_conn():
     return MagicMock(spec=sqlite3.Connection)
 
 
 @pytest.fixture
-def provider(mock_client, mock_conn):
-    return AnthropicProvider(client=mock_client, conn=mock_conn, config={})
+def provider(mock_conn):
+    return AnthropicProvider(conn=mock_conn, config={})
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +66,7 @@ def test_call_returns_model_result(provider):
     assert result.output_tokens == 0
 
 
-def test_call_passes_all_params_to_call_claude(provider, mock_client, mock_conn):
+def test_call_passes_all_params_to_call_claude(provider, mock_conn):
     messages = [{"role": "user", "content": "Test"}]
     schema = {"type": "object"}
 
@@ -89,7 +84,6 @@ def test_call_passes_all_params_to_call_claude(provider, mock_client, mock_conn)
         )
 
     mock_call.assert_called_once_with(
-        client=mock_client,
         model="claude-sonnet-4-6",
         system="System prompt",
         messages=messages,
