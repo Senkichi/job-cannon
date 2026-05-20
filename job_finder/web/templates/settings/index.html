@@ -341,23 +341,6 @@
 
         </div>
 
-        <div class="pt-2 border-t border-slate-700">
-          <p class="text-sm text-slate-400 font-medium mb-3">Model Selection <span class="text-slate-600 font-normal text-xs">(advanced — change only if you know the exact model IDs)</span></p>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Cheap-Tier Model</label>
-              <input type="text" name="model_low"
-                     value="{{ config.get('scoring', {}).get('models', {}).get('low', 'claude-haiku-4-5') }}"
-                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-400 mb-1">Balanced-Tier Model</label>
-              <input type="text" name="model_mid"
-                     value="{{ config.get('scoring', {}).get('models', {}).get('mid', 'claude-sonnet-4-6') }}"
-                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 

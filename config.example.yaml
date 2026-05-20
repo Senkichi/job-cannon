@@ -154,10 +154,10 @@ scoring:
   # other name resolves to job_finder.web.scoring_prompts.variants.<name>.
   # The eval-harness CLI overrides this at runtime via --variant.
   prompt_variant: baseline
-  # AI models (defaults are recommended; change only if you know what you're doing)
-  models:
-    low: claude-haiku-4-5
-    mid: claude-sonnet-4-6
+  # Per-workload model selection lives under `providers.overrides.<provider>.<workload>`
+  # below. The legacy `scoring.models.{low,mid}` block was removed in 2026-05-21
+  # — Phase 40 moved that selection to the providers.overrides path and the
+  # legacy keys were never read after the move.
 
 # --- Multi-provider model routing (Phase 40 flat schema) ---
 # Every call_model() invocation is cascaded: the primary provider is tried

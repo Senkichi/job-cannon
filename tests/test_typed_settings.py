@@ -151,32 +151,11 @@ def test_raw_proxy_is_defensive_copy_at_top_level():
     # the need for raw entirely.
 
 
-def test_loads_legacy_tier_keys(tmp_path):
-    """Legacy providers.* / scoring.haiku_threshold keys migrate on disk (ruamel)."""
-    cfg_path = tmp_path / "legacy.yaml"
-    cfg_path.write_text(
-        "# tier rename migration comment\n"
-        "profile:\n"
-        "  target_titles: [staff]  # required by validate_target_titles\n"
-        "sources: {}\n"
-        "providers:\n"
-        "  haiku:  # inline\n"
-        "    provider: anthropic\n"
-        "    model: claude-haiku-4-5\n"
-        "scoring:\n"
-        "  haiku_threshold: 77\n"
-        "  models:\n"
-        "    haiku: claude-haiku-4-5\n"
-        "    sonnet: claude-sonnet-4-6\n"
-        "db:\n"
-        "  path: jobs.db\n",
-        encoding="utf-8",
-    )
-    s = Settings.load_from_yaml(str(cfg_path))
-    assert s.scoring.candidate_score_threshold == 77
-    assert s.raw["providers"]["low"]["model"] == "claude-haiku-4-5"
-    assert s.raw["scoring"]["models"]["low"] == "claude-haiku-4-5"
-    text = cfg_path.read_text(encoding="utf-8")
-    assert "candidate_score_threshold" in text
-    assert "haiku_threshold" not in text
-    assert "tier rename migration comment" in text
+# test_loads_legacy_tier_keys deleted 2026-05-21: the legacy-key migration
+# function `migrate_config_keys` (providers.haiku|sonnet|opus -> low|mid|high
+# + scoring.models.haiku|sonnet -> low|mid + scoring.haiku_threshold ->
+# candidate_score_threshold) was removed in the TIER-RENAME-ECHO cleanup.
+# Phase 40 made the *target* keys (providers.{low,mid,high},
+# scoring.models.{low,mid}) themselves dead — the function was migrating to
+# unreachable destinations. Any user still on the pre-Phase-40 vocabulary
+# has had multiple migration cycles to update.

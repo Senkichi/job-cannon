@@ -274,13 +274,6 @@ def _parse_form_to_config(form) -> dict:
         scoring["candidate_score_threshold"] = safe_int(
             form["candidate_score_threshold"], DEFAULT_CANDIDATE_SCORE_THRESHOLD
         )
-    models = {}
-    if _has("model_low"):
-        models["low"] = form["model_low"]
-    if _has("model_mid"):
-        models["mid"] = form["model_mid"]
-    if models:
-        scoring["models"] = models
     if scoring:
         config["scoring"] = scoring
 

@@ -70,8 +70,7 @@ class Settings:
 
     @classmethod
     def load_from_yaml(cls, config_path: str) -> Settings:
-        """Load settings from YAML file, performing auto-migration if needed."""
-        migrate_config_keys(config_path)
+        """Load settings from YAML file."""
         from job_finder.config import load_config
 
         cfg = load_config(config_path)
@@ -155,63 +154,3 @@ class Settings:
             raise ValueError(f"Invalid ingestion.max_results: {self.ingestion.max_results}")
 
 
-def migrate_config_keys(config_path: str) -> bool:
-    """Migrate legacy tier keys in config.yaml to new semantic names.
-
-    Uses ruamel.yaml to preserve comments. Returns True if any migration occurred.
-    """
-    import logging
-    from pathlib import Path
-
-    from ruamel.yaml import YAML
-
-    path = Path(config_path)
-    if not path.exists():
-        return False
-
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    yaml.indent(mapping=2, sequence=4, offset=2)
-
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.load(f)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Failed to load config for migration: %s", exc)
-        return False
-
-    if not data or not isinstance(data, dict):
-        return False
-
-    changed = False
-
-    # 1. providers.haiku|sonnet|opus -> providers.low|mid|high
-    if "providers" in data and isinstance(data["providers"], dict):
-        p = data["providers"]
-        for old, new in [("haiku", "low"), ("sonnet", "mid"), ("opus", "high")]:
-            if old in p:
-                p[new] = p.pop(old)
-                changed = True
-
-    # 2. scoring.models.haiku|sonnet -> scoring.models.low|mid
-    if "scoring" in data and isinstance(data["scoring"], dict):
-        s = data["scoring"]
-        if "models" in s and isinstance(s["models"], dict):
-            m = s["models"]
-            for old, new in [("haiku", "low"), ("sonnet", "mid")]:
-                if old in m:
-                    m[new] = m.pop(old)
-                    changed = True
-
-        # 3. scoring.haiku_threshold -> scoring.candidate_score_threshold
-        if "haiku_threshold" in s:
-            s["candidate_score_threshold"] = s.pop("haiku_threshold")
-            changed = True
-
-    if changed:
-        logging.getLogger(__name__).info("Migrating legacy tier keys in %s", config_path)
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f)
-        return True
-
-    return False

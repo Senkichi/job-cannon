@@ -100,14 +100,11 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
 
     # --- Configuration ---
     if config is None:
-        from job_finder.settings import migrate_config_keys
-
         user_data_dirs.ensure_user_data_dir()
         # Use user-data config path if legacy default string is passed
         if config_path == "config.yaml":
             cfg = load_config(allow_missing=True)
         else:
-            migrate_config_keys(config_path)
             cfg = load_config(config_path, allow_missing=True)
     else:
         cfg = config

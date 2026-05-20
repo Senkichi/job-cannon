@@ -127,3 +127,29 @@ class TestSettingsWipeGuard:
             config = yaml.safe_load(f)
         assert "Principal Data Scientist" in config["profile"]["target_titles"]
         assert config["profile"]["min_salary"] == 200000
+
+
+def test_parse_form_does_not_write_scoring_models():
+    """Regression: 2026-05-21 TIER-RENAME-ECHO dropped scoring.models from
+    config. A representative form payload with the now-deleted model_low /
+    model_mid fields must not produce a `scoring.models` key in the merged
+    config — those inputs were write-only to a dead schema.
+    """
+    from werkzeug.datastructures import ImmutableMultiDict
+
+    from job_finder.web.blueprints.settings import _parse_form_to_config
+
+    # Even if a malicious or stale form re-introduces these field names,
+    # the parser should ignore them.
+    form = ImmutableMultiDict(
+        [
+            ("target_titles", "Engineer"),
+            ("model_low", "claude-haiku-4-5"),
+            ("model_mid", "claude-sonnet-4-6"),
+        ]
+    )
+    result = _parse_form_to_config(form)
+    scoring = result.get("scoring", {})
+    assert "models" not in scoring, (
+        f"scoring.models should be dropped, got {scoring!r}"
+    )
