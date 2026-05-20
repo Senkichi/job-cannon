@@ -26,6 +26,33 @@ narrow:
   `server.host` in `config.yaml` to anything else is at the operator's
   own risk.
 
+## Threat Model — Local File Access
+
+An attacker with read access to your home directory (or your user-data
+directory specifically) can read your IMAP app password and any provider
+API keys from `<user_data_dir>/config.yaml` in plaintext. This is the
+standard threat model for desktop apps; **secrets at rest are not
+encrypted** in v5.0.
+
+Defenses currently in place:
+
+- The wizard sets `config.yaml` to `0600` permissions on Linux and macOS
+  so only your user account can read it. (Windows: the default home-directory
+  ACL is already user-only.)
+- The `onboarding_state.wizard_data` row in `jobs.db` is cleared once the
+  wizard completes; secrets only live there during the multi-step setup.
+
+Mitigations the *operator* must take:
+
+- Don't share your user-data directory with another user account on the
+  same machine.
+- If you suspect compromise, rotate the leaked credentials per the
+  recovery steps in `PRIVACY.md` and overwrite `config.yaml`.
+
+A future milestone (v5.1+) will move provider keys and the IMAP app password
+out of `config.yaml` into the OS keyring (`keyring` Python package). Tracked
+under "Future Requirements (deferred to v5.1+)" in `.planning/REQUIREMENTS.md`.
+
 ## Out of Scope
 
 - **Multi-user threat models.** The project does not support multiple
