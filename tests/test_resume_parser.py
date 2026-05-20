@@ -1,10 +1,23 @@
-"""Tests for resume parser module."""
+"""Tests for resume parser module.
 
+These tests assert the call_model invocation matches the *canonical* signature
+in job_finder/web/model_provider.py:575-587. The previous test file mocked
+call_model and asserted on whatever kwargs the resume_parser happened to pass,
+which masked finding C-1: resume_parser called call_model with kwargs that
+would have raised TypeError at runtime (tier="low", system_prompt=, user_message=,
+no conn, no config).
+
+The "valid kwargs at the integration boundary" check (test_call_llm_uses_canonical_kwargs)
+is the regression test that would have caught C-1. Keep it.
+"""
+
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from job_finder.web.model_provider import ModelResult
 from job_finder.web.onboarding.resume_parser import (
     EXPERIENCE_PROFILE_SCHEMA,
     _call_llm,
@@ -14,11 +27,39 @@ from job_finder.web.onboarding.resume_parser import (
 )
 
 
+# --- Fixtures ---
+
+
 @pytest.fixture
-def mock_model_result():
-    """Mock ModelResult object."""
-    result = MagicMock()
-    result.data = {
+def in_memory_db():
+    """Bare sqlite3 connection (no schema). The resume parser does not touch
+    scoring_costs in tests because call_model is mocked; an empty connection
+    is sufficient as the conn= positional argument."""
+    conn = sqlite3.connect(":memory:")
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
+def stub_config():
+    """Minimal config dict for parse_resume. call_model is mocked so the
+    routing keys are never read, but pass a realistic shape so any future
+    config-reading code doesn't NoneType-crash."""
+    return {
+        "providers": {
+            "quick": {
+                "provider": "ollama",
+                "model": "qwen2.5:14b",
+                "fallback_chain": [],
+            },
+        },
+    }
+
+
+@pytest.fixture
+def valid_profile_data():
+    """Full profile matching EXPERIENCE_PROFILE_SCHEMA's required keys."""
+    return {
         "positions": [
             {
                 "title": "Software Engineer",
@@ -36,31 +77,86 @@ def mock_model_result():
         "target_locations_suggested": ["San Francisco", "Remote"],
         "salary_range_suggested": {"min": 150000, "max": 200000, "currency": "USD"},
     }
-    return result
 
 
-def test_parse_resume_pdf_calls_model_with_low_tier(mock_model_result):
-    """Test that parse_resume calls call_model with tier='low' for PDF."""
-    with patch("job_finder.web.onboarding.resume_parser._extract_text") as mock_extract, patch(
-        "job_finder.web.onboarding.resume_parser.call_model"
-    ) as mock_call:
-        mock_extract.return_value = "Sample resume text"
-        mock_call.return_value = mock_model_result
+def _make_result(data: dict) -> ModelResult:
+    return ModelResult(
+        data=data,
+        cost_usd=0.0,
+        input_tokens=0,
+        output_tokens=0,
+        model="qwen2.5:14b",
+        provider="ollama",
+        schema_valid=True,
+    )
 
-        result = parse_resume("resume.pdf")
+
+# --- Canonical-signature boundary tests (the C-1 regression set) ---
+
+
+def test_call_llm_uses_canonical_kwargs(in_memory_db, stub_config, valid_profile_data):
+    """C-1 regression: _call_llm must invoke call_model with the exact kwargs
+    accepted by model_provider.call_model. tier="quick" (workload class),
+    system=, messages=, conn=, config=. NOT tier="low", system_prompt=, user_message=."""
+    with patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+        mock_call.return_value = _make_result(valid_profile_data)
+
+        _call_llm("Sample resume text", in_memory_db, stub_config)
 
         mock_call.assert_called_once()
-        call_kwargs = mock_call.call_args.kwargs
-        assert call_kwargs["tier"] == "low"
-        assert "target_roles_suggested" in call_kwargs["output_schema"]["properties"]
+        kwargs = mock_call.call_args.kwargs
+
+        # Workload class (Phase 40 rename: low/mid/high → quick/score/triage).
+        assert kwargs["tier"] == "quick", f"Expected tier='quick', got {kwargs.get('tier')!r}"
+        # Canonical message shape.
+        assert isinstance(kwargs["messages"], list)
+        assert kwargs["messages"][0]["role"] == "user"
+        assert "Sample resume text" in kwargs["messages"][0]["content"]
+        # system, not system_prompt.
+        assert "system" in kwargs
+        assert "system_prompt" not in kwargs, "Stale kwarg from C-1 bug"
+        assert "user_message" not in kwargs, "Stale kwarg from C-1 bug"
+        # Required positional/keyword args for call_model.
+        assert kwargs["conn"] is in_memory_db
+        assert kwargs["config"] is stub_config
+        # Cost-attribution label so scoring_costs.purpose has a recognizable tag.
+        assert kwargs["purpose"] == "resume_parse"
+        assert kwargs["max_tokens"] == 2048
+        assert kwargs["output_schema"] is EXPERIENCE_PROFILE_SCHEMA
 
 
-def test_parse_resume_docx_extracts_paragraphs():
-    """Test that DOCX extraction reads paragraphs."""
+def test_parse_resume_threads_conn_and_config_to_call_llm(
+    in_memory_db, stub_config, valid_profile_data, tmp_path
+):
+    """parse_resume must thread conn/config through to _call_llm. The C-1 bug
+    silently dropped these because parse_resume's signature didn't accept them."""
+    with patch(
+        "job_finder.web.onboarding.resume_parser._extract_text",
+        return_value="Sample resume text",
+    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+        mock_call.return_value = _make_result(valid_profile_data)
+
+        # Use a real Path with a .pdf suffix so _extract_text dispatch logic
+        # (which keys off suffix) doesn't reject before reaching the patched fn.
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
+
+        kwargs = mock_call.call_args.kwargs
+        assert kwargs["conn"] is in_memory_db
+        assert kwargs["config"] is stub_config
+        assert result == valid_profile_data
+
+
+# --- Behavior tests (no behavioral change from C-1 fix; just kwarg surface) ---
+
+
+def test_parse_resume_docx_extracts_paragraphs(in_memory_db, stub_config, valid_profile_data, tmp_path):
+    """DOCX extraction reads paragraphs and feeds the result into call_model."""
     with patch("job_finder.web.onboarding.resume_parser.Document") as mock_doc_class, patch(
         "job_finder.web.onboarding.resume_parser.call_model"
     ) as mock_call:
-        # Mock Document with paragraphs
         mock_doc = MagicMock()
         mock_para1 = MagicMock()
         mock_para1.text = "First paragraph"
@@ -69,55 +165,66 @@ def test_parse_resume_docx_extracts_paragraphs():
         mock_doc.paragraphs = [mock_para1, mock_para2]
         mock_doc_class.return_value = mock_doc
 
-        # Mock LLM response
-        mock_result = MagicMock()
-        mock_result.data = _empty_profile()
-        mock_call.return_value = mock_result
+        mock_call.return_value = _make_result(valid_profile_data)
 
-        result = parse_resume("resume.docx")
+        fake_docx = tmp_path / "resume.docx"
+        fake_docx.write_bytes(b"PK\x03\x04")  # docx files are zip-stamped
+
+        parse_resume(fake_docx, conn=in_memory_db, config=stub_config)
 
         mock_doc_class.assert_called_once()
-        # Verify paragraphs were accessed
         assert len(mock_doc.paragraphs) == 2
 
 
-def test_parse_resume_rejects_unsupported_extension():
-    """Test that unsupported file extensions raise ValueError."""
+def test_parse_resume_rejects_unsupported_extension(in_memory_db, stub_config, tmp_path):
+    """Unsupported file extensions raise ValueError (propagates)."""
+    fake_txt = tmp_path / "resume.txt"
+    fake_txt.write_text("not a resume")
+
     with pytest.raises(ValueError) as exc_info:
-        parse_resume("resume.txt")
+        parse_resume(fake_txt, conn=in_memory_db, config=stub_config)
 
     assert "Unsupported resume file type" in str(exc_info.value)
     assert ".txt" in str(exc_info.value)
 
 
-def test_parse_resume_blank_text_returns_empty_profile():
-    """Test that blank extracted text returns empty profile without calling LLM."""
-    with patch("job_finder.web.onboarding.resume_parser._extract_text") as mock_extract, patch(
-        "job_finder.web.onboarding.resume_parser.call_model"
-    ) as mock_call:
-        mock_extract.return_value = ""
+def test_parse_resume_blank_text_returns_empty_profile(in_memory_db, stub_config, tmp_path):
+    """Blank extracted text returns empty profile without calling LLM."""
+    with patch(
+        "job_finder.web.onboarding.resume_parser._extract_text",
+        return_value="",
+    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
 
-        result = parse_resume("resume.pdf")
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
 
         assert result == _empty_profile()
         mock_call.assert_not_called()
 
 
-def test_parse_resume_llm_failure_returns_empty_profile():
-    """Test that LLM exception returns empty profile."""
-    with patch("job_finder.web.onboarding.resume_parser._extract_text") as mock_extract, patch(
-        "job_finder.web.onboarding.resume_parser.call_model"
-    ) as mock_call:
-        mock_extract.return_value = "Sample resume text"
+def test_parse_resume_llm_failure_returns_empty_profile(in_memory_db, stub_config, tmp_path):
+    """call_model exception returns empty profile (defensive, never raises)."""
+    with patch(
+        "job_finder.web.onboarding.resume_parser._extract_text",
+        return_value="Sample resume text",
+    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
         mock_call.side_effect = Exception("LLM error")
 
-        result = parse_resume("resume.pdf")
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
 
         assert result == _empty_profile()
 
 
+# --- _extract_text (no signature change; same as before) ---
+
+
 def test_extract_text_pdf():
-    """Test PDF text extraction."""
+    """PDF text extraction reads pages."""
     with patch("job_finder.web.onboarding.resume_parser.PDF.open") as mock_pdf_open:
         mock_pdf = MagicMock()
         mock_page = MagicMock()
@@ -132,7 +239,7 @@ def test_extract_text_pdf():
 
 
 def test_extract_text_docx():
-    """Test DOCX text extraction."""
+    """DOCX extraction reads paragraphs."""
     with patch("job_finder.web.onboarding.resume_parser.Document") as mock_doc_class:
         mock_doc = MagicMock()
         mock_para = MagicMock()
@@ -146,8 +253,11 @@ def test_extract_text_docx():
         mock_doc_class.assert_called_once()
 
 
+# --- Schema and helper integrity ---
+
+
 def test_empty_profile_structure():
-    """Test that _empty_profile returns correct structure."""
+    """_empty_profile returns correct structure."""
     profile = _empty_profile()
 
     assert profile["positions"] == []
@@ -159,7 +269,7 @@ def test_empty_profile_structure():
 
 
 def test_experience_profile_schema_contains_required_fields():
-    """Test that EXPERIENCE_PROFILE_SCHEMA contains all required fields."""
+    """EXPERIENCE_PROFILE_SCHEMA contains all required fields."""
     required = EXPERIENCE_PROFILE_SCHEMA["required"]
 
     assert "positions" in required
@@ -170,50 +280,28 @@ def test_experience_profile_schema_contains_required_fields():
     assert "salary_range_suggested" in required
 
 
-def test_call_llm_uses_low_tier():
-    """Test that _call_llm calls call_model with tier='low'."""
-    with patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
-        mock_result = MagicMock()
-        mock_result.data = {"test": "data"}
-        mock_call.return_value = mock_result
-
-        _call_llm("Sample text")
-
-        call_kwargs = mock_call.call_args.kwargs
-        assert call_kwargs["tier"] == "low"
-        assert call_kwargs["max_tokens"] == 2048
-        assert "target_roles_suggested" in call_kwargs["output_schema"]["properties"]
-
-
-def test_call_llm_returns_empty_on_no_data():
-    """Test that _call_llm returns empty dict when result has no data."""
+def test_call_llm_returns_empty_on_no_data(in_memory_db, stub_config):
+    """_call_llm returns empty dict when result has no data."""
     with patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
         mock_call.return_value = None
 
-        result = _call_llm("Sample text")
+        result = _call_llm("Sample text", in_memory_db, stub_config)
 
         assert result == {}
 
 
-def test_parse_resume_successful_flow():
-    """Test successful end-to-end parse flow."""
-    with patch("job_finder.web.onboarding.resume_parser._extract_text") as mock_extract, patch(
-        "job_finder.web.onboarding.resume_parser.call_model"
-    ) as mock_call:
-        mock_extract.return_value = "Resume text"
-        mock_result = MagicMock()
-        mock_result.data = {
-            "positions": [{"title": "Engineer", "company": "Corp"}],
-            "skills": ["Python"],
-            "education": [],
-            "target_roles_suggested": ["Senior Engineer"],
-            "target_locations_suggested": ["SF"],
-            "salary_range_suggested": {},
-        }
-        mock_call.return_value = mock_result
+def test_parse_resume_successful_flow(in_memory_db, stub_config, valid_profile_data, tmp_path):
+    """End-to-end happy path with mocked call_model."""
+    with patch(
+        "job_finder.web.onboarding.resume_parser._extract_text",
+        return_value="Resume text",
+    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+        mock_call.return_value = _make_result(valid_profile_data)
 
-        result = parse_resume("resume.pdf")
+        fake_pdf = tmp_path / "resume.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\n")
 
-        assert result["positions"][0]["title"] == "Engineer"
-        assert result["skills"] == ["Python"]
-        assert result["target_roles_suggested"] == ["Senior Engineer"]
+        result = parse_resume(fake_pdf, conn=in_memory_db, config=stub_config)
+
+        assert result["positions"][0]["title"] == "Software Engineer"
+        assert result["skills"] == ["Python", "Flask", "SQL"]

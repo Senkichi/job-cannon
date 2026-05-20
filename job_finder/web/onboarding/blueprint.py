@@ -187,7 +187,11 @@ def resume_upload():
                 uploaded.save(tmp)
             # parse_resume returns dict; raises ValueError on unsupported extension (already screened)
             try:
-                profile = resume_parser.parse_resume(Path(tmp_path))
+                profile = resume_parser.parse_resume(
+                    Path(tmp_path),
+                    conn=_db(),
+                    config=current_app.config.get("JF_CONFIG", {}),
+                )
             except ValueError as e:
                 logger.info("resume_parser rejected file (extension already screened?): %s", type(e).__name__)
                 profile = {}

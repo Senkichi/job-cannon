@@ -6,8 +6,8 @@ for manual profile extraction.
 
 import json
 import logging
+import sqlite3
 from pathlib import Path
-from typing import Any
 
 from docx import Document
 from pdfplumber import PDF
@@ -121,25 +121,30 @@ def _empty_profile() -> dict:
     }
 
 
-def _call_llm(text: str, config: dict | None = None) -> dict:
+def _call_llm(text: str, conn: sqlite3.Connection, config: dict) -> dict:
     """Call LLM to extract structured profile from resume text.
 
     Args:
         text: Resume text extracted from file.
-        config: Optional config dict (not used in this phase).
+        conn: Open SQLite connection (passed to call_model for cost recording).
+        config: Application config dict (used by call_model for routing).
 
     Returns:
-        Structured profile dict from LLM response.
+        Structured profile dict from LLM response, or empty dict on failure.
     """
     system_prompt = """You are a resume parser. Extract structured information from the resume text.
 Return a JSON object with positions, skills, education, and suggested target roles/locations/salary range."""
     user_message = f"Resume text:\n\n{text}"
 
     result = call_model(
-        tier="low",
-        system_prompt=system_prompt,
-        user_message=user_message,
+        tier="quick",
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+        conn=conn,
+        config=config,
         output_schema=EXPERIENCE_PROFILE_SCHEMA,
+        job_id=None,
+        purpose="resume_parse",
         max_tokens=2048,
     )
 
@@ -148,16 +153,17 @@ Return a JSON object with positions, skills, education, and suggested target rol
     return {}
 
 
-def parse_resume(path: str | Path, config: dict | None = None) -> dict:
+def parse_resume(path: str | Path, conn: sqlite3.Connection, config: dict) -> dict:
     """Parse resume file and extract structured profile.
 
     Args:
         path: Path to resume file (PDF or DOCX).
-        config: Optional config dict (not used in this phase).
+        conn: Open SQLite connection (used for LLM cost recording).
+        config: Application config dict (used for provider routing).
 
     Returns:
         Structured profile dict. Returns empty profile on any failure
-        (parse quality or LLM failure) - never raises.
+        (parse quality or LLM failure) - never raises except on unsupported extension.
     """
     try:
         path = Path(path)
@@ -167,7 +173,7 @@ def parse_resume(path: str | Path, config: dict | None = None) -> dict:
             logger.warning("Extracted blank text from resume: %s", path)
             return _empty_profile()
 
-        profile = _call_llm(text, config)
+        profile = _call_llm(text, conn, config)
 
         if not profile:
             logger.warning("LLM returned empty profile for resume: %s", path)
@@ -187,6 +193,10 @@ def parse_resume(path: str | Path, config: dict | None = None) -> dict:
 if __name__ == "__main__":
     import sys
 
+    from job_finder.config import load_config
+    from job_finder.web import user_data_dirs
+    from job_finder.web.db_helpers import standalone_connection
+
     if len(sys.argv) != 2:
         print("Usage: python -m job_finder.web.onboarding.resume_parser <resume.pdf>")
         print("Extracts structured profile from PDF/DOCX resume and writes experience_profile.json")
@@ -198,7 +208,10 @@ if __name__ == "__main__":
         sys.exit(2)
 
     try:
-        profile = parse_resume(resume_path)
+        cfg = load_config(allow_missing=True) or {}
+        db_path = str(user_data_dirs.db_path())
+        with standalone_connection(db_path) as standalone_conn:
+            profile = parse_resume(resume_path, conn=standalone_conn, config=cfg)
         output_path = Path.cwd() / "experience_profile.json"
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(profile, f, indent=2)
