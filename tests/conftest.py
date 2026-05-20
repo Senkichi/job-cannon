@@ -594,6 +594,32 @@ def mock_scheduler_pidfile():
 
 
 # ---------------------------------------------------------------------------
+# Keyring isolation (Item 3 commit 3.3 — KEYRING-v5.1)
+# ---------------------------------------------------------------------------
+# This MUST be autouse=True so every test runs against an in-memory backend.
+# Without it, tests that exercise set_secret() would write to the developer's
+# real OS keyring (Windows Credential Manager / macOS Keychain / Linux Secret
+# Service) and leave dangling entries behind. The fixture also resets the
+# module-level deprecation-warning memo and the _KEYRING_UNAVAILABLE flag in
+# job_finder.secrets so test order can't affect outcomes.
+
+
+@pytest.fixture(autouse=True)
+def isolated_keyring(monkeypatch):
+    """Install an in-memory keyring backend for every test."""
+    from tests.helpers.keyring_helpers import InMemoryKeyring
+
+    backend = InMemoryKeyring()
+    monkeypatch.setattr("keyring.core._keyring_backend", backend)
+
+    from job_finder import secrets as secrets_mod
+    monkeypatch.setattr(secrets_mod, "_KEYRING_UNAVAILABLE", False)
+    secrets_mod._warned.clear()
+    yield backend
+    secrets_mod._warned.clear()
+
+
+# ---------------------------------------------------------------------------
 # Collection-count sentinel (Reconciliation Plan v1 R2.3)
 # ---------------------------------------------------------------------------
 # Records the number of items pytest collected so test_collection_invariants

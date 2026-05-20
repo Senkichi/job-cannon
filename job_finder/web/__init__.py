@@ -145,6 +145,14 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         # --- File logging (skipped in test mode to avoid writing logs/app.log during pytest) ---
         _setup_file_logging()
 
+        # --- Keyring backend probe (Item 3, KEYRING-v5.1) ---
+        # Runs after file logging so the NoKeyringError warning lands in app.log.
+        # On success: subsequent get_secret() calls use the OS keyring as step 2
+        # of the precedence stack. On failure (headless Linux without D-Bus, etc.):
+        # step 2 is skipped and config.yaml plaintext fallback handles everything.
+        from job_finder.secrets import probe_keyring_backend
+        probe_keyring_backend()
+
         # Warn loudly if the env var is unset and a jobs.db exists at cwd that the
         # app is about to ignore. Targets the failure mode where a developer's
         # persisted JOB_CANNON_USER_DATA_DIR is missing in a new shell and the app
