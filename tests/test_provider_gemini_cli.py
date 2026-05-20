@@ -191,7 +191,10 @@ def test_freeform_plain_text_returns_text_dict():
             "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
         )
     assert result.data == {"text": "plain text"}
-    assert result.schema_valid is False
+    # M-1 (2026-05-20): no-schema path returns schema_valid=True. Nothing to
+    # validate against; True is the "no error" telemetry value (matches
+    # call_claude:563). False here was biasing the cascade-audit signal.
+    assert result.schema_valid is True
 
 
 def test_freeform_json_string_returns_parsed_dict():
@@ -204,7 +207,8 @@ def test_freeform_json_string_returns_parsed_dict():
             "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
         )
     assert result.data == {"x": 7}
-    assert result.schema_valid is False
+    # M-1: no schema requested → schema_valid=True (see comment above).
+    assert result.schema_valid is True
 
 
 def test_schema_mode_parses_result_field_as_json():

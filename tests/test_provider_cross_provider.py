@@ -196,6 +196,26 @@ def test_free_providers_record_zero_cost(factory_fn, expected_provider):
     assert result.cost_usd == 0.0
 
 
+@pytest.mark.parametrize("factory_fn,expected_provider", PROVIDER_FACTORIES)
+def test_no_schema_returns_schema_valid_true(factory_fn, expected_provider):
+    """M-1 regression (2026-05-20): when output_schema is None, every provider
+    must return schema_valid=True.
+
+    schema_valid is the cascade audit's primary signal — False here biases the
+    audit toward distrusting CLI providers on schema-less callsites (e.g.
+    description_reformat) for reasons that are pure telemetry artifact, not
+    actual quality.
+
+    All four factories above call .call() without an output_schema kwarg, so
+    each result must show True on this branch."""
+    do_call = factory_fn()
+    result = do_call()
+    assert result.schema_valid is True, (
+        f"{expected_provider} returned schema_valid=False on the no-schema path; "
+        f"M-1 convention is True (matches call_claude:563 + AnthropicProvider)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # _PROVIDER_DEFAULTS membership invariant
 # ---------------------------------------------------------------------------

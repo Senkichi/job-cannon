@@ -89,7 +89,11 @@ class ClaudeCodeCLIProvider(BaseProvider):
                 data = parsed if isinstance(parsed, dict) else {"text": str(raw).strip()}
             except (json.JSONDecodeError, TypeError):
                 data = {"text": str(raw).strip()}
-            schema_valid = False
+            # No schema requested — nothing to validate against. True is the "no
+            # error" telemetry value (matches claude_client.call_claude:563 and
+            # AnthropicProvider). False here would bias the cascade audit signal
+            # against CLI providers on schema-less callsites (M-1, 2026-05-20).
+            schema_valid = True
 
         usage = envelope.get("usage") or {}
         return ModelResult(

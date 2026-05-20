@@ -206,6 +206,9 @@ def test_call_with_output_schema_passes_response_format(fake_llama_cpp):
 
 
 def test_call_freeform_plain_text_returns_text_dict(fake_llama_cpp):
+    """M-1 (2026-05-20): no-schema path returns schema_valid=True (nothing to
+    validate against). Previously False, which would have biased the cascade-
+    audit signal against local_bundled on schema-less callsites."""
     provider = _make_provider()
     _FakeLlama.next_response = {
         "choices": [{"message": {"content": "just text"}}],
@@ -213,10 +216,11 @@ def test_call_freeform_plain_text_returns_text_dict(fake_llama_cpp):
     }
     result = provider.call("ignored", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"text": "just text"}
-    assert result.schema_valid is False
+    assert result.schema_valid is True
 
 
 def test_call_freeform_json_content_returns_parsed_dict(fake_llama_cpp):
+    """M-1: caller did not request schema enforcement → schema_valid=True."""
     provider = _make_provider()
     _FakeLlama.next_response = {
         "choices": [{"message": {"content": '{"k": "v"}'}}],
@@ -224,7 +228,7 @@ def test_call_freeform_json_content_returns_parsed_dict(fake_llama_cpp):
     }
     result = provider.call("ignored", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"k": "v"}
-    assert result.schema_valid is False
+    assert result.schema_valid is True
 
 
 def test_call_tokens_from_usage_block(fake_llama_cpp):

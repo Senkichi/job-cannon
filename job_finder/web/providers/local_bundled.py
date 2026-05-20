@@ -106,7 +106,11 @@ class LocalBundledProvider(BaseProvider):
                 data = parsed if isinstance(parsed, dict) else {"text": str(content).strip()}
             except (json.JSONDecodeError, TypeError):
                 data = {"text": str(content).strip()}
-            schema_valid = False
+            # No schema requested — nothing to validate against. True is the "no
+            # error" telemetry value (matches claude_client.call_claude:563 and
+            # AnthropicProvider). False here would bias the cascade audit signal
+            # (M-1, 2026-05-20).
+            schema_valid = True
 
         usage = response.get("usage") or {}
         return ModelResult(

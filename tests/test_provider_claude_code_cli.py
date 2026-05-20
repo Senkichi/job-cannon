@@ -122,7 +122,10 @@ def test_call_returns_zero_cost_and_claude_code_cli_provider():
 # ---------------------------------------------------------------------------
 
 
-def test_freeform_plain_text_returns_text_dict_with_schema_valid_false():
+def test_freeform_plain_text_returns_text_dict_with_schema_valid_true():
+    """M-1 (2026-05-20): no-schema path returns schema_valid=True (nothing to
+    validate against). Previously False, which biased the cascade-audit signal
+    against this provider on schema-less callsites."""
     provider = _make_provider()
     with patch(
         "job_finder.web.providers.claude_code_cli._run_oneshot",
@@ -130,7 +133,7 @@ def test_freeform_plain_text_returns_text_dict_with_schema_valid_false():
     ):
         result = provider.call("m", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"text": "just some plain text"}
-    assert result.schema_valid is False
+    assert result.schema_valid is True
 
 
 def test_freeform_with_json_string_result_returns_parsed_dict():
@@ -141,8 +144,9 @@ def test_freeform_with_json_string_result_returns_parsed_dict():
     ):
         result = provider.call("m", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"key": "value"}
-    # Still False because caller did not request schema enforcement
-    assert result.schema_valid is False
+    # M-1: caller did not request schema enforcement → schema_valid=True (the
+    # "no error" telemetry value, matching the convention in call_claude:563).
+    assert result.schema_valid is True
 
 
 def test_schema_prefers_structured_output_when_present():
