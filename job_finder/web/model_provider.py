@@ -217,14 +217,10 @@ def resolve_provider_config(tier: str, config: dict) -> dict:
     # Use new workload routing
     routing = resolve_workload_routing(tier, config)
 
-    # Build fallback chain, skipping providers that have no model for this workload
-    fallback_chain = []
-    for entry in routing["fallback"]:
-        try:
-            fallback_chain.append(entry)
-        except ValueError:
-            # Provider has no model for this workload (e.g., local_bundled for score)
-            continue
+    # Build fallback chain, skipping providers that have no model for this workload.
+    # resolve_workload_routing already filtered out unsupported (provider, workload)
+    # pairs, so the fallback list is canonical here.
+    fallback_chain = list(routing["fallback"])
 
     return {
         "provider": routing["primary"]["provider"],
@@ -593,7 +589,7 @@ def call_model(
     non-Anthropic providers (avoiding double-recording).
 
     Args:
-        tier: Logical tier name: "mid", "low", or "high".
+        tier: Workload class: "quick", "score", or "triage".
         system: System prompt string.
         messages: List of message dicts [{role, content}].
         conn: Open SQLite connection for budget gating and cost recording.

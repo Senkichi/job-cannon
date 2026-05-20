@@ -107,7 +107,7 @@ def check_imap(
             error_kind="timeout",
             message=f"Login timed out ({timeout}s)",
         )
-    except (OSError, Exception) as e:
+    except Exception as e:
         # T-42-01: log only the exception class name, never repr(e) or vars(e).
         logger.info("imap_test: failure %s for host=%s email=%s", type(e).__name__, host, email)
         return ImapTestResult(

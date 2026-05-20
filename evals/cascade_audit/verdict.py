@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Verdict(BaseModel):
@@ -20,6 +20,8 @@ class Verdict(BaseModel):
         confidence: Confidence score 0-1.
     """
 
+    model_config = ConfigDict(strict=True)
+
     winner: Literal["A", "B", "tie"] = Field(
         description="Which output won: 'A', 'B', or 'tie'"
     )
@@ -27,6 +29,3 @@ class Verdict(BaseModel):
     confidence: float = Field(
         ge=0.0, le=1.0, description="Confidence score 0-1"
     )
-
-    class Config:
-        strict = True
