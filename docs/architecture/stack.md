@@ -43,7 +43,6 @@ This document describes the runtime, frameworks, and dependencies that make up J
 ## Key Dependencies
 
 **Critical:**
-- anthropic >=0.84.0 - Anthropic API client for Claude models (Haiku, Sonnet, Opus)
 - google-api-python-client >=2.100.0 - Gmail API v1 client (email ingestion)
 - google-auth-oauthlib >=1.2.0 - OAuth 2.0 flow for Gmail authentication
 - google-auth-httplib2 >=0.2.0 - Transport layer for Google API authentication

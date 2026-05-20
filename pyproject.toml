@@ -22,7 +22,6 @@ license = "AGPL-3.0-only"
 keywords = [
     "job-search",
     "flask",
-    "anthropic",
     "claude",
     "htmx",
     "ai-scoring",
@@ -56,8 +55,6 @@ dependencies = [
     "imapclient>=3.0",
     "pdfplumber>=0.10",
     "python-docx>=1.1",
-    # AI
-    "anthropic~=0.84",
     # Scoring
     "thefuzz[speedup]~=0.22",
     # Multi-provider routing
