@@ -355,6 +355,11 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
 
     Writes to a sibling temp file first, then uses os.replace() for an atomic
     rename so a crash or OS error mid-write cannot produce a partial/empty file.
+
+    On POSIX, chmods the destination to 0600 after the replace so an IMAP app
+    password / provider API key sitting in plaintext at rest is at least not
+    world-readable. Windows uses ACLs not POSIX modes; the default
+    home-directory ACL is already user-only there (M-4, 2026-05-20).
     """
     config_path_obj = Path(config_path)
     tmp_path = config_path_obj.with_suffix(".yaml.tmp")
@@ -362,6 +367,14 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
         os.replace(tmp_path, config_path)
+        if os.name != "nt":
+            try:
+                os.chmod(config_path, 0o600)
+            except OSError as exc:
+                logger.warning(
+                    "could not chmod 0600 on %s; secrets may be world-readable: %s",
+                    config_path, exc,
+                )
     except Exception:
         try:
             tmp_path.unlink(missing_ok=True)
