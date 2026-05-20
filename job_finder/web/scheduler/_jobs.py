@@ -381,31 +381,6 @@ def register_homepage_discovery(scheduler, app) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Company enrichment (weekly, Sunday 4:00 AM). Uses retry-aware query that
-# skips backoff and denylist companies. Switch to daily at 4:00 AM only
-# after summary logs show meaningful backlog with acceptable failure rates.
-# ---------------------------------------------------------------------------
-
-
-def register_company_enrichment(scheduler, app) -> None:
-    """Register the weekly company-enrichment job (Sun 4:00 AM)."""
-
-    def _import_enrichment():
-        from job_finder.web.backfill_companies import run_scheduled_enrichment
-
-        return run_scheduled_enrichment
-
-    scheduler.add_job(
-        _make_simple_job(app, "Company enrichment", _import_enrichment),
-        trigger=CronTrigger(day_of_week="sun", hour=4, minute=0),
-        id="company_enrichment",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Registry hygiene (1st of month, 3:30 AM). Runs denylist cleanup then
 # orphan cleanup in order. Replaces ad-hoc denylist splicing previously
 # mixed into orphan cleanup internals.
@@ -566,7 +541,6 @@ def register_all_jobs(scheduler, app) -> None:
     register_company_linkage(scheduler, app)
     register_orphan_cleanup(scheduler, app)
     register_homepage_discovery(scheduler, app)
-    register_company_enrichment(scheduler, app)
     register_registry_hygiene(scheduler, app)
     register_enrichment_backfill(scheduler, app)
     register_agentic_backfill(scheduler, app)

@@ -19,11 +19,9 @@ from job_finder.web.scoring_orchestrator import (
 )
 
 try:
-    from job_finder.web.company_enricher import enrich_company_info
     from job_finder.web.data_enricher import enrich_job
 except ImportError:
     enrich_job = None  # type: ignore[assignment]
-    enrich_company_info = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 

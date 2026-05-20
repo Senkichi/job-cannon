@@ -236,17 +236,7 @@ def main() -> int:
             )
         )
 
-        # 11. Company enrichment (Sun) --------------------------------------
-        from job_finder.web.backfill_companies import run_scheduled_enrichment
-
-        results.append(
-            _run_one(
-                "company_enrichment",
-                lambda: run_scheduled_enrichment(db_path, config),
-            )
-        )
-
-        # 12. Registry hygiene (1st of month; destructive) ------------------
+        # 11. Registry hygiene (1st of month; destructive) ------------------
         from job_finder.web.backfill_companies import run_registry_hygiene
 
         results.append(

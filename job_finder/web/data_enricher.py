@@ -41,9 +41,6 @@ import json
 import logging
 from typing import Any
 
-from job_finder.web.company_enricher import (
-    enrich_company_info,  # noqa: F401 (re-exported for callers)
-)
 from job_finder.web.enrichment_sources import merge_apply_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,

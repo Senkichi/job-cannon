@@ -34,7 +34,7 @@ WAVES: list[tuple[str, list[str], int, int]] = [
     ("A", ["health_heartbeat", "orphan_cleanup", "registry_hygiene", "company_linkage"], 2, 3),
     ("B", ["ats_source_url_promote", "staleness_check", "pipeline_detection",
            "homepage_discovery", "ats_scan", "ats_slug_probe"], 5, 10),
-    ("C", ["careers_crawl", "company_enrichment"], 10, 30),
+    ("C", ["careers_crawl"], 10, 30),
     ("D", ["ingestion_poll", "enrichment_backfill", "agentic_backfill"], 30, 30),
 ]
 
@@ -54,7 +54,6 @@ MAX_WAIT = {
     "ats_slug_probe": 1800,
     # Wave C — HTTP, longest
     "careers_crawl": 5400,
-    "company_enrichment": 5400,
     # Wave D — feeders
     "ingestion_poll": 1800,
     "enrichment_backfill": 7200,

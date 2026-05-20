@@ -287,59 +287,6 @@ class TestSearchDuckDuckGo:
 
 
 # ---------------------------------------------------------------------------
-# Tests for enrich_company_info (preserved)
-# ---------------------------------------------------------------------------
-
-
-class TestEnrichCompanyInfo:
-    def test_enrich_company_info_calls_duckduckgo(self):
-        """enrich_company_info calls DuckDuckGo for company details."""
-        from job_finder.web.company_enricher import enrich_company_info
-
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = "Acme Corp is a SaaS company with 500 employees."
-            result = enrich_company_info("Acme Corp")
-
-        mock_ddg.assert_called_once()
-        # Should include company name in query
-        query = mock_ddg.call_args[0][0]
-        assert "Acme Corp" in query
-
-    def test_enrich_company_info_returns_dict(self):
-        """enrich_company_info returns dict (possibly empty) with company fields."""
-        from job_finder.web.company_enricher import enrich_company_info
-
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = "Acme Corp employs 500 people in the SaaS industry."
-            result = enrich_company_info("Acme Corp")
-
-        # Keys are optional (DDG reliability is low per research) but should be correct types if present
-        for key in ["company_size", "industry", "funding_stage"]:
-            if key in result:
-                assert isinstance(result[key], str)
-
-    def test_enrich_company_info_returns_empty_dict_on_ddg_failure(self):
-        """enrich_company_info returns empty dict when DuckDuckGo returns None."""
-        from job_finder.web.company_enricher import enrich_company_info
-
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.return_value = None
-            result = enrich_company_info("Acme Corp")
-
-        assert result == {}
-
-    def test_enrich_company_info_returns_empty_dict_on_exception(self):
-        """enrich_company_info returns empty dict when DDG call raises an exception."""
-        from job_finder.web.company_enricher import enrich_company_info
-
-        with patch("job_finder.web.company_enricher.search_duckduckgo") as mock_ddg:
-            mock_ddg.side_effect = Exception("Network error")
-            result = enrich_company_info("Acme Corp")
-
-        assert result == {}
-
-
-# ---------------------------------------------------------------------------
 # Tests for enrich_job tier ordering (Phase 10 — NEW)
 # ---------------------------------------------------------------------------
 

@@ -1,12 +1,15 @@
 """Homepage auto-discovery for companies without a known homepage URL.
 
-Three-tier lookup:
+Four-tier lookup:
 1. Domain guess — strip suffixes from name_raw, try single-token as domain.
    Zero API cost.
 2. Slug heuristic — try ats_slug first, then name-derived slug as domain.
    Zero API cost.
-3. SerpAPI web search — query SerpAPI engine=google for company homepage.
-   Replaces broken DDG HTML search.
+3. Claude CLI lookup — invoke ``claude -p`` with WebSearch/WebFetch to
+   resolve hard-case homepages (multi-word names, abbreviations, parent
+   companies) that the mechanical tiers miss. $0 via Claude.ai subscription.
+4. SerpAPI web search — query SerpAPI engine=google for company homepage.
+   Paid; used as last resort when Claude CLI declines.
 
 Used by run_homepage_discovery() which processes up to _BATCH_CAP companies
 per run. Stamps homepage_probe_attempted_at on every company processed
@@ -18,6 +21,7 @@ import re
 
 import requests
 
+from job_finder.secrets import get_secret
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -115,7 +119,7 @@ def discover_homepage(
     source_urls: list[str],
     api_key: str | None = None,
 ) -> str | None:
-    """Auto-discover company homepage URL via three-tier lookup.
+    """Auto-discover company homepage URL via four-tier lookup.
 
     Tier 1 (domain guess): Strip suffixes from name_raw, try single-token
     as domain. Zero API cost.
@@ -123,8 +127,12 @@ def discover_homepage(
     Tier 2 (slug heuristic): Try ats_slug first, then name-derived slug
     as domain. Zero API cost.
 
-    Tier 3 (SerpAPI web search): Query SerpAPI engine=google. Skipped
-    when api_key is None.
+    Tier 3 (Claude CLI lookup): Invoke ``claude -p`` with WebSearch/WebFetch
+    for hard-case companies (multi-word, abbreviations, parent companies).
+    $0 via Claude.ai subscription. Skipped if the Claude CLI is unavailable.
+
+    Tier 4 (SerpAPI web search): Query SerpAPI engine=google. Paid; last
+    resort. Skipped when api_key is None.
 
     Args:
         company_name: Human-readable company name.
@@ -133,7 +141,7 @@ def discover_homepage(
         ats_slug: ATS slug to try as domain prefix (e.g. "ramp" -> ramp.com).
         source_urls: List of source URLs from jobs table (reserved for future
             domain extraction from apply_options URLs).
-        api_key: SerpAPI key. When None, Tier 3 is skipped.
+        api_key: SerpAPI key. When None, Tier 4 is skipped.
 
     Returns:
         Validated homepage URL string, or None if no tier succeeds.
@@ -156,7 +164,12 @@ def discover_homepage(
         if result is not None:
             return result
 
-    # Tier 3: SerpAPI web search (skipped when no API key)
+    # Tier 3: Claude CLI lookup ($0 via subscription)
+    result = _try_claude_enricher(company_name)
+    if result is not None:
+        return result
+
+    # Tier 4: SerpAPI web search (skipped when no API key)
     if api_key is not None:
         return _search_serpapi(company_name, api_key)
 
@@ -172,7 +185,9 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
 
     Args:
         db_path: Path to the SQLite database file.
-        config: Optional config dict. Uses config['serpapi']['api_key'] for Tier 3.
+        config: Optional config dict. SerpAPI key for Tier 4 is resolved via
+            get_secret("sources.serpapi.api_key", config=config) — env var,
+            keyring, or config.yaml plaintext fallback.
 
     Returns:
         Summary dict:
@@ -184,9 +199,7 @@ def run_homepage_discovery(db_path: str, config: dict | None = None) -> dict:
     homepages_found = 0
     errors: list[str] = []
 
-    api_key = None
-    if config:
-        api_key = config.get("serpapi", {}).get("api_key")
+    api_key = get_secret("sources.serpapi.api_key", config=config) if config else None
 
     with standalone_connection(db_path) as conn:
         companies = conn.execute(
@@ -342,6 +355,42 @@ def _try_slug_heuristic(ats_slug: str) -> str | None:
     except Exception as e:
         logger.debug("Slug heuristic failed for %s: %s", url, e)
         return None
+
+
+def _try_claude_enricher(company_name: str) -> str | None:
+    """Tier 3: Claude CLI lookup for hard-case homepages.
+
+    Invokes ``claude -p`` with WebSearch/WebFetch tooling to resolve
+    companies whose mechanical name→domain mapping fails. The Claude CLI
+    runs against the user's Claude.ai subscription ($0 per call).
+
+    Imports ``enrich_companies_via_claude`` lazily so this module doesn't
+    fail to import on machines without the Claude CLI installed — the call
+    itself returns [] when the CLI binary is missing.
+
+    Args:
+        company_name: Company name to look up.
+
+    Returns:
+        Validated homepage URL string, or None if no result or invalid URL.
+    """
+    try:
+        from job_finder.web.claude_enricher import enrich_companies_via_claude
+
+        results = enrich_companies_via_claude([{"name": company_name}])
+    except Exception as e:
+        logger.debug("claude_enricher failed for '%s': %s", company_name, e)
+        return None
+
+    if not results:
+        return None
+
+    homepage_url = results[0].get("homepage_url")
+    if not homepage_url or not homepage_url.startswith("http"):
+        return None
+
+    # Validate before returning — Claude can occasionally produce dead URLs.
+    return _validate_url(homepage_url)
 
 
 def _search_serpapi(company_name: str, api_key: str) -> str | None:

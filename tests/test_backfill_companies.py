@@ -298,71 +298,6 @@ class TestAtsProbing:
 # ---------------------------------------------------------------------------
 
 
-class TestDdgEnrichment:
-    """Tests for run_ddg_enrichment()."""
-
-    def test_ddg_enrichment_triggered(self, migrated_db):
-        """After company creation, enrich_company_info is called for each new company name."""
-        from job_finder.web.backfill_companies import run_ddg_enrichment
-
-        path, conn = migrated_db
-
-        # Insert two new company records
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
-            "VALUES ('acme', 'Acme Corp', 'pending', '2026-01-01', '2026-01-01')"
-        )
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
-            "VALUES ('widgetco', 'WidgetCo', 'pending', '2026-01-01', '2026-01-01')"
-        )
-        conn.commit()
-
-        acme_id = conn.execute("SELECT id FROM companies WHERE name = 'acme'").fetchone()["id"]
-        widgetco_id = conn.execute("SELECT id FROM companies WHERE name = 'widgetco'").fetchone()[
-            "id"
-        ]
-        new_company_ids = [acme_id, widgetco_id]
-
-        # Use homepage_url which exists in the companies schema as a storable field
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.return_value = {"homepage_url": "https://example.com"}
-            result = run_ddg_enrichment(conn, new_company_ids)
-
-        # enrich_company_info called once per new company
-        assert mock_enrich.call_count == 2
-        # Both companies got a storable field (homepage_url exists in schema)
-        assert result["enriched"] == 2
-
-    def test_ddg_enrichment_results_stored(self, migrated_db):
-        """DDG enrichment results are stored in the companies table."""
-        from job_finder.web.backfill_companies import run_ddg_enrichment
-
-        path, conn = migrated_db
-
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
-            "VALUES ('testco', 'TestCo', 'pending', '2026-01-01', '2026-01-01')"
-        )
-        conn.commit()
-
-        company_id = conn.execute("SELECT id FROM companies WHERE name = 'testco'").fetchone()[
-            "id"
-        ]
-
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.return_value = {}  # Empty result — no fields to store
-            result = run_ddg_enrichment(conn, [company_id])
-
-        # Empty result means 0 enriched, 1 empty_result
-        assert result["enriched"] == 0
-        assert result["empty_result"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Summary output test
-# ---------------------------------------------------------------------------
-
 # ---------------------------------------------------------------------------
 # Denylist cleanup tests
 # ---------------------------------------------------------------------------
@@ -795,7 +730,7 @@ class TestSummaryOutput:
     """Tests that main() calls all phases and prints summary."""
 
     def test_summary_output(self, migrated_db, capsys):
-        """After full run, summary prints linked count, new companies, ATS probe results, DDG results."""
+        """After full run, summary prints linked count, new companies, ATS probe results."""
         from job_finder.web.backfill_companies import main
 
         path, conn = migrated_db
@@ -811,13 +746,11 @@ class TestSummaryOutput:
             patch("job_finder.web.backfill_companies.load_config") as mock_cfg,
             patch("job_finder.web.backfill_companies.link_jobs_to_companies") as mock_link,
             patch("job_finder.web.backfill_companies.run_ats_probing") as mock_ats,
-            patch("job_finder.web.backfill_companies.run_ddg_enrichment") as mock_ddg,
             patch("job_finder.web.backfill_companies.sqlite3") as mock_sqlite3,
         ):
             mock_cfg.return_value = {"db": {"path": path}}
             mock_link.return_value = (10, [1, 2, 3], 5)
             mock_ats.return_value = {"probed": 3, "hits": 1, "misses": 2}
-            mock_ddg.return_value = {"enriched": 2, "empty_result": 0, "error": 0}
 
             # Simulate sqlite3.connect returning a mock conn with required queries
             mock_conn = MagicMock()
@@ -1147,115 +1080,3 @@ class TestRunRegistryHygiene:
             assert isinstance(result[key], int)
 
 
-# ---------------------------------------------------------------------------
-# Retry-aware enrichment tests
-# ---------------------------------------------------------------------------
-
-
-class TestRetryAwareEnrichment:
-    """Tests for enrichment retry metadata in run_ddg_enrichment."""
-
-    def _insert_company(self, conn, name):
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, created_at, updated_at) "
-            "VALUES (?, ?, 'pending', '2026-01-01', '2026-01-01')",
-            (name.lower(), name),
-        )
-        conn.commit()
-        return conn.execute("SELECT id FROM companies WHERE name = ?", (name.lower(),)).fetchone()[
-            "id"
-        ]
-
-    def test_empty_result_sets_backoff_and_error(self, migrated_db):
-        """Empty DDG result sets enrichment_backoff_until and enrichment_last_error='no_signals_found'."""
-        from unittest.mock import patch
-
-        from job_finder.web.company_resolver import run_ddg_enrichment
-
-        db_path, conn = migrated_db
-        company_id = self._insert_company(conn, "EmptyCo")
-
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.return_value = {}
-            run_ddg_enrichment(conn, [company_id])
-
-        row = conn.execute(
-            "SELECT enrichment_attempts, enrichment_backoff_until, enrichment_last_error "
-            "FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-        assert row["enrichment_attempts"] == 1
-        assert row["enrichment_backoff_until"] is not None
-        assert row["enrichment_last_error"] == "no_signals_found"
-
-    def test_success_clears_backoff_and_error(self, migrated_db):
-        """Successful enrichment clears enrichment_backoff_until and enrichment_last_error."""
-        from unittest.mock import patch
-
-        from job_finder.web.company_resolver import run_ddg_enrichment
-
-        db_path, conn = migrated_db
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, "
-            "enrichment_backoff_until, enrichment_last_error, created_at, updated_at) "
-            "VALUES ('goodco', 'GoodCo', 'pending', '2099-01-01', 'no_signals_found', "
-            "'2026-01-01', '2026-01-01')"
-        )
-        conn.commit()
-        company_id = conn.execute("SELECT id FROM companies WHERE name = 'goodco'").fetchone()[
-            "id"
-        ]
-
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.return_value = {"company_size": "large"}
-            run_ddg_enrichment(conn, [company_id])
-
-        row = conn.execute(
-            "SELECT enrichment_backoff_until, enrichment_last_error FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-        assert row["enrichment_backoff_until"] is None
-        assert row["enrichment_last_error"] is None
-
-    def test_exception_sets_backoff_and_records_error_type(self, migrated_db):
-        """Exception during enrichment sets backoff and records error class name."""
-        from unittest.mock import patch
-
-        from job_finder.web.company_resolver import run_ddg_enrichment
-
-        db_path, conn = migrated_db
-        company_id = self._insert_company(conn, "ErrCo")
-
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.side_effect = RuntimeError("DDG timeout")
-            result = run_ddg_enrichment(conn, [company_id])
-
-        assert result["error"] == 1
-        row = conn.execute(
-            "SELECT enrichment_backoff_until, enrichment_last_error FROM companies WHERE id = ?",
-            (company_id,),
-        ).fetchone()
-        assert row["enrichment_backoff_until"] is not None
-        assert "RuntimeError" in row["enrichment_last_error"]
-
-    def test_scheduled_enrichment_skips_backoff_companies(self, migrated_db):
-        """run_scheduled_enrichment excludes companies within their backoff window."""
-        from unittest.mock import patch
-
-        from job_finder.web.backfill_companies import run_scheduled_enrichment
-
-        db_path, conn = migrated_db
-        conn.execute(
-            "INSERT INTO companies (name, name_raw, ats_probe_status, "
-            "enrichment_backoff_until, created_at, updated_at) "
-            "VALUES ('backoffco', 'BackoffCo', 'pending', '2099-12-31', "
-            "'2026-01-01', '2026-01-01')"
-        )
-        conn.commit()
-        conn.close()
-
-        with patch("job_finder.web.company_resolver.enrich_company_info") as mock_enrich:
-            mock_enrich.return_value = {}
-            result = run_scheduled_enrichment(db_path, {"filters": {}})
-
-        assert result["checked"] == 0  # backoff company excluded

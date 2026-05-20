@@ -2,17 +2,16 @@
 
 Links all jobs with NULL company_id to company records using fuzzy matching.
 Creates new company records for unmatched names, then triggers ATS probing
-and DuckDuckGo enrichment on newly created records.
+on newly created records.
 
 Purpose:
-    677 jobs currently have NULL company_id. Only 1 company record exists.
-    This script:
+    Jobs with NULL company_id are linked to existing or newly-created
+    company records:
     1. Normalizes company names from unlinked jobs
     2. Fuzzy-matches against existing company records (threshold=85)
     3. Creates new company records for unmatched names (via upsert_company)
     4. Links all jobs to their company_id
     5. Runs ATS probing on newly created companies
-    6. Runs DDG enrichment on newly created companies
 
 Usage:
     python -m job_finder.web.backfill_companies
@@ -25,8 +24,7 @@ Exports:
     fuzzy_match_company: Fuzzy-match a raw name against existing companies.
     link_jobs_to_companies: Link all unlinked jobs to company records.
     run_ats_probing: Run ATS probing on pending companies.
-    run_ddg_enrichment: Run DDG enrichment on new companies.
-    verify_homepage_urls: Check reachability of DDG-populated homepage URLs.
+    verify_homepage_urls: Check reachability of company homepage URLs.
     verify_all_linkable_jobs_linked: Verify all non-denylist jobs have company links.
 """
 
@@ -39,8 +37,6 @@ from job_finder.config import COMPANY_DENYLIST, get_company_denylist, load_confi
 from job_finder.web import company_resolver as _company_resolver
 from job_finder.web.ats_scanner import probe_ats_slugs
 from job_finder.web.db_helpers import standalone_connection
-
-# enrich_company_info accessed via _company_resolver to match test mock paths
 from job_finder.web.dedup_normalizer import normalize_company
 
 logger = logging.getLogger(__name__)
@@ -476,97 +472,6 @@ def run_ats_probing(db_path: str, config: dict) -> dict:
     return result
 
 
-def run_ddg_enrichment(
-    conn: sqlite3.Connection,
-    new_company_ids: list[int],
-) -> dict:
-    """Run DuckDuckGo enrichment on newly created company records.
-
-    For each company_id in new_company_ids, looks up name_raw from the
-    companies table and calls enrich_company_info(). If results are
-    non-empty and the returned fields exist as columns in the companies
-    table, updates the companies row with the enriched data.
-
-    DDG reliability is LOW per existing code comments. Failures are
-    non-fatal and logged at debug level.
-
-    Args:
-        conn: Open SQLite connection.
-        new_company_ids: List of company IDs for newly created records.
-
-    Returns:
-        Dict with "enriched" (int) and "empty_result" (int) counts.
-    """
-    if not new_company_ids:
-        return {"enriched": 0, "empty_result": 0, "error": 0}
-
-    # Get companies table columns for safe UPDATE construction
-    col_rows = conn.execute("PRAGMA table_info(companies)").fetchall()
-    valid_columns: frozenset[str] = frozenset(row["name"] for row in col_rows)
-
-    enriched_count = 0
-    empty_count = 0
-    error_count = 0
-    total = len(new_company_ids)
-
-    print(f"\n--- DDG Enrichment ({total} companies) ---")
-
-    for idx, company_id in enumerate(new_company_ids, 1):
-        row = conn.execute("SELECT name_raw FROM companies WHERE id = ?", (company_id,)).fetchone()
-
-        if row is None:
-            logger.warning("run_ddg_enrichment: company_id=%d not found", company_id)
-            continue
-
-        name_raw = row["name_raw"]
-        # Logger (utf-8 file handler) instead of print() — bare print() hits
-        # cp1252 stdout on Windows and crashes the entire batch the first time
-        # a non-ASCII company name appears in the queue.
-        logger.info("DDG enrichment [%d/%d]: %s", idx, total, name_raw)
-
-        try:
-            result = _company_resolver.enrich_company_info(name_raw)
-        except Exception as e:
-            logger.debug("enrich_company_info failed for '%s': %s", name_raw, e)
-            error_count += 1
-            continue
-
-        if not result:
-            empty_count += 1
-            continue
-
-        # Filter to only fields that exist as columns in the companies table
-        updatable = {k: v for k, v in result.items() if k in valid_columns}
-
-        if not updatable:
-            logger.debug(
-                "DDG enrichment for '%s': fields %s not in companies schema — skipping",
-                name_raw,
-                list(result.keys()),
-            )
-            empty_count += 1
-            continue
-
-        # Build UPDATE statement dynamically (only valid columns)
-        set_clauses = ", ".join(f"{col} = ?" for col in updatable)
-        values = list(updatable.values()) + [company_id]
-
-        try:
-            conn.execute(
-                f"UPDATE companies SET {set_clauses} WHERE id = ?",
-                values,
-            )
-            conn.commit()
-            enriched_count += 1
-            logger.debug("DDG enrichment stored for '%s': %s", name_raw, updatable)
-        except Exception as e:
-            logger.warning("Failed to store DDG enrichment for '%s': %s", name_raw, e)
-            error_count += 1
-
-    print(f"DDG enrichment complete: {enriched_count}/{total} companies enriched")
-    return {"enriched": enriched_count, "empty_result": empty_count, "error": error_count}
-
-
 def cleanup_orphan_companies(conn: sqlite3.Connection) -> dict:
     """Delete companies with no linked jobs and no scan history.
 
@@ -706,41 +611,13 @@ def run_registry_hygiene(db_path: str, config: dict) -> dict:
     }
 
 
-def run_scheduled_enrichment(db_path: str, config: dict) -> dict:
-    """Enrich company metadata with retry-aware backoff.
-
-    Skips companies within their backoff window.
-
-    Returns:
-        Dict with "checked" (int) count of companies processed.
-    """
-    from datetime import datetime
-
-    with standalone_connection(db_path) as conn:
-        now = datetime.now().isoformat()
-        rows = conn.execute(
-            """SELECT id FROM companies
-               WHERE (enrichment_backoff_until IS NULL OR enrichment_backoff_until < ?)
-               AND company_size IS NULL
-               AND industry IS NULL""",
-            (now,),
-        ).fetchall()
-
-        company_ids = [r[0] for r in rows]
-        if company_ids:
-            run_ddg_enrichment(conn, company_ids)
-
-    return {"checked": len(company_ids)}
-
-
 def main() -> None:
     """CLI entry point for company backfill.
 
     Loads config, opens its own sqlite3 connection (WAL-safe, not Flask g.db),
-    prints initial state, runs all three phases:
+    prints initial state, runs two phases:
     1. link_jobs_to_companies — fuzzy match + create + link
     2. run_ats_probing — probe ATS APIs for new companies
-    3. run_ddg_enrichment — enrich new companies with DDG data
 
     Prints final summary with all metrics.
     """
@@ -767,9 +644,6 @@ def main() -> None:
         # Phase 2: ATS probing
         ats_result = run_ats_probing(db_path, config)
 
-        # Phase 3: DDG enrichment
-        ddg_result = run_ddg_enrichment(conn, new_company_ids)
-
         # Final summary
         null_after = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id IS NULL").fetchone()[
             0
@@ -785,7 +659,6 @@ def main() -> None:
         print(f"ATS probed:              {ats_result.get('probed', 0)}")
         print(f"ATS hits:                {ats_result.get('hits', 0)}")
         print(f"ATS misses:              {ats_result.get('misses', 0)}")
-        print(f"DDG enriched:            {ddg_result.get('enriched', 0)}")
 
 
 if __name__ == "__main__":

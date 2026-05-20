@@ -32,7 +32,6 @@ JOB_NAME = {
     "homepage_discovery": "Homepage discovery",
     "ats_scan": "ATS scan",
     "ats_slug_probe": "ATS slug probe",
-    "company_enrichment": "Company enrichment",
     "orphan_cleanup": "Orphan cleanup",
     "registry_hygiene": "Registry hygiene",
 }
