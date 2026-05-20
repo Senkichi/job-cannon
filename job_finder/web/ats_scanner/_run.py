@@ -20,6 +20,7 @@ import time
 from datetime import datetime
 
 from job_finder.db import derive_classification
+from job_finder.secrets import get_secret
 from job_finder.web.ats_platforms import scan_ashby, scan_greenhouse, scan_lever
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
@@ -409,7 +410,7 @@ def _score_new_ats_jobs(
         except ImportError:
             _enrich_job = None  # type: ignore[assignment,misc]
 
-        serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+        serpapi_key = get_secret("sources.serpapi.api_key", config=config)
         scored_count = 0
 
         for dedup_key in all_new_job_keys:

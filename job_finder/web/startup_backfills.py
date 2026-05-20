@@ -13,6 +13,7 @@ first schema migrations, then startup backfills.
 
 from datetime import UTC
 
+from job_finder.secrets import get_secret
 from job_finder.web.db_helpers import standalone_connection
 
 
@@ -109,7 +110,7 @@ def run_data_backfills_once(db_path: str, config: dict) -> None:
                     logger.info("Backfill posted_date: %d jobs updated", updated)
 
                 # 3. SerpAPI enrichment for jobs missing jd_full
-                serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+                serpapi_key = get_secret("sources.serpapi.api_key", config=config)
                 if serpapi_key:
                     try:
                         from job_finder.web.data_enricher import run_enrichment_backfill

@@ -19,6 +19,8 @@ the runner bodies (none currently) would patch this module directly.
 import logging
 from typing import Any
 
+from job_finder.secrets import get_secret
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +53,7 @@ def run_enrichment_backfill_two_stage(db_path: str, config: dict) -> dict[str, A
 
     # Stage 1: enrichment
     try:
-        serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+        serpapi_key = get_secret("sources.serpapi.api_key", config=config)
         enriched = run_enrichment_backfill(
             db_path,
             serpapi_key=serpapi_key,

@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
 import requests
 
+from job_finder.secrets import get_secret
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
 logger = logging.getLogger(__name__)
@@ -40,11 +40,12 @@ class OpenRouterProvider(BaseProvider):
     """
 
     def __init__(self, config: dict) -> None:
-        self._api_key = os.environ.get("OPENROUTER_API_KEY")
+        self._api_key = get_secret("providers.api_keys.openrouter", config=config)
         if not self._api_key:
             raise ValueError(
-                "OPENROUTER_API_KEY environment variable not set. "
-                "Required for OpenRouter provider."
+                "OpenRouter API key not set. Set OPENROUTER_API_KEY env var, "
+                "store it in the OS keyring, or add providers.api_keys.openrouter "
+                "to config.yaml."
             )
         self._base_url = _DEFAULT_BASE_URL
 

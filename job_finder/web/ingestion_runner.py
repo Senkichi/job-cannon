@@ -19,6 +19,7 @@ from job_finder.db import upsert_job
 from job_finder.json_utils import utc_now_iso
 from job_finder.models import Job
 from job_finder.scoring.scorer import JobScorer
+from job_finder.secrets import get_secret
 
 try:
     from job_finder.sources.gmail_source import GmailSource
@@ -167,7 +168,7 @@ def _fetch_imap(config: dict, summary: dict) -> list[Job]:
 
     # Require non-empty credentials
     email = imap_config.get("email", "")
-    app_password = imap_config.get("app_password", "")
+    app_password = get_secret("sources.imap.app_password", config=config) or ""
     if not email or not app_password:
         logger.warning("IMAP source enabled but credentials missing")
         summary["imap_errors"].append("IMAP credentials missing")
@@ -212,7 +213,7 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
         logger.debug("SerpAPI source disabled in config.")
         return []
 
-    api_key = serpapi_config.get("api_key", "")
+    api_key = get_secret("sources.serpapi.api_key", config=config) or ""
     if not api_key:
         msg = "SerpAPI key not configured"
         summary["serpapi_errors"].append(msg)
@@ -257,7 +258,7 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
         logger.debug("Thordata source disabled in config.")
         return []
 
-    api_key = thordata_config.get("api_key", "")
+    api_key = get_secret("sources.thordata.api_key", config=config) or ""
     if not api_key:
         msg = "Thordata API key not configured"
         summary["thordata_errors"].append(msg)
@@ -319,11 +320,12 @@ def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
     # Build DataForSEO source if configured (cheapest SERP backend)
     dataforseo_source = None
     dfse_cfg = config.get("sources", {}).get("dataforseo", {})
-    if dfse_cfg.get("enabled") and dfse_cfg.get("api_key"):
+    dfse_api_key = get_secret("sources.dataforseo.api_key", config=config) or ""
+    if dfse_cfg.get("enabled") and dfse_api_key:
         from job_finder.sources.dataforseo_source import DataForSEOSource
 
         dataforseo_source = DataForSEOSource(
-            api_key=dfse_cfg["api_key"],
+            api_key=dfse_api_key,
             depth=10,  # site: queries return few results; 10 is plenty
             priority=dfse_cfg.get("priority", 1),
             poll_interval_seconds=dfse_cfg.get("poll_interval_seconds", 30),
@@ -368,7 +370,7 @@ def _submit_dataforseo_tasks(
         logger.debug("DataForSEO source disabled in config.")
         return [], None
 
-    api_key = dataforseo_config.get("api_key", "")
+    api_key = get_secret("sources.dataforseo.api_key", config=config) or ""
     if not api_key:
         msg = "DataForSEO API key not configured"
         summary["dataforseo_errors"].append(msg)

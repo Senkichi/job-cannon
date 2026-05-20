@@ -22,6 +22,7 @@ try:
 except ImportError:
     _GENAI_AVAILABLE = False
 
+from job_finder.secrets import get_secret
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
 logger = logging.getLogger(__name__)
@@ -53,10 +54,18 @@ class GeminiProvider(BaseProvider):
         if client is not None:
             self._client = client
         else:
+            # Honor the custom api_key_env override first (lets users point at
+            # a non-default env var name); fall back to the canonical
+            # precedence stack (GEMINI_API_KEY env, keyring, config.yaml).
             api_key_env = provider_cfg.get("api_key_env", "GEMINI_API_KEY")
-            api_key = os.environ.get(api_key_env)
+            api_key = os.environ.get(api_key_env) or get_secret(
+                "providers.api_keys.gemini", config=config
+            )
             if not api_key:
-                raise ValueError(f"Gemini API key not set — expected env var {api_key_env!r}")
+                raise ValueError(
+                    f"Gemini API key not set — expected env var {api_key_env!r}, "
+                    "keyring entry providers.api_keys.gemini, or config.yaml."
+                )
             genai.configure(api_key=api_key)
             # Defer model instantiation to call() so we can use the specified model
             self._api_key = api_key

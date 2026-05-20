@@ -30,6 +30,7 @@ from job_finder.db import (
     upsert_job,
 )
 from job_finder.models import Job
+from job_finder.secrets import get_secret
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.activity_tracker import (
     ACTION_EXPAND_JOB,
@@ -417,7 +418,7 @@ def add_from_listing():
         )
 
     job_row = dict(row)
-    serpapi_key = (config.get("sources") or {}).get("serpapi", {}).get("api_key")
+    serpapi_key = get_secret("sources.serpapi.api_key", config=config)
 
     enriched: dict = {}
     enrich_error = None

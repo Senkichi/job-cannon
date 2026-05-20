@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from job_finder.db import derive_classification
+from job_finder.secrets import get_secret
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def _score_new_jobs(
     # ats_scanner/_run.py. Eliminating the asymmetry removes a class of
     # cascade-bypass regressions.
 
-    serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key")
+    serpapi_key = get_secret("sources.serpapi.api_key", config=config)
 
     with standalone_connection(db_path) as conn:
         for dedup_key in new_job_keys:

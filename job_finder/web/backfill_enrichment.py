@@ -28,6 +28,7 @@ import logging
 import sqlite3
 
 from job_finder.db import persist_job_assessment
+from job_finder.secrets import get_secret
 from job_finder.web.claude_client import MODEL_PRICING
 from job_finder.web.data_enricher import enrich_job
 from job_finder.web.db_helpers import standalone_connection
@@ -344,7 +345,7 @@ def main() -> None:
     config = load_config()
 
     db_path = config.get("db", {}).get("path", "jobs.db")
-    serpapi_key = config.get("sources", {}).get("serpapi", {}).get("api_key") or None
+    serpapi_key = get_secret("sources.serpapi.api_key", config=config) or None
 
     if not serpapi_key:
         print("Warning: SerpAPI key not configured — SerpAPI tier will be skipped.")

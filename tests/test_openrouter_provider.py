@@ -20,7 +20,7 @@ def test_openrouter_provider_init():
 def test_openrouter_provider_init_no_key():
     """Test OpenRouterProvider initialization fails without API key."""
     with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(ValueError, match="OPENROUTER_API_KEY environment variable not set"):
+        with pytest.raises(ValueError, match="OpenRouter API key not set"):
             OpenRouterProvider(config={})
 
 
