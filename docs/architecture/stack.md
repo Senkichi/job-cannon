@@ -113,24 +113,18 @@ The `'scoring'` tier (v3.0 single-tier ordinal scoring) routes through a configu
 | 2 | Groq (free tier) | `llama-3.3-70b-versatile` | $0 (per-day request limit) |
 | 3 | Cerebras (free tier) | `llama3.3-70b` | $0 (per-day request limit) |
 | 4 | Gemini (free tier) | `gemini-2.0-flash` | $0 (per-day request limit) |
-| 5 | Anthropic (paid fallback) | `claude-sonnet-4-6` | ~$0.05–$0.15 per job |
+| 5 | Anthropic CLI fallback | `claude-sonnet-4-6` via `claude -p` | $0 (via your Claude.ai subscription) |
 
 Schema-validation failures or rate-limit responses on a provider fall through to the next link in the chain.
 
-**Anthropic Claude (paid-fallback only, plus vestigial non-scoring tiers):**
+**Anthropic Claude CLI ($0 fallback):**
 
-The Anthropic SDK is required (`ANTHROPIC_API_KEY`) so the cascade can always complete, but it's invoked only when every free provider is exhausted. Pricing context for the cap calculation:
-
-- `claude-haiku-4-5` — $1.00 / $5.00 per million input/output tokens
-- `claude-sonnet-4-6` — $3.00 / $15.00 per million input/output tokens
-- `claude-opus-4-6` — $5.00 / $25.00 per million input/output tokens
-
-**Vestigial tier names** (`'haiku'`, `'sonnet'`, `'opus'` in `_TIER_DEFAULTS`, `providers.*` config, and `enrichment_tier` DB column) are routing classes for non-scoring callers (enrichment, careers scrape, AI navigator, company research, description reformat). They predate the multi-provider cascade and no longer mean Anthropic models — `'haiku'` means cheap-fast, `'sonnet'` means balanced-deep, `'opus'` means heavy-reasoning. A future refactor will rename to `'low' / 'mid' / 'high'`.
+Anthropic dispatch routes through the `claude -p` CLI subprocess, not the `anthropic` Python SDK. `ANTHROPIC_API_KEY` is still validated at startup (the SDK client is constructed as an availability gate so the cascade knows whether to include this hop), but the inference subprocess uses your Claude.ai subscription — there is no per-call billing. Provider name recorded as `claude_cli` in `scoring_costs`, included in `FREE_PROVIDERS`.
 
 **Cost Tracking:**
-- Stored in `scoring_costs` table with cost_usd, provider, model, purpose, tokens
-- Free-provider calls record `cost_usd=0`; only the Anthropic-fallback path produces real spend
-- Budget gating: monthly cap (default $25.00 USD) applies to Anthropic-fallback usage only — free providers are never gated
+- Stored in `scoring_costs` table with cost_usd, provider, model, purpose, tokens.
+- Every member of `claude_client.FREE_PROVIDERS` records `cost_usd=0` — this now includes the Anthropic CLI fallback (`claude_cli`) alongside Ollama, Groq, Cerebras, Gemini-CLI, and Claude-Code-CLI.
+- Budget gating (`scoring.daily_budget_usd`): excludes everything in `FREE_PROVIDERS`. In practice the gate only trips on OpenRouter (used by the cascade-audit judge). M-2 (2026-05-20).
 
 ## Platform Requirements
 

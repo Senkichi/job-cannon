@@ -141,7 +141,11 @@ scoring:
   # is classified 'low_signal' instead of being rolled into apply/consider/skip
   # via rubric outputs (which are unreliable when the model has no real JD to read).
   low_signal_jd_chars: 1500
-  # Monthly API spending cap in USD (scoring pauses when reached)
+  # Monthly API spending cap in USD. Applies only to non-free BYO-key
+  # providers in the cascade — Ollama, the two Claude/Gemini CLIs, Groq,
+  # Cerebras, and the Anthropic CLI fallback ($0 via Claude.ai subscription)
+  # are all in claude_client.FREE_PROVIDERS and never count. In practice
+  # this gate trips only on OpenRouter (the cascade-audit judge). M-2 (2026-05-20).
   monthly_budget_usd: 25.0
   # Candidate score threshold gating LLM scoring — jobs with a candidate_score
   # below this (computed during initial ingestion) are skipped for full AI scoring.

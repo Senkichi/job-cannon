@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, DataForSEO, and live ATS scanners (Greenhouse / Lever / Ashby / Workday / SmartRecruiters), scores them through a single-tier ordinal rubric routed through a multi-provider cascade (Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic paid fallback), and tracks application pipeline status. Single-user, local-only.
+A personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, DataForSEO, and live ATS scanners (Greenhouse / Lever / Ashby / Workday / SmartRecruiters), scores them through a single-tier ordinal rubric routed through a multi-provider cascade (Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic CLI fallback ($0 via Claude.ai subscription)), and tracks application pipeline status. Single-user, local-only.
 
 ## Core Value
 
@@ -139,7 +139,7 @@ v5.0 started 2026-05-13. Defining requirements + roadmap for cascade audit + Str
 
 **Post-v4.0 work absorbed into v5.0 as validated requirements (shipped 2026-05-13):** tier label rename (`haiku`/`sonnet`/`opus` → `low`/`mid`/`high`), add-job-from-URL modal, add-job-manually form, ATS identity reconciliation, uncapped enrichment backfill + diagnostic tooling.
 
-Cascade order at v5.0 start: Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic (paid fallback). Single-tier ordinal `job_scorer.py` remains the sole scoring code path. Live DB at `user_version=51`. v5.0 will: (a) audit and rewire the cascade for non-scoring callsites, then (b) overhaul the tier system to workload classes (`quick`/`score`/`triage`) with three new providers (`claude_code_cli`/`gemini_cli`/`local_bundled`).
+Cascade order at v5.0 start: Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic CLI fallback ($0 via Claude.ai subscription). Single-tier ordinal `job_scorer.py` remains the sole scoring code path. Live DB at `user_version=51`. v5.0 will: (a) audit and rewire the cascade for non-scoring callsites, then (b) overhaul the tier system to workload classes (`quick`/`score`/`triage`) with three new providers (`claude_code_cli`/`gemini_cli`/`local_bundled`).
 
 ## Context
 
@@ -163,7 +163,7 @@ Cascade order at v5.0 start: Ollama qwen2.5:14b → Groq → Cerebras → Gemini
 | Single-tier ordinal rubric (v3.0) | Six 1-5 sub-scores + Python-derived classification; literature-settled per arXiv 2601.03444 (ICC 0.853 at 0-5 vs 0.840 at 0-100); model emits ordinals only, classification is deterministic Python | ✓ Good |
 | Grammar-constrained Ollama decoding (v3.0) | `format=<schema dict>` (Ollama v0.5+) makes invalid output physically impossible; deletes `_schema_to_field_instructions`, `_schema_to_example`, most of `_sanitize_output` | ✓ Good |
 | `(provider, model)` persisted identity (v3.0) | `jobs.scoring_model` alongside `scoring_provider`; `(provider, tier)` keying was the v2.0 calibration-invalidation bug root cause | ✓ Good |
-| Multi-provider cascade with free-tier primary (v2.0+) | Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic (paid fallback); only Anthropic-fallback usage counts against `scoring.monthly_budget_usd` | ✓ Good |
+| Multi-provider cascade with free-tier primary (v2.0+) | Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic CLI fallback ($0 via Claude.ai subscription). `scoring.daily_budget_usd` is a tripwire for non-free BYO-key providers in the cascade (e.g. OpenRouter judge); free/subscription providers never trip it. M-2 (2026-05-20). | ✓ Good |
 | HTMX + Tailwind CDN | No build step, fast iteration, good enough for local app | ✓ Good |
 | Surgical port from job-finder | Preserves cannon-only assets, dependency-ordered waves | ✓ Good |
 | Module-level db functions over class | Simpler API, matches Flask per-request connection pattern | ✓ Good |

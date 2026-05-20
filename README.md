@@ -8,7 +8,8 @@
 > Greenhouse / Lever / Ashby / SmartRecruiters / Workday — plus a
 > tier-4 AI navigator for custom sites), scores everything with a
 > cascade-routed AI pipeline (free local + free cloud providers, with
-> Anthropic as paid fallback), and tracks application state.
+> the Anthropic CLI as $0 fallback via your Claude.ai subscription),
+> and tracks application state.
 > Single-user, runs on localhost.
 
 [![CI](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml/badge.svg)](https://github.com/Senkichi/job-cannon/actions/workflows/ci.yml)
@@ -103,7 +104,7 @@ For deeper subsystem detail, see [`docs/architecture/`](docs/architecture/).
 | Runtime | Python 3.13, Flask 3.1, APScheduler 3.x |
 | Storage | SQLite (WAL mode) — raw SQL, no ORM |
 | Frontend | Jinja2 + jinja2-fragments, HTMX 2.x, Tailwind (CDN), SortableJS |
-| AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Groq → Cerebras → Gemini → Anthropic SDK (paid fallback) |
+| AI | Multi-provider cascade: Ollama (qwen2.5:14b primary) → Groq → Cerebras → Gemini → Anthropic CLI ($0 via Claude.ai subscription, dispatched through `claude -p`) |
 | Sources | Gmail API v1 (OAuth), SerpAPI, JSearch, Thordata, DataForSEO |
 | Tooling | uv (canonical), ruff, pre-commit, gitleaks, commitizen, pytest |
 | CI | GitHub Actions (Ubuntu + Windows matrix), Codecov upload |
@@ -133,20 +134,23 @@ The 11 blueprints: `admin`, `batch_scoring`, `companies`, `costs`,
 
 ## Cost Estimates
 
-The cascade tries free providers first, so typical monthly AI cost is
-**~$0**. Anthropic only enters the picture as a paid fallback when
-every free provider in the chain is exhausted or rate-limited.
+Every provider in the default cascade is **$0** out-of-pocket. Ollama
+runs locally; Groq, Cerebras, and Gemini sit on their free tiers; and
+the Anthropic CLI fallback dispatches through `claude -p` against
+your Claude.ai subscription, so usage there is metered against your
+existing plan rather than billed per call.
 
 | Provider | Cost | When |
 |------|------|------|
 | Ollama (qwen2.5:14b local) | $0 | Primary — runs locally |
 | Groq / Cerebras / Gemini free tiers | $0 | Each gated by per-day request limits |
-| Anthropic (paid fallback) | ~$0.05–0.15 per job scored | Only when all free providers exhausted |
+| Anthropic CLI (`claude -p`) | $0 (via Claude.ai subscription) | Only when all free providers exhausted; uses your plan's allowance |
 
 A configurable budget cap (default $25/mo, set in `config.yaml` under
-`scoring.monthly_budget_usd`) limits the Anthropic fallback if it
-ever activates. The app stops paid scoring when the cap is reached
-and resumes the next month.
+`scoring.monthly_budget_usd`) trips only on non-free BYO-key providers
+in the cascade — in practice, the OpenRouter judge used by the
+cascade-audit harness. All members of `claude_client.FREE_PROVIDERS`
+(including the Anthropic CLI fallback) are excluded from the gate.
 
 **Optional SERP sources:** SerpAPI, JSearch, Thordata, and DataForSEO
 are all opt-in. Each has its own pricing tier — see

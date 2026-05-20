@@ -41,7 +41,7 @@ Audit the 6 non-scoring LLM callsites via shadow-replay methodology, then rewire
 - [ ] **AUDIT-13**: (Case B only) `resolve_provider_config` and `tier_has_configured_provider` accept optional `purpose=` kwarg; lookup checks `purpose_overrides` before tier-level config
 - [ ] **AUDIT-14**: `config.yaml` rewired (Edit tool only — backup_userdata.sh first); Flask boots cleanly post-rewire
 - [ ] **AUDIT-15**: 1-week production canary observed; per-callsite Anthropic-tail rate stays <10%; tripwire rollback path tested
-- [ ] **AUDIT-16**: Marginal Anthropic spend on the 6 audited callsites drops ≥80% relative to pre-audit baseline week
+- [ ] **AUDIT-16**: Per-callsite Anthropic-CLI invocation rate drops ≥80% on the 6 audited callsites relative to pre-audit baseline week (mirroring AUDIT-15 wording; rate not spend, because the Anthropic CLI fallback is $0 via subscription — M-2 reconciliation, 2026-05-20)
 
 ---
 

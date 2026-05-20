@@ -47,13 +47,13 @@ The `'scoring'` tier dispatches through `job_finder/web/model_provider.py:call_m
 | Groq | `httpx` direct to Groq REST API | `GROQ_API_KEY` env var | Free-tier scoring fallback |
 | Cerebras | `httpx` direct to Cerebras REST API | `CEREBRAS_API_KEY` env var | Free-tier scoring fallback |
 | Gemini | `google-genai` package | `GEMINI_API_KEY` env var | Free-tier scoring fallback |
-| Anthropic | `anthropic` SDK | `ANTHROPIC_API_KEY` env var | Paid fallback at cascade bottom; also handles vestigial non-scoring tiers (`'haiku'`, `'sonnet'`, `'opus'`) |
+| Anthropic | `claude -p` CLI subprocess (SDK client constructed only as availability gate) | `ANTHROPIC_API_KEY` env var (gate-only) | CLI fallback at cascade bottom — $0 via your Claude.ai subscription; also handles vestigial non-scoring tiers (`'haiku'`, `'sonnet'`, `'opus'`) |
 
-**Anthropic Claude API (paid fallback path):**
-- Implementation: `job_finder/web/claude_client.py` (Anthropic-specific cost recording, budget gating, fallback adapter)
-- Cost calculation: per-million-token pricing table
-- Budget gating: monthly cap enforced on Anthropic-fallback calls only — free-provider hops never trigger the gate
-- Cost tracking: recorded in `scoring_costs` table with provider attribution
+**Anthropic Claude CLI ($0 fallback path):**
+- Implementation: `job_finder/web/claude_client.py` (dispatches via `claude -p` subprocess; provider name recorded as `claude_cli` in `scoring_costs`, included in `FREE_PROVIDERS`).
+- Cost calculation: $0 per call — usage is metered against your Claude.ai subscription, not billed per API request. `cost_usd` is recorded as 0.0 for all `claude_cli` rows.
+- Budget gating: the `scoring.daily_budget_usd` gate excludes all `FREE_PROVIDERS` members (claude_cli, ollama, groq, cerebras, gemini_cli, claude_code_cli). In practice the gate only trips on OpenRouter (used by the cascade-audit judge).
+- Cost tracking: every call still creates a `scoring_costs` row for telemetry (`schema_valid`, token counts, provider attribution), even though `cost_usd=0`.
 
 **Per-provider clients:** `job_finder/web/providers/{anthropic,gemini,ollama}_provider.py` (other providers dispatched via `httpx` directly inside `model_provider.py`).
 

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, DataForSEO, and live ATS scanners (Greenhouse / Lever / Ashby / Workday / SmartRecruiters), scores them through a single-tier ordinal rubric routed through a multi-provider cascade (Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic paid fallback), and tracks application pipeline status.
+Job Cannon is a personal job search command center. Flask web app (localhost:5000) that aggregates jobs from Gmail alerts (LinkedIn, Glassdoor, ZipRecruiter), SerpAPI, Thordata, DataForSEO, and live ATS scanners (Greenhouse / Lever / Ashby / Workday / SmartRecruiters), scores them through a single-tier ordinal rubric routed through a multi-provider cascade (Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic CLI fallback ($0 via Claude.ai subscription)), and tracks application pipeline status.
 
 **Single-user, local-only app. No deployment, no Docker, no CI/CD.**
 
@@ -12,7 +12,7 @@ Job Cannon is a personal job search command center. Flask web app (localhost:500
 - **Frontend**: HTMX 2.x, Tailwind CSS (CDN), SortableJS, vanilla JS only
 - **Database**: SQLite with WAL mode, raw SQL (no ORM), schema migrations via `pragma user_version`
 - **Background**: APScheduler 3.11 (pinned <4.0 — 4.x has breaking async API)
-- **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b, Phase 33 winner); cascade falls through Groq, Cerebras, Gemini before reaching Anthropic as paid fallback. Anthropic SDK still required as the safety net.
+- **AI**: Multi-provider cascade via `job_finder.web.model_provider.call_model()`. Production primary is Ollama (qwen2.5:14b, Phase 33 winner); cascade falls through Groq, Cerebras, Gemini before reaching the Anthropic CLI fallback ($0 via Claude.ai subscription). The Anthropic SDK client is constructed as an availability gate (no-key clients are skipped), but inference itself dispatches through `claude -p` CLI subprocesses — see `claude_client.py` module docstring. M-2 (2026-05-20).
 - **APIs**: Gmail API v1 (OAuth 2.0, read-only); SerpAPI / Thordata / DataForSEO / portal-search aggregator (all optional)
 
 ## Key Commands
@@ -97,7 +97,7 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 **Scoring**:
 - v3.0 single tier: `'scoring'` tier (Plan 4 Commit E) replaces the legacy Haiku-then-Sonnet two-tier. Output is a six-axis ordinal rubric; classification is **Python-derived** from the sub-scores in `job_finder.db._classification.derive_classification` — never emitted by the LLM.
 - Cascade order (configurable in `config.yaml > providers.scoring.fallback_chain`): Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic. Each provider can be disabled or rate-limited independently.
-- cost_gate returns bool — callers decide whether to raise BudgetExceededError. Only Anthropic-fallback usage counts against `scoring.monthly_budget_usd`; free-provider calls are never gated.
+- cost_gate returns bool — callers decide whether to raise BudgetExceededError. The gate excludes all members of `claude_client.FREE_PROVIDERS` (claude_cli, ollama, gemini_cli, claude_code_cli, groq, cerebras) from the spend sum, so `scoring.daily_budget_usd` only trips on non-free BYO-key providers in the cascade (e.g. OpenRouter judge used by the cascade audit). The Anthropic CLI fallback is $0 via subscription and does not count. M-2 (2026-05-20).
 - Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
 - Rescoring skips already-scored jobs unless `force=True` (manual rescore).
 

@@ -58,7 +58,7 @@ or copying `config.yaml` into the user config directory.
 
 Edit `.env` and fill in your keys. There are two variables:
 
-- **`JF_ANTHROPIC_API_KEY`** (required): Your Anthropic API key. Get one at https://console.anthropic.com/settings/keys. The key starts with `sk-ant-`. Anthropic is the paid fallback at the bottom of the scoring cascade — production runs typically resolve on free providers first (Ollama, Groq, Cerebras, Gemini), but the key is required so the cascade can complete on rare exhaustion. See `config.example.yaml` (the commented `providers.scoring` block) for the cascade configuration.
+- **`JF_ANTHROPIC_API_KEY`** (required): Your Anthropic API key. Get one at https://console.anthropic.com/settings/keys. The key starts with `sk-ant-`. Anthropic sits at the bottom of the scoring cascade as the CLI fallback (dispatched via `claude -p`); $0 out-of-pocket because usage is metered against your existing Claude.ai subscription rather than billed per API call. The key is still required so the SDK availability gate at app startup recognizes the provider as configured — inference itself does not consume the API key. Production runs typically resolve on free providers first (Ollama, Groq, Cerebras, Gemini). See `config.example.yaml` (the commented `providers.scoring` block) for the cascade configuration.
 
 - **`FLASK_SECRET_KEY`** (optional): Generate one with:
   ```bash
