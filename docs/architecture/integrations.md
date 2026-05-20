@@ -47,7 +47,7 @@ The `'scoring'` tier dispatches through `job_finder/web/model_provider.py:call_m
 | Groq | `httpx` direct to Groq REST API | `GROQ_API_KEY` env var | Free-tier scoring fallback |
 | Cerebras | `httpx` direct to Cerebras REST API | `CEREBRAS_API_KEY` env var | Free-tier scoring fallback |
 | Gemini | `google-genai` package | `GEMINI_API_KEY` env var | Free-tier scoring fallback |
-| Anthropic | `claude -p` CLI subprocess (SDK client constructed only as availability gate) | `ANTHROPIC_API_KEY` env var (gate-only) | CLI fallback at cascade bottom — $0 via your Claude.ai subscription; also handles vestigial non-scoring tiers (`'haiku'`, `'sonnet'`, `'opus'`) |
+| Anthropic | `claude -p` CLI subprocess — the SDK is not imported. Availability is detected via `claude_client.is_anthropic_available()`, which checks the `ANTHROPIC_API_KEY` and `JF_ANTHROPIC_API_KEY` env vars. | `ANTHROPIC_API_KEY` (or `JF_ANTHROPIC_API_KEY`) env var | CLI fallback at cascade bottom — $0 via your Claude.ai subscription |
 
 **Anthropic Claude CLI ($0 fallback path):**
 - Implementation: `job_finder/web/claude_client.py` (dispatches via `claude -p` subprocess; provider name recorded as `claude_cli` in `scoring_costs`, included in `FREE_PROVIDERS`).

@@ -25,6 +25,7 @@ from job_finder.web.claude_client import (  # noqa: F401 — record_cost + Budge
     FREE_PROVIDERS,
     BudgetExceededError,
     cost_gate,
+    is_anthropic_available,
     record_cost,
 )
 
@@ -284,7 +285,8 @@ def tier_has_configured_provider(
 
     conn is accepted for API symmetry with call_model() callers but is not used
     during validation — _make_adapter() only uses conn for AnthropicProvider, which
-    is short-circuited via the client-is-not-None check before _make_adapter() is called.
+    is short-circuited via the is_anthropic_available() env-var check before
+    _make_adapter() is called.
 
     Returns False (not raises) when providers.primary is unset — the predicate's
     contract is "is there a routable provider?" and the honest answer to that on
@@ -301,7 +303,7 @@ def tier_has_configured_provider(
 
     for provider_name in all_providers:
         if provider_name == "anthropic":
-            if client is not None:
+            if is_anthropic_available():
                 return True
             continue
 

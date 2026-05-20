@@ -71,6 +71,21 @@ FREE_PROVIDERS: frozenset[str] = frozenset(
 )
 
 
+def is_anthropic_available() -> bool:
+    """Return True if Anthropic CLI fallback is configured.
+
+    Phase M-2 (2026-05-20) confirmed every Anthropic dispatch routes through
+    the ``claude -p`` subprocess, not the Python SDK. The CLI's auth check
+    honors ``ANTHROPIC_API_KEY`` and the project-namespaced
+    ``JF_ANTHROPIC_API_KEY``. When neither is set, the CLI rejects the call
+    during cascade execution, so the cascade should skip this hop preemptively.
+    """
+    return bool(
+        os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("JF_ANTHROPIC_API_KEY")
+    )
+
+
 class BudgetExceededError(Exception):
     """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
 

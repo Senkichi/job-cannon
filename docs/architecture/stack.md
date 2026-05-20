@@ -119,7 +119,7 @@ Schema-validation failures or rate-limit responses on a provider fall through to
 
 **Anthropic Claude CLI ($0 fallback):**
 
-Anthropic dispatch routes through the `claude -p` CLI subprocess, not the `anthropic` Python SDK. `ANTHROPIC_API_KEY` is still validated at startup (the SDK client is constructed as an availability gate so the cascade knows whether to include this hop), but the inference subprocess uses your Claude.ai subscription — there is no per-call billing. Provider name recorded as `claude_cli` in `scoring_costs`, included in `FREE_PROVIDERS`.
+Anthropic dispatch routes through the `claude -p` CLI subprocess, not the `anthropic` Python SDK. Availability is detected via `claude_client.is_anthropic_available()`, which checks the `ANTHROPIC_API_KEY` or `JF_ANTHROPIC_API_KEY` env vars directly — the SDK is no longer imported. The inference subprocess uses your Claude.ai subscription, so there is no per-call billing. Provider name recorded as `claude_cli` in `scoring_costs`, included in `FREE_PROVIDERS`.
 
 **Cost Tracking:**
 - Stored in `scoring_costs` table with cost_usd, provider, model, purpose, tokens.

@@ -1158,12 +1158,16 @@ def test_tier_has_provider_anthropic_only_no_client():
 
 
 def test_tier_has_provider_anthropic_only_with_client():
-    """Anthropic-only chain + client present -> True.
-    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """Anthropic-only chain + ANTHROPIC_API_KEY set -> True.
+
+    Post-2026-05-21 DASHBOARD-SDK-REFACTOR: availability is detected via
+    ``is_anthropic_available()`` (env var check), not a passed SDK client.
+    The ``client`` parameter is accepted for backward compat but ignored.
     """
     config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
     mock_client = MagicMock()
-    assert tier_has_configured_provider("quick", config, client=mock_client) is True
+    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=False):
+        assert tier_has_configured_provider("quick", config, client=mock_client) is True
 
 
 def test_tier_has_provider_typo_no_client():
@@ -1186,7 +1190,13 @@ def test_tier_has_provider_missing_api_key():
 
 
 def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
-    """Mixed chain where primary is misconfigured but fallback is locally valid -> True."""
+    """Mixed chain where primary is misconfigured but fallback is locally valid -> True.
+
+    Post-2026-05-21 DASHBOARD-SDK-REFACTOR: the Anthropic-fallback branch now
+    consults ``is_anthropic_available()`` (env var) instead of a passed SDK
+    client. Clear all env vars except ANTHROPIC_API_KEY so Gemini fails to
+    instantiate (no GEMINI_API_KEY) but Anthropic resolves.
+    """
     config = {
         "providers": {
             "primary": "gemini",
@@ -1194,7 +1204,7 @@ def test_tier_has_provider_mixed_chain_primary_bad_fallback_good():
         }
     }
     mock_client = MagicMock()
-    with patch.dict("os.environ", {}, clear=True):
+    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
         assert tier_has_configured_provider("quick", config, client=mock_client) is True
 
 
