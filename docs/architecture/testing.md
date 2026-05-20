@@ -282,17 +282,17 @@ def test_costs_html_contains_canvas(self, client):
 **Error Testing:**
 ```python
 # tests/test_scoring.py
-def test_sonnet_blocked_when_over_budget(self, migrated_db, gate_config):
-    """sonnet calls are blocked when monthly spend >= budget cap."""
+def test_score_tier_blocked_when_over_budget(self, migrated_db, gate_config):
+    """score-tier calls are blocked when daily spend >= budget cap."""
     path, conn = migrated_db
     config = gate_config
-    config["scoring"]["monthly_budget_usd"] = 0.01  # $0.01 cap
+    config["scoring"]["daily_budget_usd"] = 0.01  # $0.01 cap
 
-    # Insert costs that exceed budget
-    record_cost(conn, "job-1", "sonnet_eval", "claude-sonnet-4-6", 1000, 500)
+    # Insert costs that exceed budget (non-free provider — free providers excluded from sum)
+    record_cost(conn, "job-1", "scoring", "deepseek/deepseek-v4-flash", 1000, 500, provider="openrouter")
 
-    # Try to gate another sonnet call
-    allowed = cost_gate(conn, config, "sonnet")
+    # Try to gate another score-tier call
+    allowed = cost_gate(conn, config, "score")
     assert allowed is False
 ```
 

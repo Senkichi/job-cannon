@@ -199,7 +199,7 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
 def cost_gate(
     conn: sqlite3.Connection,
     config: dict,
-    model_tier: str = "mid",
+    model_tier: str = "score",
 ) -> bool:
     """Check whether a model tier call is allowed under the daily budget.
 
@@ -210,20 +210,18 @@ def cost_gate(
     provider in the v5.0 cascade is OpenRouter (used as the cascade-audit
     judge); that's the tripwire this gate exists for. M-2 (2026-05-20).
 
-    Quick-tier calls (replaces low) are always allowed regardless of spend.
-    Score/triage-tier calls (replace mid/high) are blocked when daily spend >= budget cap.
+    Quick-tier calls are always allowed regardless of spend.
+    Score/triage-tier calls are blocked when daily spend >= budget cap.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
         config: Application config dict (reads scoring.daily_budget_usd).
-        model_tier: "quick", "score", "triage", or legacy names "low"/"mid"/"high". Defaults to "mid".
+        model_tier: "quick", "score", or "triage". Defaults to "score".
 
     Returns:
         True if the call is allowed, False if blocked.
     """
-    # Map new workload names to legacy behavior
-    # quick = low (always allowed), score/triage = mid/high (budget checked)
-    if model_tier in ("quick", "low"):
+    if model_tier == "quick":
         return True
 
     scoring_cfg = config.get("scoring", {})
@@ -553,9 +551,9 @@ def call_claude(
     # Determine model tier for budget gating
     matching_pricing_key = next((k for k in MODEL_PRICING if model.startswith(k)), None)
     if matching_pricing_key:
-        tier = "low" if "haiku" in matching_pricing_key else "mid"
+        tier = "quick" if "haiku" in matching_pricing_key else "score"
     else:
-        tier = "low" if "haiku" in model.lower() else "mid"
+        tier = "quick" if "haiku" in model.lower() else "score"
 
     if conn is None:
         raise ValueError("call_claude requires a database connection (conn is None)")
