@@ -119,12 +119,12 @@ def _cached_tier_available(tier: str, config: dict) -> bool:
 def _get_quick_actions_context(conn, config):
     """Build template context for quick actions section.
 
-    v3.0: merges the legacy Haiku/Sonnet stat blocks into a single
-    ``unscored_count`` + ``scoring_available`` pair.
-    Active sessions collapse to {sync, scoring}. Legacy 'haiku'/'sonnet'
-    session_type values (written pre-Plan-3) are treated as the unified
-    'scoring' session so the UI reflects the live pipeline regardless
-    of which historical route created the row.
+    v3.0: the pre-unified-scorer stat blocks are merged into a single
+    ``unscored_count`` + ``scoring_available`` pair. Active sessions
+    collapse to {sync, scoring}. Legacy ``session_type`` values
+    (``'haiku'`` / ``'sonnet'``) written pre-Plan-3 are folded into the
+    unified ``'scoring'`` session so the UI reflects the live pipeline
+    regardless of which historical route created the row.
     """
     # Detect active (non-terminal) sessions — unified {sync, scoring} semantics
     active_sync = None

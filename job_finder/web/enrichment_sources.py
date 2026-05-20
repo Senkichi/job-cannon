@@ -26,7 +26,7 @@ def find_missing_fields(job_row: dict, is_stub_jd_fn) -> list:
     """Return list of missing scoring-relevant field names.
 
     A job needs enrichment if any of these are missing:
-    - jd_full: full job description (needed for Sonnet). Stubs (title
+    - jd_full: full job description (needed for AI scoring). Stubs (title
       restatements < 200 chars) are treated as missing.
     - salary_min: minimum salary
 
@@ -99,7 +99,7 @@ def compose_fragment_text(fragments: dict, title: str, company: str) -> str | No
         company: Company name for fallback context.
 
     Returns:
-        Aggregated text string for use in Haiku/Sonnet extraction,
+        Aggregated text string for use in downstream LLM extraction,
         or None if no meaningful fragments exist (prevents AI tiers from
         hallucinating JDs from titles alone).
     """

@@ -67,8 +67,8 @@ _ATS_DOMAINS = [
 # Subdomains that indicate a careers site (checked after ATS exclusion)
 _CAREERS_SUBDOMAINS = ("careers.", "jobs.", "work.", "apply.")
 
-# Structured output schemas for the two Haiku call sites below. Both providers
-# (Anthropic CLI + Ollama) return the same dict shape when a schema is
+# Structured output schemas for the two quick-tier call sites below. Both
+# the CLI (Anthropic) and Ollama return the same dict shape when a schema is
 # supplied — without it, Ollama's forced "format":"json" yields arbitrary keys
 # while the CLI wraps freeform text in {"text": ...}, which would silently
 # produce empty results once a cascade routes the call through Ollama.
@@ -198,7 +198,7 @@ def _find_careers_url_with_low_tier(
 
     # Basic validation: must start with http
     if url_text.startswith("http"):
-        logger.debug("Haiku found careers URL for '%s': %s", homepage_url, url_text)
+        logger.debug("quick-tier found careers URL for '%s': %s", homepage_url, url_text)
         return url_text
 
     return None
@@ -365,14 +365,14 @@ def find_careers_url(
     If the homepage redirects to an ATS domain (Lever, Greenhouse, Ashby),
     returns None so caller can extract slug from the redirect URL instead.
 
-    When heuristic link-finding returns nothing AND client/conn/config are
-    provided, falls back to Haiku AI analysis of the truncated homepage HTML.
+    When heuristic link-finding returns nothing AND conn/config are
+    provided, falls back to a quick-tier model analysis of the truncated
+    homepage HTML.
 
     Args:
         homepage_url: Company homepage URL to scan.
-        client: Optional Anthropic client for Haiku fallback.
-        conn: Optional SQLite connection for cost recording (Haiku fallback).
-        config: Optional application config dict (Haiku fallback).
+        conn: Optional SQLite connection for cost recording (quick-tier fallback).
+        config: Optional application config dict (quick-tier fallback).
 
     Returns:
         Absolute URL to the careers page, or None if not found / ATS redirect.
@@ -557,16 +557,15 @@ def scrape_careers_page(
     text (rate-limited at _JD_DELAY seconds between fetches). Auth-wall pages
     return empty description. Descriptions capped at _MAX_JD_CHARS.
 
-    When HTML parsing finds 0 matching jobs AND client/conn/config are provided,
-    falls back to low-tier AI extraction via _extract_jobs_with_low_tier.
+    When HTML parsing finds 0 matching jobs AND conn/config are provided,
+    falls back to a quick-tier model extraction via _extract_jobs_with_low_tier.
 
     Args:
         careers_url: URL of the careers page to scrape.
         target_titles: Target title keywords for inclusion filter.
         exclusions: Title keywords for exclusion filter.
-        client: Optional Anthropic client for Haiku fallback.
-        conn: Optional SQLite connection for cost recording (Haiku fallback).
-        config: Optional application config dict (Haiku fallback).
+        conn: Optional SQLite connection for cost recording (quick-tier fallback).
+        config: Optional application config dict (quick-tier fallback).
 
     Returns:
         List of dicts with keys 'title', 'url', and 'description'. Empty list on

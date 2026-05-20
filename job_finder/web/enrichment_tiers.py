@@ -56,7 +56,7 @@ _AUTH_WALL_SIGNATURES = [
     "access denied",
 ]
 
-# Minimum jd_full length before parse_structured_fields will spend a Haiku call.
+# Minimum jd_full length before parse_structured_fields will spend a quick-tier call.
 # Matches data_enricher.MIN_FETCH_JD_CHARS — anything shorter is residual
 # auth-wall noise that wouldn't yield reliable salary/location signal.
 _MIN_STRUCTURED_PARSE_JD_CHARS = 200

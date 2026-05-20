@@ -1,7 +1,7 @@
-"""Pre-Haiku exclusion filter. Zero API cost -- pure string matching.
+"""Pre-scoring exclusion filter. Zero API cost -- pure string matching.
 
 Provides should_exclude() to determine whether a job should be skipped
-before any Haiku API call, based on title keywords, excluded companies,
+before any scoring call, based on title keywords, excluded companies,
 and a configurable salary floor.
 """
 
@@ -18,7 +18,7 @@ def should_exclude(
     min_salary: int | None = None,
     config: dict | None = None,
 ) -> tuple[bool, str]:
-    """Check if a job should be excluded before Haiku scoring.
+    """Check if a job should be excluded before scoring.
 
     Args:
         job_row: Job record dict with at minimum: title (str), company (str),

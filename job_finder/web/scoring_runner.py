@@ -106,9 +106,8 @@ def run_scoring(
                     summary["skipped_no_jd"] += 1
                     continue
 
-                # Liveness gate (D-11): pre-score, same position as legacy
-                # Sonnet path. Expired rows get the standard archive update
-                # and are counted as skipped_dead.
+                # Liveness gate (D-11): pre-score. Expired rows get the
+                # standard archive update and are counted as skipped_dead.
                 liveness = check_job_liveness(job)
                 now_iso = datetime.now(UTC).isoformat()
                 persist_job_expiry_state(conn, dedup_key, liveness, now_iso)

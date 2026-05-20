@@ -538,7 +538,8 @@ def _maybe_record_cost(
     if result.provider == "anthropic":
         return  # call_claude() already recorded it
     # Free providers: record cost as $0 instead of calling compute_cost()
-    # which doesn't recognize their model names and falls back to Opus pricing.
+    # which doesn't recognize their model names and falls back to the
+    # most-expensive Claude pricing as a safety default.
     if result.provider in _FREE_PROVIDERS:
         cost_usd = 0.0
     else:

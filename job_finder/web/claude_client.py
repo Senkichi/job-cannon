@@ -86,7 +86,7 @@ def is_anthropic_available() -> bool:
 
 
 class BudgetExceededError(Exception):
-    """Raised when a non-Haiku Claude call is blocked by the monthly budget cap."""
+    """Raised when a non-quick-tier Claude call is blocked by the daily budget cap."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +151,7 @@ def record_cost(
     Args:
         conn: Open SQLite connection.
         job_id: Job dedup_key this call is associated with (nullable).
-        purpose: Feature attribution label, e.g. "haiku_score", "sonnet_eval".
+        purpose: Feature attribution label, e.g. "scoring", "company_research".
         model: Model identifier used for the call.
         input_tokens: Number of input tokens consumed.
         output_tokens: Number of output tokens generated.
@@ -580,7 +580,7 @@ def call_claude(
 
     if not cost_gate(conn, config, tier):
         raise BudgetExceededError(
-            f"Monthly budget cap reached. Sonnet calls paused. Model: {model}"
+            f"Daily budget cap reached. Score-tier calls paused. Model: {model}"
         )
 
     effective_timeout = timeout if timeout is not None else _DEFAULT_API_TIMEOUT_SECONDS

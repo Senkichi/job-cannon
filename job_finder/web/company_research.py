@@ -109,7 +109,7 @@ def run_company_research_background(
     """Generate company research in a background thread.
 
     Opens its own sqlite3 connection (thread-safe). Loads company name,
-    calls Haiku for synthesis, and updates the research row.
+    calls the quick-tier model for synthesis, and updates the research row.
 
     Args:
         research_id: The company_research row ID.

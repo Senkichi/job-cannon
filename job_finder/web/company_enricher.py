@@ -1,7 +1,7 @@
 """Company information enrichment via web search.
 
 Provides company metadata enrichment using DuckDuckGo Instant Answer API.
-Used for Sonnet-scored jobs to add company context (size, industry).
+Used for scored jobs to add company context (size, industry).
 """
 
 import logging
@@ -159,7 +159,7 @@ def _classify_size(count: int) -> str:
 
 
 def enrich_company_info(company_name: str) -> dict:
-    """Enrich company info via DuckDuckGo (for Sonnet-scored jobs only).
+    """Enrich company info via DuckDuckGo (for scored jobs).
 
     Returns dict with optional keys: company_size, industry, funding_stage.
     Best-effort — returns empty dict on failure. DDG reliability is LOW per

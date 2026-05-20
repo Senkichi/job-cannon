@@ -623,10 +623,10 @@ def detail_inline(dedup_key: str):
 
 @jobs_bp.route("/<path:dedup_key>/paste-jd", methods=["POST"], strict_slashes=False)
 def paste_jd(dedup_key: str):
-    """HTMX POST -- accept pasted JD text, store it, trigger Sonnet eval.
+    """HTMX POST -- accept pasted JD text, store it, trigger score-tier eval.
 
-    Stores jd_text in jobs.jd_full, then calls evaluate_job_sonnet.
-    Budget-gated via cost_gate. Returns updated expanded row partial.
+    Stores jd_text in jobs.jd_full, then routes through the v3.0 unified
+    scorer. Budget-gated via cost_gate. Returns updated expanded row partial.
     """
     db_path = current_app.config["DB_PATH"]
     conn = get_db(db_path)
@@ -707,7 +707,7 @@ def paste_jd(dedup_key: str):
 
 @jobs_bp.route("/<path:dedup_key>/rescore", methods=["POST"], strict_slashes=False)
 def rescore(dedup_key: str):
-    """HTMX POST -- re-trigger Sonnet evaluation for a job that already has jd_full.
+    """HTMX POST -- re-trigger score-tier evaluation for a job that already has jd_full.
 
     Returns updated expanded row partial.
     """

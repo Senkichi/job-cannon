@@ -103,7 +103,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     1. Load batch of miss companies with careers_url, ordered by staleness
     2. For each company: try static extraction, fall back to Playwright
     3. For each matched job: create Job object and upsert
-    4. Score new jobs via scoring_orchestrator (Haiku → Sonnet)
+    4. Score new jobs via scoring_orchestrator (single-tier v3.0 ordinal rubric)
     5. Log activity and update company timestamps
 
     Args:
@@ -213,7 +213,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
             summary[key] += merged_summary.get(key, 0)
     all_new_job_keys.extend(merged_keys)
 
-    # --- Haiku/Sonnet scoring for newly discovered jobs ---
+    # --- Score newly discovered jobs (v3.0 unified scorer) ---
     if all_new_job_keys:
         _score_new_jobs(db_path, config, all_new_job_keys, summary)
 

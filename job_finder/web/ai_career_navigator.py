@@ -1,11 +1,13 @@
 """AI-navigated careers page crawler — discover once, replay forever.
 
 Two-phase architecture:
-- Phase A (Discovery): Haiku interprets a page's accessibility snapshot and
-  produces a navigation recipe — an ordered list of Playwright actions that
-  lead to job listings.  One-time cost: ~$0.01-0.03 per company.
+- Phase A (Discovery): the quick-tier model interprets a page's
+  accessibility snapshot and produces a navigation recipe — an ordered
+  list of Playwright actions that lead to job listings. One-time cost
+  per company (typically $0 — Ollama and the Anthropic CLI both bill
+  $0 per call).
 - Phase B (Replay): Execute the cached recipe mechanically via Playwright
-  locators.  Zero AI cost.
+  locators. Zero AI cost.
 
 The recipe is cached as JSON on the companies table (careers_nav_recipe column).
 If replay fails (stale layout), the recipe is re-discovered automatically.
@@ -92,9 +94,10 @@ def _take_snapshot(page) -> str:
 
     Combines the accessibility tree (for interactive elements like search
     boxes and buttons) with a curated list of links with their URLs (so
-    Haiku can produce "goto" steps to navigate to job search pages).
+    the discovery model can produce "goto" steps to navigate to job
+    search pages).
 
-    Truncates to ~4000 chars to stay within Haiku's sweet spot.
+    Truncates to ~4000 chars to keep the prompt cheap on Ollama / quick-tier.
 
     Args:
         page: Playwright Page instance (already navigated).
@@ -175,7 +178,7 @@ def _flatten_a11y_node(node: dict, lines: list, depth: int) -> None:
         parts.append(f'"{name}"')
     if value:
         parts.append(f"value={value}")
-    # Include URL for links so Haiku can produce goto steps
+    # Include URL for links so the discovery model can produce goto steps
     url = node.get("url", "")
     if url and role == "link":
         parts.append(f"href={url}")
@@ -275,7 +278,7 @@ def _extract_with_recipe(
 
 
 # ---------------------------------------------------------------------------
-# Discovery (Haiku, first visit only)
+# Discovery (quick-tier model, first visit only)
 # ---------------------------------------------------------------------------
 
 
@@ -311,11 +314,11 @@ def discover_navigation_recipe(
     config: dict,
     max_steps: int = _MAX_RECIPE_STEPS,
 ) -> dict | None:
-    """Use Haiku to discover a navigation recipe for a careers page.
+    """Use the quick-tier model to discover a navigation recipe for a careers page.
 
-    Takes an accessibility snapshot of the loaded page, sends it to Haiku
-    with instructions to produce a navigation recipe, then validates the
-    recipe by executing it and checking for results.
+    Takes an accessibility snapshot of the loaded page, sends it to the
+    quick-tier model with instructions to produce a navigation recipe,
+    then validates the recipe by executing it and checking for results.
 
     Args:
         page: Playwright Page instance (already navigated to careers_url).
@@ -327,7 +330,7 @@ def discover_navigation_recipe(
     Returns:
         Validated recipe dict, or None if discovery failed.
     """
-    # Pre-check: if the page already has extractable jobs, skip Haiku entirely
+    # Pre-check: if the page already has extractable jobs, skip the discovery call entirely
     pre_jobs = _extract_with_recipe(
         page,
         {"method": "links_in_page"},
@@ -441,7 +444,7 @@ def discover_navigation_recipe(
                 )
 
     except Exception as e:
-        logger.warning("ai_nav: Haiku discovery call failed for %s: %s", careers_url, e)
+        logger.warning("ai_nav: discovery call failed for %s: %s", careers_url, e)
         return None
 
     if not result or not isinstance(result, dict):
@@ -462,8 +465,9 @@ def discover_navigation_recipe(
 
     # Validate: execute as many steps as possible, then extract.
     # If extraction yields results even after partial execution, the recipe
-    # is still valuable. A step failure just means Haiku guessed an element
-    # role/name slightly wrong, but the page may still show jobs.
+    # is still valuable. A step failure just means the discovery model
+    # guessed an element role/name slightly wrong, but the page may still
+    # show jobs.
     try:
         page.goto(careers_url, timeout=15000, wait_until="networkidle")
         page.wait_for_timeout(2000)

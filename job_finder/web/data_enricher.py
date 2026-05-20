@@ -122,7 +122,7 @@ def enrich_job(
 ) -> dict:
     """Enrich a sparse job record using the cost-ordered tier pipeline.
 
-    Tiers: free (URL -> ATS -> careers) -> DDG -> Haiku -> SerpAPI -> Sonnet.
+    Tiers: free (URL -> ATS -> careers) -> DDG -> SerpAPI -> agentic.
     Resumes from the next tier after job_row['enrichment_tier'] if set.
     Returns {} immediately for exhausted jobs.
 
@@ -132,7 +132,6 @@ def enrich_job(
     Args:
         job_row: Job record dict. Must have 'title' and 'company'.
         serpapi_key: Optional SerpAPI API key for SerpAPI tier.
-        anthropic_client: Optional Anthropic client for Haiku/Sonnet tiers.
         conn: Optional SQLite connection for DB persistence and cost recording.
         config: Optional application config dict.
 
@@ -252,9 +251,11 @@ def enrich_job(
                         conn, job_row, config, reason="enrichment_ddg_apply_url"
                     )
 
-                # Resolve what DDG tier found (via Haiku extraction later if needed)
-                # DDG doesn't directly provide structured data; it feeds the Haiku tier.
-                # If DDG returned nothing, we still continue to Haiku with empty ddg fragment.
+                # The DDG tier no longer hands off to a separate LLM
+                # extraction tier — the Haiku/Sonnet synthesis tiers were
+                # removed in Phase 2b sub-fix RC4 (see module docstring).
+                # If DDG returned nothing, we still continue to the next
+                # tier (SerpAPI) with an empty fragment.
 
             except Exception as e:
                 logger.debug("DDG tier failed for '%s': %s", title, e)
@@ -400,7 +401,7 @@ def _find_missing_fields(job_row: dict) -> list:
     """Return list of missing scoring-relevant field names.
 
     A job needs enrichment if any of these are missing:
-    - jd_full: full job description (needed for Sonnet)
+    - jd_full: full job description (needed for AI scoring)
     - salary_min: minimum salary
 
     Returns empty list if all fields are present (no enrichment needed).

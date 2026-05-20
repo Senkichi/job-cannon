@@ -273,7 +273,7 @@ _EXPIRED_BODY_REGEXES = tuple(
 def quick_liveness_check(url: str, timeout: int = 8) -> str:
     """Lightweight HTTP GET check for a single job URL.
 
-    Used by the scoring preflight to gate Sonnet evaluation AND by
+    Used by the scoring preflight to gate score-tier evaluation AND by
     Phase C's cascade. Independent from the ATS-specific signals.
     """
     # Greenhouse error-redirect URL — expired boards redirect to ?error=true

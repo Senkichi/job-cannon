@@ -3,7 +3,6 @@
 Routes:
     GET  /profile            -- Load profile, run validation, render editor
     POST /profile/save       -- Accept JSON body, save profile to disk
-    POST /profile/import     -- Accept .md file upload, extract via Opus
     POST /profile/reorder-positions -- HTMX: reorder positions and save
     POST /profile/reorder-skills    -- HTMX: reorder top-level skills and save
 """

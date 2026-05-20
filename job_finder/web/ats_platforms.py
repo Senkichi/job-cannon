@@ -498,7 +498,7 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
 
             # Fetch the full description via the Workday detail endpoint.
             # Without this, Workday jobs land in the DB with jd_full=NULL and
-            # Sonnet can never evaluate them (skips on empty JD).
+            # the score-tier scorer can never evaluate them (skips on empty JD).
             description = (
                 _fetch_workday_description(subdomain, tenant, board, external_path)
                 if external_path
@@ -649,7 +649,7 @@ def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[s
 
             # Fetch the full description via the posting detail endpoint.
             # The list endpoint returns only name + id + location; without a
-            # secondary fetch, jd_full stays NULL and Sonnet skips the job.
+            # secondary fetch, jd_full stays NULL and the scorer skips the job.
             description = (
                 _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
             )

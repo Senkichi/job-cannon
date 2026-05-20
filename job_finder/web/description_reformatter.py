@@ -1,4 +1,4 @@
-"""Haiku-assisted job description reformatting.
+"""Quick-tier-assisted job description reformatting.
 
 Reformats raw job descriptions (pipe-separated, bullet lists, messy email-parsed
 formatting) into clean section/paragraph style resembling a real job posting.
@@ -8,15 +8,16 @@ The description_reformatted flag (added by Migration 6 in Plan 01) prevents
 re-running on already-processed jobs.
 
 Design:
-  - reformat_description: Single-job reformatting via Haiku API call.
+  - reformat_description: Single-job reformatting via the quick-tier cascade.
   - run_description_reformat_pass: One-time background pass over all unformatted jobs.
   - Both are graceful-degradation: failures return original text unchanged.
   - Already-well-formatted descriptions (2+ section headers) are skipped.
 
-Cost note: Haiku is ~$0.0003/call. With ~200 existing jobs, total is ~$0.06.
+Cost note: in production the quick-tier resolves to Ollama or the Anthropic
+CLI, both $0/call. Older runs on the paid path were ~$0.0003/call.
 
 Exports:
-    reformat_description: Reformat a single description string via Haiku.
+    reformat_description: Reformat a single description string via the cascade.
     run_description_reformat_pass: One-time background pass over all unformatted jobs.
 """
 
@@ -56,7 +57,7 @@ _REFORMAT_SCHEMA: dict = {
     "additionalProperties": False,
 }
 
-# System prompt for Haiku reformatting
+# System prompt for the quick-tier reformatting call
 _SYSTEM_PROMPT = (
     "You are a job description formatter. Reformat the following job description into "
     "clean, professional sections with headers and paragraphs — like a real job posting. "
@@ -73,7 +74,7 @@ def reformat_description(
     conn: Any = None,
     config: dict | None = None,
 ) -> str | None:
-    """Use Haiku to reformat a job description into section/paragraph style.
+    """Use the quick-tier cascade to reformat a job description into section/paragraph style.
 
     Takes raw description text (pipe-separated, bullet lists, or messy formatting)
     and returns clean section/paragraph text resembling a real job posting.
@@ -218,7 +219,7 @@ def run_description_reformat_pass(
                         )
                         reformatted_count += 1
                     else:
-                        # Text unchanged (already formatted or Haiku returned same text)
+                        # Text unchanged (already formatted or the model returned the same text)
                         # Mark as processed so it's not retried
                         conn.execute(
                             "UPDATE jobs SET description_reformatted = 1 WHERE dedup_key = ?",
