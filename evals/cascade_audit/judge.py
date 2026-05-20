@@ -27,6 +27,12 @@ If both outputs are equally good, return 'tie'. If one output has a critical err
 
 Provide a brief rationale citing specific differences."""
 
+# N-2 (2026-05-20): raised from 2000. extract_jobs returns lists of jobs that
+# typically exceed 2000 chars; truncating at the old boundary biased the judge
+# toward the head elements of each list. DeepSeek-V4-Flash :free tier has
+# ≥64k context, so 8000 chars * 2 outputs + system prompt fits comfortably.
+_MAX_JUDGE_OUTPUT_CHARS = 8000
+
 
 def judge_pair(
     output_a: dict,
@@ -52,10 +58,10 @@ def judge_pair(
     prompt = f"""Callsite: {callsite}
 
 Output A:
-{str(output_a)[:2000]}
+{str(output_a)[:_MAX_JUDGE_OUTPUT_CHARS]}
 
 Output B:
-{str(output_b)[:2000]}
+{str(output_b)[:_MAX_JUDGE_OUTPUT_CHARS]}
 
 Which output is better? Respond with winner ('A', 'B', or 'tie'), rationale, and confidence (0-1)."""
 
