@@ -35,14 +35,18 @@ def test_each_step_renders(client, path, marker):
 
 
 def test_welcome_renders_system_check_results(client):
-    """Welcome GET invokes system_check.run_all() and renders each result."""
+    """Welcome GET invokes system_check.run_all() and renders each result.
+
+    M-3 (2026-05-20): port-free check was dropped (it always reported the
+    wizard's own port 5000 as in-use). Only the two remaining checks render.
+    """
     resp = client.get("/onboarding/welcome")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    # The 3 default check names from system_check.run_all
     assert "DB writable" in body
-    assert "Port 5000" in body
     assert "Network reachable" in body
+    # The deleted port check no longer renders.
+    assert "Port 5000" not in body
 
 
 def test_step_indicator_renders(client):

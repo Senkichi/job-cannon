@@ -1,8 +1,13 @@
 """First-run system diagnostics (STRANGE-WIZ-03, Phase 42).
 
-Three checks run from the welcome route GET handler — D-10 makes them warning-only,
+Two checks run from the welcome route GET handler — D-10 makes them warning-only,
 failures do not block advance. Diagnostic strings per D-11 MUST name the failing entity
-(file path, port number, host name) so the user sees what to fix.
+(file path, host name) so the user sees what to fix.
+
+The Phase-42 port-free check was removed by M-3 (2026-05-20): by the time the
+welcome route renders, Flask is already listening on port 5000, so
+connect_ex(('127.0.0.1', 5000)) returns 0 unconditionally — the check was a
+100%-false-positive on its only meaningful caller.
 
 Stdlib-only — no new dependencies. Uses Path.touch()/unlink() for the DB-writable probe
 because os.access(p, os.W_OK) is unreliable on Windows.
@@ -64,25 +69,6 @@ def check_db_writable() -> CheckResult:
     return CheckResult("DB writable", True, str(db_file))
 
 
-def check_port_free(port: int = 5000) -> CheckResult:
-    """Check that 127.0.0.1:port has no listener.
-
-    Names the port number in BOTH ok and !ok paths (D-11 — "port-conflict names the
-    conflicting port").
-    """
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            # connect_ex returns 0 if connection succeeded — port IS taken
-            result = s.connect_ex(("127.0.0.1", port))
-    except OSError as e:
-        return CheckResult(f"Port {port} free", False, f"Port {port}: socket probe failed: {e}")
-
-    if result == 0:
-        return CheckResult(f"Port {port} free", False, f"Port {port} is in use by another process")
-    return CheckResult(f"Port {port} free", True, f"Port {port} available")
-
-
 def check_network(host: str = "imap.gmail.com", timeout: float = 2.0) -> CheckResult:
     """DNS-resolve `host` to confirm outbound network reachability.
 
@@ -105,9 +91,13 @@ def check_network(host: str = "imap.gmail.com", timeout: float = 2.0) -> CheckRe
 
 
 def run_all() -> list[CheckResult]:
-    """Run all three checks in order; never raise (warning-only per D-10).
+    """Run both system checks in order; never raise (warning-only per D-10).
 
     Returns a list so the welcome template can iterate and render each line independently,
     which prevents a single failure from hiding the others (D-11 last sentence).
+
+    Note: a port-free check was previously included but removed by M-3 (2026-05-20).
+    By the time this runs, Flask is serving the welcome page on port 5000, so the
+    check would always report the wizard's own port as "in use".
     """
-    return [check_db_writable(), check_port_free(), check_network()]
+    return [check_db_writable(), check_network()]
