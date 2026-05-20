@@ -428,3 +428,122 @@ def test_done_post_preserves_existing_sections_when_load_config_raises(configure
     assert merged["output"]["min_score_threshold"] == 7, "output.min_score_threshold wiped"
     # Slice fields applied
     assert "Staff Engineer" in merged["profile"]["target_titles"]
+
+
+# --- Commit 3.6: keyring-write integration tests ---
+
+
+def test_done_writes_imap_app_password_to_keyring(configured_app):
+    """imap.app_password from wizard_data lands in keyring; config.yaml cleared.
+
+    Commit 3.6 of KEYRING-v5.1. The `done` step is where the multi-step
+    wizard's transient plaintext (in onboarding_state.wizard_data) becomes
+    a permanent secret. Per locked decision 5a it gets written to the OS
+    keyring at this exact handoff point, and the legacy config.yaml field
+    is reduced to an empty string so plaintext doesn't sit at rest.
+    """
+    import keyring as keyring_lib
+
+    wizard_payload = {
+        "provider": {"name": "ollama"},  # no-creds provider — only imap is secret
+        "imap": {
+            "host": "imap.gmail.com",
+            "port": 993,
+            "email": "u@example.com",
+            "app_password": "abcd efgh ijkl mnop",
+            "folder": "INBOX",
+            "enabled": True,
+            "verified": True,
+        },
+        "profile_edit": {
+            "target_titles": "Engineer",
+            "target_locations": "Remote",
+            "skills": "python",
+        },
+        "schedule": {"cadence_preset": "standard"},
+    }
+    _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch(
+        "job_finder.web.onboarding.blueprint.get_scheduler",
+        return_value=MagicMock(),
+    ):
+        resp = configured_app.test_client().post("/onboarding/done")
+    assert resp.status_code == 302
+
+    # Keyring has it.
+    assert (
+        keyring_lib.get_password("job-cannon", "sources.imap.app_password")
+        == "abcd efgh ijkl mnop"
+    )
+
+    # config.yaml does NOT have plaintext at rest.
+    cfg_path: Path = configured_app._test_cfg_path
+    written = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert written["sources"]["imap"]["app_password"] == "", (
+        f"plaintext should be cleared, got {written['sources']['imap']['app_password']!r}"
+    )
+    # Non-secret fields still flow through.
+    assert written["sources"]["imap"]["email"] == "u@example.com"
+    assert written["sources"]["imap"]["host"] == "imap.gmail.com"
+
+
+def test_done_writes_provider_api_key_to_keyring(configured_app):
+    """BYO-key provider api_key from wizard_data lands in keyring; cleared in config.yaml."""
+    import keyring as keyring_lib
+
+    wizard_payload = {
+        "provider": {"name": "openrouter", "api_key": "sk-or-test-12345"},
+        "imap": {
+            "host": "imap.gmail.com",
+            "port": 993,
+            "email": "u@example.com",
+            "app_password": "",  # no app password this run
+            "folder": "INBOX",
+            "enabled": False,
+        },
+        "profile_edit": {
+            "target_titles": "Engineer",
+            "target_locations": "Remote",
+            "skills": "python",
+        },
+        "schedule": {"cadence_preset": "standard"},
+    }
+    _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
+    conn = sqlite3.connect(configured_app.config["DB_PATH"])
+    try:
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with patch(
+        "job_finder.web.onboarding.blueprint.get_scheduler",
+        return_value=MagicMock(),
+    ):
+        resp = configured_app.test_client().post("/onboarding/done")
+    assert resp.status_code == 302
+
+    assert (
+        keyring_lib.get_password("job-cannon", "providers.api_keys.openrouter")
+        == "sk-or-test-12345"
+    )
+
+    cfg_path: Path = configured_app._test_cfg_path
+    written = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert written["providers"]["api_keys"]["openrouter"] == "", (
+        f"plaintext should be cleared, got "
+        f"{written['providers']['api_keys']['openrouter']!r}"
+    )

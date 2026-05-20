@@ -37,6 +37,7 @@ from flask import (
     url_for,
 )
 
+from job_finder import secrets as jf_secrets
 from job_finder.config import ConfigError, ConfigNotFoundError, load_config
 from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import get_db
@@ -66,6 +67,39 @@ def _db():
 def _wizard():
     """Read wizard_data from DB - convenience for handlers."""
     return state.read_wizard_data(_db())
+
+
+def _move_secret_or_warn(
+    config_slice: dict, path: tuple[str, ...], canonical: str
+) -> None:
+    """Move a secret out of `config_slice` into the OS keyring.
+
+    Walks `path`; if a non-empty string is at the leaf, writes it under
+    `canonical` and clears the leaf to "" so the atomic config.yaml write
+    persists no plaintext. On RuntimeError (no keyring backend) the leaf
+    is left alone — plaintext flows through to config.yaml and the user
+    is flashed a warning so degradation is visible, not silent.
+    """
+    node = config_slice
+    for part in path[:-1]:
+        if not isinstance(node, dict) or part not in node:
+            return
+        node = node[part]
+    leaf = path[-1]
+    if not isinstance(node, dict) or leaf not in node:
+        return
+    value = node[leaf]
+    if not isinstance(value, str) or not value:
+        return
+    try:
+        jf_secrets.set_secret(canonical, value)
+        node[leaf] = ""
+    except RuntimeError:
+        flash(
+            "Couldn't write secret to OS keyring — saved to config.yaml as "
+            "plaintext fallback. See SECURITY.md.",
+            "warning",
+        )
 
 
 # --- Routes (8 total) ---
@@ -413,6 +447,25 @@ def done():
         if provider_block.get("api_key"):
             # API key only attached for BYO-key providers (D-04)
             config_slice["providers"]["api_keys"] = {provider_block["name"]: provider_block["api_key"]}
+
+        # --- Commit 3.6: route wizard secrets through the OS keyring ---
+        # Per locked decision (Phase 1 #5a): plaintext lives in wizard_data
+        # during the multi-step wizard; the keyring write only fires here, at
+        # the final `done` step, atomically with the config.yaml side effect.
+        # On RuntimeError (no keyring backend reachable) the plaintext flows
+        # through to config.yaml as a fallback so the user doesn't lose the
+        # secret — a flash warning informs them of the degradation.
+        _move_secret_or_warn(
+            config_slice, ("sources", "imap", "app_password"),
+            "sources.imap.app_password",
+        )
+        provider_name = provider_block.get("name", "")
+        if provider_name and provider_block.get("api_key"):
+            canonical = f"providers.api_keys.{provider_name}"
+            if canonical in jf_secrets.SECRET_ENV_VARS:
+                _move_secret_or_warn(
+                    config_slice, ("providers", "api_keys", provider_name), canonical,
+                )
 
         # --- Side effect 1: atomic config.yaml write (D-15) ---
         # When load_config raises ConfigError (e.g. validate_target_titles fails on
