@@ -132,8 +132,19 @@ def _call_llm(text: str, conn: sqlite3.Connection, config: dict) -> dict:
     Returns:
         Structured profile dict from LLM response, or empty dict on failure.
     """
-    system_prompt = """You are a resume parser. Extract structured information from the resume text.
-Return a JSON object with positions, skills, education, and suggested target roles/locations/salary range."""
+    # UAT F4 (2026-05-21): when the resume has no explicit Skills section,
+    # the LLM previously returned skills=[] and the wizard's profile-edit
+    # step rendered with an empty Skills textarea. The user either left it
+    # blank ("I trust the parser") or typed something off the top of their
+    # head, weakening the scoring prompt downstream. Fix is prompt-only:
+    # tell the model how to behave when no Skills section exists. Keeps
+    # this a single LLM call — no second pass, no retry loop.
+    system_prompt = """You are a resume parser. Extract structured information from the resume text and return a JSON object with positions, skills, education, and suggested target roles, locations, and salary range.
+
+For the `skills` field:
+- If the resume has an explicit Skills / Technical Skills / Competencies section, populate `skills` from that section.
+- If no such section exists, infer 8-15 skills from the technologies, tools, frameworks, methodologies, and domain terms mentioned in position descriptions, project bullets, and education. Return inferred skills as plain strings (no parenthetical "(inferred)" markers).
+- Always return `skills` as a non-empty array when any work history is present in the resume."""
     user_message = f"Resume text:\n\n{text}"
 
     result = call_model(

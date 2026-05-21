@@ -290,6 +290,49 @@ def test_call_llm_returns_empty_on_no_data(in_memory_db, stub_config):
         assert result == {}
 
 
+def test_call_llm_prompt_instructs_skill_inference_when_no_skills_section(
+    in_memory_db, stub_config, valid_profile_data
+):
+    """UAT F4 (2026-05-21): the system prompt sent to call_model must tell
+    the model to infer 8-15 skills from position descriptions when the
+    resume has no explicit Skills section.
+
+    This is a contract test on the prompt itself — we don't try to assert
+    LLM behaviour (model-dependent), only that the instruction is present.
+    The instruction's effect on real resumes is verified by manual spot-check
+    per the plan's "Evidence this plan might be wrong" guidance."""
+    with patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+        mock_call.return_value = _make_result(valid_profile_data)
+
+        _call_llm("resume text without a skills section", in_memory_db, stub_config)
+
+        system_prompt = mock_call.call_args.kwargs["system"]
+
+        # Must mention the inference instruction.
+        assert "infer" in system_prompt.lower(), (
+            "System prompt should tell the model to infer skills when no "
+            "explicit Skills section exists."
+        )
+        # Must reference the source material for inference (positions / bullets).
+        assert (
+            "position descriptions" in system_prompt.lower()
+            or "position description" in system_prompt.lower()
+        ), "System prompt should name position descriptions as the inference source."
+        # Must specify the 8-15 range so the model returns a useful list, not 2.
+        assert "8" in system_prompt and "15" in system_prompt, (
+            "System prompt should bound the inference at 8-15 skills."
+        )
+        # The prompt should call out the "(inferred)" anti-pattern so the
+        # model knows not to emit it. (The downstream consumer doesn't
+        # distinguish, and the marker would leak into the profile-edit
+        # textarea.) This is a soft assertion — the design just requires the
+        # guidance be communicated; the exact phrasing is the implementer's
+        # call.
+        assert "(inferred)" in system_prompt and "no" in system_prompt.lower(), (
+            "System prompt should explicitly tell the model not to add '(inferred)' markers."
+        )
+
+
 def test_parse_resume_successful_flow(in_memory_db, stub_config, valid_profile_data, tmp_path):
     """End-to-end happy path with mocked call_model."""
     with patch(
