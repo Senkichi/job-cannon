@@ -768,6 +768,7 @@ dependencies = [
     { name = "portalocker" },
     { name = "psutil" },
     { name = "python-docx" },
+    { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "ruamel-yaml" },
@@ -783,7 +784,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-playwright" },
-    { name = "python-dotenv" },
     { name = "types-requests" },
 ]
 eval = [
@@ -821,7 +821,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = "~=7.1" },
     { name = "pytest-playwright", marker = "extra == 'dev'", specifier = "~=0.7" },
     { name = "python-docx", specifier = ">=1.1" },
-    { name = "python-dotenv", marker = "extra == 'dev'", specifier = "~=1.0" },
+    { name = "python-dotenv", specifier = "~=1.0" },
     { name = "pyyaml", specifier = "~=6.0" },
     { name = "requests", specifier = "~=2.31" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },

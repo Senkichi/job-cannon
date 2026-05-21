@@ -1,0 +1,73 @@
+# .github/workflows/publish.yml
+#
+# Tag-triggered PyPI publish pipeline. Fires on any `v*` tag push (which
+# comes from release.yml's `cz bump --yes --changelog && git push --follow-tags`,
+# or a manual `git tag v5.0.0 && git push --tags`).
+#
+# Pre-release tags (v*a*, v*b*, v*rc*) are intentionally NOT routed here —
+# the guard step below fails fast on those and lets publish-testpypi.yml
+# handle them. Glob negation isn't supported in `on.push.tags`, so the
+# regex guard is the cleanest split (RESEARCH §Pattern 2 lines 293-299).
+#
+# Trusted publishing: registered against (owner=Senkichi, repo=job-cannon,
+# workflow=publish.yml, environment=pypi) on pypi.org. The OIDC token is
+# minted by `pypa/gh-action-pypi-publish` inside the publish step — AFTER
+# the environment's required-reviewer gate clears. D-07 / T-44-R1.
+#
+# D-02: a GitHub Release object is created here, AFTER the PyPI upload
+# succeeds. Release exists iff artifact landed on PyPI.
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Build, smoke-test, and publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/job-cannon
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Guard against pre-release tags (route those to publish-testpypi.yml)
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ (a|b|rc)[0-9]+$ ]]; then
+            echo "::error::Pre-release tag ${GITHUB_REF_NAME} — handled by publish-testpypi.yml, aborting GA publish."
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Validate metadata + long-description rendering
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test installed entry point
+        run: |
+          uv tool install ./dist/*.whl
+          job-cannon --version
+          job-cannon --help
+
+      - name: Publish to PyPI (OIDC trusted publishing)
+        uses: pypa/gh-action-pypi-publish@v1.14.0
+
+      - name: Create GitHub Release with artifacts attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.whl

@@ -11,18 +11,12 @@ running ``uv run job-cannon`` is not stranded at the Werkzeug log line.
 Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
 """
 
+import argparse
 import logging
 import os
+import sys
 import threading
 import webbrowser
-
-from job_finder.config import (
-    DEFAULT_SERVER_DEBUG,
-    DEFAULT_SERVER_HOST,
-    DEFAULT_SERVER_PORT,
-    load_config,
-)
-from job_finder.web import create_app
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +25,37 @@ logger = logging.getLogger(__name__)
 # sees a connection error, the user reloads, and they are still ahead of
 # where they started (no URL to copy from a Werkzeug log).
 _BROWSER_OPEN_DELAY_SEC = 1.5
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="job-cannon",
+        description="Personal job search command center — Flask web app on localhost:5000.",
+        epilog="Configuration: see docs/SETUP.md. Without config.yaml the app launches "
+               "into the onboarding wizard on first run.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"job-cannon {_get_version()}",
+    )
+    return parser
+
+
+def _get_version() -> str:
+    """Resolve the installed package version via importlib.metadata.
+
+    Falls back to "0.0.0+dev" when the package isn't installed (e.g.,
+    running from a source checkout without `uv pip install -e .`).
+    """
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        try:
+            return version("job-cannon")
+        except PackageNotFoundError:
+            return "0.0.0+dev"
+    except Exception:
+        return "0.0.0+dev"
 
 
 def _open_browser(url: str) -> None:
@@ -48,6 +73,21 @@ def _open_browser(url: str) -> None:
 
 def main() -> None:
     """Resolve config, build the Flask app, and start the dev server."""
+    # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
+    # argparse calls sys.exit(0) on --help and --version, so we never touch
+    # load_config() if those flags are passed. This is what makes
+    # `pipx install job-cannon && job-cannon --help` work without config.yaml.
+    _build_parser().parse_args()
+
+    # Lazy imports so a --help invocation doesn't pay the Flask import cost.
+    from job_finder.config import (
+        DEFAULT_SERVER_DEBUG,
+        DEFAULT_SERVER_HOST,
+        DEFAULT_SERVER_PORT,
+        load_config,
+    )
+    from job_finder.web import create_app
+
     cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
     server = cfg.get("server", {})

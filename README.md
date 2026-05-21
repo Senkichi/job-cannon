@@ -18,17 +18,20 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-## Fastest path
-
-Already have Python 3.13+ and Git? Three lines:
+## Install
 
 ```bash
-git clone https://github.com/Senkichi/job-cannon.git
-cd job-cannon
-./install.sh           # macOS — or .\install.ps1 on Windows PowerShell
+pipx install job-cannon
+job-cannon
 ```
 
-The bootstrap script prompts before each install step (uv → `uv sync` → optional Ollama + `qwen2.5:14b` → optional Node + Claude Code CLI), then launches the app. Pass `--minimal` to skip Ollama + Node, or `--yes` to accept every prompt. Linux users follow the manual steps below.
+`pipx install job-cannon` is the recommended path: one command, isolated venv, no Python-version conflicts. The `job-cannon` command launches the Flask app on http://localhost:5000 and opens your browser. On first launch the onboarding wizard auto-detects AI providers (Ollama / Claude Code CLI / Gemini CLI), helps you connect Gmail via IMAP app password, and writes secrets to your OS keyring — no manual YAML editing required.
+
+**Don't have pipx yet?** Per-OS one-liners: `scoop install pipx` (Windows), `brew install pipx` (macOS), `sudo apt install pipx` (Ubuntu 23.04+).
+
+**Already cloning the repo to hack on it?** See [For Contributors](#for-contributors) at the bottom.
+
+**Other install paths and troubleshooting:** [INSTALL.md](INSTALL.md).
 
 ## Engineering Highlights
 
@@ -68,62 +71,10 @@ The bootstrap script prompts before each install step (uv → `uv sync` → opti
   differently and that's intentional.
 - **2163 tests** (unit + integration + Playwright e2e) green on the CI
   matrix (Ubuntu + Windows × Python 3.13).
-
-## Quick Start
-
-**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
-
-**macOS / Linux / Git Bash**
-
-```bash
-git clone https://github.com/Senkichi/job-cannon.git
-cd job-cannon
-uv sync --extra dev --extra eval
-uv run job-cannon
-```
-
-**Windows PowerShell**
-
-```powershell
-git clone https://github.com/Senkichi/job-cannon.git
-cd job-cannon
-uv sync --extra dev --extra eval
-uv run job-cannon
-```
-
-Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
-
-**Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
-
-```bash
-cp config.example.yaml config.yaml
-cp experience_profile.example.json experience_profile.json
-```
-
-**Keep config + database inside the repo (optional — easier backup):**
-
-```bash
-export JOB_CANNON_USER_DATA_DIR=$(pwd)              # macOS / Linux / Git Bash
-```
-
-```powershell
-$env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path  # Windows PowerShell
-```
-
-Otherwise data lives at `%APPDATA%\JobCannon\` (Windows) / `~/Library/Application Support/JobCannon/` (macOS) / `~/.local/share/JobCannon/` (Linux).
-
-**`config.yaml` keys to fill in (if you skipped the wizard):**
-
-| Key | Required | Notes |
-|-----|----------|-------|
-| `profile.target_titles` | **yes** | Job titles to target, e.g. `["Senior Data Scientist"]` |
-| `profile.target_locations` | **yes** | Locations or `["Remote"]` |
-| `profile.skills` | **yes** | Your key skills |
-| `sources.imap.email` + `app_password` | optional | Gmail via IMAP — use an [app password](https://support.google.com/accounts/answer/185833), not your account password. No OAuth required. |
-| `sources.serpapi.api_key` | optional | Paid SERP API for Google Jobs search |
-| `providers.primary` | optional | Default `ollama` ($0 local); swap to `gemini` or `anthropic` if Ollama is not installed |
-
-For full configuration reference — provider table, source setup, troubleshooting — see [docs/SETUP.md](docs/SETUP.md).
+- **In-app update notifications.** Dashboard surfaces an "Update available"
+  banner when a newer GitHub release is detected; check is throttled to
+  once-per-day, dismissible per-version, never blocks app startup if the
+  network is down.
 
 ## Architecture
 
@@ -240,6 +191,64 @@ keys needed for unit / integration. The e2e tier requires
 - **[Privacy policy](PRIVACY.md)** — what data the app touches, where it lives, what it sends out
 - **[Acceptable use](AUP.md)** — prohibited uses and operator responsibilities
 - **[Security policy](SECURITY.md)** — reporting channel, scope, disclosure
+
+## For Contributors
+
+Working on Job Cannon itself? Use the clone-and-sync flow — you get the test suite, the eval harness, and a writable `.venv/` you can iterate against. (End users should use `pipx install job-cannon` from the [Install](#install) section above.)
+
+**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
+
+**macOS / Linux / Git Bash**
+
+```bash
+git clone https://github.com/Senkichi/job-cannon.git
+cd job-cannon
+uv sync --extra dev --extra eval
+uv run job-cannon
+```
+
+**Windows PowerShell**
+
+```powershell
+git clone https://github.com/Senkichi/job-cannon.git
+cd job-cannon
+uv sync --extra dev --extra eval
+uv run job-cannon
+```
+
+Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
+
+**Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
+
+```bash
+cp config.example.yaml config.yaml
+cp experience_profile.example.json experience_profile.json
+```
+
+**Keep config + database inside the repo (optional — easier backup):**
+
+```bash
+export JOB_CANNON_USER_DATA_DIR=$(pwd)              # macOS / Linux / Git Bash
+```
+
+```powershell
+$env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path  # Windows PowerShell
+```
+
+Otherwise data lives at `%APPDATA%\JobCannon\` (Windows) / `~/Library/Application Support/JobCannon/` (macOS) / `~/.local/share/JobCannon/` (Linux).
+
+**`config.yaml` keys to fill in (if you skipped the wizard):**
+
+| Key | Required | Notes |
+|-----|----------|-------|
+| `profile.target_titles` | **yes** | Job titles to target, e.g. `["Senior Data Scientist"]` |
+| `profile.target_locations` | **yes** | Locations or `["Remote"]` |
+| `profile.skills` | **yes** | Your key skills |
+| `sources.imap.email` + `app_password` | optional | Gmail via IMAP — use an [app password](https://support.google.com/accounts/answer/185833), not your account password. No OAuth required. |
+| `sources.serpapi.api_key` | optional | Paid SERP API for Google Jobs search |
+| `providers.primary` | optional | Default `ollama` ($0 local); swap to `gemini` or `anthropic` if Ollama is not installed |
+
+For full configuration reference — provider table, source setup, troubleshooting — see [docs/SETUP.md](docs/SETUP.md).
 
 ## License
 

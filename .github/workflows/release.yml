@@ -31,9 +31,3 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           cz bump --yes --changelog
           git push --follow-tags
-
-      - run: |
-          VERSION=$(cz version --project)
-          gh release create "v${VERSION}" --generate-notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

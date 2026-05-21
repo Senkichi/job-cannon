@@ -1,0 +1,58 @@
+# .github/workflows/publish-testpypi.yml
+#
+# Pre-release-tag-triggered TestPyPI rehearsal pipeline. Mirrors publish.yml
+# but routes to test.pypi.org and skips the GH Release step. Used for the
+# v5.0.0rc1 rehearsal before v5.0.0 GA (D-05).
+#
+# Trigger patterns (PEP 440 canonical pre-release markers):
+#   - v*a*   → alpha (v5.0.0a1, v5.1.0a2)
+#   - v*b*   → beta  (v5.0.0b1)
+#   - v*rc*  → release candidate (v5.0.0rc1)
+#
+# Trusted publishing: separate registration on test.pypi.org against
+# (owner=Senkichi, repo=job-cannon, workflow=publish-testpypi.yml,
+# environment=testpypi). Same OIDC mechanism as publish.yml.
+
+name: Publish to TestPyPI (pre-release rehearsal)
+
+on:
+  push:
+    tags:
+      - 'v*a*'
+      - 'v*b*'
+      - 'v*rc*'
+
+jobs:
+  publish-testpypi:
+    name: Build, smoke-test, and publish to TestPyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/job-cannon
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Validate metadata + long-description rendering
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test installed entry point
+        run: |
+          uv tool install ./dist/*.whl
+          job-cannon --version
+          job-cannon --help
+
+      - name: Publish to TestPyPI (OIDC trusted publishing)
+        uses: pypa/gh-action-pypi-publish@v1.14.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
