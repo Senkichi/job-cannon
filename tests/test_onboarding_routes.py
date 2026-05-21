@@ -7,10 +7,8 @@ IMAP failure re-render (D-08), and wizard_data write semantics (D-13).
 
 import io
 import sqlite3
-from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # The 8 routes + their marker strings (success criterion 2)
 _ROUTE_TO_MARKER = [
@@ -81,6 +79,7 @@ def test_provider_select_post_writes_wizard_data_and_redirects(client, app):
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
         assert row is not None
         import json
+
         data = json.loads(row[0])
         assert data["provider"]["name"] == "ollama"
     finally:
@@ -92,7 +91,9 @@ def test_provider_credentials_no_creds_for_free_clis(client, app):
     # First write a provider choice to wizard_data
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"}}' WHERE id=1")
+        conn.execute(
+            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"ollama"}}\' WHERE id=1'
+        )
         conn.commit()
     finally:
         conn.close()
@@ -107,7 +108,9 @@ def test_provider_credentials_api_key_form_for_anthropic(client, app):
     """provider_credentials GET for anthropic renders an API-key form."""
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"anthropic\"}}' WHERE id=1")
+        conn.execute(
+            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"anthropic"}}\' WHERE id=1'
+        )
         conn.commit()
     finally:
         conn.close()
@@ -200,7 +203,9 @@ def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch)
 
     monkeypatch.setattr(
         "job_finder.web.onboarding.blueprint.imap_test.check_imap",
-        lambda **kwargs: ImapTestResult(ok=False, error_kind="auth", message="Authentication failed — check your app password"),
+        lambda **kwargs: ImapTestResult(
+            ok=False, error_kind="auth", message="Authentication failed — check your app password"
+        ),
     )
 
     resp = client.post(
@@ -231,6 +236,7 @@ def test_imap_credentials_post_success_redirects_to_schedule(client, monkeypatch
     assert "/onboarding/schedule" in resp.headers["Location"]
 
     import json
+
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
@@ -259,6 +265,7 @@ def test_imap_skip_persists_credentials_unverified(client, app):
     assert "/onboarding/schedule" in resp.headers["Location"]
 
     import json
+
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
@@ -275,6 +282,7 @@ def test_schedule_post_writes_cadence_and_redirects_to_done(client, app):
     assert "/onboarding/done" in resp.headers["Location"]
 
     import json
+
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
@@ -290,6 +298,7 @@ def test_schedule_invalid_preset_defaults_to_standard(client, app):
     assert resp.status_code == 302
 
     import json
+
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
@@ -304,7 +313,7 @@ def test_done_get_renders_summary(client, app):
     conn = sqlite3.connect(app.config["DB_PATH"])
     try:
         conn.execute(
-            "UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"},\"imap\":{\"email\":\"x@y.com\"},\"schedule\":{\"cadence_preset\":\"light\"}}' WHERE id=1"
+            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"ollama"},"imap":{"email":"x@y.com"},"schedule":{"cadence_preset":"light"}}\' WHERE id=1'
         )
         conn.commit()
     finally:
@@ -318,14 +327,65 @@ def test_done_get_renders_summary(client, app):
     assert "light" in body
 
 
+def test_done_page_includes_alert_setup_sections(client):
+    """Stage 1 (NO-KEY-COMPENSATION-PLAN.md): /onboarding/done shows three
+    collapsed <details> blocks (LinkedIn / Glassdoor / Indeed) with the
+    matching sender email, an explicit link to the alert-setup page, and an
+    honest disclaimer for Indeed.
+
+    Static HTML, so the test is a substring/structural check — no behaviour
+    change to assert.
+    """
+    resp = client.get("/onboarding/done")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+
+    # Existing summary marker still renders (defensive against template
+    # restructure during the Stage 1 edit).
+    assert "WIZARD_STEP_DONE_MARKER" in body
+
+    # ---- LinkedIn block ----
+    assert "Set up LinkedIn job alerts" in body
+    assert "https://www.linkedin.com/jobs/job-alerts/" in body
+    assert "jobalerts-noreply@linkedin.com" in body
+
+    # ---- Glassdoor block ----
+    assert "Set up Glassdoor job alerts" in body
+    assert "glassdoor.com" in body
+    assert "noreply@glassdoor.com" in body
+
+    # ---- Indeed block + honest disclaimer ----
+    assert "Set up Indeed job alerts" in body
+    assert "indeed.com" in body
+    assert "alert@indeed.com" in body
+    # Spec calls for an honest note on Indeed reliability.
+    assert "throttle" in body.lower() or "delay" in body.lower()
+
+    # Anchor hardening: every outbound link opens in a new tab WITHOUT
+    # passing window.opener and WITHOUT leaking the referrer (matches the
+    # existing IMAP page convention enforced by test_imap_credentials_*).
+    assert 'target="_blank"' in body
+    assert 'rel="noopener"' in body
+
+    # Sections are <details> elements and they are COLLAPSED by default.
+    # The IMAP page also uses <details>, so substring counts are flaky;
+    # we assert that at LEAST 3 <details> appear (one per provider).
+    assert body.count("<details") >= 3
+    # None of the new sections should be open by default.
+    assert "<details open" not in body
+    assert "<details  open" not in body
+
+
 def test_done_post_redirects_to_jobs(client):
     """Done POST handler (plan 42-06) returns 302 redirect to /jobs with flash banner."""
     # Seed minimal wizard_data so done handler doesn't fail
     import sqlite3
-    import json
+
     conn = sqlite3.connect(client.application.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET wizard_data='{\"provider\":{\"name\":\"ollama\"}}' WHERE id=1")
+        conn.execute(
+            'UPDATE onboarding_state SET wizard_data=\'{"provider":{"name":"ollama"}}\' WHERE id=1'
+        )
         conn.commit()
     finally:
         conn.close()

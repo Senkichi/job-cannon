@@ -10,6 +10,41 @@
   <div><span class="text-slate-400">Schedule:</span> <span class="text-slate-200">{{ summary.cadence | default('—') }}</span></div>
   <div><span class="text-slate-400">Target titles:</span> <span class="text-slate-200">{{ summary.target_titles | default('—') }}</span></div>
 </div>
+<div class="space-y-2 mb-6">
+  <p class="text-sm text-slate-400">Optional: set up email alerts on the sites Job Cannon reads from. Each provider sends a daily digest to the inbox you connected; Job Cannon parses those automatically.</p>
+
+  <details class="bg-slate-900/40 border border-slate-700 rounded p-3">
+    <summary class="cursor-pointer text-slate-200">Set up LinkedIn job alerts</summary>
+    <ol class="list-decimal list-inside text-sm text-slate-300 mt-2 space-y-1">
+      <li>Open <a href="https://www.linkedin.com/jobs/job-alerts/" target="_blank" rel="noopener" class="text-blue-400 underline">LinkedIn job alerts</a>.</li>
+      <li>Search the role you want and toggle <span class="text-slate-100">Job alert</span> on.</li>
+      <li>Set frequency to <span class="text-slate-100">Daily</span> and delivery to <span class="text-slate-100">Email</span>.</li>
+      <li>Make sure email arrives in the inbox you just connected. Job Cannon parses from <code>jobalerts-noreply@linkedin.com</code> and <code>jobs-noreply@linkedin.com</code>.</li>
+    </ol>
+  </details>
+
+  <details class="bg-slate-900/40 border border-slate-700 rounded p-3">
+    <summary class="cursor-pointer text-slate-200">Set up Glassdoor job alerts</summary>
+    <ol class="list-decimal list-inside text-sm text-slate-300 mt-2 space-y-1">
+      <li>Open <a href="https://www.glassdoor.com/Job/index.htm" target="_blank" rel="noopener" class="text-blue-400 underline">Glassdoor jobs</a> and sign in.</li>
+      <li>Search the role you want, then click <span class="text-slate-100">Get job alerts</span> at the top of results.</li>
+      <li>Confirm the alert in the email Glassdoor sends.</li>
+      <li>Job Cannon parses from <code>noreply@glassdoor.com</code>.</li>
+    </ol>
+  </details>
+
+  <details class="bg-slate-900/40 border border-slate-700 rounded p-3">
+    <summary class="cursor-pointer text-slate-200">Set up Indeed job alerts</summary>
+    <ol class="list-decimal list-inside text-sm text-slate-300 mt-2 space-y-1">
+      <li>Open <a href="https://www.indeed.com/jobs" target="_blank" rel="noopener" class="text-blue-400 underline">Indeed jobs</a> and sign in.</li>
+      <li>Search the role you want, then click <span class="text-slate-100">Create alert</span> below the search bar.</li>
+      <li>Pick daily frequency and confirm.</li>
+      <li>Job Cannon parses from <code>alert@indeed.com</code>.</li>
+    </ol>
+    <p class="text-xs text-amber-300/90 mt-2">Heads up: Indeed throttles alert email aggressively, and delivery can be delayed by hours or even days. Treat Indeed as a bonus source, not a primary one.</p>
+  </details>
+</div>
+
 <form method="post" action="{{ url_for('onboarding.done') }}">
   <button type="submit" class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded font-medium">Finish &amp; start first ingest</button>
 </form>
