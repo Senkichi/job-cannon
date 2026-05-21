@@ -131,7 +131,7 @@ Full track details archived in `.planning/milestones/v4.0-ROADMAP.md`. Note: v4.
 
 **Phase checklist:**
 
-- [ ] **Phase 35: Audit Telemetry & Callsite Attribution** — Migration 49 ships `schema_valid` column + `careers_scrape` split into `find_careers_url` + `extract_jobs`
+- [x] **Phase 35: Audit Telemetry & Callsite Attribution** — Migration 49 ships `schema_valid` column + `careers_scrape` split into `find_careers_url` + `extract_jobs` (completed 2026-05-21)
 - [x] **Phase 36: Cascade Audit Eval Harness** — OpenRouter judge adapter + `evals/cascade_audit/` package + per-callsite adapters for 6 non-scoring callsites
 - [ ] **Phase 37: Cascade Audit Execution & Decision** — Three-round shadow-replay audit produces `CASCADE-AUDIT.md` + Case A/B routing decision
 - [ ] **Phase 38: Strangerify Foundation** — `user_data_dirs.py` + Migration 50 (`onboarding_state`) + config no-longer-fail-fast + personal-data audit
@@ -358,7 +358,7 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | Track B. Portfolio Track 1 (S0-S4) | v4.0 | 5/5 sessions | Complete | 2026-05-06 |
 | Track C. Portfolio Track 2 (S5-S7e) | v4.0 | 7/7 sessions | Complete | 2026-05-06 |
 | Track D. Reconciliation R1-R8 | v4.0 | 8/8 sessions | Complete | 2026-05-06 |
-| 35. Audit Telemetry & Callsite Attribution | v5.0 | 0/? | Not started | - |
+| 35. Audit Telemetry & Callsite Attribution | v5.0 | 1/1 | Complete    | 2026-05-21 |
 | 36. Cascade Audit Eval Harness | v5.0 | 4/4 | Complete | 2026-05-14 |
 | 37. Cascade Audit Execution & Decision | v5.0 | 0/? | Not started | - |
 | 38. Strangerify Foundation | v5.0 | 0/? | Not started | - |

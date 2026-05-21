@@ -17,10 +17,10 @@ Audit the 6 non-scoring LLM callsites via shadow-replay methodology, then rewire
 
 ### Pre-audit infrastructure
 
-- [ ] **AUDIT-01**: Migration 49 adds `scoring_costs.schema_valid` column for canary telemetry
-- [ ] **AUDIT-02**: `_maybe_record_cost` populates `schema_valid` on every non-Anthropic-path INSERT into `scoring_costs`
-- [ ] **AUDIT-03**: `call_claude` populates `schema_valid` on every Anthropic-path INSERT into `scoring_costs`
-- [ ] **AUDIT-04**: `careers_scraper` callsite split: `purpose="careers_scrape"` becomes `purpose="find_careers_url"` (in `_find_careers_url_with_haiku`) and `purpose="extract_jobs"` (in `_extract_jobs_with_haiku`); attribution observable per-callsite
+- [x] **AUDIT-01**: Migration 49 adds `scoring_costs.schema_valid` column for canary telemetry
+- [x] **AUDIT-02**: `_maybe_record_cost` populates `schema_valid` on every non-Anthropic-path INSERT into `scoring_costs`
+- [x] **AUDIT-03**: `call_claude` populates `schema_valid` on every Anthropic-path INSERT into `scoring_costs`
+- [x] **AUDIT-04**: `careers_scraper` callsite split: `purpose="careers_scrape"` becomes `purpose="find_careers_url"` (in `_find_careers_url_with_haiku`) and `purpose="extract_jobs"` (in `_extract_jobs_with_haiku`); attribution observable per-callsite
 
 ### Eval harness
 
