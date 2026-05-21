@@ -29,16 +29,38 @@ narrow:
 ## Threat Model — Local File Access
 
 An attacker with read access to your home directory (or your user-data
-directory specifically) can read your IMAP app password and any provider
-API keys from `<user_data_dir>/config.yaml` in plaintext. This is the
-standard threat model for desktop apps; **secrets at rest are not
-encrypted** in v5.0.
+directory specifically) can still read whatever lives in
+`<user_data_dir>/config.yaml`. Since v5.1 (2026-05-21) the primary
+storage for IMAP app passwords and provider API keys is the **OS
+keyring** (Windows Credential Manager, macOS Keychain, Linux Secret
+Service via D-Bus). Secrets read by the app go through
+`job_finder.secrets.get_secret()`, which checks:
+
+1. Explicit environment variable (e.g. `SERPAPI_API_KEY`).
+2. OS keyring entry under service `"job-cannon"`.
+3. Legacy `config.yaml` plaintext field (with a one-time deprecation
+   warning so you know the keyring migration hasn't run yet).
+4. `None` — the source disables itself via its existing
+   "if no key, skip" guard.
+
+The OS keyring isolates secrets at the OS-account level, so a
+co-resident user with read access to your `config.yaml` no longer
+automatically gets your IMAP app password — they would need to be
+*you*. Run `python -m job_finder.migrate_secrets` to move any
+plaintext that's still sitting in `config.yaml` after the upgrade.
 
 Defenses currently in place:
 
-- The wizard sets `config.yaml` to `0600` permissions on Linux and macOS
-  so only your user account can read it. (Windows: the default home-directory
-  ACL is already user-only.)
+- **Primary:** OS keyring stores IMAP app password + provider API keys
+  under the `"job-cannon"` service. Settings UI and onboarding wizard
+  write here; `python -m job_finder.migrate_secrets` migrates existing
+  plaintext.
+- **Fallback:** if no keyring backend is reachable (headless Linux
+  without D-Bus, no `keyrings.alt`), the app falls back to
+  `config.yaml` plaintext with a UI-visible flash warning, and
+  `config.yaml` is still chmodded to `0600` on Linux/macOS so only
+  your user account can read it. (Windows: the default
+  home-directory ACL is already user-only.)
 - The `onboarding_state.wizard_data` row in `jobs.db` is cleared once the
   wizard completes; secrets only live there during the multi-step setup.
 
@@ -47,11 +69,8 @@ Mitigations the *operator* must take:
 - Don't share your user-data directory with another user account on the
   same machine.
 - If you suspect compromise, rotate the leaked credentials per the
-  recovery steps in `PRIVACY.md` and overwrite `config.yaml`.
-
-A future milestone (v5.1+) will move provider keys and the IMAP app password
-out of `config.yaml` into the OS keyring (`keyring` Python package). Tracked
-under "Future Requirements (deferred to v5.1+)" in `.planning/REQUIREMENTS.md`.
+  recovery steps in `PRIVACY.md`. Use the Settings page to enter the
+  new value — it lands in the keyring, not back in `config.yaml`.
 
 ## Out of Scope
 
@@ -61,10 +80,12 @@ under "Future Requirements (deferred to v5.1+)" in `.planning/REQUIREMENTS.md`.
 - **Production deployment hardening.** The project is not designed for
   deployment to a public-facing server. There is no plan to add CSRF
   protection, rate limiting, or user isolation.
-- **Third-party API key handling beyond environment variables.** The
-  app reads `ANTHROPIC_API_KEY`, `JF_ANTHROPIC_API_KEY`, and
-  source-API keys from `os.environ` / `config.yaml`. Rotating those
-  keys is the operator's responsibility.
+- **Third-party API key handling beyond environment variables and the
+  OS keyring.** The app reads `ANTHROPIC_API_KEY`,
+  `JF_ANTHROPIC_API_KEY`, and source-API keys via
+  `job_finder.secrets.get_secret()` (env → keyring → config.yaml
+  fallback, in that order). Rotating those keys is the operator's
+  responsibility.
 
 ## Responsible Disclosure
 

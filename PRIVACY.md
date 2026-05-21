@@ -26,42 +26,61 @@ There is no server-side component. There is no telemetry.
 
 ## What Is Stored Where (secret-level detail)
 
-If you complete the onboarding wizard, the following secrets are written
-to disk in plaintext on your machine:
+Since v5.1 (2026-05-21) the **primary** store for IMAP app passwords
+and provider API keys is the **OS keyring** — Windows Credential
+Manager, macOS Keychain, or Linux Secret Service via D-Bus. The
+service name is `"job-cannon"`. The keyring isolates these values at
+the OS-account level, so they're not just sitting at rest in a YAML
+file readable by any process running as your user.
 
-- **`<user_data_dir>/config.yaml`**: contains your IMAP app password (if you
-  finished the IMAP step) and any provider API key you entered. On Linux and
-  macOS the wizard sets file permissions to `0600` so only your user account
-  can read the file; on Windows the default home-directory ACL is already
-  user-only.
-- **`<user_data_dir>/jobs.db`**: contains scored job descriptions, your
+- **OS keyring (`"job-cannon"` service)**: IMAP app password, provider
+  API keys you entered via the onboarding wizard or Settings page.
+  Visible in your OS's credentials UI (`certmgr.msc` on Windows,
+  Keychain Access on macOS, `seahorse` on GNOME). Backed up by your
+  OS's normal credential-export tooling, not by `bash backup_userdata.sh`.
+- **`<user_data_dir>/config.yaml`**: configuration (profile, source
+  toggles, scoring weights, scheduler cadence). If your install was
+  created before v5.1 or you skipped the keyring migration, secrets
+  may still sit here in plaintext as a fallback — run
+  `python -m job_finder.migrate_secrets` to move them. On Linux and
+  macOS the wizard sets file permissions to `0600` so only your user
+  account can read the file; on Windows the default home-directory
+  ACL is already user-only.
+- **`<user_data_dir>/jobs.db`**: scored job descriptions, your
   application pipeline state, and (transiently, during the wizard only)
-  the secrets above in the `onboarding_state.wizard_data` column. The row
-  is cleared when you finish onboarding.
+  the secrets above in the `onboarding_state.wizard_data` column. The
+  row is cleared when you finish onboarding. The keyring write happens
+  at the same atomic moment as that row gets cleared.
 - **`<user_data_dir>/jobs.db-wal` and `jobs.db-shm`**: SQLite WAL/shared-memory
   files. May temporarily retain copies of `wizard_data` rows. They are normal
   SQLite operation and are checkpointed automatically.
 - **`<user_data_dir>/token.json`**: Gmail OAuth refresh token if you chose
   the OAuth path instead of IMAP.
 - **`<user_data_dir>/.env`** (optional): provider keys if you exported them
-  there instead of running the wizard.
+  there instead of running the wizard. Environment variables take
+  precedence over the keyring, so `.env` still works as an override.
 
 ## What To Do If You've Shared Your Config
 
 If `config.yaml` has been seen by anyone other than you (sent it to support,
 committed it accidentally, uploaded to a paste site, etc.):
 
+- **Check whether the file actually had your secrets.** On a v5.1+ install
+  with the keyring migration completed, the `imap.app_password` and
+  `providers.api_keys.*` fields are empty strings in `config.yaml` —
+  the real values live in your OS keyring. If those fields were empty
+  when the file was shared, the rotation steps below are precautionary.
 - **Rotate your Gmail app password** — sign in to your Google Account, go to
   *Security → 2-Step Verification → App passwords*, delete the leaked one,
   and generate a new one. Update the new password via the in-app *Settings*
-  page (or re-run the onboarding wizard).
+  page (it lands in the OS keyring, not back in `config.yaml`).
 - **Rotate provider API keys** — visit the provider's dashboard
   (Anthropic / Groq / Cerebras / Gemini / SerpAPI / DataForSEO etc.) and
   rotate any key that was in the leaked config. Update the new key in
-  *Settings*.
+  *Settings* (same keyring write path).
 - **Redact before sharing diagnostic information** — open `config.yaml` in
-  a text editor and remove the `imap.app_password` and `providers.api_keys.*`
-  values from your copy before sending it to anyone.
+  a text editor; on a fully-migrated install the secret fields should
+  already be empty, but check anyway and clear them by hand before sending.
 
 ## What It Sends Out
 

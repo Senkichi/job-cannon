@@ -123,6 +123,10 @@ A pipx-installable distribution + a CI release pipeline. Public-facing publicati
 
 ---
 
+## Delivered post-v5.0 (v5.1 hotfix sweep, 2026-05-21)
+
+- [x] **KEYRING-v5.1**: OS-keyring-backed secret storage. `job_finder/secrets.py` provides a precedence stack (env var → keyring → config.yaml plaintext with one-time deprecation warning → None). All 13 read sites consume `get_secret()`; the Settings UI and onboarding wizard write through `set_secret()`. A one-shot CLI `python -m job_finder.migrate_secrets` moves existing plaintext to the keyring. Keyring backend is probed at app boot; failure flips the system to graceful plaintext fallback with a flash warning surfaced in the UI. v5.0's `0600` POSIX permissions remain as a defense-in-depth holdover for the fallback path.
+
 ## Future Requirements (deferred to v5.1+)
 
 These are scoped for follow-on milestones in the public-release thrust:
@@ -132,7 +136,6 @@ These are scoped for follow-on milestones in the public-release thrust:
 - Linux-specific install paths beyond pipx
 - Bundled-model size decision (installer-embedded vs first-run download — currently first-run via `local_bundled`)
 - Onboarding wizard URL routing strategy if HTMX swaps preferred over path-based (DESIGN.md sec 8 open question)
-- **Keyring-backed secret storage** (M-4 follow-up, 2026-05-20): move IMAP app password and provider API keys out of `config.yaml` plaintext and into the OS keyring via the `keyring` Python package. v5.0 ships with `0600` permissions on POSIX as a defensive holdover; full encryption-at-rest lands in v5.1.
 
 ## Out of Scope
 
