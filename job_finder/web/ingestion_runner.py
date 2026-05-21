@@ -289,19 +289,29 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
         return []
 
 
-def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
-    """Fetch from niche job portals: free APIs first, DataForSEO SERP fallback.
+def _fetch_portal_search(config: dict, summary: dict, *, include_cse: bool = True) -> list[Job]:
+    """Fetch from niche job portals: free APIs first, SERP fallback.
 
-    Three tiers:
-      1. Free API portals (RemoteOK, Remotive, Himalayas) — zero cost.
-      2. SERP portals via DataForSEO — cheap ($0.0006/10 results), batched.
-      3. If no DataForSEO key, only free API portals are searched.
+    Tiers (executed in order inside ``fetch_all_portals``):
+      1a. Always-on free API portals (RemoteOK, Remotive, Himalayas) — zero cost.
+      1b. Stage-2 free portals (Jobicy, YC, USAJobs, Adzuna, Jooble) — gated by
+          ``sources.portal_search.<name>.enabled``. Keyless or free-with-reg.
+      2.  SERP portals (``site:`` queries) — DataForSEO preferred when keyed,
+          Google CSE used as the free fallback when only CSE is configured.
+          See PLAN.md load-bearing decision #8: CSE once/day, hence the
+          ``include_cse`` gate (caller's job to decide which run gets it).
 
-    SerpAPI and Thordata are NOT used — too expensive for site: queries.
+    SerpAPI and Thordata are NOT used for portal_search — too expensive for
+    ``site:`` queries.
 
     Args:
         config: Full config dict.
         summary: Mutable summary dict to update.
+        include_cse: When False, suppresses Google CSE backend construction
+            even if it's enabled in config. Used by the scheduler to keep CSE
+            on a once-per-day cadence (one of the 3x/day ingestion slots) while
+            free-API portals run on every slot. Manual sync paths leave the
+            default True so user-initiated runs include CSE if configured.
 
     Returns:
         List of Job objects from portal searches.
@@ -332,6 +342,25 @@ def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
             poll_timeout_seconds=dfse_cfg.get("poll_timeout_seconds", 360),
         )
 
+    # Build Google CSE source as the free SERP fallback. Only constructed when
+    # caller permits CSE this run (include_cse=True) — load-bearing decision #8
+    # caps CSE to one of the 3x/day ingestion slots. fetch_all_portals prefers
+    # dataforseo_source when both backends are passed, so it's safe to construct
+    # both here.
+    google_cse_source = None
+    if include_cse:
+        cse_cfg = config.get("sources", {}).get("google_cse", {})
+        if cse_cfg.get("enabled"):
+            cse_api_key = get_secret("sources.google_cse.api_key", config=config) or ""
+            cse_id = get_secret("sources.google_cse.cse_id", config=config) or ""
+            if cse_api_key and cse_id:
+                from job_finder.sources.google_cse_source import GoogleCSESource
+
+                google_cse_source = GoogleCSESource(
+                    api_key=cse_api_key,
+                    cse_id=cse_id,
+                )
+
     try:
         from job_finder.sources.portal_search_source import fetch_all_portals
 
@@ -339,6 +368,8 @@ def _fetch_portal_search(config: dict, summary: dict) -> list[Job]:
             keywords,
             dataforseo_source=dataforseo_source,
             max_serp_queries=max_serp_queries,
+            portal_config=portal_cfg,
+            google_cse_source=google_cse_source,
         )
         summary["portal_search_fetched"] = len(jobs)
         return jobs

@@ -1262,7 +1262,6 @@ class TestUnifiedScorerConfigShape:
         assert "qwen2.5:14b" in text
 
 
-
 class TestCascadeConfigScoringFixture:
     """Sanity tests for the cascade_config_scoring conftest fixture."""
 
@@ -1275,3 +1274,163 @@ class TestCascadeConfigScoringFixture:
         assert scoring["model"] == "qwen2.5:14b"
         assert scoring["provider"] == "ollama"
         assert any(link.get("provider") == "anthropic" for link in scoring["fallback_chain"])
+
+
+# ---------------------------------------------------------------------------
+# F3: ingestion-wiring tests for _fetch_portal_search.
+#
+# Covers the deferred wiring from Stages 2 + 3: portal_config (Stage-2 free
+# portals) and google_cse_source (Stage-3 free SERP backend) now flow from
+# config through _fetch_portal_search into fetch_all_portals. Tests verify
+# the construction logic and the include_cse gate that the scheduler uses
+# to enforce PLAN.md load-bearing decision #8 (CSE once per day).
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPortalSearchWiring:
+    """Unit tests for _fetch_portal_search wiring (F3)."""
+
+    @pytest.fixture
+    def base_config(self):
+        """Minimal portal_search-enabled config with no SERP backends configured."""
+        return {
+            "sources": {
+                "portal_search": {
+                    "enabled": True,
+                    "keywords": ["Staff Engineer"],
+                    "max_serp_queries": 30,
+                },
+                "dataforseo": {"enabled": False},
+                "google_cse": {"enabled": False},
+            }
+        }
+
+    def test_portal_config_passed_to_fetch_all_portals(self, base_config):
+        """portal_search sub-dict is forwarded to fetch_all_portals as portal_config."""
+        base_config["sources"]["portal_search"]["jobicy"] = {"enabled": True}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {})
+
+        assert mock_fetch.called
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["portal_config"] is base_config["sources"]["portal_search"]
+        assert kwargs["portal_config"]["jobicy"]["enabled"] is True
+
+    def test_cse_built_when_enabled_and_credentials_present(self, base_config):
+        """include_cse=True + enabled + creds → GoogleCSESource constructed and passed through."""
+        base_config["sources"]["google_cse"] = {
+            "enabled": True,
+            "api_key": "test-cse-key",
+            "cse_id": "test-cse-id",
+        }
+
+        from job_finder.sources.google_cse_source import GoogleCSESource
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {}, include_cse=True)
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert isinstance(kwargs["google_cse_source"], GoogleCSESource)
+
+    def test_cse_skipped_when_include_cse_false(self, base_config):
+        """include_cse=False suppresses CSE construction even if fully configured."""
+        base_config["sources"]["google_cse"] = {
+            "enabled": True,
+            "api_key": "test-cse-key",
+            "cse_id": "test-cse-id",
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {}, include_cse=False)
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["google_cse_source"] is None
+
+    def test_cse_skipped_when_disabled_in_config(self, base_config):
+        """sources.google_cse.enabled=False → no CSE source regardless of creds."""
+        base_config["sources"]["google_cse"] = {
+            "enabled": False,
+            "api_key": "test-cse-key",
+            "cse_id": "test-cse-id",
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {}, include_cse=True)
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["google_cse_source"] is None
+
+    def test_cse_skipped_when_credentials_missing(self, base_config):
+        """enabled=True but api_key/cse_id empty → no CSE source built."""
+        base_config["sources"]["google_cse"] = {
+            "enabled": True,
+            "api_key": "",
+            "cse_id": "",
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {}, include_cse=True)
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["google_cse_source"] is None
+
+    def test_portal_search_disabled_short_circuits(self, base_config):
+        """portal_search.enabled=False → fetch_all_portals not called."""
+        base_config["sources"]["portal_search"]["enabled"] = False
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            result = _fetch_portal_search(base_config, {})
+
+        assert result == []
+        assert not mock_fetch.called
+
+    def test_default_include_cse_is_true(self, base_config):
+        """Default arg matches the manual-sync path (CSE included if configured)."""
+        base_config["sources"]["google_cse"] = {
+            "enabled": True,
+            "api_key": "test-cse-key",
+            "cse_id": "test-cse-id",
+        }
+
+        from job_finder.sources.google_cse_source import GoogleCSESource
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            # No include_cse kwarg → default
+            _fetch_portal_search(base_config, {})
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert isinstance(kwargs["google_cse_source"], GoogleCSESource)

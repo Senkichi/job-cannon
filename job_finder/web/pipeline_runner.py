@@ -56,7 +56,13 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
+def run_ingestion(
+    db_path: str,
+    config: dict,
+    *,
+    score: bool = True,
+    include_cse: bool = True,
+) -> dict:
     """Run the full ingestion pipeline: fetch -> score -> dedup -> persist -> AI score.
 
     Creates its own SQLite connection (thread-safe: called from APScheduler
@@ -138,7 +144,7 @@ def run_ingestion(db_path: str, config: dict, *, score: bool = True) -> dict:
 
         # --- Additional sources ---
         thordata_jobs = _fetch_thordata(config, summary)
-        portal_jobs = _fetch_portal_search(config, summary)
+        portal_jobs = _fetch_portal_search(config, summary, include_cse=include_cse)
 
         # --- DataForSEO: collect results (blocks until ready or timeout) ---
         dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)

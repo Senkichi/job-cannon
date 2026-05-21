@@ -37,6 +37,7 @@ def register_ingestion(scheduler, app) -> None:
     def run_pipeline():
         """Wrapped ingestion job executed by APScheduler."""
         import time as _time
+        from datetime import datetime as _dt
 
         with app.app_context():
             from job_finder.web.activity_tracker import ACTION_SCHEDULED_SYNC, log_activity
@@ -45,8 +46,12 @@ def register_ingestion(scheduler, app) -> None:
             config = get_config_snapshot(app)
             db_path = app.config.get("DB_PATH", "jobs.db")
             t0 = _time.time()
+            # Load-bearing decision #8 (NO-KEY-COMPENSATION-PLAN.md): Google CSE
+            # runs once per day on the 8 AM slot. Free-API portals run every slot.
+            # Manual "Sync Now" via _sync.run_immediate_sync leaves include_cse=True.
+            include_cse = _dt.now().hour == 8
             try:
-                summary = run_ingestion(db_path, config)
+                summary = run_ingestion(db_path, config, include_cse=include_cse)
                 logger.info(
                     "Scheduled ingestion: %d new jobs (gmail: %d, serpapi: %d, thordata: %d, dataforseo: %d)",
                     summary["jobs_new"],
