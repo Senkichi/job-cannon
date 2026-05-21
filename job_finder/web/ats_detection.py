@@ -60,8 +60,25 @@ _SMARTRECRUITERS_API_URL = re.compile(
     re.IGNORECASE,
 )
 
+# Stage 4 — three additional ATS platforms (Recruitee, Breezy, JazzHR).
+# Patterns match both the human-facing careers domain and the canonical API
+# endpoint. The careers-page form serves as the slug; the API form gives a
+# higher specificity weight when both appear so reconciliation prefers it.
+_RECRUITEE_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.recruitee\.com",
+    re.IGNORECASE,
+)
+_BREEZY_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.breezy\.hr",
+    re.IGNORECASE,
+)
+_JAZZHR_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.applytojob\.com",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
-ATS_EXTRACTOR_VERSION = "m049-v1"
+ATS_EXTRACTOR_VERSION = "m049-v2"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -116,6 +133,21 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _SMARTRECRUITERS_JOBS_URL.search(url)
     if m:
         return "smartrecruiters", m.group(1), _SPECIFICITY_BOARD
+
+    # Stage 4 additions. These platforms have no separate API vs. board domain —
+    # the same subdomain serves both human and API traffic — so they always
+    # carry the BOARD specificity weight.
+    m = _RECRUITEE_HUMAN_URL.search(url)
+    if m:
+        return "recruitee", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _BREEZY_HUMAN_URL.search(url)
+    if m:
+        return "breezy", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _JAZZHR_HUMAN_URL.search(url)
+    if m:
+        return "jazzhr", m.group(1).lower(), _SPECIFICITY_BOARD
 
     return None
 

@@ -9,7 +9,14 @@ import time
 from datetime import datetime
 
 from job_finder.web.ats_detection import derive_slug_candidates
-from job_finder.web.ats_prober import _probe_ashby, _probe_greenhouse, _probe_lever
+from job_finder.web.ats_prober import (
+    _probe_ashby,
+    _probe_breezy,
+    _probe_greenhouse,
+    _probe_jazzhr,
+    _probe_lever,
+    _probe_recruitee,
+)
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -23,10 +30,12 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
     For each pending company:
     1. Derive slug candidates from company name
-    2. Try Lever, Greenhouse, and Ashby APIs for each candidate
+    2. Try Lever, Greenhouse, Ashby, Recruitee, Breezy, and JazzHR APIs
+       for each candidate (in that order; first hit wins)
     3. Set ats_probe_status='hit' when API returns valid postings
     4. Set ats_probe_status='miss' when all APIs fail/return empty
-    5. Lever 200+empty list stays as 'miss' (never 'hit') per Research Pitfall 2
+    5. Empty-postings 200 responses stay as 'miss' (never 'hit') per
+       Lever Research Pitfall 2 — same dynamic affects Recruitee/Breezy/JazzHR
 
     Args:
         db_path: Absolute path to the SQLite database file.
@@ -73,6 +82,24 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                 # Try Ashby
                 if _probe_ashby(slug):
                     hit_platform = "ashby"
+                    hit_slug = slug
+                    break
+
+                # Stage 4 additions — Recruitee/Breezy/JazzHR. Ordered after
+                # the original three because those have a longer track record;
+                # the new ones probe slower companies on average.
+                if _probe_recruitee(slug):
+                    hit_platform = "recruitee"
+                    hit_slug = slug
+                    break
+
+                if _probe_breezy(slug):
+                    hit_platform = "breezy"
+                    hit_slug = slug
+                    break
+
+                if _probe_jazzhr(slug):
+                    hit_platform = "jazzhr"
                     hit_slug = slug
                     break
 

@@ -40,34 +40,34 @@ _DETAIL_FETCH_SLEEP_S = 0.1
 _TITLE_EXPANSIONS: list[tuple[re.Pattern, str]] = [
     (re.compile(rf"\b{abbr}\b", re.IGNORECASE), full.lower())
     for abbr, full in [
-        (r"Sr\.?",  "Senior"),
-        (r"Jr\.?",  "Junior"),
+        (r"Sr\.?", "Senior"),
+        (r"Jr\.?", "Junior"),
         (r"Mgr\.?", "Manager"),
-        (r"Mgmt\.?","Management"),
+        (r"Mgmt\.?", "Management"),
         (r"Eng\.?", "Engineer"),
-        (r"Engr\.?","Engineer"),
+        (r"Engr\.?", "Engineer"),
         (r"Dev\.?", "Developer"),
-        (r"Arch\.?","Architect"),
-        (r"Ops\b",  "Operations"),
-        (r"Admin\b","Administrator"),
+        (r"Arch\.?", "Architect"),
+        (r"Ops\b", "Operations"),
+        (r"Admin\b", "Administrator"),
         (r"Dir\.?", "Director"),
-        (r"VP\b",   "Vice President"),
-        (r"DS\b",   "Data Scientist"),
-        (r"DA\b",   "Data Analyst"),
-        (r"DE\b",   "Data Engineer"),
-        (r"PM\b",   "Product Manager"),
-        (r"TPM\b",  "Technical Program Manager"),
-        (r"EM\b",   "Engineering Manager"),
-        (r"MLE\b",  "Machine Learning Engineer"),
-        (r"ML\b",   "Machine Learning"),
-        (r"AI\b",   "Artificial Intelligence"),
-        (r"SRE\b",  "Site Reliability Engineer"),
-        (r"SWE\b",  "Software Engineer"),
-        (r"SE\b",   "Software Engineer"),
-        (r"IC\b",   "Individual Contributor"),
-        (r"QA\b",   "Quality Assurance"),
-        (r"UX\b",   "User Experience"),
-        (r"UI\b",   "User Interface"),
+        (r"VP\b", "Vice President"),
+        (r"DS\b", "Data Scientist"),
+        (r"DA\b", "Data Analyst"),
+        (r"DE\b", "Data Engineer"),
+        (r"PM\b", "Product Manager"),
+        (r"TPM\b", "Technical Program Manager"),
+        (r"EM\b", "Engineering Manager"),
+        (r"MLE\b", "Machine Learning Engineer"),
+        (r"ML\b", "Machine Learning"),
+        (r"AI\b", "Artificial Intelligence"),
+        (r"SRE\b", "Site Reliability Engineer"),
+        (r"SWE\b", "Software Engineer"),
+        (r"SE\b", "Software Engineer"),
+        (r"IC\b", "Individual Contributor"),
+        (r"QA\b", "Quality Assurance"),
+        (r"UX\b", "User Experience"),
+        (r"UI\b", "User Interface"),
     ]
 ]
 
@@ -726,3 +726,299 @@ def _fetch_smartrecruiters_description(slug: str, posting_id: str) -> str:
         return ""
 
     return strip_html_to_text(combined) if "<" in combined else combined
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 — ATS scanner expansion (NO-KEY-COMPENSATION-PLAN.md §Stage 4).
+#
+# Feasibility spike outcomes (per PLAN.md §Stage 4 acceptance):
+#
+#   Recruitee  — FEASIBLE. Public JSON at https://{slug}.recruitee.com/api/offers/
+#                returning {"offers": [...]}. No auth, no key, no rate limit
+#                documented (~120 req/min observed by 3rd-party scrapers).
+#                Verified via outscal/OpenJobs and Jhatchi/Cyber-Job-Hunter
+#                adapters on GitHub (both production-running).
+#
+#   Breezy     — FEASIBLE. Public JSON at https://{slug}.breezy.hr/json
+#                returning a bare list of position objects. No auth. List
+#                endpoint omits description (detail-page enrichment needed
+#                for jd_full). Verified via kalil0321/ats-scrapers adapter.
+#
+#   JazzHR     — FEASIBLE. Public JSON at
+#                https://{slug}.applytojob.com/apply/jobs/feed?json=1
+#                returning {"jobs": [...]} OR a bare list (tenant-dependent).
+#                No auth. Verified via ItsmeBlackOps/dailyDashboard adapter.
+#                (The historical .xml feed still exists at the same path
+#                without `?json=1` but JSON is canonical for new consumers.)
+#
+#   Pinpoint, Personio, BambooHR, Teamtailor — DEFERRED to a follow-up session.
+#                PLAN.md Q3 cutoff allows up to 3 fails before pause-and-ask.
+#                None failed; these are deferred for scope/time reasons, not
+#                feasibility. See HANDOFF.md.
+# ---------------------------------------------------------------------------
+
+
+def scan_recruitee(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Recruitee public offers API for keyword-matched job postings.
+
+    API: GET https://{slug}.recruitee.com/api/offers/ → {"offers": [...]}.
+    No auth required. The list response includes title, locations, description,
+    and careers_url; no detail-page fetch is needed for jd_full.
+
+    Recruitee does not consistently expose salary in the public response — the
+    salary fields are returned as None unless a tenant has opted in.
+
+    Args:
+        slug: Recruitee subdomain slug (e.g. 'acme' for acme.recruitee.com).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error
+        or no matches.
+    """
+    url = f"https://{slug}.recruitee.com/api/offers/"
+    try:
+        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_recruitee('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_recruitee('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning("scan_recruitee('%s') JSON parse error: %s", slug, e)
+        return []
+
+    offers = data.get("offers") if isinstance(data, dict) else None
+    if not isinstance(offers, list):
+        return []
+
+    results = []
+    for offer in offers:
+        title = offer.get("title") or offer.get("position") or ""
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        location = _recruitee_location_string(offer)
+        description_html = offer.get("description") or ""
+        description = (
+            strip_html_to_text(description_html) if "<" in description_html else description_html
+        )
+        source_url = (
+            offer.get("careers_url")
+            or offer.get("careers_apply_url")
+            or (f"https://{slug}.recruitee.com/o/{offer.get('slug')}" if offer.get("slug") else "")
+        )
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "Recruitee",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_recruitee('%s'): %d offers fetched, %d matched", slug, len(offers), len(results)
+    )
+    return results
+
+
+def _recruitee_location_string(offer: dict) -> str:
+    """Best-effort location string from a Recruitee offer.
+
+    Recruitee uses either ``locations`` (list of objects with ``city`` /
+    ``country_code``) or the flat ``city`` / ``country_code`` fields. Falls
+    back to ``location`` (free-form string) if neither is structured.
+    """
+    locs = offer.get("locations") or []
+    if isinstance(locs, list) and locs:
+        first = locs[0] if isinstance(locs[0], dict) else {}
+        parts = [first.get("city") or "", first.get("country") or first.get("country_code") or ""]
+        joined = ", ".join(p for p in parts if p)
+        if joined:
+            return joined
+    parts = [offer.get("city") or "", offer.get("country") or offer.get("country_code") or ""]
+    joined = ", ".join(p for p in parts if p)
+    if joined:
+        return joined
+    return offer.get("location") or ""
+
+
+def scan_breezy(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Breezy HR public JSON feed for keyword-matched job postings.
+
+    API: GET https://{slug}.breezy.hr/json → flat list of position objects.
+    No auth required. The list endpoint omits the full description (only a
+    short summary is exposed); jd_full enrichment happens later via the
+    description URL.
+
+    Args:
+        slug: Breezy subdomain slug (e.g. 'acme' for acme.breezy.hr).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error
+        or no matches.
+    """
+    url = f"https://{slug}.breezy.hr/json"
+    try:
+        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_breezy('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_breezy('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning("scan_breezy('%s') JSON parse error: %s", slug, e)
+        return []
+
+    # Breezy returns either a bare list or {"positions": [...]} depending on
+    # tenant config; accept both.
+    if isinstance(data, list):
+        positions = data
+    elif isinstance(data, dict):
+        positions = data.get("positions") or data.get("jobs") or []
+    else:
+        positions = []
+
+    results = []
+    for posting in positions:
+        title = posting.get("name") or posting.get("title") or ""
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        loc = posting.get("location") or {}
+        if isinstance(loc, dict):
+            parts = [
+                loc.get("city") or loc.get("name") or "",
+                loc.get("state") or loc.get("region") or "",
+                loc.get("country") or "",
+            ]
+            location = ", ".join(p for p in parts if p)
+            if not location and loc.get("is_remote"):
+                location = "Remote"
+        else:
+            location = loc if isinstance(loc, str) else ""
+
+        # Description is empty in the list response; jd_full enrichment runs
+        # later from the source_url.
+        description = posting.get("description") or ""
+
+        source_url = posting.get("url") or ""
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "Breezy",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_breezy('%s'): %d positions fetched, %d matched",
+        slug,
+        len(positions),
+        len(results),
+    )
+    return results
+
+
+def scan_jazzhr(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan JazzHR public feed for keyword-matched job postings.
+
+    API: GET https://{slug}.applytojob.com/apply/jobs/feed?json=1
+        → {"jobs": [...]} OR a bare list, depending on tenant config.
+    No auth required. Description is included in the feed (sometimes as
+    ``original_description``).
+
+    Args:
+        slug: JazzHR subdomain slug (e.g. 'acme' for acme.applytojob.com).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error
+        or no matches.
+    """
+    url = f"https://{slug}.applytojob.com/apply/jobs/feed"
+    try:
+        resp = requests.get(url, params={"json": "1"}, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_jazzhr('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_jazzhr('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.warning("scan_jazzhr('%s') JSON parse error: %s", slug, e)
+        return []
+
+    if isinstance(data, list):
+        jobs = data
+    elif isinstance(data, dict):
+        jobs = data.get("jobs") or []
+    else:
+        jobs = []
+
+    results = []
+    for job in jobs:
+        title = job.get("title") or job.get("job_title") or ""
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        parts = [job.get("city") or "", job.get("state") or "", job.get("country") or ""]
+        location = ", ".join(p for p in parts if p)
+
+        description_raw = job.get("description") or job.get("original_description") or ""
+        description = (
+            strip_html_to_text(description_raw) if "<" in description_raw else description_raw
+        )
+
+        board_code = job.get("board_code") or job.get("id") or ""
+        source_url = (
+            job.get("apply_url")
+            or job.get("link")
+            or (f"https://{slug}.applytojob.com/apply/{board_code}" if board_code else "")
+        )
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "JazzHR",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug("scan_jazzhr('%s'): %d jobs fetched, %d matched", slug, len(jobs), len(results))
+    return results

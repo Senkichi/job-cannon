@@ -218,10 +218,20 @@ def _scan_one_company_via_ats_api(
             from job_finder.web.ats_platforms import scan_smartrecruiters
 
             job_dicts = scan_smartrecruiters(slug, target_titles, title_exclusions)
+        elif platform == "recruitee":
+            from job_finder.web.ats_platforms import scan_recruitee
+
+            job_dicts = scan_recruitee(slug, target_titles, title_exclusions)
+        elif platform == "breezy":
+            from job_finder.web.ats_platforms import scan_breezy
+
+            job_dicts = scan_breezy(slug, target_titles, title_exclusions)
+        elif platform == "jazzhr":
+            from job_finder.web.ats_platforms import scan_jazzhr
+
+            job_dicts = scan_jazzhr(slug, target_titles, title_exclusions)
         else:
-            logger.warning(
-                "Unknown ATS platform '%s' for company '%s'", platform, company_name
-            )
+            logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
             job_dicts = []
 
         company_jobs_found = len(job_dicts)
@@ -275,9 +285,7 @@ def _scan_one_company_via_ats_api(
             )
             conn.commit()
         except Exception:
-            logger.debug(
-                "failed to insert error scan log for %s", company_name, exc_info=True
-            )
+            logger.debug("failed to insert error scan log for %s", company_name, exc_info=True)
 
 
 def _upsert_one_ats_api_job(
@@ -294,16 +302,13 @@ def _upsert_one_ats_api_job(
         # (no existing salary data). Check existing record first.
         from job_finder.models import Job
 
-        candidate_dedup_key = Job.normalized_dedup_key(
-            company_name, job_dict["title"]
-        )
+        candidate_dedup_key = Job.normalized_dedup_key(company_name, job_dict["title"])
         existing_row = conn.execute(
             "SELECT salary_min, salary_max FROM jobs WHERE dedup_key = ?",
             (candidate_dedup_key,),
         ).fetchone()
         if existing_row and (
-            existing_row["salary_min"] is not None
-            or existing_row["salary_max"] is not None
+            existing_row["salary_min"] is not None or existing_row["salary_max"] is not None
         ):
             # Existing job has salary — preserve it (first-seen wins)
             salary_min = None
@@ -370,9 +375,7 @@ def _upsert_one_ats_api_job(
         logger.warning("ATS scan job error: %s", error_msg)
 
 
-def _run_homepage_discovery_phase(
-    db_path: str, config: dict, summary: dict
-) -> None:
+def _run_homepage_discovery_phase(db_path: str, config: dict, summary: dict) -> None:
     """Phase B: discover homepages for companies missing homepage_url."""
     if run_homepage_discovery is None:
         return
@@ -453,9 +456,7 @@ def _score_new_ats_jobs(
                 scored_count += 1
                 if getattr(result, "status", None) != "ok" or result.data is None:
                     continue
-                cls = derive_classification(
-                    result.data.sub_scores, job_row.get("legitimacy_note")
-                )
+                cls = derive_classification(result.data.sub_scores, job_row.get("legitimacy_note"))
                 key = f"classified_{cls}"
                 summary[key] = summary.get(key, 0) + 1
             except Exception as job_err:

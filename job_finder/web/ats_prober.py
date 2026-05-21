@@ -488,3 +488,87 @@ def _probe_ashby(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_ashby('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_recruitee(slug: str) -> bool:
+    """Return True if slug has at least one active Recruitee offer.
+
+    Recruitee may return 200 with an empty offers list for an inactive
+    company (analogous to Lever's Research Pitfall 2), so the probe only
+    confirms 'hit' on non-empty offers.
+
+    Args:
+        slug: Recruitee subdomain (e.g. 'acme' for acme.recruitee.com).
+
+    Returns:
+        True if the slug resolves to a Recruitee company with active offers.
+    """
+    url = f"https://{slug}.recruitee.com/api/offers/"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        offers = data.get("offers") if isinstance(data, dict) else None
+        return isinstance(offers, list) and len(offers) > 0
+    except Exception as e:
+        logger.debug("_probe_recruitee('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_breezy(slug: str) -> bool:
+    """Return True if slug has at least one active Breezy posting.
+
+    Breezy returns 200 with an empty list for valid-but-empty tenants
+    (same pitfall pattern as Lever/Recruitee), so the probe requires
+    a non-empty list to confirm 'hit'.
+
+    Args:
+        slug: Breezy subdomain (e.g. 'acme' for acme.breezy.hr).
+
+    Returns:
+        True if the slug resolves to a Breezy company with active positions.
+    """
+    url = f"https://{slug}.breezy.hr/json"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if isinstance(data, list):
+            return len(data) > 0
+        if isinstance(data, dict):
+            positions = data.get("positions") or data.get("jobs") or []
+            return isinstance(positions, list) and len(positions) > 0
+        return False
+    except Exception as e:
+        logger.debug("_probe_breezy('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_jazzhr(slug: str) -> bool:
+    """Return True if slug has at least one active JazzHR posting.
+
+    Same empty-list pitfall pattern — non-empty list required for 'hit'.
+
+    Args:
+        slug: JazzHR subdomain (e.g. 'acme' for acme.applytojob.com).
+
+    Returns:
+        True if the slug resolves to a JazzHR tenant with active jobs.
+    """
+    url = f"https://{slug}.applytojob.com/apply/jobs/feed"
+    try:
+        r = requests.get(url, params={"json": "1"}, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if isinstance(data, list):
+            return len(data) > 0
+        if isinstance(data, dict):
+            jobs = data.get("jobs") or []
+            return isinstance(jobs, list) and len(jobs) > 0
+        return False
+    except Exception as e:
+        logger.debug("_probe_jazzhr('%s') failed: %s", slug, e)
+        return False
