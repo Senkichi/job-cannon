@@ -100,9 +100,9 @@ The cascade audit harness lives at `evals/cascade_audit/` if you want to compare
 
 ### Gmail via IMAP (default — no OAuth)
 
-1. In Google: enable [2-Step Verification](https://myaccount.google.com/security).
-2. Generate an [app password](https://support.google.com/accounts/answer/185833) (16 characters).
-3. In Job Cannon: **Settings → Sources → IMAP**, enter your email + app password. (Or use wizard step 5.)
+Wizard step 5 ("Connect Gmail") walks you through the Google App Password setup with two in-page links (to [2-Step Verification](https://myaccount.google.com/security) and [App Passwords](https://myaccount.google.com/apppasswords)) plus a 4-step list for the Google UI. For most users that's all you need; come back here only if you want the manual path.
+
+Manual path: enable [2-Step Verification](https://myaccount.google.com/security), generate an [app password](https://myaccount.google.com/apppasswords) (16 characters), then in Job Cannon go to **Settings → Sources → IMAP** and enter your email + app password.
 
 The app password is stored in your OS keyring. Rotating it: delete in Google's app-password dashboard, generate a new one, paste into Settings — never edit `config.yaml` directly.
 

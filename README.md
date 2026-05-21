@@ -18,6 +18,18 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
+## Fastest path
+
+Already have Python 3.13+ and Git? Three lines:
+
+```bash
+git clone https://github.com/Senkichi/job-cannon.git
+cd job-cannon
+./install.sh           # macOS — or .\install.ps1 on Windows PowerShell
+```
+
+The bootstrap script prompts before each install step (uv → `uv sync` → optional Ollama + `qwen2.5:14b` → optional Node + Claude Code CLI), then launches the app. Pass `--minimal` to skip Ollama + Node, or `--yes` to accept every prompt. Linux users follow the manual steps below.
+
 ## Engineering Highlights
 
 - **Single-tier ordinal scoring through a multi-provider cascade.**
@@ -79,7 +91,7 @@ uv sync --extra dev --extra eval
 uv run job-cannon
 ```
 
-Open http://localhost:5000. On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
+Open http://localhost:5000 (the app auto-opens it for you). On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
 
 **Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
 
