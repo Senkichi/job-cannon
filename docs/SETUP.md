@@ -1,19 +1,28 @@
-# Job Cannon -- Setup Guide
+# Job Cannon — Setup Guide
 
-This guide walks you through setting up Job Cannon from a fresh clone to a running app. It is written for someone who knows Python but has not used Google Cloud Console before.
+Walks you from a fresh clone to a running app on Windows, macOS, or Linux. The fast path is: install, launch, let the onboarding wizard do the rest.
 
 ## Prerequisites
 
-- Python 3.13 or later (`python --version` to check)
-- A Gmail account (for reading job alert emails)
-- An Anthropic API key (for AI scoring)
-- A Google Cloud project (free -- instructions below)
+- **Python 3.13+** — `python --version` to check
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** for dependency management
+- *(Recommended)* **[Ollama](https://ollama.com)** for free local AI scoring — install, then `ollama pull qwen2.5:14b` (~9 GB)
+
+Everything else — API keys, Google Cloud, OAuth, app passwords — is optional. The app boots with zero credentials and routes you to an onboarding wizard that fills the gaps.
 
 ---
 
-## 1. Environment Setup
+## 1. Install
 
-Clone the repo and install dependencies (with [uv](https://docs.astral.sh/uv/)):
+### macOS / Linux / Git Bash
+
+```bash
+git clone https://github.com/Senkichi/job-cannon.git
+cd job-cannon
+uv sync --extra dev --extra eval
+```
+
+### Windows PowerShell
 
 ```powershell
 git clone https://github.com/Senkichi/job-cannon.git
@@ -21,249 +30,269 @@ cd job-cannon
 uv sync --extra dev --extra eval
 ```
 
-`uv sync` creates a `.venv/`, installs the project plus the dev/eval
-optional extras, and registers the `job-cannon` console script. To run
-anything in the venv: `uv run <cmd>` (e.g. `uv run job-cannon`,
-`uv run pytest`).
+`uv sync` creates `.venv/`, installs the project plus dev/eval extras, and registers the `job-cannon` console script. Run anything in the venv with `uv run <cmd>` (e.g. `uv run job-cannon`, `uv run pytest`).
 
-Copy the config templates. **Critical: do NOT run these if `config.yaml` or
-`.env` already exist — you'll lose your settings.**
-
-```powershell
-if (-not (Test-Path config.yaml)) { Copy-Item config.example.yaml config.yaml }
-if (-not (Test-Path .env))        { Copy-Item .env.example .env }
-```
-
-### Where Job Cannon looks for `config.yaml`
-
-`job-cannon` resolves `config.yaml` in this order — the first hit wins:
-
-1. `$JOB_CANNON_CONFIG` environment variable.
-   If set but the path doesn't exist, the app errors out (it does **not**
-   silently fall through — naming a config and getting a different one is
-   wrong UX).
-2. `./config.yaml` in the current working directory.
-3. User config directory:
-   - Windows: `%APPDATA%\job-cannon\config.yaml`
-   - Unix:    `~/.config/job-cannon/config.yaml`
-
-Run from the project root for the simplest case (option 2). Once the app
-is installed (`uv run job-cannon` works), you can launch it from any
-directory by either `cd`-ing into the repo, setting `$JOB_CANNON_CONFIG`,
-or copying `config.yaml` into the user config directory.
+The `--extra dev --extra eval` flags pull in test + benchmark tooling. If you only want to run the app, plain `uv sync` is enough.
 
 ---
 
-## 2. Environment Variables
+## 2. First Launch — Two Paths
 
-Edit `.env` and fill in your keys. There are two variables:
-
-- **`JF_ANTHROPIC_API_KEY`** (required): Your Anthropic API key. Get one at https://console.anthropic.com/settings/keys. The key starts with `sk-ant-`. Anthropic sits at the bottom of the scoring cascade as the CLI fallback (dispatched via `claude -p`); $0 out-of-pocket because usage is metered against your existing Claude.ai subscription rather than billed per API call. The key is still required so the SDK availability gate at app startup recognizes the provider as configured — inference itself does not consume the API key. Production runs typically resolve on free providers first (Ollama, Groq, Cerebras, Gemini). See `config.example.yaml` (the commented `providers.scoring` block) for the cascade configuration.
-
-- **`FLASK_SECRET_KEY`** (optional): Generate one with:
-  ```bash
-  python -c "import secrets; print(secrets.token_hex(32))"
-  ```
-  If not set, the app uses a dev-only default. This is fine for personal local use. Only set it if you plan to run the app on a shared network.
-
----
-
-## 3. Google OAuth Setup
-
-Job Cannon reads your Gmail inbox to find job alert emails. This requires a one-time OAuth setup so the app can access your Gmail (read-only).
-
-This takes about 10 minutes and you only do it once.
-
-### Step 1: Create a Google Cloud Project
-
-1. Go to https://console.cloud.google.com/
-2. Click the project dropdown in the top bar (it may say "Select a project")
-3. Click **New Project**
-4. Give it a name (e.g., "Job Cannon") -- the name is just for your reference
-5. Click **Create** and wait for it to finish
-
-### Step 2: Enable the Gmail API
-
-1. In the left sidebar, go to **APIs & Services > Library**
-2. Search for **Gmail API**, click it, then click **Enable**
-
-### Step 3: Configure the OAuth Consent Screen
-
-1. Go to **APIs & Services > OAuth consent screen**
-2. Select **External** user type (choose "Internal" only if you have a Google Workspace account)
-3. Click **Create**
-4. Fill in the required fields:
-   - App name: "Job Cannon" (or anything you like)
-   - User support email: your email address
-   - Developer contact information: your email address
-5. Click **Save and Continue**
-6. On the **Scopes** page, click **Add or Remove Scopes** and add:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-7. Click **Update**, then **Save and Continue**
-8. On the **Test Users** page, click **Add Users** and add your Gmail address
-9. Click **Save and Continue**, then **Back to Dashboard**
-
-Adding yourself as a test user is required. Without it, the OAuth flow will be blocked.
-
-### Step 4: Create OAuth Credentials
-
-1. Go to **APIs & Services > Credentials**
-2. Click **Create Credentials** > **OAuth client ID**
-3. For Application type, select **Desktop app**
-4. Name it "Job Cannon" (or anything)
-5. Click **Create**
-6. A dialog appears -- click **Download JSON**
-7. Rename the downloaded file to `credentials.json`
-8. Move it to the project root (the same folder as `config.yaml`)
-
-### Step 5: Run the Auth Flow
-
-```bash
-python -m job_finder.gmail_auth
-```
-
-This opens a browser window. Sign in with your Gmail account and accept the Gmail read-only permission. After you accept:
-
-- `token.json` is saved in the project root -- do not commit this file, it contains your credentials
-- The script prints a scope checklist confirming the Gmail permission was granted
-
-### Note: "App Not Verified" Warning
-
-Google shows a warning because the app is in testing mode and has not been through Google's verification process. This is expected for personal tools.
-
-To proceed:
-1. Click **Advanced** (bottom left of the warning screen)
-2. Click **Go to Job Cannon (unsafe)**
-
-This is safe -- it is your own app running under your own Google account.
-
----
-
-## 4. Config File Reference
-
-Copy `config.example.yaml` to `config.yaml` and edit it. Every field has an inline comment explaining what it does -- the example file is the source of truth.
-
-Here is what each section controls:
-
-| Section | What it does |
-|---------|-------------|
-| `profile:` | Your job search targets -- titles, locations, minimum salary, industries, skills, and exclusion rules |
-| `sources:` | Enable/disable Gmail, SerpAPI, JSearch, Thordata, and DataForSEO as job sources |
-| `scoring:` | AI model weights, monthly budget cap, and score thresholds |
-| `output:` | Default format and max results per run |
-| `db:` | SQLite database file path (created automatically) |
-| `ats:` | ATS scan schedule (days and time) |
-| `server:` | Flask host, port, and debug mode |
-| `filters:` | Additional company names to auto-exclude |
-
-The most important fields to set before your first run are in `profile:` -- at minimum set `target_titles`, `target_locations`, and `min_salary`.
-
-After running `python -m job_finder.gmail_auth`, set `sources.gmail.enabled: true` in `config.yaml`.
-
----
-
-## 5. Experience Profile Setup
-
-The experience profile is used by the AI to personalize job fit scoring.
-
-1. Copy the example to your profile file:
-   ```bash
-   cp experience_profile.example.json experience_profile.json
-   ```
-
-2. Edit `experience_profile.json` with your actual career history. The example shows the expected structure:
-   - `positions`: Array of job roles with title, company, dates, achievements, and skills
-   - `skills`: Your full skills list
-   - `education`: Degrees with institution and graduation year
-
-The profile is not required to start the app -- it is only used by the `'scoring'` tier prompt to tailor fit scoring with your real career history.
-
----
-
-## 6. API Overview
-
-| API | What it does | Required? |
-|-----|-------------|-----------|
-| Gmail API | Reads job alert emails from your inbox (read-only, never modifies or deletes) | Yes (for Gmail source) |
-| Anthropic API | Paid fallback at the bottom of the scoring cascade. Required so the cascade can always complete, but rarely invoked in practice — free providers (Ollama, Groq, Cerebras, Gemini) handle most scoring traffic. | Yes (cascade safety net) |
-| Ollama (local) | Production scoring primary (`qwen2.5:14b`, Phase 33 shootout winner). Auto-started by the scheduler if the binary is on PATH or at `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` (override via `$env:OLLAMA_EXE`). | Recommended for $0 scoring; optional |
-| Groq / Cerebras / Gemini | Free-tier API providers in the cascade between Ollama and Anthropic. Each gated by per-day request limits. | Optional |
-| SerpAPI | Searches Google Jobs for additional listings (free tier: 100 searches/month) | No |
-| JSearch / Thordata / DataForSEO | Alternate SERP-based job sources, all opt-in | No |
-
----
-
-## 7. Starting the App
-
-Once config.yaml is set up and OAuth is done:
+### Path A — Onboarding Wizard (recommended)
 
 ```powershell
 uv run job-cannon
 ```
 
-Equivalent invocations (any of these works):
+Open http://localhost:5000. With no `config.yaml` present, the app redirects to a 7-step wizard:
+
+1. **Welcome** — machine check (Python version, keyring backend, Ollama, etc.)
+2. **AI provider** — auto-detects installed $0 CLIs (Ollama, Claude Code CLI, Gemini CLI). Top hit is recommended.
+3. **Provider credentials** — only shown if the selected provider needs a key (skipped for $0 CLIs).
+4. **Resume upload OR profile edit** — paste a PDF/DOCX, or edit `experience_profile.json` directly.
+5. **Gmail via IMAP** — your address + a Google [app password](https://support.google.com/accounts/answer/185833). No OAuth setup needed.
+6. **Schedule** — light / standard / heavy ingestion cadence.
+7. **Done** — `config.yaml` + secrets are written; the app reloads to the dashboard.
+
+Secrets (provider API keys, IMAP app password) land in your **OS keyring** — Windows Credential Manager, macOS Keychain, or Linux Secret Service — not in `config.yaml`. See [SECURITY.md](../SECURITY.md) for the storage model.
+
+### Path B — Manual config (power user)
+
+```bash
+cp config.example.yaml config.yaml
+cp experience_profile.example.json experience_profile.json
+# Edit both files; populate profile.target_titles / target_locations / skills at minimum
+uv run job-cannon
+```
+
+The example `config.yaml` has inline comments for every field. The app validates the schema at startup and fails fast on missing required keys. Editing YAML by hand skips the wizard entirely.
+
+---
+
+## 3. AI Provider Reference
+
+Every scoring call cascades through providers in order. The default chain is **Ollama → Groq → Cerebras → Gemini → Anthropic** — all $0 in normal operation.
+
+| Provider | Cost | How to enable |
+|---|---|---|
+| **Ollama** (`qwen2.5:14b`) | $0 (runs locally) | Install [Ollama](https://ollama.com), then `ollama pull qwen2.5:14b`. App auto-starts the service. Production primary per Phase 33 shootout. |
+| **Groq** | $0 (free tier, rate-limited) | Get key at [console.groq.com](https://console.groq.com). Enter in Settings → Providers (lands in keyring). |
+| **Cerebras** | $0 (free tier, rate-limited) | Get key at [cloud.cerebras.ai](https://cloud.cerebras.ai). Enter in Settings → Providers. |
+| **Gemini** | $0 (free tier, rate-limited) | Get key at [ai.google.dev](https://ai.google.dev). Enter in Settings → Providers. |
+| **Anthropic CLI** | $0 (via Claude.ai subscription) | Install [Claude Code CLI](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview), sign in with `claude /login`. Cascade dispatches via `claude -p` subprocess. |
+| **Anthropic API** | Paid (per call) | Get key at [console.anthropic.com](https://console.anthropic.com/settings/keys). Only consumed when the CLI isn't authenticated. |
+
+Customize the cascade order in `config.yaml`:
+
+```yaml
+providers:
+  primary: ollama
+  fallback_chain: [groq, cerebras, gemini, anthropic]
+  daily_limits: {}       # e.g. {groq: 1000}
+  throttle_delays: {}    # e.g. {gemini: 0.5}
+```
+
+The cascade audit harness lives at `evals/cascade_audit/` if you want to compare providers head-to-head on your own data.
+
+---
+
+## 4. Job Sources
+
+### Gmail via IMAP (default — no OAuth)
+
+1. In Google: enable [2-Step Verification](https://myaccount.google.com/security).
+2. Generate an [app password](https://support.google.com/accounts/answer/185833) (16 characters).
+3. In Job Cannon: **Settings → Sources → IMAP**, enter your email + app password. (Or use wizard step 5.)
+
+The app password is stored in your OS keyring. Rotating it: delete in Google's app-password dashboard, generate a new one, paste into Settings — never edit `config.yaml` directly.
+
+### SerpAPI / JSearch / Thordata / DataForSEO
+
+Optional paid SERP-based sources. Each has its own key field in `config.yaml` and an env override. Pricing notes are in `config.example.yaml`.
+
+| Source | Where to get a key |
+|---|---|
+| SerpAPI | [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) |
+| JSearch | [rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) |
+| Thordata | [thordata.com](https://www.thordata.com/) |
+| DataForSEO | [app.dataforseo.com/api-access](https://app.dataforseo.com/api-access) (base64 `login:password`) |
+
+### Gmail via OAuth (power-user alternative)
+
+If you prefer the Gmail API over IMAP, the one-time Google Cloud setup is below. This takes about 10 minutes. Most users should use IMAP.
+
+#### Step 1: Create a Google Cloud Project
+
+1. Go to https://console.cloud.google.com/
+2. Click the project dropdown in the top bar
+3. Click **New Project**, name it (e.g. "Job Cannon"), click **Create**
+
+#### Step 2: Enable the Gmail API
+
+1. **APIs & Services → Library**
+2. Search for **Gmail API**, click it, click **Enable**
+
+#### Step 3: Configure the OAuth Consent Screen
+
+1. **APIs & Services → OAuth consent screen**
+2. **External** user type → **Create**
+3. Fill required fields (App name, support email, contact email) → **Save and Continue**
+4. **Scopes** page → **Add or Remove Scopes** → add `https://www.googleapis.com/auth/gmail.readonly` → **Update** → **Save and Continue**
+5. **Test Users** → **Add Users** → add your Gmail address → **Save and Continue**
+
+Adding yourself as a test user is required; without it the OAuth flow is blocked.
+
+#### Step 4: Create OAuth Credentials
+
+1. **APIs & Services → Credentials**
+2. **Create Credentials → OAuth client ID**
+3. Application type: **Desktop app**, name it, click **Create**
+4. **Download JSON**, rename to `credentials.json`
+5. Move it to your user-data directory (see Section 6) or the project root if `JOB_CANNON_USER_DATA_DIR` points there
+
+#### Step 5: Run the Auth Flow
+
+```bash
+uv run python -m job_finder.gmail_auth
+```
+
+Browser opens — sign in, accept the Gmail read-only permission. `token.json` is written next to `credentials.json`.
+
+You'll see an "App Not Verified" warning. This is expected — click **Advanced → Go to Job Cannon (unsafe)**. Safe because it's your own app under your own Google account.
+
+Then set `sources.gmail.enabled: true` in `config.yaml` (and `sources.imap.enabled: false` if you're switching away from IMAP).
+
+---
+
+## 5. Experience Profile
+
+Used by the AI to personalize fit-scoring against your real career history.
+
+- **Wizard path (step 4):** upload a PDF/DOCX resume — the parser fills `experience_profile.json` automatically.
+- **Manual path:** `cp experience_profile.example.json experience_profile.json` and edit. The example shows the expected shape: `positions[]`, `skills[]`, `education[]`.
+
+Not strictly required — the app boots without it — but scoring quality drops noticeably without your real work history in the prompt.
+
+---
+
+## 6. Where Config + Data Live
+
+By default, the app uses your OS user-data directory:
+
+| OS | Path |
+|---|---|
+| Windows | `%APPDATA%\JobCannon\` |
+| macOS | `~/Library/Application Support/JobCannon/` |
+| Linux | `~/.local/share/JobCannon/` |
+
+Files stored there: `config.yaml`, `jobs.db` (+ WAL/SHM), `update_check.json`, `token.json` (if you used OAuth), `experience_profile.json`.
+
+**Override:** set `JOB_CANNON_USER_DATA_DIR` to keep everything in one place (e.g. the repo root for easier backup):
+
+```bash
+# macOS / Linux / Git Bash
+export JOB_CANNON_USER_DATA_DIR=$(pwd)
+```
+
+```powershell
+# Windows PowerShell
+$env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path
+```
+
+Set it before running `uv run job-cannon` so the app sees it at boot. Add to your shell profile to make it permanent.
+
+`$JOB_CANNON_CONFIG` (different env var) points at a specific `config.yaml` file regardless of the user-data dir — useful for swapping profiles.
+
+---
+
+## 7. Starting the App
+
+```powershell
+uv run job-cannon
+```
+
+Equivalent invocations:
 
 ```powershell
 uv run python -m job_finder      # module entry
-uv run python run.py             # legacy entry, still supported
+uv run python run.py             # legacy entry, still works (now a shim)
 ```
 
-Open your browser and go to http://localhost:5000.
+Open http://localhost:5000. Click **Run Pipeline** on the dashboard to fetch + score jobs for the first time. The scheduler also runs ingestion automatically per your chosen cadence (default: 3×/day at 00:00, 08:00, 16:00 local).
 
-Click **Run Pipeline** on the dashboard to fetch and score jobs for the first time. The pipeline reads your Gmail alerts, parses them, runs AI scoring, and populates the job list.
+To stop: `Ctrl+C` in the terminal. The scheduler's pidfile auto-cleans on graceful shutdown.
 
 ---
 
 ## 8. Troubleshooting
 
-### "config.yaml not found" or startup crash
+### "Config file not found" at startup
 
-Copy the example config:
+Either run the onboarding wizard (`uv run job-cannon` with no `config.yaml`) or copy the example:
+
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-The error message tells you exactly which file is missing. The app fails fast at startup if required config is absent -- it will not start with a broken config.
+The error message names the exact path the app looked at. The default is platformdirs (see Section 6); `JOB_CANNON_USER_DATA_DIR` or `JOB_CANNON_CONFIG` override it.
 
----
+### Provider keys not being picked up
 
-### OAuth fails / "credentials.json not found"
+Precedence is env var > OS keyring > `config.yaml` plaintext fallback. Check:
 
-- Make sure `credentials.json` is in the project root (the same directory as `run.py`), not inside a subdirectory
-- If you see "token.json not found" -- run the auth flow:
-  ```bash
-  python -m job_finder.gmail_auth
-  ```
-- If you see "Access blocked: This app's request is invalid" -- go back to the OAuth consent screen setup and make sure you added your Gmail address as a test user (Step 3, Step 8 above)
+1. **Env override active?** `echo $env:GROQ_API_KEY` (PowerShell) or `echo $GROQ_API_KEY` (bash). If set, the keyring entry is ignored.
+2. **Keyring entry present?** Settings → Providers shows "configured" if the key is in the keyring under service `"job-cannon"`. On Linux, the keyring requires Secret Service (gnome-keyring or kwallet); on a headless box it falls back to `config.yaml`.
+3. **Plaintext fallback flagged?** A UI flash warning appears if the wizard or Settings couldn't reach the keyring.
 
----
+To migrate plaintext from a pre-v5.1 `config.yaml` into the keyring in one shot:
 
-### No jobs appearing after setup
+```bash
+uv run python -m job_finder.migrate_secrets
+```
 
-1. Check that Gmail job alerts are actually arriving in your inbox -- search for emails from `jobalerts-noreply@linkedin.com` or `noreply@glassdoor.com`
-2. Confirm `sources.gmail.enabled: true` in config.yaml (it defaults to false)
-3. The default lookback is 7 days -- you need alerts from the past week
-4. Click **Run Pipeline** on the dashboard to trigger an immediate fetch (do not wait for the scheduler)
+### Ollama not auto-starting
 
----
+App expects `ollama.exe` on PATH or at `%LOCALAPPDATA%\Programs\Ollama\ollama.exe` (Windows default). Override with `OLLAMA_EXE`:
 
-### "ANTHROPIC_API_KEY" errors / AI scoring not working
+```powershell
+$env:OLLAMA_EXE = "C:\path\to\ollama.exe"
+```
 
-- Make sure `JF_ANTHROPIC_API_KEY` is set in `.env` (not just `.env.example`)
-- The key should start with `sk-ant-`
-- The app starts without the key, but AI scoring will not work
-- Check the console output when you start `uv run job-cannon` -- it warns if the key is missing
-
----
+Test manually: `ollama run qwen2.5:14b "test"`. If that works, Job Cannon will too.
 
 ### Port 5000 already in use
 
-Change the port in config.yaml:
+Change the port:
+
 ```yaml
 server:
   port: 5001
 ```
 
-Then restart the app and go to http://localhost:5001.
+Then restart and go to http://localhost:5001.
 
-**macOS note:** AirPlay Receiver uses port 5000 by default. Turn it off in System Settings > AirDrop & Handoff > AirPlay Receiver.
+**macOS note:** AirPlay Receiver uses port 5000 by default. Disable in **System Settings → AirDrop & Handoff → AirPlay Receiver**.
+
+### IMAP "authentication failed"
+
+- The password must be a Google [app password](https://support.google.com/accounts/answer/185833), not your account password.
+- 2-Step Verification must be enabled on your Google account first (app passwords are only available with 2SV on).
+- Test the credentials directly: **Settings → Sources → IMAP → Test connection**.
+
+### Gmail OAuth "Access blocked"
+
+Re-visit the OAuth consent screen setup (Section 4 Step 3) and confirm your Gmail address is listed under **Test Users**. Then re-run `uv run python -m job_finder.gmail_auth`.
+
+### Pre-commit hook fails to run
+
+Opt in once: `git config core.hooksPath .githooks`. Then `uv run pre-commit install`. The hook runs gitleaks + ruff + commitizen before each commit.
+
+---
+
+## Where to Next
+
+- **[README.md](../README.md)** — feature overview, architecture, cost estimates
+- **[SECURITY.md](../SECURITY.md)** — secret storage model, threat model
+- **[PRIVACY.md](../PRIVACY.md)** — what data the app touches, what it sends out
+- **[docs/architecture/](architecture/)** — deep dives for contributors
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)** — dev workflow, commit style, type checking

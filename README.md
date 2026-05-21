@@ -61,26 +61,46 @@
 
 **Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
 
+**macOS / Linux / Git Bash**
+
 ```bash
 git clone https://github.com/Senkichi/job-cannon.git
 cd job-cannon
 uv sync --extra dev --extra eval
-
-# Tell Job Cannon to store config and database in the project root:
-export JOB_CANNON_USER_DATA_DIR=$(pwd)           # macOS / Linux / Git Bash
-# $env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path   # Windows PowerShell
-
-# First-time setup — copy the example config files:
-cp config.example.yaml config.yaml
-cp experience_profile.example.json experience_profile.json
-
 uv run job-cannon
-# Open http://localhost:5000
 ```
 
-**Works with zero API keys via Ollama.** All external sources are disabled by default; the app routes to an onboarding wizard on first launch if no config is found.
+**Windows PowerShell**
 
-**`config.yaml` keys to fill in:**
+```powershell
+git clone https://github.com/Senkichi/job-cannon.git
+cd job-cannon
+uv sync --extra dev --extra eval
+uv run job-cannon
+```
+
+Open http://localhost:5000. On first launch the **onboarding wizard** auto-detects AI providers, helps you connect Gmail via IMAP app-password, and writes secrets to your OS keyring — no manual config editing required.
+
+**Works with zero API keys via Ollama.** Prefer to edit YAML directly? Copy the templates instead and skip the wizard:
+
+```bash
+cp config.example.yaml config.yaml
+cp experience_profile.example.json experience_profile.json
+```
+
+**Keep config + database inside the repo (optional — easier backup):**
+
+```bash
+export JOB_CANNON_USER_DATA_DIR=$(pwd)              # macOS / Linux / Git Bash
+```
+
+```powershell
+$env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path  # Windows PowerShell
+```
+
+Otherwise data lives at `%APPDATA%\JobCannon\` (Windows) / `~/Library/Application Support/JobCannon/` (macOS) / `~/.local/share/JobCannon/` (Linux).
+
+**`config.yaml` keys to fill in (if you skipped the wizard):**
 
 | Key | Required | Notes |
 |-----|----------|-------|
@@ -91,7 +111,7 @@ uv run job-cannon
 | `sources.serpapi.api_key` | optional | Paid SERP API for Google Jobs search |
 | `providers.primary` | optional | Default `ollama` ($0 local); swap to `gemini` or `anthropic` if Ollama is not installed |
 
-For full configuration reference see [docs/SETUP.md](docs/SETUP.md).
+For full configuration reference — provider table, source setup, troubleshooting — see [docs/SETUP.md](docs/SETUP.md).
 
 ## Architecture
 
