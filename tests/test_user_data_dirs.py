@@ -160,3 +160,116 @@ def test_warns_when_env_unset_and_cwd_has_orphan_db(tmp_path, monkeypatch, caplo
     assert str(resolved) in message
     assert str(cwd) in message
     assert "JOB_CANNON_USER_DATA_DIR" in message
+
+
+# --- create_app() always calls ensure_user_data_dir() (UAT F1 regression) ---
+#
+# Failure mode this guards against: on a fresh macOS install,
+# `~/Library/Application Support/JobCannon/` does not exist. The app's entry
+# point (job_finder/__main__.py) pre-loads config and calls create_app(config=cfg).
+# Pre-fix, ensure_user_data_dir() was inside the `if config is None` branch
+# and was skipped on this path; run_migrations() then called
+# sqlite3.connect() on a path whose parent directory did not exist and the
+# app crashed before the onboarding gate could even render.
+#
+# The fix hoists the call to the top of create_app(), unconditional on the
+# config-source branch. These tests assert that invariant.
+
+
+def test_create_app_calls_ensure_user_data_dir_when_config_passed(tmp_path, monkeypatch):
+    """The F1 regression: create_app(config=...) must call ensure_user_data_dir()
+    so a fresh macOS / Windows install can create ~/Library/Application Support/JobCannon
+    (or %APPDATA%\\JobCannon\\) before run_migrations() opens the SQLite file."""
+    from unittest.mock import patch as mock_patch
+
+    # Point user-data root at a tmp path so the real call to ensure_user_data_dir()
+    # is harmless. The patch-and-counter is the load-bearing assertion.
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "udr"))
+
+    test_config = {
+        "db": {"path": str(tmp_path / "jobs.db")},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+        "TESTING": True,
+    }
+
+    from job_finder.web import create_app
+
+    with mock_patch(
+        "job_finder.web.user_data_dirs.ensure_user_data_dir",
+        wraps=user_data_dirs.ensure_user_data_dir,
+    ) as spy:
+        create_app(config=test_config)
+        assert spy.call_count == 1, (
+            f"ensure_user_data_dir() called {spy.call_count} times; expected exactly 1. "
+            "Regression: the config-passed path skipped the user-data-dir creation, "
+            "which crashed fresh macOS installs at run_migrations()."
+        )
+
+
+def test_create_app_calls_ensure_user_data_dir_when_config_is_none(tmp_path, monkeypatch):
+    """Same assertion as above, for the `config is None` branch. Keeps both
+    branches honest under the single-point-of-enforcement contract."""
+    from unittest.mock import patch as mock_patch
+
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(tmp_path / "udr"))
+    # Hand create_app a config file path that doesn't exist; load_config(allow_missing=True)
+    # returns a minimal-but-valid config in that case.
+    nonexistent_config = tmp_path / "no_config_here.yaml"
+
+    from job_finder.web import create_app
+
+    with mock_patch(
+        "job_finder.web.user_data_dirs.ensure_user_data_dir",
+        wraps=user_data_dirs.ensure_user_data_dir,
+    ) as spy:
+        create_app(config_path=str(nonexistent_config))
+        assert spy.call_count == 1, (
+            f"ensure_user_data_dir() called {spy.call_count} times; expected exactly 1."
+        )
+
+
+def test_create_app_works_on_fresh_user_data_root(tmp_path, monkeypatch):
+    """End-to-end of the F1 bug: point JOB_CANNON_USER_DATA_DIR at a path
+    whose parent directory does not exist yet (simulating a fresh macOS
+    install where ~/Library/Application Support/JobCannon doesn't exist).
+    create_app() must NOT crash with sqlite3.OperationalError."""
+    fresh_root = tmp_path / "never_existed_before" / "JobCannon"
+    monkeypatch.setenv("JOB_CANNON_USER_DATA_DIR", str(fresh_root))
+    # Use the user-data-root's jobs.db (the real failure path) — not a tmp file.
+    db_under_fresh_root = fresh_root / "jobs.db"
+
+    test_config = {
+        "db": {"path": str(db_under_fresh_root)},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+        "TESTING": True,
+    }
+
+    assert not fresh_root.exists(), "Precondition: fresh root must not pre-exist"
+
+    from job_finder.web import create_app
+
+    # Pre-fix this raised sqlite3.OperationalError: unable to open database file
+    create_app(config=test_config)
+
+    assert fresh_root.exists()
+    assert fresh_root.is_dir()

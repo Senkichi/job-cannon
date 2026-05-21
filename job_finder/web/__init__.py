@@ -98,9 +98,17 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         template_folder="templates",
     )
 
+    # Single point of enforcement: the user-data root must exist before any
+    # code path touches it (config_path / db_path / logs_path). Previously
+    # this was only called on the `config is None` branch, so __main__.py
+    # (which pre-loads config and passes it in) would skip directory creation
+    # and crash with sqlite3.OperationalError on a fresh macOS install
+    # (~/Library/Application Support/JobCannon doesn't exist by default).
+    # See UAT 2026-05-21 finding F1.
+    user_data_dirs.ensure_user_data_dir()
+
     # --- Configuration ---
     if config is None:
-        user_data_dirs.ensure_user_data_dir()
         # Use user-data config path if legacy default string is passed
         if config_path == "config.yaml":
             cfg = load_config(allow_missing=True)
