@@ -59,22 +59,39 @@
 
 ## Quick Start
 
-```powershell
+**Prerequisites:** Python 3.13+, [uv](https://docs.astral.sh/uv/getting-started/installation/). For free local AI scoring install [Ollama](https://ollama.com) and run `ollama pull qwen2.5:14b`.
+
+```bash
 git clone https://github.com/Senkichi/job-cannon.git
 cd job-cannon
 uv sync --extra dev --extra eval
 
-# First run only — DO NOT run if config.yaml or .env already exist:
-if (-not (Test-Path config.yaml)) { Copy-Item config.example.yaml config.yaml }
-if (-not (Test-Path .env))        { Copy-Item .env.example .env }
-# Add ANTHROPIC_API_KEY to .env (https://console.anthropic.com/settings/keys)
+# Tell Job Cannon to store config and database in the project root:
+export JOB_CANNON_USER_DATA_DIR=$(pwd)           # macOS / Linux / Git Bash
+# $env:JOB_CANNON_USER_DATA_DIR = (Get-Location).Path   # Windows PowerShell
+
+# First-time setup — copy the example config files:
+cp config.example.yaml config.yaml
+cp experience_profile.example.json experience_profile.json
 
 uv run job-cannon
 # Open http://localhost:5000
 ```
 
-For Gmail OAuth setup and full configuration reference, see
-[docs/SETUP.md](docs/SETUP.md).
+**Works with zero API keys via Ollama.** All external sources are disabled by default; the app routes to an onboarding wizard on first launch if no config is found.
+
+**`config.yaml` keys to fill in:**
+
+| Key | Required | Notes |
+|-----|----------|-------|
+| `profile.target_titles` | **yes** | Job titles to target, e.g. `["Senior Data Scientist"]` |
+| `profile.target_locations` | **yes** | Locations or `["Remote"]` |
+| `profile.skills` | **yes** | Your key skills |
+| `sources.imap.email` + `app_password` | optional | Gmail via IMAP — use an [app password](https://support.google.com/accounts/answer/185833), not your account password. No OAuth required. |
+| `sources.serpapi.api_key` | optional | Paid SERP API for Google Jobs search |
+| `providers.primary` | optional | Default `ollama` ($0 local); swap to `gemini` or `anthropic` if Ollama is not installed |
+
+For full configuration reference see [docs/SETUP.md](docs/SETUP.md).
 
 ## Architecture
 

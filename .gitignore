@@ -56,6 +56,13 @@ docs/superpowers/
 # Screenshots from exploration/testing sessions
 *.png
 
+# Session artifacts / local dev outputs
+*.out.txt
+backup_userdata_*.tar.gz
+.smoke_pre_snapshot.json
+update_check.json
+.worktreeinclude
+
 # SQLite WAL artifacts
 *.db-shm
 *.db-wal

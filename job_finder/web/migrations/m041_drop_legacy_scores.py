@@ -23,7 +23,7 @@ from job_finder.web.migrations.types import Migration, MigrationContext
 def _drop_legacy_scores(ctx: MigrationContext) -> None:
     # The gate lives in `migrations._gate` so the import is direct (no
     # cycle through `db_migrate.py`).
-    _check_backup_recent(ctx.user_data_root)
+    _check_backup_recent(ctx.user_data_root, initial_version=ctx.initial_version)
     ctx.conn.execute("DROP INDEX IF EXISTS idx_jobs_haiku_score")
     ctx.conn.execute("ALTER TABLE jobs DROP COLUMN haiku_score")
     ctx.conn.execute("ALTER TABLE jobs DROP COLUMN haiku_summary")

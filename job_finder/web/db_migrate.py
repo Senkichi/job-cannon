@@ -53,7 +53,7 @@ def run_migrations(db_path: str, user_data_root: str | None = None) -> None:
     root = user_data_root if user_data_root is not None else os.getcwd()
     with standalone_connection(db_path) as conn:
         current_version = conn.execute("PRAGMA user_version").fetchone()[0]
-        ctx = MigrationContext(conn=conn, db_path=db_path, user_data_root=root)
+        ctx = MigrationContext(conn=conn, db_path=db_path, user_data_root=root, initial_version=current_version)
         for migration in MIGRATIONS:
             if migration.version <= current_version:
                 continue

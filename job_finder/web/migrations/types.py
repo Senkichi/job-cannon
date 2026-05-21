@@ -37,11 +37,16 @@ class MigrationContext:
         user_data_root: Directory where user-data backups live. Defaults to
             CWD in `run_migrations`. Migration 41 uses this to glob for
             `backup_userdata_*.tar.gz` to enforce the backup-recency gate.
+        initial_version: PRAGMA user_version read before any migration in this
+            run was applied. Used by Migration 41's backup gate to distinguish
+            a fresh install (version 0 — nothing to lose) from an upgrade of
+            an existing database (version > 0 — backup required).
     """
 
     conn: sqlite3.Connection
     db_path: str
     user_data_root: str
+    initial_version: int = 0
 
 
 @dataclass(frozen=True)

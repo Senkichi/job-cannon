@@ -28,7 +28,10 @@ class MigrationBlockedError(Exception):
     """
 
 
-def _check_backup_recent(user_data_root: str | None = None) -> None:
+def _check_backup_recent(
+    user_data_root: str | None = None,
+    initial_version: int = 0,
+) -> None:
     """Preflight gate for Migration 41: require a recent backup OR explicit override.
 
     Looks for backup_userdata_*.tar.gz files under `user_data_root` (defaults
@@ -40,21 +43,16 @@ def _check_backup_recent(user_data_root: str | None = None) -> None:
     (time-machine snapshots, zfs datasets, manual .backup copies) can proceed
     after accepting responsibility for the rollback path. Fail-closed default.
 
-    Fresh install bypass: If the jobs.db file doesn't exist, skip the backup check
-    since there's no data to migrate from.
+    Fresh install bypass: ``initial_version == 0`` means the DB was brand-new
+    when this migration run started (no data to lose), so the backup gate is
+    skipped.  Checking the DB file's existence is not reliable here because
+    migrations 1-40 have already created the file by the time migration 41 runs.
     """
     if os.environ.get("GSD_BACKUP_CONFIRMED") == "1":
         return
-    root = user_data_root if user_data_root is not None else os.getcwd()
-
-    # Check if this is a fresh install (no database exists)
-    # If so, skip backup check since there's nothing to migrate from
-    from job_finder.web.user_data_dirs import db_path
-
-    db_file = db_path()
-    if not db_file.exists():
-        # Fresh install - no database to migrate, skip backup check
+    if initial_version == 0:
         return
+    root = user_data_root if user_data_root is not None else os.getcwd()
 
     pattern = os.path.join(root, "backup_userdata_*.tar.gz")
     backups = sorted(glob.glob(pattern), reverse=True)

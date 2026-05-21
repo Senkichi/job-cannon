@@ -1192,7 +1192,7 @@ class TestMigration41BackupGate:
         monkeypatch.delenv("GSD_BACKUP_CONFIRMED", raising=False)
         monkeypatch.chdir(tmp_path)  # empty directory -- no backup tarballs
         with pytest.raises(MigrationBlockedError, match=r"no backup_userdata_\*\.tar\.gz"):
-            _check_backup_recent()
+            _check_backup_recent(initial_version=40)  # existing DB, not a fresh install
 
     def test_gate_raises_when_backup_older_than_24h(self, monkeypatch, tmp_path):
         import os
@@ -1212,7 +1212,7 @@ class TestMigration41BackupGate:
         os.utime(stale, (old_mtime, old_mtime))
 
         with pytest.raises(MigrationBlockedError, match=r"h old \(>24h\)"):
-            _check_backup_recent()
+            _check_backup_recent(initial_version=40)  # existing DB, not a fresh install
 
     def test_gate_allows_fresh_backup(self, monkeypatch, tmp_path):
         from job_finder.web.db_migrate import _check_backup_recent
@@ -1241,7 +1241,7 @@ class TestMigration41BackupGate:
         monkeypatch.setenv("GSD_BACKUP_CONFIRMED", "yes")  # not '1'
         monkeypatch.chdir(tmp_path)
         with pytest.raises(MigrationBlockedError):
-            _check_backup_recent()
+            _check_backup_recent(initial_version=40)  # existing DB, not a fresh install
 
 
 class TestMigration50RewriteEnrichmentTier:
