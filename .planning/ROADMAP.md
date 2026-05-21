@@ -207,12 +207,12 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   4. `pip install job-cannon[local-ai]` installs `llama-cpp-python` and `local_bundled` provider loads a Q4_K_M GGUF (~2GB Qwen2.5-3B-Instruct or similar) and returns a completion
   5. Provider abstraction unit tests cover all five providers' `.call()` signatures returning a consistent `ModelResult` shape
 **Plans**: 6 plans
-  - [ ] 39-01-PLAN.md — _PROVIDER_DEFAULTS swap + legacy-tier translation + _SUPPORTED_PROVIDERS extension + ImportError cascade fix (foundation, wave 1)
-  - [ ] 39-02-PLAN.md — ClaudeCodeCLIProvider delegating to _run_oneshot() + FREE_PROVIDERS extension (wave 2)
-  - [ ] 39-03-PLAN.md — GeminiCLIProvider with inline subprocess invocation (wave 2)
-  - [ ] 39-04-PLAN.md — LocalBundledProvider with lazy llama_cpp import + pyproject [local-ai] extra (wave 2)
-  - [ ] 39-05-PLAN.md — providers/detection.py with liveness probes + ProviderHandle + cache (wave 3)
-  - [ ] 39-06-PLAN.md — cross-provider .call() shape + security source-grep regressions (wave 4)
+  - [x] 39-01-PLAN.md — _PROVIDER_DEFAULTS swap + legacy-tier translation + _SUPPORTED_PROVIDERS extension + ImportError cascade fix (foundation, wave 1)
+  - [x] 39-02-PLAN.md — ClaudeCodeCLIProvider delegating to _run_oneshot() + FREE_PROVIDERS extension (wave 2)
+  - [x] 39-03-PLAN.md — GeminiCLIProvider with inline subprocess invocation (wave 2)
+  - [x] 39-04-PLAN.md — LocalBundledProvider with lazy llama_cpp import + pyproject [local-ai] extra (wave 2)
+  - [x] 39-05-PLAN.md — providers/detection.py with liveness probes + ProviderHandle + cache (wave 3)
+  - [x] 39-06-PLAN.md — cross-provider .call() shape + security source-grep regressions (wave 4)
 
 ### Phase 40: Workload Tiers + Cascade Rewire + Canary
 **Goal**: The cascade is rewritten in a single coordinated config edit — workload-class semantics (`quick`/`score`/`triage`) replace capability tiers, the audit's Case A/B decision is wired in, the triage gate is operational, and a 1-week production canary validates ≥80% Anthropic-tail spend reduction.
@@ -226,7 +226,11 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   5. Dashboard renders a "Dismissed by triage" filter chip; clicking it shows jobs with `pipeline_status='dismissed'` AND `pipeline_status_history.source='triage_filter'`; job detail exposes the `evidence` field as the triage reason
   6. After 7 consecutive days of production canary: per-callsite Anthropic-tail rate stays <10% (queried from `scoring_costs WHERE provider='anthropic' AND created_at > NOW() - 7d` grouped by `purpose`), and marginal Anthropic spend on the 6 audited callsites drops ≥80% vs the pre-audit baseline week documented in Phase 37
   7. Rollback path tested: a recorded `config.yaml` backup can be restored and the Flask app boots cleanly with pre-audit cascade
-**Plans**: TBD
+**Plans**: 4 artifact-normalized plans
+  - [x] 40-01-PLAN.md — Workload tier system foundation (shipped)
+  - [x] 40-02-PLAN.md — Caller rewires (shipped)
+  - [x] 40-03-PLAN.md — Triage gate + UI (deferred/not shipped; see 40-03-SUMMARY.md)
+  - [x] 40-04-PLAN.md — Config rewire + canary (partially shipped; canary deferred; see 40-04-SUMMARY.md)
 **UI hint**: yes
 
 ### Phase 41: Strangerify Data Sources
@@ -252,12 +256,12 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
   4. `onboarding/imap_test.py` logs into Gmail IMAP with the entered app password, lists at least one folder, logs out, and returns a clear success or a specific-error message (auth/host/timeout) to the wizard
   5. Submitting the final wizard step writes config to user-data dir via atomic write, sets `onboarding_complete=true`, kicks off the first ingest via the scheduler, and redirects to `/dashboard` with a "Welcome — first ingest in progress" banner
 **Plans**: 6 plans
-  - [ ] 42-01-PLAN.md — Wave 0 test infrastructure (conftest seed + 10 stub test files)
-  - [ ] 42-02-PLAN.md — Wave 1: Migration 54 + onboarding/state.py + before_request gate + blueprint scaffold (STRANGE-WIZ-01)
-  - [ ] 42-03-PLAN.md — Wave 2: onboarding/system_check.py + tests (STRANGE-WIZ-03)
-  - [ ] 42-04-PLAN.md — Wave 2: onboarding/imap_test.py + mocked + live smoke tests (STRANGE-WIZ-04)
-  - [ ] 42-05-PLAN.md — Wave 3: blueprint.py (8 routes) + 9 templates + route tests (STRANGE-WIZ-02, STRANGE-WIZ-05)
-  - [ ] 42-06-PLAN.md — Wave 4: Done step atomicity + first-ingest kickoff + scheduler config (STRANGE-WIZ-06)
+  - [x] 42-01-PLAN.md — Wave 0 test infrastructure (conftest seed + 10 stub test files)
+  - [x] 42-02-PLAN.md — Wave 1: Migration 54 + onboarding/state.py + before_request gate + blueprint scaffold (STRANGE-WIZ-01)
+  - [x] 42-03-PLAN.md — Wave 2: onboarding/system_check.py + tests (STRANGE-WIZ-03)
+  - [x] 42-04-PLAN.md — Wave 2: onboarding/imap_test.py + mocked + live smoke tests (STRANGE-WIZ-04)
+  - [x] 42-05-PLAN.md — Wave 3: blueprint.py (8 routes) + 9 templates + route tests (STRANGE-WIZ-02, STRANGE-WIZ-05)
+  - [x] 42-06-PLAN.md — Wave 4: Done step atomicity + first-ingest kickoff + scheduler config (STRANGE-WIZ-06)
 **UI hint**: yes
 
 ### Phase 43: Update Check, Legal, Strangerify Exit Gate
@@ -359,9 +363,9 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | 37. Cascade Audit Execution & Decision | v5.0 | 0/? | Not started | - |
 | 38. Strangerify Foundation | v5.0 | 0/? | Not started | - |
 | 39. Strangerify Provider Abstraction | v5.0 | 6/6 | Complete | 2026-05-16 |
-| 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 0/? | Not started | - |
+| 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 4/4 artifacts | Partial: core shipped; triage/canary deferred | 2026-05-21 |
 | 41. Strangerify Data Sources | v5.0 | 0/? | Not started | - |
-| 42. Onboarding Wizard | v5.0 | 0/? | Not started | - |
+| 42. Onboarding Wizard | v5.0 | 6/6 | Complete | 2026-05-17 |
 | 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 0/5 | Not started | - |
 | 44. PyPI Release Pipeline & Install Docs | v5.0 | 0/? | Not started | - |
 | 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 0/? | Not started | - |
