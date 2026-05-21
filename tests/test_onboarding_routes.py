@@ -241,6 +241,14 @@ def test_imap_credentials_post_success_redirects_to_schedule(client, monkeypatch
         conn.close()
 
 
+def test_imap_skip_button_bypasses_required_field_validation(client):
+    resp = client.get("/onboarding/imap_credentials")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'name="skip"' in body
+    assert "formnovalidate" in body
+
+
 def test_imap_skip_persists_credentials_unverified(client, app):
     """D-08: skip-for-now saves creds but marks verified=False."""
     resp = client.post(
