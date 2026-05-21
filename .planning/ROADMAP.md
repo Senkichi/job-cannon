@@ -133,12 +133,12 @@ Full track details archived in `.planning/milestones/v4.0-ROADMAP.md`. Note: v4.
 
 - [x] **Phase 35: Audit Telemetry & Callsite Attribution** — Migration 49 ships `schema_valid` column + `careers_scrape` split into `find_careers_url` + `extract_jobs` (completed 2026-05-21)
 - [x] **Phase 36: Cascade Audit Eval Harness** — OpenRouter judge adapter + `evals/cascade_audit/` package + per-callsite adapters for 6 non-scoring callsites
-- [ ] **Phase 37: Cascade Audit Execution & Decision** — Three-round shadow-replay audit produces `CASCADE-AUDIT.md` + Case A/B routing decision
-- [ ] **Phase 38: Strangerify Foundation** — `user_data_dirs.py` + Migration 50 (`onboarding_state`) + config no-longer-fail-fast + personal-data audit
-- [ ] **Phase 39: Strangerify Provider Abstraction** — `_PROVIDER_DEFAULTS` (nested) + auto-detection + three new providers (`claude_code_cli`, `gemini_cli`, `local_bundled`)
+- [x] **Phase 37: Cascade Audit Execution & Decision** — Three-round shadow-replay audit produces `CASCADE-AUDIT.md` + Case A/B routing decision (completed 2026-05-21)
+- [x] **Phase 38: Strangerify Foundation** — `user_data_dirs.py` + Migration 50 (`onboarding_state`) + config no-longer-fail-fast + personal-data audit (completed 2026-05-21)
+- [x] **Phase 39: Strangerify Provider Abstraction** — `_PROVIDER_DEFAULTS` (nested) + auto-detection + three new providers (`claude_code_cli`, `gemini_cli`, `local_bundled`) (completed 2026-05-21)
 - [ ] **Phase 40: Workload Tiers + Cascade Rewire + Canary** — `quick`/`score`/`triage` replace `low`/`mid`/`high` + triage gate + single `config.yaml` rewire (absorbs audit Case A/B) + 1-week production canary
-- [ ] **Phase 41: Strangerify Data Sources** — IMAP source default + parser verification + PDF/DOCX resume parser
-- [ ] **Phase 42: Onboarding Wizard** — 7-step Flask blueprint + system check + IMAP smoke test + templates
+- [x] **Phase 41: Strangerify Data Sources** — IMAP source default + parser verification + PDF/DOCX resume parser (completed 2026-05-21)
+- [x] **Phase 42: Onboarding Wizard** — 7-step Flask blueprint + system check + IMAP smoke test + templates (completed 2026-05-21)
 - [ ] **Phase 43: Update Check, Legal, Strangerify Exit Gate** — GitHub Releases banner + AGPL/PRIVACY/AUP/SECURITY + fresh-clone stranger validation
 - [ ] **Phase 44: PyPI Release Pipeline & Install Docs** — PyPI name + trusted publishing + `release.yml` + `INSTALL.md` + README rewrite
 - [ ] **Phase 45: Cross-Platform pipx Validation & Exit Gate** — Win/macOS/Linux `pipx install job-cannon` validation + ≥5-strangers exit gate
@@ -360,12 +360,12 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | Track D. Reconciliation R1-R8 | v4.0 | 8/8 sessions | Complete | 2026-05-06 |
 | 35. Audit Telemetry & Callsite Attribution | v5.0 | 1/1 | Complete    | 2026-05-21 |
 | 36. Cascade Audit Eval Harness | v5.0 | 4/4 | Complete | 2026-05-14 |
-| 37. Cascade Audit Execution & Decision | v5.0 | 0/? | Not started | - |
-| 38. Strangerify Foundation | v5.0 | 0/? | Not started | - |
-| 39. Strangerify Provider Abstraction | v5.0 | 6/6 | Complete | 2026-05-16 |
+| 37. Cascade Audit Execution & Decision | v5.0 | 1/1 | Complete    | 2026-05-21 |
+| 38. Strangerify Foundation | v5.0 | 4/4 | Complete    | 2026-05-21 |
+| 39. Strangerify Provider Abstraction | v5.0 | 6/6 | Complete    | 2026-05-21 |
 | 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 4/4 artifacts | Partial: core shipped; triage/canary deferred | 2026-05-21 |
-| 41. Strangerify Data Sources | v5.0 | 0/? | Not started | - |
-| 42. Onboarding Wizard | v5.0 | 6/6 | Complete | 2026-05-17 |
+| 41. Strangerify Data Sources | v5.0 | 4/4 | Complete    | 2026-05-21 |
+| 42. Onboarding Wizard | v5.0 | 6/6 | Complete    | 2026-05-21 |
 | 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 0/5 | Not started | - |
 | 44. PyPI Release Pipeline & Install Docs | v5.0 | 0/? | Not started | - |
 | 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 0/? | Not started | - |

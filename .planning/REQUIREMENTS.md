@@ -31,10 +31,10 @@ Audit the 6 non-scoring LLM callsites via shadow-replay methodology, then rewire
 
 ### Audit execution
 
-- [ ] **AUDIT-09**: Three-round audit executed (R0 calibration / R1 contenders / R2 head-to-head); raw artifacts in `evals/cascade_audit/artifacts/` (gitignored)
-- [ ] **AUDIT-10**: `CASCADE-AUDIT.md` produced summarizing per-callsite verdicts, gate outcomes, recommended cascade
-- [ ] **AUDIT-11**: User spot-checks 10 judge verdicts; ≤2 obvious errors per spec section 11
-- [ ] **AUDIT-12**: Decision recorded: Case A (single shared cascade) or Case B (per-callsite `purpose_overrides`)
+- [x] **AUDIT-09**: Three-round audit executed (R0 calibration / R1 contenders / R2 head-to-head); raw artifacts in `evals/cascade_audit/artifacts/` (gitignored)
+- [x] **AUDIT-10**: `CASCADE-AUDIT.md` produced summarizing per-callsite verdicts, gate outcomes, recommended cascade
+- [x] **AUDIT-11**: User spot-checks 10 judge verdicts; ≤2 obvious errors per spec section 11
+- [x] **AUDIT-12**: Decision recorded: Case A (single shared cascade) or Case B (per-callsite `purpose_overrides`)
 
 ### Rewire + canary
 
@@ -51,19 +51,19 @@ A stranger can `git clone && uv sync && uv run job-cannon`, complete a 7-step on
 
 ### Foundation
 
-- [ ] **STRANGE-FOUND-01**: `job_finder/web/user_data_dirs.py` ships using `platformdirs`; returns paths for config/DB/logs/cache per OS (`%APPDATA%\JobCannon` on Win, `~/Library/Application Support/JobCannon` on macOS)
-- [ ] **STRANGE-FOUND-02**: Migration 50 adds `onboarding_state` table with `onboarding_complete` flag (default false)
-- [ ] **STRANGE-FOUND-03**: `config.py` handles "config doesn't exist yet" path (no longer fail-fast); reads from + writes to `user_data_dirs.config_path()` with atomic write
-- [ ] **STRANGE-FOUND-04**: `db_helpers.py` resolves DB path via `user_data_dirs.db_path()`
-- [ ] **STRANGE-FOUND-05**: Personal-data audit complete: `experience_profile.example.json` genericized; prompt templates in `job_scorer.py`, `data_enricher.py`, `ai_career_navigator.py` stripped of user-specific phrasing; `tests/fixtures/*.json` audited; `config.example.yaml` audited
+- [x] **STRANGE-FOUND-01**: `job_finder/web/user_data_dirs.py` ships using `platformdirs`; returns paths for config/DB/logs/cache per OS (`%APPDATA%\JobCannon` on Win, `~/Library/Application Support/JobCannon` on macOS)
+- [x] **STRANGE-FOUND-02**: Migration 50 adds `onboarding_state` table with `onboarding_complete` flag (default false)
+- [x] **STRANGE-FOUND-03**: `config.py` handles "config doesn't exist yet" path (no longer fail-fast); reads from + writes to `user_data_dirs.config_path()` with atomic write
+- [x] **STRANGE-FOUND-04**: `db_helpers.py` resolves DB path via `user_data_dirs.db_path()`
+- [x] **STRANGE-FOUND-05**: Personal-data audit complete: `experience_profile.example.json` genericized; prompt templates in `job_scorer.py`, `data_enricher.py`, `ai_career_navigator.py` stripped of user-specific phrasing; `tests/fixtures/*.json` audited; `config.example.yaml` audited
 
 ### Provider abstraction
 
-- [ ] **STRANGE-PROV-01**: `_PROVIDER_DEFAULTS` (nested provider→workload→model) replaces flat `_TIER_DEFAULTS`; legacy `low`/`mid`/`high` removed
-- [ ] **STRANGE-PROV-02**: `providers/detection.py` auto-detects `claude`/`gemini`/`ollama` CLIs on PATH; returns ranked list with liveness probe (not just `--version`)
-- [ ] **STRANGE-PROV-03**: `providers/claude_code_cli.py` shells out to `claude -p` headlessly; subscription-leveraged (cost = $0)
-- [ ] **STRANGE-PROV-04**: `providers/gemini_cli.py` shells out to `gemini` CLI
-- [ ] **STRANGE-PROV-05**: `providers/local_bundled.py` wraps `llama-cpp-python` with a bundled GGUF (Qwen2.5-3B-Instruct-Q4_K_M or similar, ~2GB); optional extra `[project.optional-dependencies] local-ai = ["llama-cpp-python>=0.2.0"]`
+- [x] **STRANGE-PROV-01**: `_PROVIDER_DEFAULTS` (nested provider→workload→model) replaces flat `_TIER_DEFAULTS`; legacy `low`/`mid`/`high` removed
+- [x] **STRANGE-PROV-02**: `providers/detection.py` auto-detects `claude`/`gemini`/`ollama` CLIs on PATH; returns ranked list with liveness probe (not just `--version`)
+- [x] **STRANGE-PROV-03**: `providers/claude_code_cli.py` shells out to `claude -p` headlessly; subscription-leveraged (cost = $0)
+- [x] **STRANGE-PROV-04**: `providers/gemini_cli.py` shells out to `gemini` CLI
+- [x] **STRANGE-PROV-05**: `providers/local_bundled.py` wraps `llama-cpp-python` with a bundled GGUF (Qwen2.5-3B-Instruct-Q4_K_M or similar, ~2GB); optional extra `[project.optional-dependencies] local-ai = ["llama-cpp-python>=0.2.0"]`
 
 ### Workload tiers + triage gate
 
@@ -79,19 +79,19 @@ A stranger can `git clone && uv sync && uv run job-cannon`, complete a 7-step on
 
 ### Data sources
 
-- [ ] **STRANGE-INGEST-01**: `sources/imap_source.py` ingests via `imapclient` (LOGIN/SEARCH UNSEEN/FETCH/LOGOUT); same `Job` dataclass output as `gmail_source.py`
-- [ ] **STRANGE-INGEST-02**: `pipeline_runner` defaults to `imap_source` per config; `gmail_source` retained as opt-in (power-user)
-- [ ] **STRANGE-INGEST-03**: Existing parsers (`linkedin.py`, `glassdoor.py`, `ziprecruiter.py`) verified working against IMAP-fetched RFC 5322 messages
-- [ ] **STRANGE-RESUME-01**: `onboarding/resume_parser.py` ships: PDF/DOCX → text (pdfplumber + python-docx) → LLM structured-output call → `experience_profile.json` shape + suggested target roles/locations/salary range
+- [x] **STRANGE-INGEST-01**: `sources/imap_source.py` ingests via `imapclient` (LOGIN/SEARCH UNSEEN/FETCH/LOGOUT); same `Job` dataclass output as `gmail_source.py`
+- [x] **STRANGE-INGEST-02**: `pipeline_runner` defaults to `imap_source` per config; `gmail_source` retained as opt-in (power-user)
+- [x] **STRANGE-INGEST-03**: Existing parsers (`linkedin.py`, `glassdoor.py`, `ziprecruiter.py`) verified working against IMAP-fetched RFC 5322 messages
+- [x] **STRANGE-RESUME-01**: `onboarding/resume_parser.py` ships: PDF/DOCX → text (pdfplumber + python-docx) → LLM structured-output call → `experience_profile.json` shape + suggested target roles/locations/salary range
 
 ### Onboarding wizard
 
-- [ ] **STRANGE-WIZ-01**: `onboarding/state.py` ships: DB read/write for `onboarding_state`; before-request redirect logic in app factory
-- [ ] **STRANGE-WIZ-02**: `onboarding/blueprint.py` ships 7 Flask routes: `/welcome` → `/provider_select` → `/provider_credentials` → `/resume_upload` + `/profile_edit` → `/imap_credentials` → `/schedule` → `/done`
-- [ ] **STRANGE-WIZ-03**: `onboarding/system_check.py` ships: verifies DB writable, ports free, network reachable
-- [ ] **STRANGE-WIZ-04**: `onboarding/imap_test.py` ships: LOGIN→LIST→LOGOUT smoke test for entered IMAP credentials; specific error messages on failure
-- [ ] **STRANGE-WIZ-05**: 7 wizard templates render: `welcome.html`, `provider_select.html`, `provider_credentials.html`, `resume_upload.html`, `profile_edit.html`, `imap_credentials.html`, `schedule.html`, `done.html` (+ `_base.html` layout)
-- [ ] **STRANGE-WIZ-06**: Wizard finish persists final config to user-data dir, sets `onboarding_complete=true`, kicks off first ingest, redirects to `/dashboard` with banner
+- [x] **STRANGE-WIZ-01**: `onboarding/state.py` ships: DB read/write for `onboarding_state`; before-request redirect logic in app factory
+- [x] **STRANGE-WIZ-02**: `onboarding/blueprint.py` ships 7 Flask routes: `/welcome` → `/provider_select` → `/provider_credentials` → `/resume_upload` + `/profile_edit` → `/imap_credentials` → `/schedule` → `/done`
+- [x] **STRANGE-WIZ-03**: `onboarding/system_check.py` ships: verifies DB writable, ports free, network reachable
+- [x] **STRANGE-WIZ-04**: `onboarding/imap_test.py` ships: LOGIN→LIST→LOGOUT smoke test for entered IMAP credentials; specific error messages on failure
+- [x] **STRANGE-WIZ-05**: 7 wizard templates render: `welcome.html`, `provider_select.html`, `provider_credentials.html`, `resume_upload.html`, `profile_edit.html`, `imap_credentials.html`, `schedule.html`, `done.html` (+ `_base.html` layout)
+- [x] **STRANGE-WIZ-06**: Wizard finish persists final config to user-data dir, sets `onboarding_complete=true`, kicks off first ingest, redirects to `/dashboard` with banner
 
 ### Update checker + legal
 
