@@ -40,9 +40,7 @@ def _make_jobs_table(db_path: str, rows: list[tuple[str, str, str]]) -> None:
             "  company TEXT NOT NULL"
             ")"
         )
-        conn.executemany(
-            "INSERT INTO jobs (dedup_key, title, company) VALUES (?, ?, ?)", rows
-        )
+        conn.executemany("INSERT INTO jobs (dedup_key, title, company) VALUES (?, ?, ?)", rows)
         conn.commit()
     finally:
         conn.close()
@@ -221,7 +219,16 @@ def test_format_markdown_report_includes_all_columns():
     )
 
     # Header columns
-    for col in ("source", "raw", "parse_ok", "title_match", "novel", "overlap_pct", "fetch_s", "notes"):
+    for col in (
+        "source",
+        "raw",
+        "parse_ok",
+        "title_match",
+        "novel",
+        "overlap_pct",
+        "fetch_s",
+        "notes",
+    ):
         assert col in md, f"column {col!r} missing from report"
 
     # Per-source rows
@@ -368,7 +375,5 @@ def test_main_missing_target_titles_returns_nonzero(tmp_path, monkeypatch):
 
     monkeypatch.setattr(benchmark_sources, "_PORTAL_FETCHERS", {})
 
-    rc = benchmark_sources.main(
-        ["--config", str(cfg_path), "--db", str(tmp_path / "missing.db")]
-    )
+    rc = benchmark_sources.main(["--config", str(cfg_path), "--db", str(tmp_path / "missing.db")])
     assert rc != 0

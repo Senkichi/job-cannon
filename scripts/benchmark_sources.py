@@ -27,8 +27,8 @@ import logging
 import sqlite3
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from job_finder.models import Job
 
@@ -192,7 +192,9 @@ def format_markdown_report(
     lines.append(
         "| source | raw | parse_ok | title_match | novel | overlap_pct | fetch_s | notes |"
     )
-    lines.append("|--------|----:|---------:|------------:|------:|------------:|--------:|-------|")
+    lines.append(
+        "|--------|----:|---------:|------------:|------:|------------:|--------:|-------|"
+    )
     for r in results:
         notes_cell = r.notes.replace("|", "\\|") if r.notes else "-"
         lines.append(
