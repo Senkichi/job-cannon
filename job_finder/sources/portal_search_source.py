@@ -13,12 +13,24 @@ from __future__ import annotations
 import logging
 import re
 import time
+from typing import Protocol
 
 import requests
 
 from job_finder.models import Job
 
 logger = logging.getLogger(__name__)
+
+
+class _SerpBackend(Protocol):
+    """Duck-type for DataForSEOSource / GoogleCSESource interchangeability.
+
+    Both backends accept ``site:domain keyword`` queries through a common
+    entry point and return Job objects. ``fetch_serp_portals`` selects which
+    backend to use based on which is configured.
+    """
+
+    def fetch_jobs(self, queries: list[dict]) -> list[Job]: ...
 
 _REQUEST_TIMEOUT = 15
 _USER_AGENT = "Mozilla/5.0 (compatible; JobCannon/1.0)"
@@ -563,24 +575,37 @@ def _fetch_jooble(keywords: list[str], *, api_key: str) -> list[Job]:
 
 def fetch_serp_portals(
     keywords: list[str],
-    dataforseo_source: object,
+    dataforseo_source: _SerpBackend | None,
     portals: list[dict[str, str]] | None = None,
     max_queries: int = 30,
+    google_cse_source: _SerpBackend | None = None,
 ) -> list[Job]:
-    """Run site: queries through DataForSEO for portals without free APIs.
+    """Run site: queries through DataForSEO or Google CSE for portals without free APIs.
 
-    Batches all queries into a single DataForSEO task submission for efficiency.
-    DataForSEO charges ~$0.0006 per 10 results — far cheaper than SerpAPI.
+    Backend selection (per PLAN.md §3 load-bearing decision #2): DataForSEO is
+    preferred when both backends are configured because it has no daily quota
+    and supports query batching. Google CSE is the free-tier fallback used
+    when only CSE is configured. When neither is configured the function
+    returns ``[]`` silently.
+
+    DataForSEO charges ~$0.0006 per 10 results; CSE is free up to 100/day with
+    a 95-query defense-in-depth gate enforced inside ``GoogleCSESource``.
 
     Args:
         keywords: Search terms.
-        dataforseo_source: DataForSEOSource instance.
+        dataforseo_source: Optional DataForSEOSource instance. Preferred when set.
         portals: Portal list (defaults to SERP_PORTALS).
         max_queries: Cap on total SERP queries to prevent runaway costs.
+        google_cse_source: Optional GoogleCSESource instance. Used only when
+            ``dataforseo_source`` is None and CSE is configured.
 
     Returns:
         Deduplicated list of Job objects.
     """
+    backend = dataforseo_source if dataforseo_source is not None else google_cse_source
+    if backend is None:
+        return []
+
     portal_list = portals if portals is not None else SERP_PORTALS
     seen_urls: set[str] = set()
     all_jobs: list[Job] = []
@@ -601,13 +626,15 @@ def fetch_serp_portals(
     if not queries:
         return []
 
+    backend_name = "DataForSEO" if dataforseo_source is not None else "Google CSE"
     logger.info(
-        "Portal SERP search: submitting %d queries to DataForSEO",
+        "Portal SERP search: submitting %d queries to %s",
         len(queries),
+        backend_name,
     )
 
     try:
-        raw_jobs = dataforseo_source.fetch_jobs(queries)
+        raw_jobs = backend.fetch_jobs(queries)
     except Exception:
         logger.warning("Portal SERP search failed", exc_info=True)
         return []
@@ -651,23 +678,27 @@ def fetch_serp_portals(
 
 def fetch_all_portals(
     keywords: list[str],
-    dataforseo_source: object | None = None,
+    dataforseo_source: _SerpBackend | None = None,
     max_serp_queries: int = 30,
     serp_portals: list[dict[str, str]] | None = None,
     portal_config: dict | None = None,
+    google_cse_source: _SerpBackend | None = None,
 ) -> list[Job]:
     """Fetch from all portals: free APIs first, then SERP fallback.
 
     Args:
         keywords: Search terms.
         dataforseo_source: Optional DataForSEOSource for SERP portals.
-            If None, only free API portals are searched.
-        max_serp_queries: Cap on DataForSEO queries.
+            Preferred over CSE when both are configured.
+        max_serp_queries: Cap on SERP queries (applies to whichever backend runs).
         serp_portals: Optional override for SERP portal list.
         portal_config: Optional ``sources.portal_search`` config dict. Used
             to enable/configure the Stage-2 portals (jobicy, yc_workatastartup,
             usajobs, adzuna, jooble). When omitted, those portals are skipped
             and only the three always-on free portals plus SERP run.
+        google_cse_source: Optional GoogleCSESource backend. Used only when
+            ``dataforseo_source`` is None — Stage 3's free substitute for the
+            DataForSEO ``site:`` query path.
 
     Returns:
         Combined, deduplicated job list.
@@ -725,17 +756,19 @@ def fetch_all_portals(
             )
         )
 
-    # Tier 2: SERP portals via DataForSEO (cheap, batched)
-    if dataforseo_source is not None:
+    # Tier 2: SERP portals — DataForSEO (paid, batched) preferred, Google CSE
+    # (free, 95/day quota) as fallback when only CSE is configured.
+    if dataforseo_source is not None or google_cse_source is not None:
         serp_jobs = fetch_serp_portals(
             keywords,
             dataforseo_source,
             portals=serp_portals,
             max_queries=max_serp_queries,
+            google_cse_source=google_cse_source,
         )
         _dedup_extend(serp_jobs)
     else:
-        logger.info("Portal search: no DataForSEO backend, skipping SERP portals")
+        logger.info("Portal search: no SERP backend (DataForSEO or CSE), skipping SERP portals")
 
     logger.info("Portal search total: %d jobs from all portals", len(all_jobs))
     return all_jobs

@@ -66,6 +66,7 @@ FREE_PROVIDERS: frozenset[str] = frozenset(
         "claude_code_cli",   # NEW — ClaudeCodeCLIProvider (Plan 02)
         "gemini_cli",        # NEW — GeminiCLIProvider (Plan 03)
         "local_bundled",     # NEW — LocalBundledProvider (Plan 04)
+        "google_cse",        # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
     }
 )
 

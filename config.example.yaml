@@ -162,6 +162,26 @@ sources:
       enabled: false
       api_key: ""
 
+  google_cse:
+    # Stage 3 — Google Programmable Search Engine (free 100 queries/day quota).
+    # Drop-in replacement for the DataForSEO site: query path. Activates only
+    # when both api_key and cse_id are set AND dataforseo is not enabled
+    # (DataForSEO is preferred when both are configured — it has no daily cap).
+    #
+    # Setup:
+    #   1. Create a Programmable Search Engine at
+    #      https://programmablesearchengine.google.com/ — "Search the entire web"
+    #   2. Copy the Search engine ID (the cse_id below)
+    #   3. Enable the Custom Search API in https://console.cloud.google.com/
+    #      and create an API key (the api_key below)
+    #
+    # Quota: 100 queries/day free, $5 per 1000 thereafter. Job Cannon enforces
+    # a 95/day defense-in-depth gate. Per PLAN.md load-bearing decision #8, the
+    # scheduler runs CSE-backed portal search once per day, not 3x/day.
+    enabled: false
+    api_key: ""
+    cse_id: ""
+
 # --- AI scoring configuration ---
 scoring:
   # How much each factor contributes to the overall score (must sum to 1.0)

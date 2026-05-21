@@ -431,6 +431,46 @@ def _fetch_portal_jooble(cfg: dict, target_titles: list[str]) -> list[Job]:
     return _fetch_jooble(_portal_keywords(cfg, target_titles), api_key=api_key)
 
 
+def _fetch_portal_serp_cse(cfg: dict, target_titles: list[str]) -> list[Job]:
+    """Stage 3 — exercise the CSE-backed SERP path through ``fetch_serp_portals``.
+
+    Runs only when the user has configured ``sources.google_cse`` *and* not
+    ``sources.dataforseo`` (DataForSEO is preferred when both are set, and is
+    already reported under the ``dataforseo`` row). The benchmark report should
+    not double-count SERP queries.
+    """
+    cse_cfg = cfg.get("sources", {}).get("google_cse", {})
+    if not cse_cfg.get("enabled", False):
+        return []
+
+    # If DataForSEO is enabled, the live ingestion path uses it instead of CSE
+    # (per load-bearing decision #2). Skip the CSE benchmark row so we don't
+    # report a yield that wouldn't run in production.
+    dfse_cfg = cfg.get("sources", {}).get("dataforseo", {})
+    if dfse_cfg.get("enabled", False):
+        return []
+
+    from job_finder.secrets import get_secret
+    from job_finder.sources.google_cse_source import GoogleCSESource
+    from job_finder.sources.portal_search_source import fetch_serp_portals
+
+    api_key = get_secret("sources.google_cse.api_key", config=cfg) or ""
+    cse_id = get_secret("sources.google_cse.cse_id", config=cfg) or ""
+    if not (api_key and cse_id):
+        return []
+
+    portal_search_cfg = cfg.get("sources", {}).get("portal_search", {})
+    max_queries = portal_search_cfg.get("max_serp_queries", 30)
+
+    backend = GoogleCSESource(api_key=api_key, cse_id=cse_id)
+    return fetch_serp_portals(
+        _portal_keywords(cfg, target_titles),
+        dataforseo_source=None,
+        max_queries=max_queries,
+        google_cse_source=backend,
+    )
+
+
 # Module-level so tests can replace this with {} to stop live HTTP.
 _PORTAL_FETCHERS: dict[str, Callable[[dict, list[str]], list[Job]]] = {
     "portal_remoteok": _fetch_portal_remoteok,
@@ -441,6 +481,7 @@ _PORTAL_FETCHERS: dict[str, Callable[[dict, list[str]], list[Job]]] = {
     "portal_usajobs": _fetch_portal_usajobs,
     "portal_adzuna": _fetch_portal_adzuna,
     "portal_jooble": _fetch_portal_jooble,
+    "portal_serp_cse": _fetch_portal_serp_cse,
 }
 
 # Source-name → keyed-source adapter. Tuples so the table order is stable

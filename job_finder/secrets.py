@@ -50,6 +50,11 @@ SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     "sources.adzuna.app_id":               ("ADZUNA_APP_ID",),
     "sources.adzuna.app_key":              ("ADZUNA_APP_KEY",),
     "sources.jooble.api_key":              ("JOOBLE_API_KEY",),
+    # Stage 3 — Google Programmable Search Engine (free 100/day quota).
+    # cse_id is the Programmable Search Engine ID, not a secret per se, but
+    # routed through the same precedence stack for symmetry with api_key.
+    "sources.google_cse.api_key":          ("GOOGLE_CSE_API_KEY",),
+    "sources.google_cse.cse_id":           ("GOOGLE_CSE_ID",),
     "providers.api_keys.openrouter":       ("OPENROUTER_API_KEY",),
     "providers.api_keys.gemini":           ("GEMINI_API_KEY",),
     "providers.api_keys.groq":             ("GROQ_API_KEY",),

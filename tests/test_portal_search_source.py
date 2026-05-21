@@ -661,3 +661,116 @@ class TestFetchAllPortalsStage2:
             ["Engineer"], app_id="id", app_key="k", country="gb"
         )
         mock_jooble.assert_called_once_with(["Engineer"], api_key="abc")
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 — Google CSE backend selection in fetch_serp_portals / fetch_all_portals
+# ---------------------------------------------------------------------------
+
+
+class TestFetchSerpPortalsCseBackend:
+    """Stage 3 acceptance criteria — backend selection logic."""
+
+    def test_cse_used_when_only_cse_configured(self):
+        """When DataForSEO is None but CSE is set, CSE is the backend."""
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.return_value = [
+            _make_job(url="https://wellfound.com/cse-1"),
+        ]
+
+        jobs = fetch_serp_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            google_cse_source=mock_cse,
+        )
+        assert len(jobs) == 1
+        assert jobs[0].source == "portal_wellfound"
+        mock_cse.fetch_jobs.assert_called_once()
+
+    def test_dataforseo_preferred_when_both_configured(self):
+        """When both are set, DataForSEO wins (no daily quota, supports batching)."""
+        mock_dfse = MagicMock()
+        mock_dfse.fetch_jobs.return_value = [_make_job(url="https://wellfound.com/dfse-1")]
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.return_value = [_make_job(url="https://wellfound.com/cse-1")]
+
+        jobs = fetch_serp_portals(
+            ["Engineer"],
+            dataforseo_source=mock_dfse,
+            google_cse_source=mock_cse,
+        )
+
+        assert len(jobs) == 1
+        assert jobs[0].source_url == "https://wellfound.com/dfse-1"
+        mock_dfse.fetch_jobs.assert_called_once()
+        mock_cse.fetch_jobs.assert_not_called()
+
+    def test_neither_backend_returns_empty(self):
+        """Calling with both backends None is a silent no-op (no exception)."""
+        jobs = fetch_serp_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            google_cse_source=None,
+        )
+        assert jobs == []
+
+    def test_cse_failure_returns_empty(self):
+        """CSE-backend exception is logged but caller gets [] (matches DataForSEO)."""
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.side_effect = RuntimeError("CSE 503")
+
+        jobs = fetch_serp_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            google_cse_source=mock_cse,
+        )
+        assert jobs == []
+
+
+class TestFetchAllPortalsCseBackend:
+    """Stage 3 — fetch_all_portals wiring of google_cse_source kwarg."""
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok", return_value=[])
+    def test_cse_runs_when_dataforseo_none(self, mock_rok, mock_rem, mock_him):
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.return_value = [_make_job(url="https://wellfound.com/x")]
+
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            google_cse_source=mock_cse,
+        )
+        assert len(jobs) == 1
+        mock_cse.fetch_jobs.assert_called_once()
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok", return_value=[])
+    def test_dataforseo_preferred_when_both(self, mock_rok, mock_rem, mock_him):
+        mock_dfse = MagicMock()
+        mock_dfse.fetch_jobs.return_value = [_make_job(url="https://wellfound.com/dfse")]
+        mock_cse = MagicMock()
+        mock_cse.fetch_jobs.return_value = [_make_job(url="https://wellfound.com/cse")]
+
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=mock_dfse,
+            google_cse_source=mock_cse,
+        )
+        assert len(jobs) == 1
+        assert jobs[0].source_url == "https://wellfound.com/dfse"
+        mock_cse.fetch_jobs.assert_not_called()
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok", return_value=[])
+    def test_neither_skips_serp_tier(self, mock_rok, mock_rem, mock_him):
+        """No SERP backend → free portals only, no SERP exceptions."""
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            google_cse_source=None,
+        )
+        assert jobs == []
