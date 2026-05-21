@@ -158,6 +158,42 @@ def test_resume_upload_unlinks_temp_file(client, monkeypatch):
     assert len(unlinked) == 1, f"Expected exactly 1 unlink call, got {unlinked}"
 
 
+def test_imap_credentials_renders_app_password_hand_holding(client):
+    """UAT F3 (2026-05-21): IMAP step must include the two Google links and
+    the 4-step numbered list so a user unfamiliar with App Passwords can
+    complete the step without leaving the page or opening docs/SETUP.md."""
+    resp = client.get("/onboarding/imap_credentials")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+
+    # The marker stays in the template (test_each_step_renders enforces this
+    # too — re-asserting locally protects against accidental removal during
+    # template churn).
+    assert "WIZARD_STEP_IMAP_CREDENTIALS_MARKER" in body
+
+    # The two Google links must appear as anchors with target="_blank".
+    assert 'href="https://myaccount.google.com/security"' in body
+    assert 'href="https://myaccount.google.com/apppasswords"' in body
+    assert 'target="_blank"' in body
+    # Anchor opener-noreferrer hardening — required by the design.
+    assert 'rel="noopener"' in body
+
+    # The 4-step numbered list must be visible (no expand control).
+    # We assert on the 4 substrings the design fixed, not on exact wording.
+    assert "Mail" in body
+    assert "Other (custom name)" in body
+    assert "Job Cannon" in body
+    assert "16-character" in body
+
+    # The "Why am I doing this?" panel must be a <details> (collapsed by default).
+    assert "<details" in body
+    assert "Why am I doing this?" in body
+    # Detail must NOT be open by default — there must be no `open` attribute
+    # on the <details> element. Substring check is sufficient because the
+    # template has exactly one <details>.
+    assert "<details open" not in body and "<details  open" not in body
+
+
 def test_imap_credentials_post_failure_rerenders_with_error(client, monkeypatch):
     """D-08: POST /onboarding/imap_credentials with bad creds → HTTP 200 + error + preserved email."""
     from job_finder.web.onboarding.imap_test import ImapTestResult
