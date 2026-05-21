@@ -572,3 +572,120 @@ def _probe_jazzhr(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_jazzhr('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_pinpoint(slug: str) -> bool:
+    """Return True if slug has at least one active Pinpoint posting.
+
+    Pinpoint may return 200 with ``{"data": []}`` for tenants without active
+    postings — empty-list pitfall, same as Lever/Recruitee.
+
+    Args:
+        slug: Pinpoint subdomain (e.g. 'workwithus' for workwithus.pinpointhq.com).
+
+    Returns:
+        True if the slug resolves to a Pinpoint tenant with active postings.
+    """
+    url = f"https://{slug}.pinpointhq.com/postings.json"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        postings = data.get("data") or []
+        return isinstance(postings, list) and len(postings) > 0
+    except Exception as e:
+        logger.debug("_probe_pinpoint('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_personio(slug: str) -> bool:
+    """Return True if slug has at least one active Personio position.
+
+    Personio publishes XML at .de OR .com; this probe tries .de first then
+    falls back to .com on 404. A valid feed with at least one <position> is
+    a hit; empty <workzag-jobs> stays a miss (same pitfall pattern).
+
+    Args:
+        slug: Personio subdomain (e.g. 'acme' for acme.jobs.personio.de).
+
+    Returns:
+        True if the slug resolves to a Personio tenant with active positions.
+    """
+    for tld in ("de", "com"):
+        url = f"https://{slug}.jobs.personio.{tld}/xml"
+        try:
+            r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        except Exception as e:
+            logger.debug("_probe_personio('%s', tld=%s) failed: %s", slug, tld, e)
+            continue
+        if r.status_code == 404:
+            continue
+        if r.status_code != 200 or not r.content:
+            continue
+        # Parse cheaply — any <position> element is enough to confirm a hit.
+        try:
+            import defusedxml.ElementTree as ET
+
+            root = ET.fromstring(r.content)
+            for _ in root.iter("position"):
+                return True
+            return False
+        except Exception as e:
+            logger.debug("_probe_personio('%s', tld=%s) parse error: %s", slug, tld, e)
+            continue
+    return False
+
+
+def _probe_bamboohr(slug: str) -> bool:
+    """Return True if slug has at least one active BambooHR posting.
+
+    Probes the public careers widget at /jobs/embed2.php and counts
+    ``<li id="bhrPositionID_...">`` items. Tenants without open jobs serve
+    a 200 with an empty widget — empty-list pitfall pattern.
+
+    Args:
+        slug: BambooHR subdomain (e.g. 'acme' for acme.bamboohr.com).
+
+    Returns:
+        True if the slug resolves to a BambooHR tenant with active jobs.
+    """
+    url = f"https://{slug}.bamboohr.com/jobs/embed2.php"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        # Substring check avoids loading a full HTML parser just for the probe.
+        return "bhrPositionID_" in r.text
+    except Exception as e:
+        logger.debug("_probe_bamboohr('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_teamtailor(slug: str) -> bool:
+    """Return True if slug has at least one active Teamtailor posting.
+
+    Probes the public unkeyed JSON:API at /api/jobs. Tenants without active
+    jobs return ``{"data": []}`` — empty-list pitfall, same as others.
+
+    Args:
+        slug: Teamtailor subdomain (e.g. 'acme' for acme.teamtailor.com).
+
+    Returns:
+        True if the slug resolves to a Teamtailor tenant with active jobs.
+    """
+    url = f"https://{slug}.teamtailor.com/api/jobs"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        items = data.get("data") or []
+        return isinstance(items, list) and len(items) > 0
+    except Exception as e:
+        logger.debug("_probe_teamtailor('%s') failed: %s", slug, e)
+        return False

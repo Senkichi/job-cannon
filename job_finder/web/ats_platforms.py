@@ -10,7 +10,9 @@ import re
 import time
 from functools import lru_cache
 
+import defusedxml.ElementTree as ET
 import requests
+from bs4 import BeautifulSoup
 
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.description_formatter import strip_html_to_text
@@ -751,10 +753,36 @@ def _fetch_smartrecruiters_description(slug: str, posting_id: str) -> str:
 #                (The historical .xml feed still exists at the same path
 #                without `?json=1` but JSON is canonical for new consumers.)
 #
-#   Pinpoint, Personio, BambooHR, Teamtailor — DEFERRED to a follow-up session.
-#                PLAN.md Q3 cutoff allows up to 3 fails before pause-and-ask.
-#                None failed; these are deferred for scope/time reasons, not
-#                feasibility. See HANDOFF.md.
+#   Pinpoint   — FEASIBLE. Public JSON at https://{slug}.pinpointhq.com/postings.json
+#                returning {"data": [...]}. No auth. Single-shot (no pagination).
+#                Verified via kalil0321/ats-scrapers PinpointScraper + several
+#                production peviitor-ro adapters hitting the same endpoint.
+#
+#   Personio   — FEASIBLE. Public XML feed at
+#                https://{slug}.jobs.personio.{de,com}/xml. Standard XML schema
+#                (<position> elements with <id>/<name>/<office>/<jobDescriptions>).
+#                Some tenants also expose /search.json but XML is the canonical
+#                public source per Personio's own docs (SammyTheSalmon/personio).
+#                Verified via leonfoeck/Werki-Checker, ever-jobs, working-group-two.
+#
+#   BambooHR   — FEASIBLE (HTML scrape). The historical
+#                https://{slug}.bamboohr.com/careers/list JSON endpoint was
+#                deprecated in 2024 — every tenant now serves the embedded
+#                careers widget at /jobs/embed2.php as static HTML. We parse the
+#                widget with BeautifulSoup (already a project dependency); jobs
+#                are <li id="bhrPositionID_{id}"> elements with title, location,
+#                and detail-page link. Verified via kalil0321/ats-scrapers
+#                BambooHRScraper. Description/jd_full requires a per-job
+#                detail-page fetch — deferred (Stage 4 only does listings).
+#
+#   Teamtailor — FEASIBLE. Public unkeyed JSON at
+#                https://{slug}.teamtailor.com/api/jobs returning JSON:API-shaped
+#                {"data": [{"attributes": {...}}, ...]}. The X-Api-Version /
+#                X-Api-Key flow at api.teamtailor.com/v1/jobs is the keyed
+#                organization-level API — orthogonal to the public per-tenant
+#                feed. Verified via ahmedmobarak1994/jobscannercloud
+#                TeamtailorSource (_fetch_public path). HANDOFF.md previously
+#                flagged this as keyed-only; that was wrong.
 # ---------------------------------------------------------------------------
 
 
@@ -1021,4 +1049,360 @@ def scan_jazzhr(slug: str, target_titles: list[str], exclusions: list[str]) -> l
         )
 
     logger.debug("scan_jazzhr('%s'): %d jobs fetched, %d matched", slug, len(jobs), len(results))
+    return results
+
+
+def scan_pinpoint(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Pinpoint public postings JSON for keyword-matched job postings.
+
+    API: GET https://{slug}.pinpointhq.com/postings.json → {"data": [...]}.
+    No auth. Single-shot — Pinpoint returns every active posting in one
+    response with no pagination. Each item carries title, url, location dict
+    ({city, name, province}), compensation_minimum/maximum, employment_type,
+    workplace_type, and a job.department.name nested under "job".
+
+    Args:
+        slug: Pinpoint subdomain slug (e.g. 'workwithus' for
+            workwithus.pinpointhq.com).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error.
+    """
+    url = f"https://{slug}.pinpointhq.com/postings.json"
+    try:
+        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_pinpoint('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_pinpoint('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("scan_pinpoint('%s') JSON parse error: %s", slug, e)
+        return []
+
+    postings = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(postings, list):
+        return []
+
+    results = []
+    for posting in postings:
+        if not isinstance(posting, dict):
+            continue
+        title = posting.get("title") or ""
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        loc_obj = posting.get("location") or {}
+        if isinstance(loc_obj, dict):
+            parts = [
+                loc_obj.get("city") or "",
+                loc_obj.get("province") or loc_obj.get("name") or "",
+            ]
+            location = ", ".join(p for p in parts if p)
+        else:
+            location = ""
+
+        # Pinpoint's listing payload usually includes a description-like field;
+        # fall back to the empty string when absent so jd_full promotion is
+        # explicit on first ingest.
+        description_raw = posting.get("description") or posting.get("description_html") or ""
+        description = (
+            strip_html_to_text(description_raw) if "<" in description_raw else description_raw
+        )
+
+        source_url = posting.get("url") or posting.get("apply_url") or ""
+
+        salary_min = posting.get("compensation_minimum")
+        salary_max = posting.get("compensation_maximum")
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "Pinpoint",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": salary_min if isinstance(salary_min, (int, float)) else None,
+                "salary_max": salary_max if isinstance(salary_max, (int, float)) else None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_pinpoint('%s'): %d postings fetched, %d matched", slug, len(postings), len(results)
+    )
+    return results
+
+
+# Personio publishes a Google-jobs-friendly XML feed at the .de and .com TLDs.
+# Some tenants resolve only on .de; a few migrated to .com. The scanner tries
+# .de first (canonical per Personio docs) and falls back to .com on 404.
+_PERSONIO_TLDS = ("de", "com")
+
+
+def _personio_fetch_xml(slug: str) -> bytes | None:
+    """Fetch the Personio XML feed for a slug, trying .de then .com."""
+    for tld in _PERSONIO_TLDS:
+        url = f"https://{slug}.jobs.personio.{tld}/xml"
+        try:
+            resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+        except Exception as e:
+            logger.debug("_personio_fetch_xml('%s', tld=%s) failed: %s", slug, tld, e)
+            continue
+        if resp.status_code == 200 and resp.content:
+            return resp.content
+        if resp.status_code != 404:
+            # Treat non-200/non-404 as a soft failure for this TLD and try the next
+            logger.debug(
+                "_personio_fetch_xml('%s', tld=%s) returned HTTP %d", slug, tld, resp.status_code
+            )
+    return None
+
+
+def scan_personio(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Personio public XML feed for keyword-matched job postings.
+
+    API: GET https://{slug}.jobs.personio.{de,com}/xml → <workzag-jobs>
+    document with <position> children. Each <position> exposes id, name,
+    office, jobDescriptions, employmentType, and yearsOfExperience.
+
+    Args:
+        slug: Personio subdomain slug (e.g. 'acme' for acme.jobs.personio.de).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error.
+    """
+    content = _personio_fetch_xml(slug)
+    if content is None:
+        return []
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError as e:
+        logger.warning("scan_personio('%s') XML parse error: %s", slug, e)
+        return []
+
+    positions = list(root.iter("position"))
+    results: list[dict] = []
+    for pos in positions:
+        title = (pos.findtext("name") or "").strip()
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        location = (pos.findtext("office") or "").strip()
+
+        # jobDescriptions is a wrapper holding one or more <jobDescription>
+        # children, each with <name> + <value>. Flatten into plain text.
+        descriptions: list[str] = []
+        for desc in pos.iter("jobDescription"):
+            value = desc.findtext("value") or ""
+            if value:
+                descriptions.append(value)
+        joined = "\n\n".join(descriptions)
+        description = strip_html_to_text(joined) if "<" in joined else joined
+
+        # Canonical detail URL — uses the same .de host as the feed lookup
+        # path. Tenants on .com still link out via .de in most cases, so this
+        # is a best-effort fallback rather than an authoritative path.
+        position_id = (pos.findtext("id") or "").strip()
+        source_url = f"https://{slug}.jobs.personio.de/job/{position_id}" if position_id else ""
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "Personio",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_personio('%s'): %d positions fetched, %d matched",
+        slug,
+        len(positions),
+        len(results),
+    )
+    return results
+
+
+def scan_bamboohr(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan BambooHR public careers widget HTML for keyword-matched postings.
+
+    API: GET https://{slug}.bamboohr.com/jobs/embed2.php → HTML widget.
+    The historical /careers/list JSON endpoint was deprecated in 2024 — the
+    widget HTML is now the only public source. Each job is rendered as
+    ``<li id="bhrPositionID_{id}">`` containing the title, location, and a
+    detail-page link. The listing does NOT include job descriptions — only
+    titles and locations are available without a per-job detail fetch
+    (deferred to enrichment).
+
+    Args:
+        slug: BambooHR subdomain (e.g. 'acme' for acme.bamboohr.com).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error.
+    """
+    url = f"https://{slug}.bamboohr.com/jobs/embed2.php"
+    try:
+        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_bamboohr('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_bamboohr('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception as e:
+        logger.warning("scan_bamboohr('%s') HTML parse error: %s", slug, e)
+        return []
+
+    items = soup.select("li.BambooHR-ATS-Jobs-Item")
+    results: list[dict] = []
+    for item in items:
+        anchor = item.find("a")
+        if anchor is None:
+            continue
+        title = anchor.get_text(strip=True)
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        href = anchor.get("href") or ""
+        if isinstance(href, str) and href.startswith("//"):
+            href = "https:" + href
+        elif isinstance(href, str) and href.startswith("/"):
+            href = f"https://{slug}.bamboohr.com{href}"
+
+        location_el = item.find(class_="BambooHR-ATS-Location")
+        location = location_el.get_text(strip=True) if location_el else ""
+
+        # No description in the listing; jd_full will be filled by the enrichment
+        # tier when a real first-time hit comes through.
+        results.append(
+            {
+                "title": title,
+                "company_source": "BambooHR",
+                "location": location,
+                "description": "",
+                "source_url": href if isinstance(href, str) else "",
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_bamboohr('%s'): %d items in widget, %d matched", slug, len(items), len(results)
+    )
+    return results
+
+
+def scan_teamtailor(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Teamtailor public jobs API for keyword-matched postings.
+
+    API: GET https://{slug}.teamtailor.com/api/jobs → JSON:API document
+    {"data": [{"attributes": {"title": ..., "body": ...,
+    "human-status": ..., "pinned": ..., "sharing-image-layout": ..., ...},
+    "links": {"careersite-job-url": ...}}, ...]}.
+
+    This is the per-tenant public unkeyed feed. The keyed organization-level
+    API at https://api.teamtailor.com/v1/jobs is orthogonal and requires
+    X-Api-Key + X-Api-Version — we do not use it. Verified via
+    ahmedmobarak1994/jobscannercloud TeamtailorSource._fetch_public.
+
+    Args:
+        slug: Teamtailor subdomain (e.g. 'acme' for acme.teamtailor.com).
+        target_titles: Target title keywords for inclusion filter.
+        exclusions: Title keywords for exclusion filter.
+
+    Returns:
+        List of job dicts with the standard scan_* shape. Empty list on error.
+    """
+    url = f"https://{slug}.teamtailor.com/api/jobs"
+    try:
+        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+    except Exception as e:
+        logger.warning("scan_teamtailor('%s') request failed: %s", slug, e)
+        return []
+
+    if resp.status_code != 200:
+        logger.debug("scan_teamtailor('%s') returned HTTP %d", slug, resp.status_code)
+        return []
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        logger.warning("scan_teamtailor('%s') JSON parse error: %s", slug, e)
+        return []
+
+    items = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return []
+
+    results: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        attrs = item.get("attributes") or {}
+        if not isinstance(attrs, dict):
+            continue
+
+        title = attrs.get("title") or ""
+        if not _title_matches(title, target_titles, exclusions):
+            continue
+
+        # Teamtailor's JSON:API exposes the body as HTML; strip it for jd_full.
+        body_html = attrs.get("body") or ""
+        description = strip_html_to_text(body_html) if "<" in body_html else body_html
+
+        # Location: Teamtailor stores location on a related "location" resource,
+        # but the attribute "city"/"country" is often denormalized into job attrs
+        # as well. Use that when available.
+        loc_parts = [attrs.get("city") or "", attrs.get("country") or ""]
+        location = ", ".join(p for p in loc_parts if p)
+
+        # Apply / careersite URL lives under links.
+        links = item.get("links") or {}
+        source_url = ""
+        if isinstance(links, dict):
+            source_url = (
+                links.get("careersite-job-url")
+                or links.get("careersite-job-apply-url")
+                or links.get("self")
+                or ""
+            )
+
+        results.append(
+            {
+                "title": title,
+                "company_source": "Teamtailor",
+                "location": location,
+                "description": description,
+                "source_url": source_url,
+                "salary_min": None,
+                "salary_max": None,
+                "comp_json": None,
+            }
+        )
+
+    logger.debug(
+        "scan_teamtailor('%s'): %d items fetched, %d matched", slug, len(items), len(results)
+    )
     return results

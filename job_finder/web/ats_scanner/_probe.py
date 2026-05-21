@@ -11,11 +11,15 @@ from datetime import datetime
 from job_finder.web.ats_detection import derive_slug_candidates
 from job_finder.web.ats_prober import (
     _probe_ashby,
+    _probe_bamboohr,
     _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
     _probe_lever,
+    _probe_personio,
+    _probe_pinpoint,
     _probe_recruitee,
+    _probe_teamtailor,
 )
 from job_finder.web.db_helpers import standalone_connection
 
@@ -30,12 +34,15 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
     For each pending company:
     1. Derive slug candidates from company name
-    2. Try Lever, Greenhouse, Ashby, Recruitee, Breezy, and JazzHR APIs
-       for each candidate (in that order; first hit wins)
+    2. Try Lever, Greenhouse, Ashby, Recruitee, Breezy, JazzHR, Pinpoint,
+       Teamtailor, Personio, BambooHR APIs for each candidate (in that order;
+       first hit wins). New platforms are appended after the established
+       three; fastest probes go earlier within the new block so we
+       short-circuit before paying the cost of slower ones.
     3. Set ats_probe_status='hit' when API returns valid postings
     4. Set ats_probe_status='miss' when all APIs fail/return empty
     5. Empty-postings 200 responses stay as 'miss' (never 'hit') per
-       Lever Research Pitfall 2 — same dynamic affects Recruitee/Breezy/JazzHR
+       Lever Research Pitfall 2 — same dynamic affects every Stage 4 platform
 
     Args:
         db_path: Absolute path to the SQLite database file.
@@ -100,6 +107,30 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
                 if _probe_jazzhr(slug):
                     hit_platform = "jazzhr"
+                    hit_slug = slug
+                    break
+
+                # Stage 4 continuation — Pinpoint, Teamtailor, Personio,
+                # BambooHR. Ordered fastest-to-slowest within the new block so
+                # cheap JSON probes short-circuit before the XML and HTML
+                # variants pay their cost.
+                if _probe_pinpoint(slug):
+                    hit_platform = "pinpoint"
+                    hit_slug = slug
+                    break
+
+                if _probe_teamtailor(slug):
+                    hit_platform = "teamtailor"
+                    hit_slug = slug
+                    break
+
+                if _probe_personio(slug):
+                    hit_platform = "personio"
+                    hit_slug = slug
+                    break
+
+                if _probe_bamboohr(slug):
+                    hit_platform = "bamboohr"
                     hit_slug = slug
                     break
 

@@ -77,8 +77,28 @@ _JAZZHR_HUMAN_URL = re.compile(
     re.IGNORECASE,
 )
 
+# Stage 4 continuation — Pinpoint, Personio, BambooHR, Teamtailor.
+# Same human-facing-only pattern as the first three (no separate API host).
+_PINPOINT_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.pinpointhq\.com",
+    re.IGNORECASE,
+)
+# Personio uses {slug}.jobs.personio.{de,com}. Slug is the leftmost label.
+_PERSONIO_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.jobs\.personio\.(?:de|com)",
+    re.IGNORECASE,
+)
+_BAMBOOHR_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.bamboohr\.com",
+    re.IGNORECASE,
+)
+_TEAMTAILOR_HUMAN_URL = re.compile(
+    r"https?://([a-z0-9-]+)\.teamtailor\.com",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
-ATS_EXTRACTOR_VERSION = "m049-v2"
+ATS_EXTRACTOR_VERSION = "m049-v3"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -148,6 +168,24 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _JAZZHR_HUMAN_URL.search(url)
     if m:
         return "jazzhr", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # Stage 4 continuation — Pinpoint, Personio, BambooHR, Teamtailor.
+    # Same one-domain-each pattern as the prior three; BOARD specificity.
+    m = _PINPOINT_HUMAN_URL.search(url)
+    if m:
+        return "pinpoint", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _PERSONIO_HUMAN_URL.search(url)
+    if m:
+        return "personio", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _BAMBOOHR_HUMAN_URL.search(url)
+    if m:
+        return "bamboohr", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _TEAMTAILOR_HUMAN_URL.search(url)
+    if m:
+        return "teamtailor", m.group(1).lower(), _SPECIFICITY_BOARD
 
     return None
 

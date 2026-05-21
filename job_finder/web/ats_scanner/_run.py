@@ -230,6 +230,22 @@ def _scan_one_company_via_ats_api(
             from job_finder.web.ats_platforms import scan_jazzhr
 
             job_dicts = scan_jazzhr(slug, target_titles, title_exclusions)
+        elif platform == "pinpoint":
+            from job_finder.web.ats_platforms import scan_pinpoint
+
+            job_dicts = scan_pinpoint(slug, target_titles, title_exclusions)
+        elif platform == "personio":
+            from job_finder.web.ats_platforms import scan_personio
+
+            job_dicts = scan_personio(slug, target_titles, title_exclusions)
+        elif platform == "bamboohr":
+            from job_finder.web.ats_platforms import scan_bamboohr
+
+            job_dicts = scan_bamboohr(slug, target_titles, title_exclusions)
+        elif platform == "teamtailor":
+            from job_finder.web.ats_platforms import scan_teamtailor
+
+            job_dicts = scan_teamtailor(slug, target_titles, title_exclusions)
         else:
             logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
             job_dicts = []

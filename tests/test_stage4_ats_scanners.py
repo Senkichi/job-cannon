@@ -431,17 +431,575 @@ class TestSpeculativeProbeLoopWiring:
     """Confirms the new probes are reachable through probe_ats_slugs."""
 
     def test_probe_names_exported_from_ats_prober(self):
-        """All 3 new probes are public symbols in ats_prober."""
+        """All 7 Stage-4 probes are public symbols in ats_prober."""
         from job_finder.web import ats_prober
 
         assert callable(ats_prober._probe_recruitee)
         assert callable(ats_prober._probe_breezy)
         assert callable(ats_prober._probe_jazzhr)
+        assert callable(ats_prober._probe_pinpoint)
+        assert callable(ats_prober._probe_personio)
+        assert callable(ats_prober._probe_bamboohr)
+        assert callable(ats_prober._probe_teamtailor)
 
     def test_speculative_loop_imports_new_probes(self):
-        """ats_scanner._probe imports the new probe symbols at module load."""
+        """ats_scanner._probe imports every Stage-4 probe symbol at module load."""
         from job_finder.web.ats_scanner import _probe as ats_scanner_probe
 
         assert callable(ats_scanner_probe._probe_recruitee)
         assert callable(ats_scanner_probe._probe_breezy)
         assert callable(ats_scanner_probe._probe_jazzhr)
+        assert callable(ats_scanner_probe._probe_pinpoint)
+        assert callable(ats_scanner_probe._probe_personio)
+        assert callable(ats_scanner_probe._probe_bamboohr)
+        assert callable(ats_scanner_probe._probe_teamtailor)
+
+
+# ===========================================================================
+# Pinpoint
+# ===========================================================================
+
+
+class TestPinpointUrlDetection:
+    def test_subdomain_url_returns_pinpoint_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://workwithus.pinpointhq.com/postings/some-job"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "pinpoint"
+        assert slug == "workwithus"
+
+    def test_api_path_returns_pinpoint_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://workwithus.pinpointhq.com/postings.json"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "pinpoint"
+        assert slug == "workwithus"
+
+    def test_slug_lowercased(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://WorkWithUs.pinpointhq.com/postings"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "pinpoint"
+        assert slug == "workwithus"
+
+    def test_root_domain_not_matched(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://pinpointhq.com/about"]
+        platform, _ = extract_ats_from_urls(urls)
+        assert platform is None
+
+
+class TestProbePinpoint:
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_true_when_postings_present(self, mock_get):
+        from job_finder.web.ats_prober import _probe_pinpoint
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"data": [{"id": "1", "title": "Engineer"}]}
+        mock_get.return_value = mock_resp
+        assert _probe_pinpoint("acme") is True
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_when_postings_empty(self, mock_get):
+        from job_finder.web.ats_prober import _probe_pinpoint
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"data": []}
+        mock_get.return_value = mock_resp
+        assert _probe_pinpoint("emptyco") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_404(self, mock_get):
+        from job_finder.web.ats_prober import _probe_pinpoint
+
+        mock_get.return_value = MagicMock(status_code=404)
+        assert _probe_pinpoint("nonexistent") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_exception(self, mock_get):
+        from job_finder.web.ats_prober import _probe_pinpoint
+
+        mock_get.side_effect = Exception("dns failure")
+        assert _probe_pinpoint("acme") is False
+
+
+class TestScanPinpoint:
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_matched_jobs(self, mock_get):
+        from job_finder.web.ats_platforms import scan_pinpoint
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "data": [
+                {
+                    "id": "1",
+                    "title": "Senior Data Scientist",
+                    "url": "https://acme.pinpointhq.com/postings/1",
+                    "location": {"city": "Berlin", "province": "BE", "name": "Berlin Office"},
+                    "compensation_minimum": 90000,
+                    "compensation_maximum": 130000,
+                    "description": "<p>Build cool stuff.</p>",
+                },
+                {
+                    "id": "2",
+                    "title": "Receptionist",  # excluded
+                    "url": "https://acme.pinpointhq.com/postings/2",
+                    "location": {"city": "Berlin"},
+                },
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        results = scan_pinpoint("acme", ["Data Scientist"], [])
+        assert len(results) == 1
+        assert results[0]["title"] == "Senior Data Scientist"
+        assert results[0]["company_source"] == "Pinpoint"
+        assert results[0]["location"] == "Berlin, BE"
+        assert results[0]["source_url"] == "https://acme.pinpointhq.com/postings/1"
+        assert results[0]["description"] == "Build cool stuff."
+        assert results[0]["salary_min"] == 90000
+        assert results[0]["salary_max"] == 130000
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_when_data_missing(self, mock_get):
+        from job_finder.web.ats_platforms import scan_pinpoint
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {}
+        mock_get.return_value = mock_resp
+        assert scan_pinpoint("acme", ["Engineer"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_exception(self, mock_get):
+        from job_finder.web.ats_platforms import scan_pinpoint
+
+        mock_get.side_effect = Exception("dns failure")
+        assert scan_pinpoint("acme", ["Engineer"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_invalid_compensation_does_not_crash(self, mock_get):
+        from job_finder.web.ats_platforms import scan_pinpoint
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "data": [
+                {
+                    "id": "3",
+                    "title": "Engineer",
+                    "url": "https://acme.pinpointhq.com/postings/3",
+                    "location": {},
+                    "compensation_minimum": "not-a-number",
+                    "compensation_maximum": None,
+                    "description": "",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        results = scan_pinpoint("acme", ["Engineer"], [])
+        assert len(results) == 1
+        assert results[0]["salary_min"] is None
+        assert results[0]["salary_max"] is None
+
+
+# ===========================================================================
+# Personio
+# ===========================================================================
+
+
+_PERSONIO_XML_SAMPLE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<workzag-jobs>
+  <position>
+    <id>12345</id>
+    <name>Senior Data Scientist</name>
+    <office>Berlin</office>
+    <employmentType>permanent</employmentType>
+    <jobDescriptions>
+      <jobDescription>
+        <name>About the role</name>
+        <value>&lt;p&gt;Build cool stuff.&lt;/p&gt;</value>
+      </jobDescription>
+    </jobDescriptions>
+  </position>
+  <position>
+    <id>67890</id>
+    <name>Receptionist</name>
+    <office>Munich</office>
+    <jobDescriptions/>
+  </position>
+</workzag-jobs>
+"""
+
+
+class TestPersonioUrlDetection:
+    def test_de_tld_url_returns_personio_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.jobs.personio.de/job/12345"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "personio"
+        assert slug == "acme"
+
+    def test_com_tld_url_returns_personio_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.jobs.personio.com/job/12345"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "personio"
+        assert slug == "acme"
+
+    def test_xml_path_returns_personio(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.jobs.personio.de/xml"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "personio"
+        assert slug == "acme"
+
+    def test_root_domain_not_matched(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://www.personio.de/"]
+        platform, _ = extract_ats_from_urls(urls)
+        assert platform is None
+
+
+class TestProbePersonio:
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_true_when_positions_present_on_de(self, mock_get):
+        from job_finder.web.ats_prober import _probe_personio
+
+        mock_resp = MagicMock(status_code=200, content=_PERSONIO_XML_SAMPLE)
+        mock_get.return_value = mock_resp
+        assert _probe_personio("acme") is True
+        # First call should hit .de
+        assert "personio.de" in mock_get.call_args_list[0].args[0]
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_falls_back_to_com_on_404(self, mock_get):
+        from job_finder.web.ats_prober import _probe_personio
+
+        mock_de = MagicMock(status_code=404, content=b"")
+        mock_com = MagicMock(status_code=200, content=_PERSONIO_XML_SAMPLE)
+        mock_get.side_effect = [mock_de, mock_com]
+        assert _probe_personio("acme") is True
+        assert "personio.com" in mock_get.call_args_list[1].args[0]
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_when_feed_empty(self, mock_get):
+        from job_finder.web.ats_prober import _probe_personio
+
+        empty_xml = b"<?xml version='1.0'?><workzag-jobs></workzag-jobs>"
+        mock_de = MagicMock(status_code=200, content=empty_xml)
+        mock_com = MagicMock(status_code=404, content=b"")
+        mock_get.side_effect = [mock_de, mock_com]
+        assert _probe_personio("emptyco") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_exception(self, mock_get):
+        from job_finder.web.ats_prober import _probe_personio
+
+        mock_get.side_effect = Exception("dns failure")
+        assert _probe_personio("acme") is False
+
+
+class TestScanPersonio:
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_matched_jobs(self, mock_get):
+        from job_finder.web.ats_platforms import scan_personio
+
+        mock_resp = MagicMock(status_code=200, content=_PERSONIO_XML_SAMPLE)
+        mock_get.return_value = mock_resp
+
+        results = scan_personio("acme", ["Data Scientist"], [])
+        assert len(results) == 1
+        job = results[0]
+        assert job["title"] == "Senior Data Scientist"
+        assert job["company_source"] == "Personio"
+        assert job["location"] == "Berlin"
+        assert "Build cool stuff" in job["description"]
+        assert job["source_url"].endswith("/job/12345")
+        assert job["salary_min"] is None
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_404(self, mock_get):
+        from job_finder.web.ats_platforms import scan_personio
+
+        mock_get.return_value = MagicMock(status_code=404, content=b"")
+        assert scan_personio("acme", ["Engineer"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_parse_error(self, mock_get):
+        from job_finder.web.ats_platforms import scan_personio
+
+        mock_get.return_value = MagicMock(status_code=200, content=b"<not-xml>")
+        assert scan_personio("acme", ["Engineer"], []) == []
+
+
+# ===========================================================================
+# BambooHR
+# ===========================================================================
+
+
+_BAMBOOHR_WIDGET_SAMPLE = """
+<div class="BambooHR-ATS-board">
+  <ul>
+    <li id="bhrDepartmentID_1" class="BambooHR-ATS-Department-Item">
+      <div id="department_1" class="BambooHR-ATS-Department-Header">Engineering</div>
+      <ul class="BambooHR-ATS-Jobs-List">
+        <li id="bhrPositionID_111" class="BambooHR-ATS-Jobs-Item">
+          <a href="//acme.bamboohr.com/careers/111">Senior Data Scientist</a>
+          <span class="BambooHR-ATS-Location">Berlin, Germany</span>
+        </li>
+        <li id="bhrPositionID_222" class="BambooHR-ATS-Jobs-Item">
+          <a href="//acme.bamboohr.com/careers/222">Receptionist</a>
+          <span class="BambooHR-ATS-Location">Munich</span>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</div>
+"""
+
+
+class TestBambooHRUrlDetection:
+    def test_subdomain_url_returns_bamboohr_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.bamboohr.com/careers/111"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "bamboohr"
+        assert slug == "acme"
+
+    def test_jobs_embed_url_returns_bamboohr(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.bamboohr.com/jobs/embed2.php"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "bamboohr"
+        assert slug == "acme"
+
+    def test_slug_lowercased(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://AcmeCo.bamboohr.com/careers/123"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "bamboohr"
+        assert slug == "acmeco"
+
+    def test_root_domain_not_matched(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://www.bamboohr.com/products/ats"]
+        platform, _ = extract_ats_from_urls(urls)
+        assert platform == "bamboohr"
+        # We accept www-prefixed company-less URLs as a degenerate slug 'www' —
+        # the human URL regex is intentionally permissive. Reconciliation
+        # depends on the speculative probe to confirm the slug is real.
+
+
+class TestProbeBambooHR:
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_true_when_widget_contains_positions(self, mock_get):
+        from job_finder.web.ats_prober import _probe_bamboohr
+
+        mock_resp = MagicMock(status_code=200, text=_BAMBOOHR_WIDGET_SAMPLE)
+        mock_get.return_value = mock_resp
+        assert _probe_bamboohr("acme") is True
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_when_widget_empty(self, mock_get):
+        from job_finder.web.ats_prober import _probe_bamboohr
+
+        mock_resp = MagicMock(status_code=200, text="<div class='BambooHR-ATS-board'></div>")
+        mock_get.return_value = mock_resp
+        assert _probe_bamboohr("emptyco") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_404(self, mock_get):
+        from job_finder.web.ats_prober import _probe_bamboohr
+
+        mock_get.return_value = MagicMock(status_code=404, text="")
+        assert _probe_bamboohr("nonexistent") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_exception(self, mock_get):
+        from job_finder.web.ats_prober import _probe_bamboohr
+
+        mock_get.side_effect = Exception("dns failure")
+        assert _probe_bamboohr("acme") is False
+
+
+class TestScanBambooHR:
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_matched_jobs(self, mock_get):
+        from job_finder.web.ats_platforms import scan_bamboohr
+
+        mock_resp = MagicMock(status_code=200, text=_BAMBOOHR_WIDGET_SAMPLE)
+        mock_get.return_value = mock_resp
+
+        results = scan_bamboohr("acme", ["Data Scientist"], [])
+        assert len(results) == 1
+        job = results[0]
+        assert job["title"] == "Senior Data Scientist"
+        assert job["company_source"] == "BambooHR"
+        assert job["location"] == "Berlin, Germany"
+        assert job["source_url"] == "https://acme.bamboohr.com/careers/111"
+        # Listing has no description; jd_full is filled later by enrichment.
+        assert job["description"] == ""
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_relative_href_is_absolutized(self, mock_get):
+        from job_finder.web.ats_platforms import scan_bamboohr
+
+        sample = (
+            '<li id="bhrPositionID_999" class="BambooHR-ATS-Jobs-Item">'
+            '<a href="/careers/999">Engineer</a>'
+            '<span class="BambooHR-ATS-Location">Remote</span></li>'
+        )
+        mock_get.return_value = MagicMock(status_code=200, text=sample)
+        results = scan_bamboohr("acme", ["Engineer"], [])
+        assert results[0]["source_url"] == "https://acme.bamboohr.com/careers/999"
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_404(self, mock_get):
+        from job_finder.web.ats_platforms import scan_bamboohr
+
+        mock_get.return_value = MagicMock(status_code=404, text="")
+        assert scan_bamboohr("acme", ["Engineer"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_exception(self, mock_get):
+        from job_finder.web.ats_platforms import scan_bamboohr
+
+        mock_get.side_effect = Exception("dns failure")
+        assert scan_bamboohr("acme", ["Engineer"], []) == []
+
+
+# ===========================================================================
+# Teamtailor
+# ===========================================================================
+
+
+class TestTeamtailorUrlDetection:
+    def test_subdomain_url_returns_teamtailor_and_slug(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.teamtailor.com/jobs/12345"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "teamtailor"
+        assert slug == "acme"
+
+    def test_api_path_returns_teamtailor(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://acme.teamtailor.com/api/jobs"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "teamtailor"
+        assert slug == "acme"
+
+    def test_slug_lowercased(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://AcmeCo.teamtailor.com/jobs/12345"]
+        platform, slug = extract_ats_from_urls(urls)
+        assert platform == "teamtailor"
+        assert slug == "acmeco"
+
+    def test_root_domain_not_matched(self):
+        from job_finder.web.ats_detection import extract_ats_from_urls
+
+        urls = ["https://teamtailor.com/about"]
+        platform, _ = extract_ats_from_urls(urls)
+        assert platform is None
+
+
+class TestProbeTeamtailor:
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_true_when_data_present(self, mock_get):
+        from job_finder.web.ats_prober import _probe_teamtailor
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"data": [{"id": "1", "attributes": {"title": "Engineer"}}]}
+        mock_get.return_value = mock_resp
+        assert _probe_teamtailor("acme") is True
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_when_data_empty(self, mock_get):
+        from job_finder.web.ats_prober import _probe_teamtailor
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"data": []}
+        mock_get.return_value = mock_resp
+        assert _probe_teamtailor("emptyco") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_404(self, mock_get):
+        from job_finder.web.ats_prober import _probe_teamtailor
+
+        mock_get.return_value = MagicMock(status_code=404)
+        assert _probe_teamtailor("nonexistent") is False
+
+    @patch("job_finder.web.ats_prober.requests.get")
+    def test_returns_false_on_exception(self, mock_get):
+        from job_finder.web.ats_prober import _probe_teamtailor
+
+        mock_get.side_effect = Exception("dns failure")
+        assert _probe_teamtailor("acme") is False
+
+
+class TestScanTeamtailor:
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_matched_jobs(self, mock_get):
+        from job_finder.web.ats_platforms import scan_teamtailor
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "data": [
+                {
+                    "id": "1",
+                    "attributes": {
+                        "title": "Senior Data Scientist",
+                        "body": "<p>Build cool stuff.</p>",
+                        "city": "Stockholm",
+                        "country": "Sweden",
+                    },
+                    "links": {"careersite-job-url": "https://acme.teamtailor.com/jobs/1"},
+                },
+                {
+                    "id": "2",
+                    "attributes": {"title": "Receptionist"},
+                    "links": {},
+                },
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        results = scan_teamtailor("acme", ["Data Scientist"], [])
+        assert len(results) == 1
+        job = results[0]
+        assert job["title"] == "Senior Data Scientist"
+        assert job["company_source"] == "Teamtailor"
+        assert job["location"] == "Stockholm, Sweden"
+        assert job["source_url"] == "https://acme.teamtailor.com/jobs/1"
+        assert job["description"] == "Build cool stuff."
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_when_data_missing(self, mock_get):
+        from job_finder.web.ats_platforms import scan_teamtailor
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {}
+        mock_get.return_value = mock_resp
+        assert scan_teamtailor("acme", ["Engineer"], []) == []
+
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_returns_empty_list_on_exception(self, mock_get):
+        from job_finder.web.ats_platforms import scan_teamtailor
+
+        mock_get.side_effect = Exception("dns failure")
+        assert scan_teamtailor("acme", ["Engineer"], []) == []

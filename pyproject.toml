@@ -47,6 +47,7 @@ dependencies = [
     "google-genai>=1.0.0",
     # Web + parsing
     "beautifulsoup4~=4.12",
+    "defusedxml>=0.7,<0.8",
     "pyyaml~=6.0",
     "requests~=2.31",
     "Flask~=3.1",
