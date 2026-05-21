@@ -360,11 +360,87 @@ def _fetch_portal_himalayas(cfg: dict, target_titles: list[str]) -> list[Job]:
     return _fetch_himalayas(_portal_keywords(cfg, target_titles))
 
 
+# ---------------------------------------------------------------------------
+# Stage-2 portal adapters. Each respects the per-portal ``enabled`` flag so
+# the report row is meaningful: a zero count for an enabled portal points at
+# a real-yield problem, whereas a disabled portal is simply not measured.
+# Adapters that need credentials route them through ``get_secret()`` to honor
+# the same env → keyring → config precedence as the live ingestion path.
+# ---------------------------------------------------------------------------
+
+
+def _fetch_portal_jobicy(cfg: dict, target_titles: list[str]) -> list[Job]:
+    portal_cfg = cfg.get("sources", {}).get("portal_search", {}).get("jobicy", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+    from job_finder.sources.portal_search_source import _fetch_jobicy
+
+    return _fetch_jobicy(_portal_keywords(cfg, target_titles))
+
+
+def _fetch_portal_yc_workatastartup(cfg: dict, target_titles: list[str]) -> list[Job]:
+    portal_cfg = cfg.get("sources", {}).get("portal_search", {}).get("yc_workatastartup", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+    from job_finder.sources.portal_search_source import _fetch_yc_workatastartup
+
+    return _fetch_yc_workatastartup(_portal_keywords(cfg, target_titles))
+
+
+def _fetch_portal_usajobs(cfg: dict, target_titles: list[str]) -> list[Job]:
+    portal_cfg = cfg.get("sources", {}).get("portal_search", {}).get("usajobs", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+    from job_finder.secrets import get_secret
+    from job_finder.sources.portal_search_source import _fetch_usajobs
+
+    user_agent_email = get_secret("sources.usajobs.user_agent_email", config=cfg) or ""
+    authorization_key = get_secret("sources.usajobs.authorization_key", config=cfg) or ""
+    return _fetch_usajobs(
+        _portal_keywords(cfg, target_titles),
+        user_agent_email=user_agent_email,
+        authorization_key=authorization_key,
+    )
+
+
+def _fetch_portal_adzuna(cfg: dict, target_titles: list[str]) -> list[Job]:
+    portal_cfg = cfg.get("sources", {}).get("portal_search", {}).get("adzuna", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+    from job_finder.secrets import get_secret
+    from job_finder.sources.portal_search_source import _fetch_adzuna
+
+    app_id = get_secret("sources.adzuna.app_id", config=cfg) or ""
+    app_key = get_secret("sources.adzuna.app_key", config=cfg) or ""
+    return _fetch_adzuna(
+        _portal_keywords(cfg, target_titles),
+        app_id=app_id,
+        app_key=app_key,
+        country=portal_cfg.get("country", "us") or "us",
+    )
+
+
+def _fetch_portal_jooble(cfg: dict, target_titles: list[str]) -> list[Job]:
+    portal_cfg = cfg.get("sources", {}).get("portal_search", {}).get("jooble", {})
+    if not portal_cfg.get("enabled", False):
+        return []
+    from job_finder.secrets import get_secret
+    from job_finder.sources.portal_search_source import _fetch_jooble
+
+    api_key = get_secret("sources.jooble.api_key", config=cfg) or ""
+    return _fetch_jooble(_portal_keywords(cfg, target_titles), api_key=api_key)
+
+
 # Module-level so tests can replace this with {} to stop live HTTP.
 _PORTAL_FETCHERS: dict[str, Callable[[dict, list[str]], list[Job]]] = {
     "portal_remoteok": _fetch_portal_remoteok,
     "portal_remotive": _fetch_portal_remotive,
     "portal_himalayas": _fetch_portal_himalayas,
+    "portal_jobicy": _fetch_portal_jobicy,
+    "portal_yc_workatastartup": _fetch_portal_yc_workatastartup,
+    "portal_usajobs": _fetch_portal_usajobs,
+    "portal_adzuna": _fetch_portal_adzuna,
+    "portal_jooble": _fetch_portal_jooble,
 }
 
 # Source-name → keyed-source adapter. Tuples so the table order is stable

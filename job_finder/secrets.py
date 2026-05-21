@@ -41,6 +41,15 @@ SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     "sources.thordata.api_key":            ("THORDATA_API_KEY",),
     "sources.dataforseo.api_key":          ("DATAFORSEO_API_KEY",),
     "sources.jsearch.rapidapi_key":        ("JSEARCH_RAPIDAPI_KEY", "RAPIDAPI_KEY"),
+    # Stage 2 free-portal credentials. USAJobs/Adzuna require both halves;
+    # Jooble is single-key. The user_agent_email field for USAJobs is the
+    # required User-Agent header value (an email address) rather than a
+    # secret per se — routed through the same precedence stack for symmetry.
+    "sources.usajobs.user_agent_email":    ("USAJOBS_USER_AGENT_EMAIL",),
+    "sources.usajobs.authorization_key":   ("USAJOBS_AUTHORIZATION_KEY",),
+    "sources.adzuna.app_id":               ("ADZUNA_APP_ID",),
+    "sources.adzuna.app_key":              ("ADZUNA_APP_KEY",),
+    "sources.jooble.api_key":              ("JOOBLE_API_KEY",),
     "providers.api_keys.openrouter":       ("OPENROUTER_API_KEY",),
     "providers.api_keys.gemini":           ("GEMINI_API_KEY",),
     "providers.api_keys.groq":             ("GROQ_API_KEY",),

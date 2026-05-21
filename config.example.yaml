@@ -110,11 +110,13 @@ sources:
         location: San Francisco Bay Area
 
   portal_search:
-    # Niche job portal discovery. Two tiers:
-    #   1. Free APIs (RemoteOK, Remotive, Himalayas) — always zero cost.
-    #   2. Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
-    # SerpAPI/Thordata are NOT used (too expensive for site: queries).
-    # If DataForSEO is not enabled, only free API portals are searched.
+    # Niche job portal discovery. Three tiers:
+    #   1a. Always-on free APIs (RemoteOK, Remotive, Himalayas) — zero cost, no keys.
+    #   1b. Stage-2 free portals (Jobicy, YC Work at a Startup, USAJobs, Adzuna,
+    #       Jooble) — keyless or free-with-registration. Configured below.
+    #   2.  Site: SERP queries via DataForSEO for remaining portals — cheap, batched.
+    # SerpAPI/Thordata are NOT used for portal_search (too expensive for site: queries).
+    # If DataForSEO is not enabled, only Tier 1 portals are searched.
     enabled: false
     keywords:
       - Staff Engineer
@@ -122,6 +124,43 @@ sources:
       - Data Infrastructure
     # Max DataForSEO site: queries per run (caps SERP spend)
     max_serp_queries: 30
+
+    # --- Stage-2 free portals ---
+    # Enable each independently. The keyless portals (jobicy, yc_workatastartup)
+    # are the lowest-friction onboarding path. The keyed-but-free portals
+    # (usajobs / adzuna / jooble) require a one-time signup at the linked
+    # registration page in exchange for a generous free tier.
+
+    jobicy:
+      # Remote-only job board. No key required.
+      # https://jobicy.com/jobs-rss-feed
+      enabled: false
+    yc_workatastartup:
+      # Y Combinator's "Work at a Startup". No key required.
+      # Implemented by parsing the Inertia.js page state from
+      # https://www.workatastartup.com/jobs — breaks if YC migrates off Inertia.
+      enabled: false
+    usajobs:
+      # US federal government jobs. Free with email registration.
+      # Get your key: https://developer.usajobs.gov/apirequest/
+      enabled: false
+      # The email address used as the User-Agent header (per USAJobs spec).
+      user_agent_email: ""
+      # The Authorization-Key header value.
+      authorization_key: ""
+    adzuna:
+      # Global jobs aggregator. Free dev tier (~250 calls/day per country).
+      # Get your key: https://developer.adzuna.com/signup
+      enabled: false
+      app_id: ""
+      app_key: ""
+      # ISO country code: us, gb, au, ca, de, fr, in, sg, etc.
+      country: us
+    jooble:
+      # Global jobs aggregator. Free with email registration.
+      # Get your key: https://jooble.org/api/about
+      enabled: false
+      api_key: ""
 
 # --- AI scoring configuration ---
 scoring:
