@@ -69,14 +69,23 @@ update_check.json
 *.db-wal
 *.db.bak*
 
-# Internal planning + working notes — NEVER tracked, with one exception.
-/.planning/
+# Internal planning + working notes — files at the top level of .planning/
+# are ignored by default, with explicit exceptions below. Subdirectories are
+# fully ignored unless explicitly re-included.
+/.planning/*
+/.planning/*/
 
 # Eval-harness baseline reports — tracked as portfolio artifacts. The
 # eval harness writes new reports here by default; only files explicitly
 # checked in are version-controlled.
 !/.planning/eval_results/
 !/.planning/eval_results/**
+
+# Source benchmark reports (scripts/benchmark_sources.py output) — the
+# baseline and dated stage reports are tracked so post-impl comparisons
+# survive across machines.
+!/.planning/SOURCE-BENCHMARK-BASELINE.md
+!/.planning/SOURCE-BENCHMARK-[0-9]*.md
 
 # Cascade audit (phase 36/37) artifact outputs — regenerable, may contain
 # LLM cost details and per-row provider responses. JD source samples under
