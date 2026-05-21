@@ -42,6 +42,7 @@ data/
 
 # Development tooling (not for distribution)
 .claude/
+.windsurf/
 AUDIT_LOG.md
 
 # Code review / audit tool working directories
