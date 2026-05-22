@@ -23,8 +23,6 @@ from typing import Any
 import requests  # noqa: F401  — bound here so test_careers_crawler patches resolve
 from playwright.sync_api import sync_playwright
 
-from job_finder.web.db_helpers import standalone_connection
-
 # Title hygiene + URL-path navigation filters — extracted to _title_filters.
 # Re-imported here so the public surface (job_finder.web.careers_crawler.X)
 # is preserved for tests/test_careers_crawler.py and for any downstream
@@ -35,6 +33,7 @@ from job_finder.web.careers_crawler._title_filters import (
     _NAV_PATH_PREFIXES,
     _clean_title,
 )
+from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +50,14 @@ _POLITE_DELAY = 1.0  # Seconds between companies
 # _extract_jobs_from_soup from careers_page_interactions and
 # ai_career_navigator) keep resolving from
 # job_finder.web.careers_crawler.X.
-from job_finder.web.careers_crawler._static_tier import (  # noqa: E402
-    _STATIC_MIN_TEXT_LEN,
-    _STATIC_TEXT_RATIO,
-    _extract_jobs_from_soup,
-    _extract_jsonld_postings,
-    _try_static_extract,
+# ---------------------------------------------------------------------------
+# API cache helpers — extracted to _api_cache.py
+# ---------------------------------------------------------------------------
+from job_finder.web.careers_crawler._api_cache import (
+    _cache_api_endpoint,
+    _clear_api_cache,
+    _try_cached_api,
 )
-
 
 # ---------------------------------------------------------------------------
 # Playwright tiers (passive + active) — extracted to _playwright_tier.
@@ -67,8 +66,7 @@ from job_finder.web.careers_crawler._static_tier import (  # noqa: E402
 # resolving and so internal callers (_try_cached_tier, _crawl_companies)
 # can continue dispatching through the package namespace.
 # ---------------------------------------------------------------------------
-
-from job_finder.web.careers_crawler._playwright_tier import (  # noqa: E402
+from job_finder.web.careers_crawler._playwright_tier import (
     _INTERACTION_DELAY_S,
     _JS_SETTLE_MS,
     _PLAYWRIGHT_TIMEOUT_MS,
@@ -76,16 +74,66 @@ from job_finder.web.careers_crawler._playwright_tier import (  # noqa: E402
     _try_playwright_extract,
 )
 
-
 # ---------------------------------------------------------------------------
-# API cache helpers — extracted to _api_cache.py
+# Sitemap / RSS tier (Stage 5) — sits between API-cache and static tiers
+# in the escalation chain. Re-exported here so test patches that target
+# `job_finder.web.careers_crawler._try_sitemap_extract` resolve.
 # ---------------------------------------------------------------------------
-
-from job_finder.web.careers_crawler._api_cache import (  # noqa: E402
-    _cache_api_endpoint,
-    _clear_api_cache,
-    _try_cached_api,
+from job_finder.web.careers_crawler._sitemap_tier import _try_sitemap_extract
+from job_finder.web.careers_crawler._static_tier import (
+    _STATIC_MIN_TEXT_LEN,
+    _STATIC_TEXT_RATIO,
+    _extract_jobs_from_soup,
+    _extract_jsonld_postings,
+    _try_static_extract,
 )
+
+# Explicit re-export surface for the careers_crawler package.
+#
+# Every symbol imported above into this `__init__.py` is intentionally
+# re-exposed at the package namespace (e.g. so test files can patch
+# `job_finder.web.careers_crawler._try_playwright_active`). Listing them
+# in `__all__` tells ruff that these "unused" imports are intentional
+# re-exports — the documented alternative to per-line `# noqa: F401`
+# annotations on every multi-line import block.
+# Grouped by source module:
+#   _title_filters:  _CITY_SUFFIX_RE, _LOCATION_SUFFIX_RE, _NAV_PATH_PREFIXES, _clean_title
+#   _api_cache:      _cache_api_endpoint, _clear_api_cache, _try_cached_api
+#   _playwright_tier: _INTERACTION_DELAY_S, _JS_SETTLE_MS, _PLAYWRIGHT_TIMEOUT_MS,
+#                    _try_playwright_active, _try_playwright_extract
+#   _sitemap_tier:   _try_sitemap_extract                       (Stage 5)
+#   _static_tier:    _STATIC_MIN_TEXT_LEN, _STATIC_TEXT_RATIO,
+#                    _extract_jobs_from_soup, _extract_jsonld_postings, _try_static_extract
+#   _ai_nav_tier:    _try_ai_navigation
+#   _tier_cache:     _try_cached_tier
+#   _persistence:    _upsert_and_log, _update_timestamp_on_error
+#   _scoring:        _score_new_jobs
+__all__ = [
+    "_CITY_SUFFIX_RE",
+    "_INTERACTION_DELAY_S",
+    "_JS_SETTLE_MS",
+    "_LOCATION_SUFFIX_RE",
+    "_NAV_PATH_PREFIXES",
+    "_PLAYWRIGHT_TIMEOUT_MS",
+    "_STATIC_MIN_TEXT_LEN",
+    "_STATIC_TEXT_RATIO",
+    "_cache_api_endpoint",
+    "_clean_title",
+    "_clear_api_cache",
+    "_extract_jobs_from_soup",
+    "_extract_jsonld_postings",
+    "_score_new_jobs",
+    "_try_ai_navigation",
+    "_try_cached_api",
+    "_try_cached_tier",
+    "_try_playwright_active",
+    "_try_playwright_extract",
+    "_try_sitemap_extract",
+    "_try_static_extract",
+    "_update_timestamp_on_error",
+    "_upsert_and_log",
+    "crawl_careers_batch",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +178,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
             "interactive": 0,
             "api_cached": 0,
             "url_param_hits": 0,
+            "sitemap_hits": 0,
             "ai_navigated": 0,
             "ai_replayed": 0,
             "errors": [],
@@ -155,6 +204,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         "interactive": 0,
         "api_cached": 0,
         "url_param_hits": 0,
+        "sitemap_hits": 0,
         "ai_navigated": 0,
         "ai_replayed": 0,
         "errors": [],
@@ -238,8 +288,8 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
 
     logger.info(
         "careers_crawler complete: %d crawled, %d found, %d new, "
-        "%d playwright, %d interactive, %d api-cached, %d url-param, "
-        "%d ai-navigated, %d ai-replayed, %d scored "
+        "%d playwright, %d interactive, %d api-cached, %d sitemap, "
+        "%d url-param, %d ai-navigated, %d ai-replayed, %d scored "
         "(apply=%d, consider=%d, skip=%d, reject=%d)",
         summary["companies_crawled"],
         summary["jobs_found"],
@@ -247,6 +297,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         summary["playwright_rendered"],
         summary.get("interactive", 0),
         summary.get("api_cached", 0),
+        summary.get("sitemap_hits", 0),
         summary.get("url_param_hits", 0),
         summary.get("ai_navigated", 0),
         summary.get("ai_replayed", 0),
@@ -277,6 +328,7 @@ _SUMMARY_KEYS = [
     "interactive",
     "api_cached",
     "url_param_hits",
+    "sitemap_hits",
     "ai_navigated",
     "ai_replayed",
 ]
@@ -336,7 +388,10 @@ def _crawl_companies(
                         jobs: list[dict] = []
 
                         # === Tier cache: try last-successful tier first ===
-                        if cached_tier and cached_tier != "static":
+                        # Skip cache replay for `static` and `sitemap` — both
+                        # are cheap pre-static tiers and always run at the top
+                        # of the full chain, so cache replay would be redundant.
+                        if cached_tier and cached_tier not in ("static", "sitemap"):
                             jobs = _try_cached_tier(
                                 cached_tier,
                                 browser,
@@ -369,6 +424,20 @@ def _crawl_companies(
                                     local_summary["api_cached"] += 1
                                 else:
                                     _clear_api_cache(db_path, company_id)
+
+                            # Tier 0.5: Sitemap / RSS (Stage 5) — pre-static
+                            # cheap probe. Returns [] if no sitemap or RSS
+                            # candidates found, falling through to static.
+                            if not jobs and tier_used != "api_cached":
+                                sitemap_jobs = _try_sitemap_extract(
+                                    careers_url,
+                                    target_titles,
+                                    title_exclusions,
+                                )
+                                if sitemap_jobs:
+                                    jobs = sitemap_jobs
+                                    tier_used = "sitemap"
+                                    local_summary["sitemap_hits"] += 1
 
                             # Tier 1: Static HTML
                             if not jobs and tier_used != "api_cached":
@@ -498,16 +567,14 @@ def _crawl_companies(
 # Both re-imported into the package namespace so tests and the
 # orchestrator (_crawl_companies, above) keep dispatching through
 # job_finder.web.careers_crawler.X.
-from job_finder.web.careers_crawler._ai_nav_tier import _try_ai_navigation  # noqa: E402, F401
-from job_finder.web.careers_crawler._tier_cache import _try_cached_tier  # noqa: E402, F401
-
+from job_finder.web.careers_crawler._ai_nav_tier import _try_ai_navigation
 
 # Persistence helpers — extracted to _persistence.py and re-exported.
-from job_finder.web.careers_crawler._persistence import (  # noqa: E402, F401
+from job_finder.web.careers_crawler._persistence import (
     _update_timestamp_on_error,
     _upsert_and_log,
 )
 
-
 # Scoring trigger — extracted to _scoring.py and re-exported.
-from job_finder.web.careers_crawler._scoring import _score_new_jobs  # noqa: E402, F401
+from job_finder.web.careers_crawler._scoring import _score_new_jobs
+from job_finder.web.careers_crawler._tier_cache import _try_cached_tier
