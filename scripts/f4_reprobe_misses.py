@@ -55,7 +55,7 @@ requests.get = _capturing_get  # type: ignore[assignment]
 
 from job_finder.web.ats_detection import (
     derive_slug_candidates,
-    probe_hit_consistent_with_careers_url,
+    probe_hit_consistent_or_dead_url,
 )
 from job_finder.web.ats_prober import (
     _probe_ashby,
@@ -162,9 +162,11 @@ def _probe_slug_parallel(
 ) -> tuple[str, str] | None:
     """Probe every platform for one slug concurrently. First True wins.
 
-    F6 consistency gate: a hit whose platform disagrees with the platform
-    inferred from `careers_url` is rejected; we keep waiting for another
-    future to land. If no consistent hit lands, returns None.
+    F6 consistency gate (with liveness): a hit whose platform disagrees with
+    the platform inferred from `careers_url` is rejected ONLY when that
+    careers_url is still live (not 404/410). If careers_url is stale (probably
+    an ATS migration), the live probe hit wins. We keep waiting for the next
+    future. If no consistent hit lands, returns None.
     """
     with ThreadPoolExecutor(max_workers=len(_PROBES), thread_name_prefix="probe") as pool:
         futures = {
@@ -180,9 +182,9 @@ def _probe_slug_parallel(
             except Exception as exc:
                 log.debug("probe future %s/%s raised %s", platform, slug, exc)
                 continue
-            if not probe_hit_consistent_with_careers_url(platform, careers_url):
+            if not probe_hit_consistent_or_dead_url(platform, careers_url):
                 log.info(
-                    "REJECT %s -> %s/%s (careers_url %s infers different platform)",
+                    "REJECT %s -> %s/%s (careers_url %s infers different platform AND is live)",
                     company_name,
                     platform,
                     slug,
@@ -203,14 +205,17 @@ def _probe_slug_serial(
 ) -> tuple[str, str] | None:
     """Serial fallback path. Same ordering as ats_scanner/_probe.py.
 
-    F6 consistency gate: hits inconsistent with `careers_url` are skipped.
+    F6 consistency gate (with liveness): hits inconsistent with `careers_url`
+    are skipped only when the careers_url is still live (not 404/410). This
+    preserves brand-collision protection while allowing the probe to win on
+    ATS migrations where the old careers_url is now dead.
     """
     for platform, probe in _PROBES:
         if not _probe_with_diagnostics(platform, probe, slug):
             continue
-        if not probe_hit_consistent_with_careers_url(platform, careers_url):
+        if not probe_hit_consistent_or_dead_url(platform, careers_url):
             log.info(
-                "REJECT %s -> %s/%s (careers_url %s infers different platform)",
+                "REJECT %s -> %s/%s (careers_url %s infers different platform AND is live)",
                 company_name,
                 platform,
                 slug,

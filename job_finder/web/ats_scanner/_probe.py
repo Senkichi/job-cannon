@@ -11,7 +11,7 @@ from datetime import datetime
 
 from job_finder.web.ats_detection import (
     derive_slug_candidates,
-    probe_hit_consistent_with_careers_url,
+    probe_hit_consistent_or_dead_url,
 )
 from job_finder.web.ats_prober import (
     _probe_ashby,
@@ -61,11 +61,14 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
        first hit wins). New platforms are appended after the established
        three; fastest probes go earlier within the new block so we
        short-circuit before paying the cost of slower ones.
-    3. F6 consistency gate: if a hit's platform disagrees with the platform
-       inferred from the company's `careers_url`, reject the hit and keep
-       trying. This catches brand-name-collision false positives (e.g.
-       'Shopify' → Pinpoint tenant of a different small company) when the
-       careers_url positively identifies a different ATS.
+    3. F6 consistency gate (augmented with liveness check): if a hit's
+       platform disagrees with the platform inferred from the company's
+       `careers_url` AND that careers_url is still live (not 404/410),
+       reject the hit and keep trying. Catches brand-name-collision false
+       positives (e.g. 'Shopify' → Pinpoint tenant of a different small
+       company) without rejecting legitimate ATS migrations where the old
+       careers_url now 404s and the live probe correctly rediscovers the
+       new platform.
     4. Set ats_probe_status='hit' when API returns valid postings
     5. Set ats_probe_status='miss' when all APIs fail/return empty
     6. Empty-postings 200 responses stay as 'miss' (never 'hit') per
@@ -105,10 +108,10 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                 for platform, probe in _PROBES:
                     if not probe(slug):
                         continue
-                    if not probe_hit_consistent_with_careers_url(platform, careers_url):
+                    if not probe_hit_consistent_or_dead_url(platform, careers_url):
                         logger.info(
                             "probe_ats_slugs: rejected %s/%s for company %s — "
-                            "careers_url %s infers a different platform",
+                            "careers_url %s infers a different platform and is live",
                             platform,
                             slug,
                             company_name,

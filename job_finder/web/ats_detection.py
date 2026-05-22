@@ -2,6 +2,8 @@
 
 import logging
 import re
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +218,92 @@ def probe_hit_consistent_with_careers_url(hit_platform: str, careers_url: str | 
     if inferred is None:
         return True
     return inferred[0] == hit_platform
+
+
+def _default_http_get(url: str, timeout: float) -> Any:
+    """Default GET used by `careers_url_is_live`. Lazy-imports `requests` so the
+    pure helpers above remain importable in environments without network deps.
+    """
+    import requests
+
+    from job_finder.web._http_constants import _HEADERS
+
+    return requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=True)
+
+
+def careers_url_is_live(
+    url: str | None,
+    *,
+    timeout: float = 5.0,
+    _get: Callable[[str, float], Any] | None = None,
+) -> bool | None:
+    """Best-effort liveness probe for a careers URL.
+
+    F6's pure helper (above) treats `careers_url`-inferred ATS as authoritative.
+    That breaks when a company has migrated ATS platforms: the old careers_url
+    still parses to its old ATS, but the live probe correctly rediscovers the
+    new one. This helper lets the composite gate distinguish:
+
+    Returns:
+        True  — URL responded 2xx (careers_url is current — trust it).
+        False — URL responded 404 or 410 (careers_url is stale — trust the probe).
+        None  — ambiguous (timeout, 5xx, 403, network error, missing URL). Caller
+                should treat as "couldn't determine" and preserve the conservative
+                gate behavior (do not let the probe hit override a live-looking
+                careers_url).
+
+    `_get` is injected for testability; defaults to `_default_http_get`.
+    """
+    if not url:
+        return None
+    get = _get if _get is not None else _default_http_get
+    try:
+        resp = get(url, timeout)
+    except Exception as exc:
+        logger.debug("careers_url_is_live: %s raised %s — returning None", url, exc)
+        return None
+    status = getattr(resp, "status_code", None)
+    if status is None:
+        return None
+    if 200 <= status < 300:
+        return True
+    if status in (404, 410):
+        return False
+    return None
+
+
+def probe_hit_consistent_or_dead_url(
+    hit_platform: str,
+    careers_url: str | None,
+    *,
+    liveness_check: Callable[[str | None], bool | None] | None = None,
+) -> bool:
+    """F6 augmented — gate a probe hit, override rejection when careers_url is dead.
+
+    Composes `probe_hit_consistent_with_careers_url` with `careers_url_is_live`:
+
+    - If the pure helper accepts (no URL, no signature, or matching platform),
+      return True immediately — no network call.
+    - If the pure helper rejects (URL infers a *different* platform), probe the
+      URL for liveness. A 404/410 means careers_url is stale (likely the
+      company migrated ATS platforms) and the live probe hit is preferred —
+      return True. Live or ambiguous (timeout/5xx/403/etc.) preserves the
+      rejection — return False.
+
+    This is the call-site gate for F4-resume and the scheduler's speculative
+    probe loop. The brand-collision false positive (Shopify → Pinpoint with a
+    live `jobs.lever.co/shopify` URL — hypothetical) is still caught. The
+    migration false rejection (NimbleAI moved Lever→Greenhouse, old Lever URL
+    404s) no longer fires.
+
+    `liveness_check` is injected for testability; defaults to
+    `careers_url_is_live` (which itself performs the HTTP request).
+    """
+    if probe_hit_consistent_with_careers_url(hit_platform, careers_url):
+        return True
+    check = liveness_check if liveness_check is not None else careers_url_is_live
+    # careers_url disagrees with hit; accept the hit only if URL is provably dead.
+    return check(careers_url) is False
 
 
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[str | None, str | None]:
