@@ -66,7 +66,13 @@ def index():
     # "(set)" would mislead the user into thinking the migration ran.
     secret_set = {
         name: jf_secrets.get_secret(name) is not None
-        for name in ("sources.serpapi.api_key", "sources.thordata.api_key")
+        for name in (
+            "sources.serpapi.api_key",
+            "sources.thordata.api_key",
+            "sources.dataforseo.api_key",
+            "sources.google_cse.api_key",
+            "sources.google_cse.cse_id",
+        )
     }
 
     return render_template(
@@ -110,6 +116,18 @@ def save():
         # a warning so the user knows storage degraded gracefully.
         _move_secret_to_keyring(
             form_config, ("sources", "serpapi", "api_key"), "sources.serpapi.api_key"
+        )
+        _move_secret_to_keyring(
+            form_config, ("sources", "thordata", "api_key"), "sources.thordata.api_key"
+        )
+        _move_secret_to_keyring(
+            form_config, ("sources", "dataforseo", "api_key"), "sources.dataforseo.api_key"
+        )
+        _move_secret_to_keyring(
+            form_config, ("sources", "google_cse", "api_key"), "sources.google_cse.api_key"
+        )
+        _move_secret_to_keyring(
+            form_config, ("sources", "google_cse", "cse_id"), "sources.google_cse.cse_id"
         )
         _move_secret_to_keyring(
             form_config, ("sources", "jsearch", "rapidapi_key"), "sources.jsearch.rapidapi_key"
@@ -264,9 +282,54 @@ def _parse_form_to_config(form) -> dict:
     # Sentinel hidden input marks that the queries section was rendered;
     # if present we parse queries (possibly []), otherwise preserve existing.
     if _has("_serpapi_queries_present"):
-        serpapi["queries"] = _parse_serpapi_queries(form)
+        serpapi["queries"] = _parse_query_rows(form, "serpapi")
     if serpapi:
         config.setdefault("sources", {})["serpapi"] = serpapi
+
+    # --- Sources: Thordata (Stage 6 — parser was missing pre-2026-05-22) ---
+    thordata = {}
+    if _has("thordata_enabled"):
+        thordata["enabled"] = form["thordata_enabled"] == "on"
+    if _has("thordata_api_key") and form["thordata_api_key"]:
+        thordata["api_key"] = form["thordata_api_key"]
+    if _has("thordata_max_age_days"):
+        thordata["max_age_days"] = safe_int(form["thordata_max_age_days"], 3)
+    if _has("_thordata_queries_present"):
+        thordata["queries"] = _parse_query_rows(form, "thordata")
+    if thordata:
+        config.setdefault("sources", {})["thordata"] = thordata
+
+    # --- Sources: DataForSEO (Stage 6 — NEW tile) ---
+    dataforseo = {}
+    if _has("dataforseo_enabled"):
+        dataforseo["enabled"] = form["dataforseo_enabled"] == "on"
+    if _has("dataforseo_api_key") and form["dataforseo_api_key"]:
+        dataforseo["api_key"] = form["dataforseo_api_key"]
+    if _has("dataforseo_max_age_days"):
+        dataforseo["max_age_days"] = safe_int(form["dataforseo_max_age_days"], 7)
+    if _has("dataforseo_depth"):
+        depth = safe_int(form["dataforseo_depth"], 200)
+        # Clamp to DataForSEO's documented bounds (10–200, multiples of 10)
+        dataforseo["depth"] = max(10, min(200, depth))
+    if _has("dataforseo_priority"):
+        # 1 = normal, 2 = high; anything else falls back to 1
+        priority = safe_int(form["dataforseo_priority"], 1)
+        dataforseo["priority"] = priority if priority in (1, 2) else 1
+    if _has("_dataforseo_queries_present"):
+        dataforseo["queries"] = _parse_query_rows(form, "dataforseo")
+    if dataforseo:
+        config.setdefault("sources", {})["dataforseo"] = dataforseo
+
+    # --- Sources: Google CSE (Stage 6 — NEW tile) ---
+    google_cse = {}
+    if _has("google_cse_enabled"):
+        google_cse["enabled"] = form["google_cse_enabled"] == "on"
+    if _has("google_cse_api_key") and form["google_cse_api_key"]:
+        google_cse["api_key"] = form["google_cse_api_key"]
+    if _has("google_cse_cse_id") and form["google_cse_cse_id"]:
+        google_cse["cse_id"] = form["google_cse_cse_id"]
+    if google_cse:
+        config.setdefault("sources", {})["google_cse"] = google_cse
 
     # --- Sources: JSearch ---
     jsearch = {}
@@ -354,9 +417,7 @@ def _parse_form_to_config(form) -> dict:
     return config
 
 
-def _move_secret_to_keyring(
-    form_config: dict, path: tuple[str, ...], canonical: str
-) -> None:
+def _move_secret_to_keyring(form_config: dict, path: tuple[str, ...], canonical: str) -> None:
     """Move a freshly-submitted secret from form_config into the OS keyring.
 
     Walks `path` through `form_config`; if a non-empty string is at the
@@ -389,13 +450,22 @@ def _move_secret_to_keyring(
         )
 
 
-def _parse_serpapi_queries(form) -> list:
-    """Extract SerpAPI queries from form fields (variable number of rows)."""
+def _parse_query_rows(form, prefix: str) -> list:
+    """Extract {query, location} rows from a form section indexed by `prefix`.
+
+    Form fields are expected to be named `{prefix}_query_{i}` and
+    `{prefix}_location_{i}` for i = 0, 1, 2, ... Iteration stops at the first
+    row where both query and location are empty, or after 50 rows (safety
+    limit against malicious or runaway form submissions).
+
+    Replaces the per-source `_parse_serpapi_queries` helper as of Stage 6
+    (2026-05-22) when DataForSEO + Thordata gained their own query rows.
+    """
     queries = []
     i = 0
     while True:
-        query = form.get(f"serpapi_query_{i}", "").strip()
-        location = form.get(f"serpapi_location_{i}", "").strip()
+        query = form.get(f"{prefix}_query_{i}", "").strip()
+        location = form.get(f"{prefix}_location_{i}", "").strip()
         if not query and not location:
             break
         if query or location:
@@ -429,7 +499,8 @@ def _write_config(config: dict, config_path: str = _CONFIG_PATH) -> None:
             except OSError as exc:
                 logger.warning(
                     "could not chmod 0600 on %s; secrets may be world-readable: %s",
-                    config_path, exc,
+                    config_path,
+                    exc,
                 )
     except Exception:
         try:

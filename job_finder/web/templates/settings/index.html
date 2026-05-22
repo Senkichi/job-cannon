@@ -136,6 +136,22 @@
 
         <hr class="border-slate-700">
 
+        <!-- Stage 6: Advanced — paid SERP providers (collapsed by default) -->
+        <details class="bg-slate-900/40 border border-slate-700 rounded p-4 space-y-6">
+          <summary class="cursor-pointer text-sm font-semibold text-slate-200 select-none flex items-center gap-2">
+            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Advanced: paid SERP providers (optional)
+          </summary>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            Most users won't need these — Job Cannon ships with free alternatives (RemoteOK,
+            Remotive, Himalayas, USAJobs, Adzuna, Jooble, Jobicy, Y Combinator's Work at a
+            Startup, Google Programmable Search). Add a key only if you want faster
+            speed-to-discovery, or to backfill job descriptions for postings missing detail.
+          </p>
+
         <!-- SerpAPI -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
@@ -245,6 +261,140 @@
                     class="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors">+ Add Query</button>
           </div>
         </div>
+
+        <hr class="border-slate-700">
+
+        <!-- DataForSEO -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+            DataForSEO (Google Jobs SERP)
+          </h3>
+          <p class="text-xs text-slate-500 mb-3">
+            Cheapest of the SERP options (~$0.87/month at default settings). Credentials are
+            <code class="text-slate-400">base64(login:password)</code> — copy from
+            <a href="https://app.dataforseo.com/api-access" target="_blank" rel="noreferrer"
+               class="text-violet-400 hover:text-violet-300">DataForSEO API access</a>.
+          </p>
+          <div class="grid grid-cols-3 gap-4 mb-3">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="dataforseo_enabled" value="">
+                <input type="checkbox" name="dataforseo_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('dataforseo', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">API Key (base64 login:password)</label>
+              <input type="password" name="dataforseo_api_key"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.dataforseo.api_key') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Max Age (days)</label>
+              <input type="number" name="dataforseo_max_age_days" min="1" max="30"
+                     value="{{ config.get('sources', {}).get('dataforseo', {}).get('max_age_days', 7) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-4 mb-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Depth (10-200)</label>
+              <input type="number" name="dataforseo_depth" min="10" max="200" step="10"
+                     value="{{ config.get('sources', {}).get('dataforseo', {}).get('depth', 200) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+              <p class="text-xs text-slate-600 mt-1">Results per query (each 10 = 1 billing unit)</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Priority</label>
+              <select name="dataforseo_priority"
+                      class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <option value="1" {% if config.get('sources', {}).get('dataforseo', {}).get('priority', 1) == 1 %}selected{% endif %}>1 — Normal ($0.0006/10)</option>
+                <option value="2" {% if config.get('sources', {}).get('dataforseo', {}).get('priority', 1) == 2 %}selected{% endif %}>2 — High ($0.0012/10)</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-2">Search Queries</label>
+            <input type="hidden" name="_dataforseo_queries_present" value="1">
+            <div id="dataforseo-queries" class="space-y-2">
+              {% for q in config.get('sources', {}).get('dataforseo', {}).get('queries', []) %}
+              <div class="flex gap-2 items-center dataforseo-query-row">
+                <input type="text" name="dataforseo_query_{{ loop.index0 }}" value="{{ q.get('query', '') }}"
+                       placeholder="Query (e.g. Staff Data Scientist)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <input type="text" name="dataforseo_location_{{ loop.index0 }}" value="{{ q.get('location', '') }}"
+                       placeholder="Location (e.g. San Francisco Bay Area)"
+                       class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+                <button type="button" onclick="removeDataForSeoRow(this)"
+                        class="text-slate-600 hover:text-red-400 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              {% endfor %}
+            </div>
+            <button type="button" onclick="addDataForSeoRow()"
+                    class="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors">+ Add Query</button>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
+        <!-- Google CSE -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>
+            Google Programmable Search (CSE)
+          </h3>
+          <p class="text-xs text-slate-500 mb-3">
+            Free 100 queries/day; $5 per 1000 thereafter. Job Cannon caps usage at 95/day
+            and runs CSE-backed portal search once daily. Setup:
+            (1) create a search engine at
+            <a href="https://programmablesearchengine.google.com/" target="_blank" rel="noreferrer"
+               class="text-violet-400 hover:text-violet-300">programmablesearchengine.google.com</a>
+            ("Search the entire web");
+            (2) copy the Search engine ID into "Search Engine ID" below;
+            (3) enable the Custom Search API in
+            <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer"
+               class="text-violet-400 hover:text-violet-300">Google Cloud Console</a>
+            and create an API key (paste into "API Key" below).
+            Activates only when DataForSEO is not enabled (DataForSEO has no daily cap, so it's preferred).
+          </p>
+          <div class="grid grid-cols-3 gap-4">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="google_cse_enabled" value="">
+                <input type="checkbox" name="google_cse_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('google_cse', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
+              <input type="password" name="google_cse_api_key"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.google_cse.api_key') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Search Engine ID (cx)</label>
+              <input type="password" name="google_cse_cse_id"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.google_cse.cse_id') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+          </div>
+        </div>
+        </details>
       </div>
     </div>
 
@@ -365,7 +515,9 @@
       </button>
       <div class="section-body border-t border-slate-700 p-6 space-y-4">
         <p class="text-xs text-slate-500">
-          ATS scanning queries Lever, Greenhouse, and Ashby public APIs for new job postings at tracked companies.
+          ATS scanning queries 12 public ATS APIs for new job postings at tracked companies:
+          Lever, Greenhouse, Ashby, Workday, SmartRecruiters, Recruitee, Breezy, JazzHR,
+          Pinpoint, Personio, BambooHR, and Teamtailor.
           No AI API calls are used during discovery — only keyword matching against your target titles.
         </p>
 
@@ -647,6 +799,37 @@ function removeThordataRow(btn) {
     const inputs = row.querySelectorAll('input[type="text"]');
     if (inputs[0]) inputs[0].name = 'thordata_query_' + i;
     if (inputs[1]) inputs[1].name = 'thordata_location_' + i;
+  });
+}
+
+// DataForSEO dynamic query rows (Stage 6)
+function addDataForSeoRow() {
+  const container = document.getElementById('dataforseo-queries');
+  const idx = container.querySelectorAll('.dataforseo-query-row').length;
+  const row = document.createElement('div');
+  row.className = 'flex gap-2 items-center dataforseo-query-row';
+  row.innerHTML = `
+    <input type="text" name="dataforseo_query_${idx}" placeholder="Query (e.g. Staff Data Scientist)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <input type="text" name="dataforseo_location_${idx}" placeholder="Location (e.g. San Francisco Bay Area)"
+           class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+    <button type="button" onclick="removeDataForSeoRow(this)"
+            class="text-slate-600 hover:text-red-400 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  `;
+  container.appendChild(row);
+}
+
+function removeDataForSeoRow(btn) {
+  btn.closest('.dataforseo-query-row').remove();
+  const container = document.getElementById('dataforseo-queries');
+  container.querySelectorAll('.dataforseo-query-row').forEach(function(row, i) {
+    const inputs = row.querySelectorAll('input[type="text"]');
+    if (inputs[0]) inputs[0].name = 'dataforseo_query_' + i;
+    if (inputs[1]) inputs[1].name = 'dataforseo_location_' + i;
   });
 }
 </script>
