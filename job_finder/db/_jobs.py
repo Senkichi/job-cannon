@@ -176,13 +176,20 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         initial_jd_full = None
         if job.description and len(job.description) > 200:
             initial_jd_full = job.description[:8000]
+        # Explicit scoring_provider=NULL on INSERT to override the migration 20
+        # column DEFAULT 'anthropic'. The DEFAULT pre-dates the multi-provider
+        # cascade; without this override, every new row enters tagged as scored
+        # by anthropic before any scorer has run. The legitimate write path
+        # (persist_job_assessment) sets scoring_provider + scoring_model
+        # atomically via COALESCE, so the discriminator for "real attribution"
+        # is scoring_model IS NOT NULL.
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, salary_min, salary_max, description,
                  first_seen, last_seen, score, score_breakdown, locations_raw,
-                 jd_full)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 jd_full, scoring_provider)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.dedup_key,
                 job.title,
@@ -200,6 +207,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 json.dumps(job.score_breakdown),
                 json.dumps(initial_locs),
                 initial_jd_full,
+                None,
             ),
         )
         conn.commit()

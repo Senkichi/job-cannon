@@ -1508,3 +1508,93 @@ class TestFetchPortalSearchWiring:
 
         assert result == []
         assert not mock_fetch.called
+
+
+# ---------------------------------------------------------------------------
+# Stage 7.7 — upsert_job does NOT leak the scoring_provider DEFAULT 'anthropic'
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertScoringProviderNotLeaked:
+    """Regression guard for the migration 20 column-default leak.
+
+    Migration 20 added `scoring_provider TEXT DEFAULT 'anthropic'`. When
+    upsert_job INSERTs a new row without specifying scoring_provider,
+    SQLite applies the DEFAULT — tagging every new row as scored by
+    anthropic before any scorer has run.
+
+    The fix in upsert_job (job_finder/db/_jobs.py) is to explicitly pass
+    scoring_provider=NULL on INSERT. These tests are the canary.
+    """
+
+    def test_upsert_inserts_scoring_provider_null(self, migrated_db_path):
+        """A freshly upserted row must have scoring_provider IS NULL — NOT 'anthropic'."""
+        job = Job(
+            title="Senior Data Scientist",
+            company="LeakCheckCo",
+            location="Remote",
+            source="linkedin",
+            source_url="https://linkedin.com/jobs/view/777/",
+            source_id="777",
+        )
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            is_new = upsert_job(conn, job)
+            assert is_new is True
+            row = conn.execute(
+                "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
+                (job.dedup_key,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert row is not None
+        assert row["scoring_provider"] is None, (
+            f"upsert_job leaked the migration 20 DEFAULT 'anthropic' onto a "
+            f"never-scored row. Got scoring_provider={row['scoring_provider']!r}, "
+            f"expected None. Check job_finder/db/_jobs.py INSERT column list."
+        )
+        assert row["scoring_model"] is None
+
+    def test_upsert_does_not_overwrite_existing_scoring_provider(self, migrated_db_path):
+        """Re-upsert of an already-scored job must not clobber a real attribution.
+
+        Defense-in-depth: the INSERT-NULL fix only fires on the new-row branch.
+        The UPDATE branch goes through merge_description / merge_sources and
+        leaves scoring_provider alone. This test pins that contract so a
+        future refactor that adds scoring_provider to the UPDATE column list
+        doesn't accidentally null out real attributions.
+        """
+        job = Job(
+            title="Senior Data Scientist",
+            company="ReUpsertCo",
+            location="Remote",
+            source="linkedin",
+            source_url="https://linkedin.com/jobs/view/888/",
+            source_id="888",
+        )
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            # INSERT (scoring_provider=NULL via 7.7 fix)
+            upsert_job(conn, job)
+            # Simulate a real scoring attribution via the legitimate writer path
+            conn.execute(
+                "UPDATE jobs SET scoring_provider = ?, scoring_model = ? WHERE dedup_key = ?",
+                ("ollama", "qwen2.5:14b", job.dedup_key),
+            )
+            conn.commit()
+            # Re-upsert (UPDATE branch fires because the row exists)
+            upsert_job(conn, job)
+            row = conn.execute(
+                "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
+                (job.dedup_key,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert row["scoring_provider"] == "ollama"
+        assert row["scoring_model"] == "qwen2.5:14b"

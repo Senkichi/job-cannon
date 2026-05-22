@@ -386,11 +386,12 @@ def test_migration_count_is_thirteen():
     Migration 53: create onboarding_state table (Phase 42).
     Migration 54: onboarding_state.wizard_data for inter-step wizard state (Phase 42).
     Migration 55: idx_jobs_company_id for orphan-recalibration writer-lock fix.
+    Migration 56: clear default-leaked scoring_provider='anthropic' tags (Stage 7.7).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 55
+    assert len(MIGRATIONS) == 56
 
 
 class TestMigration27:
@@ -914,8 +915,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 55 entries (through Migration 55: idx_jobs_company_id)."""
-        assert len(MIGRATIONS) == 55
+        """MIGRATIONS list has 56 entries (through Migration 56: clear scoring_provider default leak)."""
+        assert len(MIGRATIONS) == 56
 
 
 class TestMigration40:
@@ -1363,7 +1364,7 @@ class TestMigration52And53:
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 55, f"Expected PRAGMA user_version=55, got: {version}"
+        assert version == 56, f"Expected PRAGMA user_version=56, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(
