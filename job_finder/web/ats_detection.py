@@ -190,6 +190,34 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     return None
 
 
+def probe_hit_consistent_with_careers_url(hit_platform: str, careers_url: str | None) -> bool:
+    """F6 — gate a speculative-probe hit against an existing careers_url.
+
+    The speculative probe loop derives slug candidates from `name_raw` and
+    hits the first ATS API that returns non-empty postings for any candidate.
+    For famous-brand short slugs that collide with a small startup on a
+    small ATS, this produces a false positive (e.g. 'Shopify' → Pinpoint
+    tenant `shopify.pinpointhq.com`, which is a DIFFERENT company).
+
+    This guard rejects a hit when the company already has a `careers_url`
+    that positively identifies a DIFFERENT ATS platform. It does NOT catch
+    cases where `careers_url` carries no ATS signature (e.g.
+    `shopify.com/careers`) — that requires fetching the page and parsing for
+    embedded-widget signatures, deferred to a future F7 (wide F6).
+
+    Returns:
+        True if the hit is consistent (URL infers same platform OR carries
+        no ATS signature OR is absent). False only when the URL infers a
+        different platform than `hit_platform`.
+    """
+    if not careers_url:
+        return True
+    inferred = extract_ats_from_url_best(careers_url)
+    if inferred is None:
+        return True
+    return inferred[0] == hit_platform
+
+
 def extract_ats_from_urls(source_urls: list[str]) -> tuple[str | None, str | None]:
     """Extract ATS platform and slug from a list of job source URLs.
 

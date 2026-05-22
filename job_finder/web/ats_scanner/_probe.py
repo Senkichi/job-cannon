@@ -6,9 +6,13 @@ Re-exported from the package for backward compatibility.
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime
 
-from job_finder.web.ats_detection import derive_slug_candidates
+from job_finder.web.ats_detection import (
+    derive_slug_candidates,
+    probe_hit_consistent_with_careers_url,
+)
 from job_finder.web.ats_prober import (
     _probe_ashby,
     _probe_bamboohr,
@@ -25,6 +29,24 @@ from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
+# (platform, probe_fn) pairs. Ordering matches the historical ladder:
+# original three (Lever / Greenhouse / Ashby) first because they have the
+# longest track record; Stage 4 additions follow, with the Pinpoint/
+# Teamtailor/Personio/BambooHR block ordered fastest-JSON-first so cheap
+# probes short-circuit before the XML and HTML variants pay their cost.
+_PROBES: list[tuple[str, Callable[[str], bool]]] = [
+    ("lever", _probe_lever),
+    ("greenhouse", _probe_greenhouse),
+    ("ashby", _probe_ashby),
+    ("recruitee", _probe_recruitee),
+    ("breezy", _probe_breezy),
+    ("jazzhr", _probe_jazzhr),
+    ("pinpoint", _probe_pinpoint),
+    ("teamtailor", _probe_teamtailor),
+    ("personio", _probe_personio),
+    ("bamboohr", _probe_bamboohr),
+]
+
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
     """Probe ATS APIs speculatively for companies with pending probe status.
@@ -39,9 +61,14 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
        first hit wins). New platforms are appended after the established
        three; fastest probes go earlier within the new block so we
        short-circuit before paying the cost of slower ones.
-    3. Set ats_probe_status='hit' when API returns valid postings
-    4. Set ats_probe_status='miss' when all APIs fail/return empty
-    5. Empty-postings 200 responses stay as 'miss' (never 'hit') per
+    3. F6 consistency gate: if a hit's platform disagrees with the platform
+       inferred from the company's `careers_url`, reject the hit and keep
+       trying. This catches brand-name-collision false positives (e.g.
+       'Shopify' → Pinpoint tenant of a different small company) when the
+       careers_url positively identifies a different ATS.
+    4. Set ats_probe_status='hit' when API returns valid postings
+    5. Set ats_probe_status='miss' when all APIs fail/return empty
+    6. Empty-postings 200 responses stay as 'miss' (never 'hit') per
        Lever Research Pitfall 2 — same dynamic affects every Stage 4 platform
 
     Args:
@@ -61,12 +88,13 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
     with standalone_connection(db_path) as conn:
         # Only probe companies with pending status
         pending = conn.execute(
-            "SELECT id, name_raw FROM companies WHERE ats_probe_status = 'pending'"
+            "SELECT id, name_raw, careers_url FROM companies WHERE ats_probe_status = 'pending'"
         ).fetchall()
 
         for company in pending:
             company_id = company["id"]
             company_name = company["name_raw"]
+            careers_url = company["careers_url"]
             now = datetime.now().isoformat()
 
             candidates = derive_slug_candidates(company_name)
@@ -74,64 +102,23 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             hit_slug = None
 
             for slug in candidates:
-                # Try Lever first
-                if _probe_lever(slug):
-                    hit_platform = "lever"
+                for platform, probe in _PROBES:
+                    if not probe(slug):
+                        continue
+                    if not probe_hit_consistent_with_careers_url(platform, careers_url):
+                        logger.info(
+                            "probe_ats_slugs: rejected %s/%s for company %s — "
+                            "careers_url %s infers a different platform",
+                            platform,
+                            slug,
+                            company_name,
+                            careers_url,
+                        )
+                        continue
+                    hit_platform = platform
                     hit_slug = slug
                     break
-
-                # Try Greenhouse
-                if _probe_greenhouse(slug):
-                    hit_platform = "greenhouse"
-                    hit_slug = slug
-                    break
-
-                # Try Ashby
-                if _probe_ashby(slug):
-                    hit_platform = "ashby"
-                    hit_slug = slug
-                    break
-
-                # Stage 4 additions — Recruitee/Breezy/JazzHR. Ordered after
-                # the original three because those have a longer track record;
-                # the new ones probe slower companies on average.
-                if _probe_recruitee(slug):
-                    hit_platform = "recruitee"
-                    hit_slug = slug
-                    break
-
-                if _probe_breezy(slug):
-                    hit_platform = "breezy"
-                    hit_slug = slug
-                    break
-
-                if _probe_jazzhr(slug):
-                    hit_platform = "jazzhr"
-                    hit_slug = slug
-                    break
-
-                # Stage 4 continuation — Pinpoint, Teamtailor, Personio,
-                # BambooHR. Ordered fastest-to-slowest within the new block so
-                # cheap JSON probes short-circuit before the XML and HTML
-                # variants pay their cost.
-                if _probe_pinpoint(slug):
-                    hit_platform = "pinpoint"
-                    hit_slug = slug
-                    break
-
-                if _probe_teamtailor(slug):
-                    hit_platform = "teamtailor"
-                    hit_slug = slug
-                    break
-
-                if _probe_personio(slug):
-                    hit_platform = "personio"
-                    hit_slug = slug
-                    break
-
-                if _probe_bamboohr(slug):
-                    hit_platform = "bamboohr"
-                    hit_slug = slug
+                if hit_platform:
                     break
 
             # Update company record based on probe result

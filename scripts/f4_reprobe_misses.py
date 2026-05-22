@@ -53,7 +53,10 @@ def _capturing_get(*args, **kwargs):  # type: ignore[no-untyped-def]
 
 requests.get = _capturing_get  # type: ignore[assignment]
 
-from job_finder.web.ats_detection import derive_slug_candidates
+from job_finder.web.ats_detection import (
+    derive_slug_candidates,
+    probe_hit_consistent_with_careers_url,
+)
 from job_finder.web.ats_prober import (
     _probe_ashby,
     _probe_bamboohr,
@@ -154,8 +157,15 @@ def _probe_with_diagnostics(platform: str, probe_fn: Callable[[str], bool], slug
     return result
 
 
-def _probe_slug_parallel(slug: str) -> tuple[str, str] | None:
-    """Probe every platform for one slug concurrently. First True wins."""
+def _probe_slug_parallel(
+    slug: str, careers_url: str | None, company_name: str
+) -> tuple[str, str] | None:
+    """Probe every platform for one slug concurrently. First True wins.
+
+    F6 consistency gate: a hit whose platform disagrees with the platform
+    inferred from `careers_url` is rejected; we keep waiting for another
+    future to land. If no consistent hit lands, returns None.
+    """
     with ThreadPoolExecutor(max_workers=len(_PROBES), thread_name_prefix="probe") as pool:
         futures = {
             pool.submit(_probe_with_diagnostics, platform, probe, slug): platform
@@ -165,11 +175,22 @@ def _probe_slug_parallel(slug: str) -> tuple[str, str] | None:
         for fut in as_completed(futures):
             platform = futures[fut]
             try:
-                if fut.result():
-                    hit = (platform, slug)
-                    break
+                if not fut.result():
+                    continue
             except Exception as exc:
                 log.debug("probe future %s/%s raised %s", platform, slug, exc)
+                continue
+            if not probe_hit_consistent_with_careers_url(platform, careers_url):
+                log.info(
+                    "REJECT %s -> %s/%s (careers_url %s infers different platform)",
+                    company_name,
+                    platform,
+                    slug,
+                    careers_url,
+                )
+                continue
+            hit = (platform, slug)
+            break
         # Best-effort cancel of remaining futures (already-in-flight HTTP runs
         # to completion regardless; this just suppresses queued ones).
         for fut in futures:
@@ -177,18 +198,39 @@ def _probe_slug_parallel(slug: str) -> tuple[str, str] | None:
         return hit
 
 
-def _probe_slug_serial(slug: str) -> tuple[str, str] | None:
-    """Serial fallback path. Same ordering as ats_scanner/_probe.py."""
+def _probe_slug_serial(
+    slug: str, careers_url: str | None, company_name: str
+) -> tuple[str, str] | None:
+    """Serial fallback path. Same ordering as ats_scanner/_probe.py.
+
+    F6 consistency gate: hits inconsistent with `careers_url` are skipped.
+    """
     for platform, probe in _PROBES:
-        if _probe_with_diagnostics(platform, probe, slug):
-            return (platform, slug)
+        if not _probe_with_diagnostics(platform, probe, slug):
+            continue
+        if not probe_hit_consistent_with_careers_url(platform, careers_url):
+            log.info(
+                "REJECT %s -> %s/%s (careers_url %s infers different platform)",
+                company_name,
+                platform,
+                slug,
+                careers_url,
+            )
+            continue
+        return (platform, slug)
     return None
 
 
-def _probe_company(company_name: str, parallel: bool) -> tuple[str, str] | None:
+def _probe_company(
+    company_name: str, careers_url: str | None, parallel: bool
+) -> tuple[str, str] | None:
     """Try each slug candidate until one hits. First hit wins."""
     for slug in derive_slug_candidates(company_name):
-        hit = _probe_slug_parallel(slug) if parallel else _probe_slug_serial(slug)
+        hit = (
+            _probe_slug_parallel(slug, careers_url, company_name)
+            if parallel
+            else _probe_slug_serial(slug, careers_url, company_name)
+        )
         if hit:
             return hit
     return None
@@ -208,6 +250,7 @@ def _process_one(
     db_path: str,
     company_id: int,
     company_name: str,
+    careers_url: str | None,
     parallel_inner: bool,
     dry_run: bool,
 ) -> tuple[int, str, str | None, str | None]:
@@ -217,7 +260,7 @@ def _process_one(
     Opens its own sqlite3 connection so callers can safely run this in a
     ThreadPoolExecutor. WAL mode on the DB lets concurrent writers coexist.
     """
-    hit = _probe_company(company_name, parallel=parallel_inner)
+    hit = _probe_company(company_name, careers_url, parallel=parallel_inner)
     hit_platform = hit[0] if hit else None
     hit_slug = hit[1] if hit else None
 
@@ -301,7 +344,7 @@ def main() -> int:
     )
 
     misses = conn.execute(
-        "SELECT id, name_raw FROM companies WHERE ats_probe_status='miss' ORDER BY id"
+        "SELECT id, name_raw, careers_url FROM companies WHERE ats_probe_status='miss' ORDER BY id"
     ).fetchall()
     total = len(misses)
     if args.limit and args.limit < total:
@@ -333,7 +376,7 @@ def main() -> int:
     processed = 0
     started = time.monotonic()
 
-    work_items = [(row["id"], row["name_raw"]) for row in misses]
+    work_items = [(row["id"], row["name_raw"], row["careers_url"]) for row in misses]
     db_path_str = str(db_path)
 
     def _on_completed(result: tuple[int, str, str | None, str | None]) -> None:
@@ -369,11 +412,12 @@ def main() -> int:
 
     try:
         if args.workers <= 1:
-            for company_id, company_name in work_items:
+            for company_id, company_name, careers_url in work_items:
                 result = _process_one(
                     db_path_str,
                     company_id,
                     company_name,
+                    careers_url,
                     parallel_inner=not args.serial,
                     dry_run=args.dry_run,
                 )
@@ -389,10 +433,11 @@ def main() -> int:
                         db_path_str,
                         company_id,
                         company_name,
+                        careers_url,
                         not args.serial,
                         args.dry_run,
                     ): (company_id, company_name)
-                    for company_id, company_name in work_items
+                    for company_id, company_name, careers_url in work_items
                 }
                 for fut in as_completed(futures):
                     try:
