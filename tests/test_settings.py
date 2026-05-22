@@ -559,3 +559,219 @@ class TestSettingsThordataPersistence:
                 keyring.delete_password("job-cannon", "sources.thordata.api_key")
             except Exception:
                 pass
+
+
+class TestSettingsStage7FreePortalsTile:
+    """Stage 7 (2026-05-22): Settings UI tiles for the free job portals.
+
+    The portal_search master + Jobicy/YC/USAJobs/Adzuna/Jooble sub-portals
+    + JSearch are now editable from the Settings page. Credentials for
+    USAJobs/Adzuna/Jooble are persisted to config.yaml plaintext (under
+    0600 perms) — the keyring path is NOT wired for these because the
+    secrets.py canonical names use a top-level layout while the read
+    site at job_finder.sources.portal_search_source expects nested
+    portal_search.<name>.* — addressing that mismatch is out of Stage 7
+    scope. JSearch keeps its existing keyring routing.
+    """
+
+    def test_index_renders_with_portal_tile(self, settings_client):
+        resp = settings_client.get("/settings")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # Master switch
+        assert "portal_search_enabled" in body
+        assert "Job Portals (free)" in body
+        # Sub-portals
+        assert "portal_search_jobicy_enabled" in body
+        assert "portal_search_yc_enabled" in body
+        assert "portal_search_usajobs_enabled" in body
+        assert "portal_search_adzuna_enabled" in body
+        assert "portal_search_jooble_enabled" in body
+        # JSearch tile (new — was wired in parser but had no UI)
+        assert "jsearch_enabled" in body
+        assert "jsearch_rapidapi_key" in body
+
+    def test_save_portal_search_master_persists(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_enabled": "on",
+                "portal_search_keywords": "Staff Engineer\nML Platform",
+                "portal_search_max_serp_queries": "20",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        ps = saved["sources"]["portal_search"]
+        assert ps["enabled"] is True
+        assert ps["keywords"] == ["Staff Engineer", "ML Platform"]
+        assert ps["max_serp_queries"] == 20
+
+    def test_save_keyless_subportals_persists(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_jobicy_enabled": "on",
+                "portal_search_yc_enabled": "on",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        ps = saved["sources"]["portal_search"]
+        assert ps["jobicy"]["enabled"] is True
+        assert ps["yc_workatastartup"]["enabled"] is True
+
+    def test_save_usajobs_credentials_persists(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_usajobs_enabled": "on",
+                "portal_search_usajobs_user_agent_email": "me@example.com",
+                "portal_search_usajobs_authorization_key": "usajobs-test-key",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        usajobs = saved["sources"]["portal_search"]["usajobs"]
+        assert usajobs["enabled"] is True
+        assert usajobs["user_agent_email"] == "me@example.com"
+        assert usajobs["authorization_key"] == "usajobs-test-key"
+
+    def test_save_adzuna_credentials_persists(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_adzuna_enabled": "on",
+                "portal_search_adzuna_app_id": "adzuna-id",
+                "portal_search_adzuna_app_key": "adzuna-key",
+                "portal_search_adzuna_country": "gb",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        adzuna = saved["sources"]["portal_search"]["adzuna"]
+        assert adzuna["enabled"] is True
+        assert adzuna["app_id"] == "adzuna-id"
+        assert adzuna["app_key"] == "adzuna-key"
+        assert adzuna["country"] == "gb"
+
+    def test_save_jooble_credentials_persists(self, settings_client, settings_app):
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_jooble_enabled": "on",
+                "portal_search_jooble_api_key": "jooble-test-key",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        jooble = saved["sources"]["portal_search"]["jooble"]
+        assert jooble["enabled"] is True
+        assert jooble["api_key"] == "jooble-test-key"
+
+    def test_save_empty_password_preserves_existing_creds(self, settings_client, settings_app):
+        """No-op save (no creds in form) must not clobber existing values."""
+        # Seed config.yaml with an existing creds
+        cfg_path = settings_app._test_config_path
+        with open(cfg_path, encoding="utf-8") as f:
+            existing = yaml.safe_load(f)
+        existing.setdefault("sources", {})["portal_search"] = {
+            "enabled": True,
+            "usajobs": {"enabled": True, "user_agent_email": "old@x.com", "authorization_key": "OLD"},
+            "adzuna": {"enabled": True, "app_id": "OLD_ID", "app_key": "OLD_KEY", "country": "us"},
+            "jooble": {"enabled": True, "api_key": "OLD_JK"},
+        }
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            yaml.dump(existing, f, default_flow_style=False)
+
+        # Submit form with toggles re-enabled but blank credential fields
+        # (this is what happens when the user just edits something else).
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_enabled": "on",
+                "portal_search_usajobs_enabled": "on",
+                "portal_search_usajobs_user_agent_email": "",
+                "portal_search_usajobs_authorization_key": "",
+                "portal_search_adzuna_enabled": "on",
+                "portal_search_adzuna_app_id": "",
+                "portal_search_adzuna_app_key": "",
+                "portal_search_adzuna_country": "us",
+                "portal_search_jooble_enabled": "on",
+                "portal_search_jooble_api_key": "",
+            },
+        )
+        assert resp.status_code == 302
+        with open(cfg_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        ps = saved["sources"]["portal_search"]
+        # Credentials preserved — the `and form[...]` guard in the parser skips
+        # empty submissions so _deep_merge keeps the old values.
+        assert ps["usajobs"]["user_agent_email"] == "old@x.com"
+        assert ps["usajobs"]["authorization_key"] == "OLD"
+        assert ps["adzuna"]["app_id"] == "OLD_ID"
+        assert ps["adzuna"]["app_key"] == "OLD_KEY"
+        assert ps["jooble"]["api_key"] == "OLD_JK"
+
+    def test_save_jsearch_settings_persists_keyring(self, settings_client, settings_app):
+        """JSearch already routed through keyring in save(); the new tile feeds it."""
+        import keyring
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "jsearch_enabled": "on",
+                "jsearch_rapidapi_key": "jsearch-test-key",
+            },
+        )
+        assert resp.status_code == 302
+        try:
+            assert (
+                keyring.get_password("job-cannon", "sources.jsearch.rapidapi_key")
+                == "jsearch-test-key"
+            )
+            with open(settings_app._test_config_path, encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            assert saved["sources"]["jsearch"]["enabled"] is True
+            # Keyring captured the secret; config.yaml plaintext is wiped.
+            assert saved["sources"]["jsearch"].get("rapidapi_key", "") == ""
+        finally:
+            try:
+                keyring.delete_password("job-cannon", "sources.jsearch.rapidapi_key")
+            except Exception:
+                pass
+
+    def test_adzuna_country_lowercased(self, settings_client, settings_app):
+        """ISO country codes are case-insensitive on input — normalize to lowercase."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "portal_search_adzuna_enabled": "on",
+                "portal_search_adzuna_country": "GB",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        assert saved["sources"]["portal_search"]["adzuna"]["country"] == "gb"

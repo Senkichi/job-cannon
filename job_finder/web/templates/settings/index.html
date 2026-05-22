@@ -139,6 +139,202 @@
 
         <hr class="border-slate-700">
 
+        <!-- Stage 7: Job Portals (free) — visible by default, no signup required for keyless portals -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+            Job Portals (free)
+          </h3>
+          <p class="text-xs text-slate-500 mb-3">
+            Niche job-board discovery. When enabled, Job Cannon polls RemoteOK, Remotive,
+            and Himalayas automatically (no key). The portals below each ship as optional —
+            two are keyless (Jobicy, Y Combinator) and three require a free signup
+            (USAJobs, Adzuna, Jooble) in exchange for a generous free tier.
+          </p>
+          <div class="grid grid-cols-3 gap-4 mb-3">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_enabled" value="">
+                <input type="checkbox" name="portal_search_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled (master switch)</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Max SERP queries / run</label>
+              <input type="number" name="portal_search_max_serp_queries" min="0" max="500"
+                     value="{{ config.get('sources', {}).get('portal_search', {}).get('max_serp_queries', 30) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+              <p class="text-xs text-slate-600 mt-1">Caps DataForSEO/CSE site: queries</p>
+            </div>
+          </div>
+          <div class="mb-4">
+            <label class="block text-xs font-medium text-slate-400 mb-1">Keywords <span class="text-slate-500 font-normal">(one per line)</span></label>
+            <textarea name="portal_search_keywords" rows="3"
+                      class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('sources', {}).get('portal_search', {}).get('keywords', []) | join('\n') }}</textarea>
+          </div>
+
+          <!-- Keyless free portals -->
+          <div class="bg-slate-900/40 border border-slate-700 rounded p-3 mb-3">
+            <p class="text-xs font-semibold text-slate-300 mb-2">Keyless portals (no signup)</p>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_jobicy_enabled" value="">
+                <input type="checkbox" name="portal_search_jobicy_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('jobicy', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Jobicy <span class="text-slate-500 text-xs">— remote-only board</span></span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_yc_enabled" value="">
+                <input type="checkbox" name="portal_search_yc_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('yc_workatastartup', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Y Combinator <span class="text-slate-500 text-xs">— Work at a Startup</span></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- USAJobs (free signup) -->
+          <div class="bg-slate-900/40 border border-slate-700 rounded p-3 mb-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-semibold text-slate-300">USAJobs <span class="text-slate-500 font-normal">— US federal jobs (free with email registration)</span></p>
+              <a href="https://developer.usajobs.gov/apirequest/" target="_blank" rel="noreferrer"
+                 class="text-xs text-violet-400 hover:text-violet-300">Get a key →</a>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_usajobs_enabled" value="">
+                <input type="checkbox" name="portal_search_usajobs_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('usajobs', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">User-Agent Email</label>
+                <input type="email" name="portal_search_usajobs_user_agent_email"
+                       value=""
+                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('usajobs', {}).get('user_agent_email') %}(saved — type to replace){% else %}you@example.com{% endif %}"
+                       autocomplete="off"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">Authorization Key</label>
+                <input type="password" name="portal_search_usajobs_authorization_key"
+                       value=""
+                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('usajobs', {}).get('authorization_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       autocomplete="off"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+              </div>
+            </div>
+          </div>
+
+          <!-- Adzuna (free signup) -->
+          <div class="bg-slate-900/40 border border-slate-700 rounded p-3 mb-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-semibold text-slate-300">Adzuna <span class="text-slate-500 font-normal">— global aggregator (free dev tier, ~250 calls/day per country)</span></p>
+              <a href="https://developer.adzuna.com/signup" target="_blank" rel="noreferrer"
+                 class="text-xs text-violet-400 hover:text-violet-300">Get a key →</a>
+            </div>
+            <div class="grid grid-cols-4 gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_adzuna_enabled" value="">
+                <input type="checkbox" name="portal_search_adzuna_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">App ID</label>
+                <input type="password" name="portal_search_adzuna_app_id"
+                       value=""
+                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('app_id') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       autocomplete="off"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">App Key</label>
+                <input type="password" name="portal_search_adzuna_app_key"
+                       value=""
+                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('app_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       autocomplete="off"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-400 mb-1">Country</label>
+                <input type="text" name="portal_search_adzuna_country" maxlength="3"
+                       value="{{ config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('country', 'us') }}"
+                       placeholder="us"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none uppercase">
+                <p class="text-xs text-slate-600 mt-1">ISO: us, gb, au, ca, de, fr, in, sg…</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Jooble (free signup) -->
+          <div class="bg-slate-900/40 border border-slate-700 rounded p-3">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-xs font-semibold text-slate-300">Jooble <span class="text-slate-500 font-normal">— global aggregator (free with email registration)</span></p>
+              <a href="https://jooble.org/api/about" target="_blank" rel="noreferrer"
+                 class="text-xs text-violet-400 hover:text-violet-300">Get a key →</a>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="portal_search_jooble_enabled" value="">
+                <input type="checkbox" name="portal_search_jooble_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('portal_search', {}).get('jooble', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+              <div class="col-span-2">
+                <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
+                <input type="password" name="portal_search_jooble_api_key"
+                       value=""
+                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('jooble', {}).get('api_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       autocomplete="off"
+                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
+        <!-- JSearch (free RapidAPI tier) -->
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-pink-400 inline-block"></span>
+            JSearch <span class="text-slate-500 font-normal text-xs">— RapidAPI Google Jobs alternative</span>
+          </h3>
+          <p class="text-xs text-slate-500 mb-3">
+            Free tier via <a href="https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch"
+            target="_blank" rel="noreferrer" class="text-violet-400 hover:text-violet-300">RapidAPI</a>.
+            Independent of portal_search above — uses your target_titles directly.
+          </p>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="hidden" name="jsearch_enabled" value="">
+                <input type="checkbox" name="jsearch_enabled" value="on"
+                       class="w-4 h-4 accent-violet-500"
+                       {% if config.get('sources', {}).get('jsearch', {}).get('enabled', False) %}checked{% endif %}>
+                <span class="text-sm text-slate-300">Enabled</span>
+              </label>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">RapidAPI Key</label>
+              <input type="password" name="jsearch_rapidapi_key"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.jsearch.rapidapi_key') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
+            </div>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
         <!-- Stage 6: Advanced — paid SERP providers (collapsed by default) -->
         <details class="bg-slate-900/40 border border-slate-700 rounded p-4 space-y-6">
           <summary class="cursor-pointer text-sm font-semibold text-slate-200 select-none flex items-center gap-2">

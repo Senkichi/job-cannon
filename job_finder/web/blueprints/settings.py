@@ -74,6 +74,7 @@ def index():
             "sources.dataforseo.api_key",
             "sources.google_cse.api_key",
             "sources.google_cse.cse_id",
+            "sources.jsearch.rapidapi_key",
         )
     }
 
@@ -380,6 +381,56 @@ def _parse_form_to_config(form) -> dict:
         jsearch["rapidapi_key"] = form["jsearch_rapidapi_key"]
     if jsearch:
         config.setdefault("sources", {})["jsearch"] = jsearch
+
+    # --- Sources: portal_search (Stage 7 — NEW tile) ---
+    # Master switch + keywords + sub-portal toggles. Secret credentials for
+    # USAJobs/Adzuna/Jooble are routed through _move_secret_to_keyring in save().
+    portal_search = {}
+    if _has("portal_search_enabled"):
+        portal_search["enabled"] = form["portal_search_enabled"] == "on"
+    if _has("portal_search_keywords"):
+        portal_search["keywords"] = lines_to_list(form["portal_search_keywords"])
+    if _has("portal_search_max_serp_queries"):
+        portal_search["max_serp_queries"] = safe_int(form["portal_search_max_serp_queries"], 30)
+    # Keyless sub-portals
+    if _has("portal_search_jobicy_enabled"):
+        portal_search["jobicy"] = {"enabled": form["portal_search_jobicy_enabled"] == "on"}
+    if _has("portal_search_yc_enabled"):
+        portal_search["yc_workatastartup"] = {"enabled": form["portal_search_yc_enabled"] == "on"}
+    # USAJobs (toggle + email + auth key)
+    usajobs = {}
+    if _has("portal_search_usajobs_enabled"):
+        usajobs["enabled"] = form["portal_search_usajobs_enabled"] == "on"
+    if _has("portal_search_usajobs_user_agent_email") and form["portal_search_usajobs_user_agent_email"]:
+        usajobs["user_agent_email"] = form["portal_search_usajobs_user_agent_email"]
+    if _has("portal_search_usajobs_authorization_key") and form["portal_search_usajobs_authorization_key"]:
+        usajobs["authorization_key"] = form["portal_search_usajobs_authorization_key"]
+    if usajobs:
+        portal_search["usajobs"] = usajobs
+    # Adzuna (toggle + app_id + app_key + country)
+    adzuna = {}
+    if _has("portal_search_adzuna_enabled"):
+        adzuna["enabled"] = form["portal_search_adzuna_enabled"] == "on"
+    if _has("portal_search_adzuna_app_id") and form["portal_search_adzuna_app_id"]:
+        adzuna["app_id"] = form["portal_search_adzuna_app_id"]
+    if _has("portal_search_adzuna_app_key") and form["portal_search_adzuna_app_key"]:
+        adzuna["app_key"] = form["portal_search_adzuna_app_key"]
+    if _has("portal_search_adzuna_country"):
+        country = form["portal_search_adzuna_country"].strip().lower()
+        if country:
+            adzuna["country"] = country
+    if adzuna:
+        portal_search["adzuna"] = adzuna
+    # Jooble (toggle + api_key)
+    jooble = {}
+    if _has("portal_search_jooble_enabled"):
+        jooble["enabled"] = form["portal_search_jooble_enabled"] == "on"
+    if _has("portal_search_jooble_api_key") and form["portal_search_jooble_api_key"]:
+        jooble["api_key"] = form["portal_search_jooble_api_key"]
+    if jooble:
+        portal_search["jooble"] = jooble
+    if portal_search:
+        config.setdefault("sources", {})["portal_search"] = portal_search
 
     # --- Scoring ---
     scoring = {}
