@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import requests
 
 from job_finder.web.ats_detection import derive_slug_candidates
+from job_finder.web.brand_blocklist import is_blocked_brand
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +297,20 @@ def probe_single_company(
             return {"status": "error", "detail": str(e)}
 
     else:
-        # No platform/slug — try speculative probing via derived slug candidates
+        # No platform/slug — try speculative probing via derived slug candidates.
+        # F8: short-circuit famous-brand names (Shopify, Walmart, ...) — the
+        # speculative ladder produces ~29% FPs on these because slug-collisions
+        # with small-company ATS tenants are common. See brand_blocklist.py.
+        if is_blocked_brand(company_name):
+            logger.info("probe_single_company: %s blocked by brand blocklist", company_name)
+            conn.execute(
+                """UPDATE companies
+                   SET ats_probe_status='miss', miss_reason='blocked_brand'
+                   WHERE id=?""",
+                (company_id,),
+            )
+            conn.commit()
+            return {"status": "miss", "detail": "blocked_brand"}
         candidates = derive_slug_candidates(company_name)
         for slug_candidate in candidates:
             try:

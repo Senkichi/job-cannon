@@ -25,6 +25,7 @@ from job_finder.web.ats_prober import (
     _probe_recruitee,
     _probe_teamtailor,
 )
+from job_finder.web.brand_blocklist import is_blocked_brand
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,33 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             company_name = company["name_raw"]
             careers_url = company["careers_url"]
             now = datetime.now().isoformat()
+
+            # F8 — brand blocklist gate. Famous-brand names (Shopify, Walmart,
+            # Canva, ...) produce a high-rate collision with small companies
+            # that have registered the same slug on a small ATS (BambooHR,
+            # Recruitee, Pinpoint, ...). Empirically the tenants self-identify
+            # with the same name, so name-matching can't disambiguate; only
+            # a curated blocklist works for this cohort. See
+            # job_finder/web/brand_blocklist.py for the rationale and seed list.
+            if is_blocked_brand(company_name):
+                logger.info(
+                    "probe_ats_slugs: skipped %s (id=%d) — blocked brand",
+                    company_name,
+                    company_id,
+                )
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'blocked_brand',
+                           ats_probe_attempted_at = ?,
+                           updated_at = ?
+                       WHERE id = ?""",
+                    (now, now, company_id),
+                )
+                conn.commit()
+                summary["misses"] += 1
+                summary["probed"] += 1
+                continue
 
             candidates = derive_slug_candidates(company_name)
             hit_platform = None

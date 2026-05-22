@@ -69,6 +69,7 @@ from job_finder.web.ats_prober import (
     _probe_recruitee,
     _probe_teamtailor,
 )
+from job_finder.web.brand_blocklist import is_blocked_brand
 
 _PROBES: list[tuple[str, Callable[[str], bool]]] = [
     ("lever", _probe_lever),
@@ -262,9 +263,39 @@ def _process_one(
     """Probe a single company and write its result. Returns (id, name,
     hit_platform_or_None, hit_slug_or_None).
 
+    F8 — short-circuit when company name matches the brand blocklist. The
+    speculative ladder is poisoned for famous brands (Shopify, Walmart, etc.)
+    because slug-collisions with small-company ATS tenants produce ~29%
+    FPs (see brand_blocklist.py rationale). Blocked rows are written back
+    to 'miss' with miss_reason='blocked_brand' so the scheduler will not
+    re-probe them on every restart.
+
     Opens its own sqlite3 connection so callers can safely run this in a
     ThreadPoolExecutor. WAL mode on the DB lets concurrent writers coexist.
     """
+    if is_blocked_brand(company_name):
+        log.info(
+            "BLOCKED %s (id=%d) — brand blocklist, no probes attempted",
+            company_name,
+            company_id,
+        )
+        if not dry_run:
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            try:
+                now = datetime.now().isoformat()
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_probe_status='miss',
+                           miss_reason='blocked_brand',
+                           ats_probe_attempted_at=?, updated_at=?
+                       WHERE id=?""",
+                    (now, now, company_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return (company_id, company_name, None, None)
+
     hit = _probe_company(company_name, careers_url, parallel=parallel_inner)
     hit_platform = hit[0] if hit else None
     hit_slug = hit[1] if hit else None
