@@ -48,6 +48,9 @@ dependencies = [
     # Web + parsing
     "beautifulsoup4~=4.12",
     "defusedxml>=0.7,<0.8",
+    # Text-encoding repair for portal sources that ship pre-mangled UTF-8
+    # (Himalayas + occasional YC location fields — see Stage 7.5).
+    "ftfy>=6.2,<7",
     "pyyaml~=6.0",
     "requests~=2.31",
     "Flask~=3.1",

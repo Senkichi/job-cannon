@@ -774,3 +774,305 @@ class TestFetchAllPortalsCseBackend:
             google_cse_source=None,
         )
         assert jobs == []
+
+
+# ---------------------------------------------------------------------------
+# Stage 7.5 — Portal-source JD parse quality
+# ---------------------------------------------------------------------------
+
+
+class TestStage75Helpers:
+    """Unit tests for the parse-hygiene helpers added in Stage 7.5."""
+
+    def test_strip_html_removes_tags_keeps_text(self):
+        from job_finder.sources.portal_search_source import _strip_html
+
+        html = (
+            "<div><a href='https://x.com'>X</a><h3>About</h3>"
+            "<p>We are <b>hiring</b> a <i>staff engineer</i>.</p></div>"
+        )
+        out = _strip_html(html)
+        assert "<" not in out and ">" not in out
+        assert "About" in out
+        assert "hiring" in out
+        assert "staff engineer" in out
+
+    def test_strip_html_preserves_word_boundaries(self):
+        """`<b>Foo</b><i>Bar</i>` must not collapse to `FooBar`."""
+        from job_finder.sources.portal_search_source import _strip_html
+
+        out = _strip_html("<b>Foo</b><i>Bar</i>")
+        assert "Foo" in out and "Bar" in out
+        assert "FooBar" not in out
+
+    def test_strip_html_none_and_empty(self):
+        from job_finder.sources.portal_search_source import _strip_html
+
+        assert _strip_html(None) == ""
+        assert _strip_html("") == ""
+
+    def test_clean_text_repairs_mojibake(self):
+        """ftfy round-trips UTF-8-mangled-as-cp1252 back to clean unicode.
+
+        ftfy also normalizes smart-quote U+2019 to ASCII U+0027 by default;
+        we keep that behavior because ASCII apostrophes are friendlier for
+        downstream substring scans (matcher, scorer prompt construction).
+        """
+        from job_finder.sources.portal_search_source import _clean_text
+
+        # `weâ€™re` is the canonical "we're" with cp1252 mojibake.
+        # ftfy repairs the bytes AND folds U+2019 -> U+0027.
+        assert _clean_text("weâ€™re hiring") == "we're hiring"
+
+    def test_clean_text_passes_clean_input_through(self):
+        from job_finder.sources.portal_search_source import _clean_text
+
+        assert _clean_text("Paris, Île-de-France") == "Paris, Île-de-France"
+
+    def test_clean_text_none_returns_empty(self):
+        from job_finder.sources.portal_search_source import _clean_text
+
+        assert _clean_text(None) == ""
+        assert _clean_text("") == ""
+
+    def test_unix_to_datetime_basic(self):
+        from datetime import timezone
+
+        from job_finder.sources.portal_search_source import _unix_to_datetime
+
+        dt = _unix_to_datetime(1779443427)
+        assert dt is not None
+        assert dt.tzinfo == timezone.utc
+        assert dt.year == 2026 and dt.month == 5
+
+    def test_unix_to_datetime_invalid_inputs(self):
+        from job_finder.sources.portal_search_source import _unix_to_datetime
+
+        assert _unix_to_datetime(None) is None
+        assert _unix_to_datetime("not-a-number") is None
+        assert _unix_to_datetime(0) is None
+        assert _unix_to_datetime(-1) is None
+
+
+class TestStage75HimalayasParseHygiene:
+    """Regression guards for Finding #5 — Himalayas parse quality."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_description_html_stripped(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Staff Data Scientist",
+                    "companyName": "AnalyticsCo",
+                    "applicationLink": "https://himalayas.app/j/strip",
+                    "description": (
+                        "<div><a href='https://x.com'>X</a>"
+                        "<h3>About The Position</h3>"
+                        "<p>We are <b>hiring</b> a "
+                        "<i>staff data scientist</i> to lead analytics.</p></div>"
+                    ),
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_himalayas
+
+        jobs = _fetch_himalayas(["Data Scientist"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        assert "<" not in desc and ">" not in desc
+        assert "About The Position" in desc
+        assert "hiring" in desc
+        assert "staff data scientist" in desc
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_description_truncate_widened_to_8000(self, mock_get):
+        """Inputs up to 8000 chars must pass through, matching the jd_full
+        eager-promote write width in job_finder/db/_jobs.py:178."""
+        # 7500 chars of plain text — should NOT be truncated (was 2000 pre-7.5).
+        long_text = "Senior data work. " * 400  # ~7200 chars, no HTML
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Senior DS",
+                    "companyName": "BigCo",
+                    "applicationLink": "https://himalayas.app/j/long",
+                    "description": long_text,
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_himalayas
+
+        jobs = _fetch_himalayas(["DS"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        # Pre-fix: would be truncated to 2000. Post-fix: under 8000 passes through.
+        assert len(desc) > 2000
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_posted_date_extracted_from_pubdate(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Lead DS",
+                    "companyName": "Co",
+                    "applicationLink": "https://himalayas.app/j/dated",
+                    "description": "<p>Role.</p>",
+                    "pubDate": 1779443427,
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_himalayas
+
+        jobs = _fetch_himalayas(["DS"])
+        assert len(jobs) == 1
+        pd = jobs[0].posted_date
+        assert pd is not None
+        assert pd.year == 2026 and pd.month == 5
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_mojibake_repaired_in_description(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "DS",
+                    "companyName": "Co",
+                    "applicationLink": "https://himalayas.app/j/utf",
+                    "description": "<p>We donâ€™t require relocation</p>",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_himalayas
+
+        jobs = _fetch_himalayas(["DS"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        # ftfy folds U+2019 -> U+0027 by default, alongside the cp1252 repair
+        assert "don't" in desc
+        assert "â€™" not in desc
+
+
+class TestStage75YcParseHygiene:
+    """Regression guards for Finding #5 — YC jd_full population."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    @patch("job_finder.sources.portal_search_source.time.sleep")
+    def test_description_crosses_200_char_threshold(self, _mock_sleep, mock_get):
+        """YC `jd_full` eager-promote requires description > 200 chars
+        (see job_finder/db/_jobs.py:174-180). Synthesizing from metadata
+        guarantees this even when only listing fields are available."""
+        payload = (
+            '{"props":{"jobs":[{"id":7777,"title":"Senior Data Scientist",'
+            '"companyName":"AcmeAI","companySlug":"acmeai",'
+            '"location":"San Francisco, CA, US / Remote",'
+            '"salary":"$180K - $240K","companyOneLiner":'
+            '"AI-powered analytics for life sciences companies",'
+            '"roleType":"Data Scientist","jobType":"Fulltime",'
+            '"companyBatch":"W24"}]}}'
+        )
+        html_body = f'<div data-page="{payload.replace(chr(34), "&quot;")}"></div>'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_body
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_yc_workatastartup
+
+        jobs = _fetch_yc_workatastartup(["Data Scientist"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        assert len(desc) > 200, f"description must exceed 200 chars, got {len(desc)}"
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    @patch("job_finder.sources.portal_search_source.time.sleep")
+    def test_description_contains_role_and_company_signal(self, _mock_sleep, mock_get):
+        """Scorer needs title + role + company context, not just a tagline."""
+        payload = (
+            '{"props":{"jobs":[{"id":7778,"title":"Staff Engineer",'
+            '"companyName":"FintechCo","companySlug":"fintechco",'
+            '"location":"Remote","salary":"$200K - $260K",'
+            '"companyOneLiner":"Payments rails for marketplaces",'
+            '"roleType":"Backend engineer","jobType":"Fulltime",'
+            '"companyBatch":"S23"}]}}'
+        )
+        html_body = f'<div data-page="{payload.replace(chr(34), "&quot;")}"></div>'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_body
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_yc_workatastartup
+
+        jobs = _fetch_yc_workatastartup(["Engineer"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        assert "Staff Engineer" in desc
+        assert "FintechCo" in desc
+        assert "Backend engineer" in desc
+        assert "S23" in desc
+        assert "Payments rails for marketplaces" in desc
+        assert "$200K - $260K" in desc
+        # Honest about the limitation
+        assert "YC login" in desc
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    @patch("job_finder.sources.portal_search_source.time.sleep")
+    def test_synthesis_handles_missing_optional_fields(self, _mock_sleep, mock_get):
+        """When YC ships only title+company, description still builds without error."""
+        payload = (
+            '{"props":{"jobs":[{"id":7779,"title":"Engineer",'
+            '"companyName":"X","companySlug":"x"}]}}'
+        )
+        html_body = f'<div data-page="{payload.replace(chr(34), "&quot;")}"></div>'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_body
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_yc_workatastartup
+
+        jobs = _fetch_yc_workatastartup(["X"])
+        assert len(jobs) == 1
+        desc = jobs[0].description or ""
+        assert "Engineer" in desc
+        assert "X" in desc
+        # Honest closing line is always present
+        assert "YC login" in desc
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    @patch("job_finder.sources.portal_search_source.time.sleep")
+    def test_mojibake_repaired_in_location(self, _mock_sleep, mock_get):
+        """Per the shakedown: YC location field was the canonical mojibake site."""
+        payload = (
+            '{"props":{"jobs":[{"id":7780,"title":"DS",'
+            '"companyName":"FrCo","companySlug":"frco",'
+            '"location":"Paris, Île-de-France, FR",'
+            '"companyOneLiner":"French analytics shop","roleType":"DS"}]}}'
+        )
+        html_body = f'<div data-page="{payload.replace(chr(34), "&quot;")}"></div>'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_body
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_yc_workatastartup
+
+        jobs = _fetch_yc_workatastartup(["DS"])
+        assert len(jobs) == 1
+        # ftfy preserves clean unicode untouched
+        assert "Île-de-France" in (jobs[0].location or "")

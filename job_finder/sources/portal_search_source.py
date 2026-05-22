@@ -13,9 +13,12 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from typing import Protocol
 
 import requests
+from bs4 import BeautifulSoup
+from ftfy import fix_text
 
 from job_finder.models import Job
 
@@ -159,6 +162,17 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
 
     Supports server-side search via query param, so we make one request
     per keyword to avoid downloading the entire 100K+ listing catalog.
+
+    Stage 7.5 parse hygiene:
+      - description is raw HTML; we strip tags via BeautifulSoup before storage
+        so the scoring prompt sees clean prose, not <div>/<a>/<p> markup.
+      - truncate cap widened from 2000 -> 8000 chars to match the jd_full
+        eager-promote write width in job_finder/db/_jobs.py (post-strip the
+        actual char counts are well under this).
+      - posted_date populated from `pubDate` (Unix seconds).
+      - ftfy.fix_text applied to text fields; the source itself sometimes
+        serves mangled UTF-8 (e.g., `we\\u2019re` round-tripped through
+        cp1252 surfacing as U+FFFD / mojibake).
     """
     all_jobs: list[Job] = []
     seen_urls: set[str] = set()
@@ -180,8 +194,8 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
         listings = data.get("jobs", [])
 
         for item in listings:
-            title = item.get("title") or ""
-            company = item.get("companyName") or ""
+            title = _clean_text(item.get("title") or "")
+            company = _clean_text(item.get("companyName") or "")
             url = item.get("applicationLink") or ""
             if not title or not company:
                 continue
@@ -193,12 +207,15 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
                 Job(
                     title=title,
                     company=company,
-                    location=item.get("location") or "Remote",
+                    location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_himalayas",
                     source_url=url,
                     salary_min=_safe_int(item.get("minSalary")),
                     salary_max=_safe_int(item.get("maxSalary")),
-                    description=_truncate(item.get("description")),
+                    description=_truncate(
+                        _strip_html(item.get("description")), max_len=8000
+                    ),
+                    posted_date=_unix_to_datetime(item.get("pubDate")),
                 )
             )
 
@@ -282,6 +299,19 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
     but the pattern has been stable for years. Spike confirmed 2026-05-21.
     See plan Stage 2 / open question Q3-style "permission to drop if fragile";
     chose to ship rather than drop.
+
+    Stage 7.5 parse hygiene:
+      - The unauthenticated detail URL is gated (login wall, no data-page
+        attr on GET), so we cannot fetch the canonical JD body during
+        ingestion. We instead synthesize a structured description from the
+        listing-payload metadata (title / role type / company one-liner /
+        location / salary / batch / employment type). The synthesized text
+        exceeds the 200-char eager-promote threshold in
+        `job_finder/db/_jobs.py:174-180` so `jd_full` populates and the
+        row becomes scoreable on its metadata signal.
+      - ftfy.fix_text applied to text fields (YC sometimes ships mangled
+        UTF-8 in `location` for non-US offices).
+      - posted_date is not exposed on the listing payload; leave NULL.
     """
     import html as _html
     import json as _json
@@ -319,8 +349,8 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
             if job_id:
                 seen_ids.add(job_id)
 
-            title = item.get("title") or ""
-            company = item.get("companyName") or ""
+            title = _clean_text(item.get("title") or "")
+            company = _clean_text(item.get("companyName") or "")
             if not title or not company:
                 continue
 
@@ -333,12 +363,12 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
                 Job(
                     title=title,
                     company=company,
-                    location=item.get("location") or "Remote",
+                    location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_yc_workatastartup",
                     source_url=source_url,
                     salary_min=salary_min,
                     salary_max=salary_max,
-                    description=_truncate(item.get("companyOneLiner")),
+                    description=_synthesize_yc_description(item),
                 )
             )
 
@@ -807,10 +837,121 @@ def _parse_salary_string(s: str) -> tuple[int | None, int | None]:
 
 
 def _truncate(text: str | None, max_len: int = 2000) -> str | None:
-    """Truncate description to avoid storing massive HTML blobs."""
+    """Truncate description to avoid storing massive HTML blobs.
+
+    Default cap (2000) preserved for portals where the source already
+    truncates and the body was used verbatim. Himalayas passes
+    ``max_len=8000`` to match the ``jd_full`` eager-promote write width
+    in ``job_finder/db/_jobs.py``.
+    """
     if not text:
         return text
     return text[:max_len] if len(text) > max_len else text
+
+
+def _clean_text(text: str | None) -> str:
+    """Run ftfy on a free-text field; tolerant of None.
+
+    Repairs upstream mojibake (UTF-8 bytes mis-decoded as cp1252 then
+    re-encoded as UTF-8). Some portal sources (Himalayas, occasionally YC
+    location fields for non-US offices) ship pre-mangled bytes; ftfy is
+    the canonical Python remedy.
+    """
+    if not text:
+        return ""
+    return fix_text(text)
+
+
+def _strip_html(text: str | None) -> str:
+    """Strip HTML markup, returning plain text. Tolerant of None / non-strings.
+
+    Used by Himalayas, whose ``description`` field is raw HTML
+    (``<div>``, ``<p>``, ``<a>``, etc.). ftfy is applied after stripping
+    so the cleaner sees normalized text rather than markup.
+    """
+    if not text:
+        return ""
+    try:
+        soup = BeautifulSoup(text, "html.parser")
+        # get_text with a space separator keeps word boundaries intact
+        # across removed tags (e.g., "<b>Foo</b><i>Bar</i>" -> "Foo Bar"
+        # not "FooBar").
+        stripped = soup.get_text(separator=" ", strip=True)
+    except Exception:
+        # Defensive: if BS4 chokes on a pathological input, fall back
+        # to a regex-based tag-strip rather than dropping the row.
+        stripped = re.sub(r"<[^>]+>", " ", text)
+        stripped = re.sub(r"\s+", " ", stripped).strip()
+    return fix_text(stripped)
+
+
+def _synthesize_yc_description(item: dict) -> str:
+    """Build a structured description from a YC Inertia listing payload.
+
+    YC's detail URL requires login, so we can't fetch the canonical JD
+    body. The listing payload exposes useful metadata fields; we render
+    them into a stable, scoreable description that crosses the 200-char
+    ``jd_full`` eager-promote threshold in
+    ``job_finder/db/_jobs.py:174-180``.
+
+    The output is deliberately honest about being a metadata summary
+    rather than a JD — the final line tells the LLM scorer (and any
+    human reader) that the full JD lives behind a login wall.
+    """
+    title = _clean_text(item.get("title") or "")
+    company = _clean_text(item.get("companyName") or "")
+    one_liner = _clean_text(item.get("companyOneLiner") or "")
+    role_type = _clean_text(item.get("roleType") or "")
+    job_type = _clean_text(item.get("jobType") or "")
+    location = _clean_text(item.get("location") or "")
+    salary = _clean_text(item.get("salary") or "")
+    batch = _clean_text(item.get("companyBatch") or "")
+
+    parts: list[str] = []
+    header = title
+    if role_type:
+        header += f" — {role_type} role"
+    if company:
+        header += f" at {company}"
+    if batch:
+        header += f" ({batch} YC company)"
+    if header:
+        header += "."
+        parts.append(header)
+
+    if one_liner:
+        parts.append(f"Company overview: {one_liner}")
+
+    facts: list[str] = []
+    if location:
+        facts.append(f"Location: {location}")
+    if salary:
+        facts.append(f"Compensation: {salary}")
+    if job_type:
+        facts.append(f"Employment type: {job_type}")
+    if facts:
+        parts.append("\n".join(facts))
+
+    parts.append(
+        "(Posted via Work at a Startup; full job description requires YC login.)"
+    )
+    return "\n\n".join(parts)
+
+
+def _unix_to_datetime(value) -> datetime | None:
+    """Convert a Unix-seconds value to a UTC datetime, returning None on bad input."""
+    if value is None:
+        return None
+    try:
+        ts = int(value)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _detect_portal_from_url(url: str, portals: list[dict[str, str]]) -> str | None:
