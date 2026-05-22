@@ -11,6 +11,9 @@
     <p class="text-slate-400 text-sm mt-1">Configure job search preferences, sources, and scoring. Changes persist to config.yaml.</p>
   </div>
 
+  {# F1 — inbox-wiring system check tile #}
+  {% include "settings/_inbox_status_tile.html" %}
+
   <form action="{{ url_for('settings.save') }}" method="post" class="space-y-6">
     <input type="hidden" name="_config_mtime" value="{{ config_mtime | default(0) }}">
 

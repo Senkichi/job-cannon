@@ -1,5 +1,6 @@
 """Dashboard blueprint — overview stats, activity feed, pipeline summary."""
 
+import logging
 import time
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
@@ -17,6 +18,8 @@ from job_finder.web.claude_client import get_cost_stats, is_anthropic_available
 from job_finder.web.db_helpers import get_db
 from job_finder.web.exclusion_filter import count_scorable
 from job_finder.web.model_provider import tier_has_configured_provider
+
+logger = logging.getLogger(__name__)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
@@ -106,7 +109,9 @@ def _cached_tier_available(tier: str, config: dict) -> bool:
         except ValueError:
             resolved = None
         if resolved is not None:
-            providers = [resolved["provider"]] + [e["provider"] for e in resolved["fallback_chain"]]
+            providers = [resolved["provider"]] + [
+                e["provider"] for e in resolved["fallback_chain"]
+            ]
             if "anthropic" in providers:
                 _provider_cache[tier] = (True, now)
                 return True
@@ -177,6 +182,7 @@ def index():
     pipeline_summary = get_pipeline_summary(conn)
     pending_detections = get_pending_detections(conn)
     pipeline_events = get_recent_pipeline_events(conn, limit=10)
+    inbox_banner = _get_inbox_banner(config, conn)
 
     return render_template(
         "dashboard/index.html",
@@ -187,7 +193,31 @@ def index():
         pipeline_summary=pipeline_summary,
         pending_detections=pending_detections,
         pipeline_events=pipeline_events,
+        inbox_banner=inbox_banner,
     )
+
+
+def _get_inbox_banner(config: dict, conn):
+    """Return banner context if inbox wiring has been RED for ≥7 days, else None.
+
+    Uses a 7-day window on `run_inbox_check`. The function only returns a banner
+    when both `status == 'red'` AND the source is configured — short outages and
+    unconfigured installs do not banner. Wrapped in try/except so a check failure
+    never breaks the dashboard.
+    """
+    try:
+        from job_finder.web.onboarding.inbox_check import run_inbox_check
+
+        result = run_inbox_check(config, conn, window_hours=24 * 7)
+        if result.status == "red" and result.source_kind != "none":
+            return {
+                "summary": result.summary,
+                "reason": result.reason,
+            }
+        return None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("inbox banner check failed: %s", type(exc).__name__)
+        return None
 
 
 @dashboard_bp.route("/stats", strict_slashes=False)

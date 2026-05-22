@@ -28,6 +28,8 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
 )
+from job_finder.web.db_helpers import get_db
+from job_finder.web.onboarding.inbox_check import run_inbox_check
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +77,51 @@ def index():
         )
     }
 
+    # F1: inbox-wiring system check — auth probe + email_parse_log activity window.
+    inbox_status = _safe_run_inbox_check(config)
+
     return render_template(
         "settings/index.html",
         config=config,
         config_mtime=config_mtime,
         secret_set=secret_set,
+        inbox_status=inbox_status,
     )
+
+
+@settings_bp.route("/inbox-check", strict_slashes=False)
+def inbox_check_fragment():
+    """HTMX fragment — re-run the inbox-wiring check on demand.
+
+    Returns the same tile rendered standalone so HTMX can swap it in place.
+    """
+    try:
+        config = load_config(_CONFIG_PATH)
+    except FileNotFoundError:
+        config = current_app.config.get("JF_CONFIG", {})
+    inbox_status = _safe_run_inbox_check(config)
+    return render_template(
+        "settings/_inbox_status_tile.html",
+        inbox_status=inbox_status,
+    )
+
+
+def _safe_run_inbox_check(config: dict):
+    """Run `run_inbox_check` with the request-scoped DB connection.
+
+    Catches and logs any failure so the Settings page never 500s because the
+    check raised. Returns None if a connection isn't available (e.g. in tests
+    without a configured DB_PATH).
+    """
+    try:
+        db_path = current_app.config.get("DB_PATH")
+        if not db_path:
+            return None
+        conn = get_db(db_path)
+        return run_inbox_check(config, conn)
+    except Exception as exc:
+        logger.warning("inbox_check failed in settings.index: %s", type(exc).__name__)
+        return None
 
 
 @settings_bp.route("/save", methods=["POST"], strict_slashes=False)

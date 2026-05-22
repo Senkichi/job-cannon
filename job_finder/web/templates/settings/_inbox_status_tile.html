@@ -1,0 +1,52 @@
+{# F1 — Inbox-wiring status tile. Renders either standalone (HTMX fragment) or inline (settings index).
+   Status semantics: green | yellow | red | unconfigured | None (failed to run).
+   Color scheme mirrors the rest of the Settings page (slate-800 cards, accent dot). #}
+<div id="inbox-status-tile" class="bg-slate-800 rounded-lg overflow-hidden">
+  <div class="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      {% if not inbox_status %}
+        <span class="w-2 h-2 rounded-full bg-slate-500 inline-block"></span>
+        <span class="font-semibold text-slate-100">Inbox wiring</span>
+      {% elif inbox_status.status == 'green' %}
+        <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+        <span class="font-semibold text-slate-100">Inbox wiring — healthy</span>
+      {% elif inbox_status.status == 'yellow' %}
+        <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+        <span class="font-semibold text-slate-100">Inbox wiring — parsing trouble</span>
+      {% elif inbox_status.status == 'red' %}
+        <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+        <span class="font-semibold text-slate-100">Inbox wiring — not delivering</span>
+      {% else %}
+        <span class="w-2 h-2 rounded-full bg-slate-500 inline-block"></span>
+        <span class="font-semibold text-slate-100">Inbox wiring — unconfigured</span>
+      {% endif %}
+    </div>
+    <button type="button"
+            hx-get="{{ url_for('settings.inbox_check_fragment') }}"
+            hx-target="#inbox-status-tile"
+            hx-swap="outerHTML"
+            class="text-xs text-violet-400 hover:text-violet-300 transition-colors">
+      Re-run check
+    </button>
+  </div>
+  <div class="px-6 py-4 space-y-2">
+    {% if not inbox_status %}
+      <p class="text-sm text-slate-400">Could not run the check (no DB connection).</p>
+    {% else %}
+      <p class="text-sm text-slate-200">{{ inbox_status.summary }}</p>
+      <p class="text-xs text-slate-400 leading-relaxed">{{ inbox_status.reason }}</p>
+      {% if inbox_status.gmail_auth %}
+        <div class="text-xs text-slate-500 pt-2 border-t border-slate-700">
+          Gmail: {% if inbox_status.gmail_auth.ok %}<span class="text-emerald-400">OK</span>{% else %}<span class="text-red-400">{{ inbox_status.gmail_auth.error_kind }}</span>{% endif %}
+          — {{ inbox_status.gmail_auth.message }}
+        </div>
+      {% endif %}
+      {% if inbox_status.imap_auth %}
+        <div class="text-xs text-slate-500{% if not inbox_status.gmail_auth %} pt-2 border-t border-slate-700{% endif %}">
+          IMAP: {% if inbox_status.imap_auth.ok %}<span class="text-emerald-400">OK</span>{% else %}<span class="text-red-400">{{ inbox_status.imap_auth.error_kind }}</span>{% endif %}
+          — {{ inbox_status.imap_auth.message }}
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
