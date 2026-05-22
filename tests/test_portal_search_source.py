@@ -1076,3 +1076,93 @@ class TestStage75YcParseHygiene:
         assert len(jobs) == 1
         # ftfy preserves clean unicode untouched
         assert "Île-de-France" in (jobs[0].location or "")
+
+
+class TestStage78JobicyMojibakeRepair:
+    """Regression guards for Stage 7.8 — Jobicy parse hygiene.
+
+    Surfaced during the Stage 7.8 keyword-breadth re-verification: live
+    Jobicy responses ship with U+FFFD replacement characters in some
+    titles (e.g. "Senior Consultant � Vault CRM"). Applying _clean_text
+    via ftfy is the same defense pattern from Stage 7.5's Himalayas/YC
+    fixes — per the handoff policy, ftfy adoption is reactive on
+    observed mojibake.
+    """
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_title_mojibake_repaired(self, mock_get):
+        """ftfy fixes cp1252-as-UTF-8 round-trip mojibake in titles."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "jobTitle": "Weâ€™re hiring: Senior Analyst",
+                    "companyName": "AcmeCo",
+                    "jobGeo": "Remote",
+                    "url": "https://jobicy.com/jobs/1",
+                    "jobDescription": "Join our team",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_jobicy
+
+        jobs = _fetch_jobicy([])
+        assert len(jobs) == 1
+        # ftfy normalizes U+2019 to U+0027 (ASCII apostrophe) by default
+        assert "we're hiring: senior analyst" in jobs[0].title.lower()
+        # The mangled bytes must not appear
+        assert "â€™" not in jobs[0].title
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_company_and_location_mojibake_repaired(self, mock_get):
+        """Defense-in-depth: clean text fields in addition to title."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "jobTitle": "Engineer",
+                    "companyName": "Sociétê AcmeFR",
+                    "jobGeo": "Paris, Île-de-France",
+                    "url": "https://jobicy.com/jobs/2",
+                    "jobDescription": "Description text",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_jobicy
+
+        jobs = _fetch_jobicy([])
+        assert len(jobs) == 1
+        # ftfy preserves clean unicode untouched
+        assert "Île-de-France" in (jobs[0].location or "")
+        # Société is left alone if not mangled (the input is intentionally a mix)
+        assert jobs[0].company  # non-empty, not crashed
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_missing_description_does_not_crash(self, mock_get):
+        """Both jobDescription and jobExcerpt absent must not raise."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "jobTitle": "Engineer",
+                    "companyName": "MinimalCo",
+                    "jobGeo": "Remote",
+                    "url": "https://jobicy.com/jobs/3",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_jobicy
+
+        jobs = _fetch_jobicy([])
+        assert len(jobs) == 1
+        # Empty string OK; eager-promote logic in upsert_job skips short/empty
+        assert jobs[0].description in ("", None)

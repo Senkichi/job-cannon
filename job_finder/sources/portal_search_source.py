@@ -261,8 +261,8 @@ def _fetch_jobicy(keywords: list[str]) -> list[Job]:
     jobs: list[Job] = []
 
     for item in listings:
-        title = item.get("jobTitle") or ""
-        company = item.get("companyName") or ""
+        title = _clean_text(item.get("jobTitle") or "")
+        company = _clean_text(item.get("companyName") or "")
         if not title or not company:
             continue
 
@@ -274,12 +274,14 @@ def _fetch_jobicy(keywords: list[str]) -> list[Job]:
             Job(
                 title=title,
                 company=company,
-                location=item.get("jobGeo") or "Remote",
+                location=_clean_text(item.get("jobGeo") or "") or "Remote",
                 source="portal_jobicy",
                 source_url=item.get("url") or "",
                 salary_min=_safe_int(item.get("annualSalaryMin")),
                 salary_max=_safe_int(item.get("annualSalaryMax")),
-                description=_truncate(item.get("jobDescription") or item.get("jobExcerpt")),
+                description=_truncate(
+                    _clean_text(item.get("jobDescription") or item.get("jobExcerpt") or "")
+                ),
             )
         )
 
