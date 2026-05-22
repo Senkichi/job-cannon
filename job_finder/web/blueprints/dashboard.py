@@ -198,18 +198,42 @@ def index():
 
 
 def _get_inbox_banner(config: dict, conn):
-    """Return banner context if inbox wiring has been RED for ≥7 days, else None.
+    """Return banner context if inbox wiring is broken, else None.
 
-    Uses a 7-day window on `run_inbox_check`. The function only returns a banner
-    when both `status == 'red'` AND the source is configured — short outages and
-    unconfigured installs do not banner. Wrapped in try/except so a check failure
-    never breaks the dashboard.
+    Trigger rule (tightened 2026-05-22 per user choice — was 168h status==red):
+
+    1. Any configured source's auth probe fails (Gmail OAuth or IMAP login).
+       Even one failed source banners, even if the other source is healthy
+       and activity is fine. Auth failure is high-signal — it never resolves
+       on its own.
+    2. OR ``run_inbox_check(window_hours=24).status == 'red'`` — i.e. all
+       configured sources' auth failed, or zero alert emails in the last
+       24 hours. The 24h window catches "ingestion stopped" within one day
+       of breakage instead of the prior 7-day buffer.
+
+    Unconfigured installs (source_kind == 'none') never banner — there's
+    nothing to be broken. Wrapped in try/except so a check failure never
+    breaks the dashboard.
     """
     try:
         from job_finder.web.onboarding.inbox_check import run_inbox_check
 
-        result = run_inbox_check(config, conn, window_hours=24 * 7)
-        if result.status == "red" and result.source_kind != "none":
+        result = run_inbox_check(config, conn, window_hours=24)
+        if result.source_kind == "none":
+            return None
+
+        any_auth_failed = (result.gmail_auth is not None and not result.gmail_auth.ok) or (
+            result.imap_auth is not None and not result.imap_auth.ok
+        )
+
+        if result.status == "red" or any_auth_failed:
+            if any_auth_failed and result.status != "red":
+                failed = result.gmail_auth if (result.gmail_auth and not result.gmail_auth.ok) else result.imap_auth
+                source_name = "Gmail" if (result.gmail_auth and not result.gmail_auth.ok) else "IMAP"
+                return {
+                    "summary": f"{source_name} authentication failed",
+                    "reason": failed.message if failed else "Auth probe returned not-ok with no message.",
+                }
             return {
                 "summary": result.summary,
                 "reason": result.reason,
