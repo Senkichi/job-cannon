@@ -271,6 +271,17 @@ def _parse_form_to_config(form) -> dict:
         """Check if a form field was actually submitted."""
         return key in form
 
+    def _checked(key):
+        """True iff a checkbox is checked in the submitted form.
+
+        Form templates emit a hidden empty input AND a real checkbox under the
+        same name (so an absent checkbox still posts the field). Werkzeug's
+        ``form[key]`` returns the first matching value — the hidden's empty
+        string — which made the legacy ``form[key] == "on"`` always False even
+        when the box was checked. Use this helper instead.
+        """
+        return "on" in form.getlist(key)
+
     config = {}
 
     # --- Profile ---
@@ -298,7 +309,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: Gmail ---
     gmail = {}
     if _has("gmail_enabled"):
-        gmail["enabled"] = form["gmail_enabled"] == "on"
+        gmail["enabled"] = _checked("gmail_enabled")
     if _has("gmail_lookback_days"):
         gmail["lookback_days"] = safe_int(form["gmail_lookback_days"], DEFAULT_LOOKBACK_DAYS)
     senders = {}
@@ -314,7 +325,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: SerpAPI ---
     serpapi = {}
     if _has("serpapi_enabled"):
-        serpapi["enabled"] = form["serpapi_enabled"] == "on"
+        serpapi["enabled"] = _checked("serpapi_enabled")
     # Commit 3.5: only include api_key when the user typed something. The
     # password input now renders with value="" + a (set)/(not set) placeholder,
     # so an empty submission means "leave existing secret alone" — including
@@ -331,7 +342,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: Thordata (Stage 6 — parser was missing pre-2026-05-22) ---
     thordata = {}
     if _has("thordata_enabled"):
-        thordata["enabled"] = form["thordata_enabled"] == "on"
+        thordata["enabled"] = _checked("thordata_enabled")
     if _has("thordata_api_key") and form["thordata_api_key"]:
         thordata["api_key"] = form["thordata_api_key"]
     if _has("thordata_max_age_days"):
@@ -344,7 +355,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: DataForSEO (Stage 6 — NEW tile) ---
     dataforseo = {}
     if _has("dataforseo_enabled"):
-        dataforseo["enabled"] = form["dataforseo_enabled"] == "on"
+        dataforseo["enabled"] = _checked("dataforseo_enabled")
     if _has("dataforseo_api_key") and form["dataforseo_api_key"]:
         dataforseo["api_key"] = form["dataforseo_api_key"]
     if _has("dataforseo_max_age_days"):
@@ -365,7 +376,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: Google CSE (Stage 6 — NEW tile) ---
     google_cse = {}
     if _has("google_cse_enabled"):
-        google_cse["enabled"] = form["google_cse_enabled"] == "on"
+        google_cse["enabled"] = _checked("google_cse_enabled")
     if _has("google_cse_api_key") and form["google_cse_api_key"]:
         google_cse["api_key"] = form["google_cse_api_key"]
     if _has("google_cse_cse_id") and form["google_cse_cse_id"]:
@@ -376,7 +387,7 @@ def _parse_form_to_config(form) -> dict:
     # --- Sources: JSearch ---
     jsearch = {}
     if _has("jsearch_enabled"):
-        jsearch["enabled"] = form["jsearch_enabled"] == "on"
+        jsearch["enabled"] = _checked("jsearch_enabled")
     if _has("jsearch_rapidapi_key") and form["jsearch_rapidapi_key"]:
         jsearch["rapidapi_key"] = form["jsearch_rapidapi_key"]
     if jsearch:
@@ -387,20 +398,20 @@ def _parse_form_to_config(form) -> dict:
     # USAJobs/Adzuna/Jooble are routed through _move_secret_to_keyring in save().
     portal_search = {}
     if _has("portal_search_enabled"):
-        portal_search["enabled"] = form["portal_search_enabled"] == "on"
+        portal_search["enabled"] = _checked("portal_search_enabled")
     if _has("portal_search_keywords"):
         portal_search["keywords"] = lines_to_list(form["portal_search_keywords"])
     if _has("portal_search_max_serp_queries"):
         portal_search["max_serp_queries"] = safe_int(form["portal_search_max_serp_queries"], 30)
     # Keyless sub-portals
     if _has("portal_search_jobicy_enabled"):
-        portal_search["jobicy"] = {"enabled": form["portal_search_jobicy_enabled"] == "on"}
+        portal_search["jobicy"] = {"enabled": _checked("portal_search_jobicy_enabled")}
     if _has("portal_search_yc_enabled"):
-        portal_search["yc_workatastartup"] = {"enabled": form["portal_search_yc_enabled"] == "on"}
+        portal_search["yc_workatastartup"] = {"enabled": _checked("portal_search_yc_enabled")}
     # USAJobs (toggle + email + auth key)
     usajobs = {}
     if _has("portal_search_usajobs_enabled"):
-        usajobs["enabled"] = form["portal_search_usajobs_enabled"] == "on"
+        usajobs["enabled"] = _checked("portal_search_usajobs_enabled")
     if _has("portal_search_usajobs_user_agent_email") and form["portal_search_usajobs_user_agent_email"]:
         usajobs["user_agent_email"] = form["portal_search_usajobs_user_agent_email"]
     if _has("portal_search_usajobs_authorization_key") and form["portal_search_usajobs_authorization_key"]:
@@ -410,7 +421,7 @@ def _parse_form_to_config(form) -> dict:
     # Adzuna (toggle + app_id + app_key + country)
     adzuna = {}
     if _has("portal_search_adzuna_enabled"):
-        adzuna["enabled"] = form["portal_search_adzuna_enabled"] == "on"
+        adzuna["enabled"] = _checked("portal_search_adzuna_enabled")
     if _has("portal_search_adzuna_app_id") and form["portal_search_adzuna_app_id"]:
         adzuna["app_id"] = form["portal_search_adzuna_app_id"]
     if _has("portal_search_adzuna_app_key") and form["portal_search_adzuna_app_key"]:
@@ -424,7 +435,7 @@ def _parse_form_to_config(form) -> dict:
     # Jooble (toggle + api_key)
     jooble = {}
     if _has("portal_search_jooble_enabled"):
-        jooble["enabled"] = form["portal_search_jooble_enabled"] == "on"
+        jooble["enabled"] = _checked("portal_search_jooble_enabled")
     if _has("portal_search_jooble_api_key") and form["portal_search_jooble_api_key"]:
         jooble["api_key"] = form["portal_search_jooble_api_key"]
     if jooble:
@@ -487,18 +498,18 @@ def _parse_form_to_config(form) -> dict:
     # --- Notifications (checkboxes with hidden companion inputs) ---
     notifications = {}
     if _has("notification_high_score"):
-        notifications["high_score"] = form["notification_high_score"] == "on"
+        notifications["high_score"] = _checked("notification_high_score")
     if _has("notification_pipeline_change"):
-        notifications["pipeline_change"] = form["notification_pipeline_change"] == "on"
+        notifications["pipeline_change"] = _checked("notification_pipeline_change")
     if _has("notification_budget_alert"):
-        notifications["budget_alert"] = form["notification_budget_alert"] == "on"
+        notifications["budget_alert"] = _checked("notification_budget_alert")
     if notifications:
         config["notifications"] = notifications
 
     # --- ATS ---
     ats = {}
     if _has("ats_scan_enabled"):
-        ats["scan_enabled"] = form["ats_scan_enabled"] == "on"
+        ats["scan_enabled"] = _checked("ats_scan_enabled")
     if _has("ats_scan_days"):
         ats["scan_days"] = form["ats_scan_days"]
     if _has("ats_scan_hour"):

@@ -775,3 +775,147 @@ class TestSettingsStage7FreePortalsTile:
         with open(settings_app._test_config_path, encoding="utf-8") as f:
             saved = yaml.safe_load(f)
         assert saved["sources"]["portal_search"]["adzuna"]["country"] == "gb"
+
+
+class TestSettingsCheckboxBrowserShape:
+    """Discovery #4 (2026-05-22 Stage 7.3 shakedown): the settings form
+    template emits a hidden empty input AND a real checkbox under the same
+    name, so unchecked boxes still post the field. Werkzeug ``form[name]``
+    returns the FIRST matching value — the hidden's empty string — which
+    made the legacy ``form[name] == "on"`` pattern always evaluate False
+    even when the box was checked.
+
+    Browser-driven E2E surfaced the bug; existing Stage 1–7 tests missed it
+    because they only POST ``{name: "on"}`` without the hidden pair.
+
+    These regression tests POST the actual browser shape (list of tuples
+    with duplicate keys) for every checkbox in the form and confirm True
+    persists. Fix lives in ``settings.py::_checked``.
+    """
+
+    def _browser_post(self, settings_client, fields):
+        """POST fields with duplicate-key form encoding.
+
+        ``fields`` is a list of (name, value) tuples. Always includes the
+        profile required-fields so the save handler doesn't reject. Wraps
+        in a MultiDict so Werkzeug preserves duplicate keys.
+        """
+        from werkzeug.datastructures import MultiDict
+
+        base = [
+            ("target_titles", "Staff Data Scientist\nSenior Data Scientist"),
+            ("profile_skills", "Python\nSQL\nSpark"),
+        ]
+        return settings_client.post(
+            "/settings/save", data=MultiDict(base + list(fields))
+        )
+
+    def test_gmail_enabled_persists_via_browser_shape(
+        self, settings_client, settings_app
+    ):
+        resp = self._browser_post(
+            settings_client,
+            [("gmail_enabled", ""), ("gmail_enabled", "on")],
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        assert saved["sources"]["gmail"]["enabled"] is True
+
+    def test_gmail_enabled_unchecked_via_browser_shape(
+        self, settings_client, settings_app
+    ):
+        # Only the hidden submits when the box is unchecked.
+        resp = self._browser_post(
+            settings_client,
+            [("gmail_enabled", "")],
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        assert saved["sources"]["gmail"]["enabled"] is False
+
+    def test_portal_search_master_persists_via_browser_shape(
+        self, settings_client, settings_app
+    ):
+        resp = self._browser_post(
+            settings_client,
+            [
+                ("portal_search_enabled", ""),
+                ("portal_search_enabled", "on"),
+                ("portal_search_jobicy_enabled", ""),
+                ("portal_search_jobicy_enabled", "on"),
+                ("portal_search_yc_enabled", ""),
+                ("portal_search_yc_enabled", "on"),
+            ],
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        ps = saved["sources"]["portal_search"]
+        assert ps["enabled"] is True
+        assert ps["jobicy"]["enabled"] is True
+        assert ps["yc_workatastartup"]["enabled"] is True
+
+    def test_all_checkbox_names_persist_true_via_browser_shape(
+        self, settings_client, settings_app
+    ):
+        """Exhaustive: every checkbox in the form (16 names) must persist
+        True when posted in the browser's hidden+checkbox shape.
+        """
+        names_and_paths = [
+            ("gmail_enabled", ["sources", "gmail", "enabled"]),
+            ("serpapi_enabled", ["sources", "serpapi", "enabled"]),
+            ("thordata_enabled", ["sources", "thordata", "enabled"]),
+            ("dataforseo_enabled", ["sources", "dataforseo", "enabled"]),
+            ("google_cse_enabled", ["sources", "google_cse", "enabled"]),
+            ("jsearch_enabled", ["sources", "jsearch", "enabled"]),
+            ("portal_search_enabled", ["sources", "portal_search", "enabled"]),
+            (
+                "portal_search_jobicy_enabled",
+                ["sources", "portal_search", "jobicy", "enabled"],
+            ),
+            (
+                "portal_search_yc_enabled",
+                ["sources", "portal_search", "yc_workatastartup", "enabled"],
+            ),
+            (
+                "portal_search_usajobs_enabled",
+                ["sources", "portal_search", "usajobs", "enabled"],
+            ),
+            (
+                "portal_search_adzuna_enabled",
+                ["sources", "portal_search", "adzuna", "enabled"],
+            ),
+            (
+                "portal_search_jooble_enabled",
+                ["sources", "portal_search", "jooble", "enabled"],
+            ),
+            (
+                "notification_high_score",
+                ["notifications", "high_score"],
+            ),
+            (
+                "notification_pipeline_change",
+                ["notifications", "pipeline_change"],
+            ),
+            (
+                "notification_budget_alert",
+                ["notifications", "budget_alert"],
+            ),
+            ("ats_scan_enabled", ["ats", "scan_enabled"]),
+        ]
+        fields = []
+        for name, _ in names_and_paths:
+            fields.append((name, ""))
+            fields.append((name, "on"))
+        resp = self._browser_post(settings_client, fields)
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        for name, path in names_and_paths:
+            node = saved
+            for key in path:
+                assert key in node, f"missing path {path} for {name}: got {saved}"
+                node = node[key]
+            assert node is True, f"{name} (path {path}) persisted as {node!r}, expected True"
