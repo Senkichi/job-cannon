@@ -144,7 +144,9 @@ def run_ingestion(
 
         # --- Additional sources ---
         thordata_jobs = _fetch_thordata(config, summary)
-        portal_jobs = _fetch_portal_search(config, summary, include_cse=include_cse)
+        portal_jobs = _fetch_portal_search(
+            config, summary, include_cse=include_cse, db_path=db_path
+        )
 
         # --- DataForSEO: collect results (blocks until ready or timeout) ---
         dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)

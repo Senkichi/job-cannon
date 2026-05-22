@@ -4,14 +4,17 @@ Free substitute for the DataForSEO `site:portal.com keyword` query path. CSE has
 a hard 100 queries/day quota on the free tier; this module enforces a 95-query
 defense-in-depth gate so users don't get surprised by a 429 from Google.
 
-Quota tracking is in-process for this iteration. The PLAN.md acceptance criterion
-("Quota gate trips at >=95 queries with the documented warning log") only
-requires a working gate, not the DB-backed counter that the load-bearing
-decision §8 sketches. Once `ingestion_runner._fetch_portal_search` is wired to
-this backend (deferred — see HANDOFF.md), the counter should move to
-`scoring_costs(provider='google_cse', cost_usd=0)` so it survives restarts. For
-now the in-process counter is sufficient because the ingestion runner does not
-yet exercise this backend.
+**Quota tracking** (F2, 2026-05-22):
+
+When ``db_path`` is supplied at construction, each query write a zero-cost row
+to ``scoring_costs`` (``provider='google_cse'``, ``purpose='cse_query'``,
+``cost_usd=0``) and the day-count is read back from the same table with a
+``DATE(timestamp)=DATE('now')`` filter. This survives Flask restarts — the
+original in-process counter reset to 0 every boot, which on a long-uptime
+install could let the same calendar day burn through >100 queries by accident.
+
+When ``db_path`` is ``None`` (tests, ad-hoc usage from a CLI / REPL) the source
+falls back to the in-process counter. Same semantics, no persistence.
 
 The shape matches DataForSEOSource just enough that `fetch_serp_portals` can
 swap backends: a single `fetch_jobs(queries)` entry point taking
@@ -22,7 +25,8 @@ CSE has no batch endpoint, so each query is one round-trip.
 from __future__ import annotations
 
 import logging
-from datetime import date
+import sqlite3
+from datetime import date, datetime
 
 import requests
 
@@ -38,6 +42,13 @@ _USER_AGENT = "Mozilla/5.0 (compatible; JobCannon/1.0)"
 # concurrent calls from the same install (e.g. a manual benchmark run while a
 # scheduled ingest is mid-flight) can't blow past the ceiling.
 _QUOTA_LIMIT_PER_DAY = 95
+
+# scoring_costs row identifier for CSE quota events. provider='google_cse' is
+# already excluded from cost_gate spend sums via claude_client.FREE_PROVIDERS;
+# cost_usd is always 0 — these rows only exist as a quota ledger.
+_PROVIDER_NAME = "google_cse"
+_PURPOSE_NAME = "cse_query"
+_MODEL_NAME = "cse_query"
 
 
 class GoogleCSESource:
@@ -55,10 +66,15 @@ class GoogleCSESource:
         cse_id: str,
         *,
         quota_limit_per_day: int = _QUOTA_LIMIT_PER_DAY,
+        db_path: str | None = None,
     ):
         self._api_key = api_key
         self._cse_id = cse_id
         self._quota_limit = quota_limit_per_day
+        self._db_path = db_path
+        # In-process fallback (used only when ``db_path`` is None — tests +
+        # CLI usage). When ``db_path`` is set the DB ledger is authoritative
+        # and these fields are not read.
         self._quota_used = 0
         self._quota_day = date.today()
 
@@ -87,11 +103,12 @@ class GoogleCSESource:
         seen_urls: set[str] = set()
 
         for entry in queries:
-            if self._quota_used >= self._quota_limit:
+            used = self._current_quota_used()
+            if used >= self._quota_limit:
                 logger.warning(
                     "CSE quota nearly exhausted (%d/%d used today); skipping "
                     "remaining site: queries",
-                    self._quota_used,
+                    used,
                     self._quota_limit,
                 )
                 break
@@ -112,7 +129,7 @@ class GoogleCSESource:
                     headers={"User-Agent": _USER_AGENT},
                     timeout=_REQUEST_TIMEOUT,
                 )
-                self._quota_used += 1
+                self._record_quota_use()
                 resp.raise_for_status()
                 payload = resp.json()
             except Exception as exc:
@@ -140,15 +157,72 @@ class GoogleCSESource:
                     )
                 )
 
+        final_used = self._current_quota_used()
         logger.info(
             "CSE: %d queries used today (%d remaining), %d jobs returned",
-            self._quota_used,
-            max(0, self._quota_limit - self._quota_used),
+            final_used,
+            max(0, self._quota_limit - final_used),
             len(all_jobs),
         )
         return all_jobs
 
+    def _current_quota_used(self) -> int:
+        """Return today's CSE query count from whichever ledger is active."""
+        if self._db_path is None:
+            return self._quota_used
+        try:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                row = conn.execute(
+                    """SELECT COUNT(*) FROM scoring_costs
+                       WHERE provider=? AND DATE(timestamp)=DATE('now', 'localtime')""",
+                    (_PROVIDER_NAME,),
+                ).fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.warning(
+                "CSE quota DB read failed (%s); falling back to in-process counter",
+                type(exc).__name__,
+            )
+            return self._quota_used
+
+    def _record_quota_use(self) -> None:
+        """Append a quota-ledger row to scoring_costs, or bump the in-process counter."""
+        if self._db_path is None:
+            self._quota_used += 1
+            return
+        try:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                conn.execute(
+                    """INSERT INTO scoring_costs
+                       (job_id, purpose, model, input_tokens, output_tokens,
+                        cost_usd, timestamp, provider)
+                       VALUES (NULL, ?, ?, 0, 0, 0, ?, ?)""",
+                    (
+                        _PURPOSE_NAME,
+                        _MODEL_NAME,
+                        datetime.now().isoformat(),
+                        _PROVIDER_NAME,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.warning(
+                "CSE quota DB write failed (%s); bumping in-process counter as fallback",
+                type(exc).__name__,
+            )
+            self._quota_used += 1
+
     def _roll_quota_if_new_day(self) -> None:
+        """In-process counter roll-over only. DB-backed path is calendar-correct
+        by virtue of ``DATE(timestamp)=DATE('now', 'localtime')`` in the query."""
+        if self._db_path is not None:
+            return
         today = date.today()
         if today != self._quota_day:
             self._quota_day = today

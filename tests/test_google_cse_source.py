@@ -9,7 +9,7 @@ Coverage:
 - _split_title_company helper
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from job_finder.sources.google_cse_source import (
@@ -217,9 +217,7 @@ class TestQuotaGate:
         # Only the first 3 calls go through.
         assert mock_get.call_count == 3
         # Warning logged when 4th query is attempted.
-        assert any(
-            "CSE quota nearly exhausted" in rec.getMessage() for rec in caplog.records
-        )
+        assert any("CSE quota nearly exhausted" in rec.getMessage() for rec in caplog.records)
 
     @patch("job_finder.sources.google_cse_source.requests.get")
     def test_quota_persists_across_fetch_calls_same_day(self, mock_get):
@@ -254,3 +252,159 @@ class TestQuotaGate:
         # Sanity check on the documented defense-in-depth threshold.
         src = GoogleCSESource(api_key="k", cse_id="cx")
         assert src._quota_limit == 95
+
+
+# ---------------------------------------------------------------------------
+# F2 — DB-backed quota counter (2026-05-22)
+# ---------------------------------------------------------------------------
+
+import sqlite3 as _sqlite3
+
+
+def _make_quota_db(tmp_path):
+    """Create a minimal scoring_costs table matching m001 + m018."""
+    db_path = tmp_path / "jobs.db"
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute(
+        """CREATE TABLE scoring_costs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT,
+            purpose TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
+            cost_usd REAL DEFAULT 0.0,
+            timestamp TEXT NOT NULL,
+            provider TEXT DEFAULT 'anthropic'
+        )"""
+    )
+    conn.commit()
+    conn.close()
+    return str(db_path)
+
+
+class TestDbBackedQuota:
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_each_query_inserts_a_zero_cost_row(self, mock_get, tmp_path):
+        """Every CSE call must append a (provider='google_cse', cost_usd=0) row."""
+        db_path = _make_quota_db(tmp_path)
+        mock_get.return_value = _make_cse_response([_make_item()])
+
+        src = GoogleCSESource(api_key="k", cse_id="cx", db_path=db_path)
+        src.fetch_jobs(
+            [
+                {"query": "q1", "location": ""},
+                {"query": "q2", "location": ""},
+                {"query": "q3", "location": ""},
+            ]
+        )
+
+        conn = _sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT COUNT(*), SUM(cost_usd) FROM scoring_costs WHERE provider='google_cse'"
+        ).fetchone()
+        conn.close()
+        assert row[0] == 3
+        assert row[1] == 0  # always zero-cost rows
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_db_count_survives_new_source_instance(self, mock_get, tmp_path):
+        """Restart simulation: a fresh GoogleCSESource sees prior day's count via DB."""
+        db_path = _make_quota_db(tmp_path)
+        mock_get.return_value = _make_cse_response([])
+
+        # Run 1 — consume 2 of a 2-cap.
+        src1 = GoogleCSESource(api_key="k", cse_id="cx", db_path=db_path, quota_limit_per_day=2)
+        src1.fetch_jobs([{"query": "a", "location": ""}, {"query": "b", "location": ""}])
+        assert mock_get.call_count == 2
+
+        # Run 2 — fresh instance (simulates Flask restart). Cap is 2, DB already
+        # has 2 rows for today, so no more queries should fire.
+        src2 = GoogleCSESource(api_key="k", cse_id="cx", db_path=db_path, quota_limit_per_day=2)
+        src2.fetch_jobs([{"query": "c", "location": ""}])
+        assert mock_get.call_count == 2
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_only_today_rows_count(self, mock_get, tmp_path):
+        """Yesterday's rows must not count against today's quota."""
+        db_path = _make_quota_db(tmp_path)
+        mock_get.return_value = _make_cse_response([])
+
+        # Pre-seed 5 rows with yesterday's timestamp.
+        yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+        conn = _sqlite3.connect(db_path)
+        for _ in range(5):
+            conn.execute(
+                "INSERT INTO scoring_costs (purpose, model, cost_usd, timestamp, provider)"
+                " VALUES (?, ?, 0, ?, ?)",
+                ("cse_query", "cse_query", yesterday, "google_cse"),
+            )
+        conn.commit()
+        conn.close()
+
+        # Cap is 2. Today's count should be 0 → first 2 queries fire.
+        src = GoogleCSESource(api_key="k", cse_id="cx", db_path=db_path, quota_limit_per_day=2)
+        src.fetch_jobs([{"query": f"q{i}", "location": ""} for i in range(4)])
+        assert mock_get.call_count == 2
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_other_providers_not_counted(self, mock_get, tmp_path):
+        """anthropic/openrouter rows must not bleed into the CSE quota."""
+        db_path = _make_quota_db(tmp_path)
+        mock_get.return_value = _make_cse_response([])
+
+        now = datetime.now().isoformat()
+        conn = _sqlite3.connect(db_path)
+        for provider in ("anthropic", "openrouter", "gemini"):
+            for _ in range(10):
+                conn.execute(
+                    "INSERT INTO scoring_costs (purpose, model, cost_usd, timestamp, provider)"
+                    " VALUES (?, ?, 0.001, ?, ?)",
+                    ("scoring", "claude-3", now, provider),
+                )
+        conn.commit()
+        conn.close()
+
+        src = GoogleCSESource(api_key="k", cse_id="cx", db_path=db_path, quota_limit_per_day=2)
+        src.fetch_jobs([{"query": "q1", "location": ""}, {"query": "q2", "location": ""}])
+        assert mock_get.call_count == 2
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_db_write_failure_falls_back_to_in_process(self, mock_get, tmp_path):
+        """Broken DB path must not break ingestion — fall back to the in-process counter."""
+        mock_get.return_value = _make_cse_response([])
+        bad_path = str(tmp_path / "does_not_exist" / "jobs.db")
+
+        src = GoogleCSESource(api_key="k", cse_id="cx", db_path=bad_path, quota_limit_per_day=2)
+        # Should not raise; should still respect the cap via the fallback counter.
+        src.fetch_jobs(
+            [
+                {"query": "q1", "location": ""},
+                {"query": "q2", "location": ""},
+                {"query": "q3", "location": ""},
+            ]
+        )
+        assert mock_get.call_count == 2
+
+    @patch("job_finder.sources.google_cse_source.requests.get")
+    def test_in_process_mode_unchanged_when_db_path_none(self, mock_get, tmp_path):
+        """db_path=None preserves the pre-F2 in-process counter behavior."""
+        db_path = _make_quota_db(tmp_path)
+        mock_get.return_value = _make_cse_response([])
+
+        src = GoogleCSESource(api_key="k", cse_id="cx", db_path=None, quota_limit_per_day=2)
+        src.fetch_jobs(
+            [
+                {"query": "q1", "location": ""},
+                {"query": "q2", "location": ""},
+                {"query": "q3", "location": ""},
+            ]
+        )
+        assert mock_get.call_count == 2
+        # No rows should have been written to the DB (because db_path is None).
+        conn = _sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM scoring_costs WHERE provider='google_cse'"
+        ).fetchone()
+        conn.close()
+        assert row[0] == 0

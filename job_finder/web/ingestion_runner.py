@@ -289,7 +289,13 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
         return []
 
 
-def _fetch_portal_search(config: dict, summary: dict, *, include_cse: bool = True) -> list[Job]:
+def _fetch_portal_search(
+    config: dict,
+    summary: dict,
+    *,
+    include_cse: bool = True,
+    db_path: str | None = None,
+) -> list[Job]:
     """Fetch from niche job portals: free APIs first, SERP fallback.
 
     Tiers (executed in order inside ``fetch_all_portals``):
@@ -359,6 +365,7 @@ def _fetch_portal_search(config: dict, summary: dict, *, include_cse: bool = Tru
                 google_cse_source = GoogleCSESource(
                     api_key=cse_api_key,
                     cse_id=cse_id,
+                    db_path=db_path,
                 )
 
     try:
