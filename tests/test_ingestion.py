@@ -1434,3 +1434,77 @@ class TestFetchPortalSearchWiring:
 
         kwargs = mock_fetch.call_args.kwargs
         assert isinstance(kwargs["google_cse_source"], GoogleCSESource)
+
+    # Stage 7.4 — keywords→target_titles fallback (Finding #3 from E2E shakedown).
+    # Production was silently early-returning [] when sources.portal_search.keywords
+    # was empty, while scripts/benchmark_sources.py::_portal_keywords falls back to
+    # profile.target_titles. That divergence meant the Q6 benchmark measured a
+    # path users couldn't reach by toggling the Stage 7 master switch alone.
+
+    def test_empty_keywords_falls_back_to_target_titles(self, base_config):
+        """When portal_search.keywords is empty, profile.target_titles is used."""
+        base_config["sources"]["portal_search"]["keywords"] = []
+        base_config["profile"] = {
+            "target_titles": ["Staff Data Scientist", "Principal Engineer"]
+        }
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {})
+
+        assert mock_fetch.called
+        # First positional arg to fetch_all_portals is the keywords list.
+        args, _ = mock_fetch.call_args
+        assert args[0] == ["Staff Data Scientist", "Principal Engineer"]
+
+    def test_explicit_keywords_win_over_target_titles(self, base_config):
+        """When both are populated, explicit keywords are used (target_titles ignored)."""
+        base_config["sources"]["portal_search"]["keywords"] = ["explicit kw"]
+        base_config["profile"] = {"target_titles": ["target title"]}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(base_config, {})
+
+        args, _ = mock_fetch.call_args
+        assert args[0] == ["explicit kw"]
+
+    def test_both_empty_short_circuits(self, base_config):
+        """Empty keywords + empty target_titles → skip, do not call fetch_all_portals."""
+        base_config["sources"]["portal_search"]["keywords"] = []
+        base_config["profile"] = {"target_titles": []}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            result = _fetch_portal_search(base_config, {})
+
+        assert result == []
+        assert not mock_fetch.called
+
+    def test_missing_profile_section_short_circuits_when_keywords_empty(self, base_config):
+        """No profile section at all + empty keywords → safe skip, no KeyError."""
+        base_config["sources"]["portal_search"]["keywords"] = []
+        # No "profile" key in config at all.
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            result = _fetch_portal_search(base_config, {})
+
+        assert result == []
+        assert not mock_fetch.called

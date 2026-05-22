@@ -590,6 +590,10 @@ class TestSettingsStage7FreePortalsTile:
         # JSearch tile (new — was wired in parser but had no UI)
         assert "jsearch_enabled" in body
         assert "jsearch_rapidapi_key" in body
+        # Stage 7.4 — keywords-fallback hint copy (Finding #3). Production
+        # _fetch_portal_search falls back to profile.target_titles when
+        # keywords is empty; this hint surfaces that contract in the UI.
+        assert "Leave empty to use your target titles." in body
 
     def test_save_portal_search_master_persists(self, settings_client, settings_app):
         resp = settings_client.post(

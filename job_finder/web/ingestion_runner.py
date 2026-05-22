@@ -326,10 +326,24 @@ def _fetch_portal_search(
     if not portal_cfg.get("enabled", False):
         return []
 
-    keywords = portal_cfg.get("keywords", [])
+    # Stage 7.4 (Finding #3): fall back to profile.target_titles when
+    # portal_search.keywords is empty. Matches the benchmark behavior
+    # (scripts/benchmark_sources.py::_portal_keywords) so a user who toggles
+    # the Stage 7 master switch without manually populating keywords still
+    # gets meaningful queries. Settings UI hints at this with helper copy
+    # under the keywords textarea.
+    keywords = portal_cfg.get("keywords") or []
     if not keywords:
-        logger.info("Portal search: no keywords configured, skipping")
-        return []
+        keywords = list(config.get("profile", {}).get("target_titles") or [])
+        if not keywords:
+            logger.info(
+                "Portal search: no keywords and no profile.target_titles, skipping"
+            )
+            return []
+        logger.info(
+            "Portal search: keywords empty, falling back to %d target_titles",
+            len(keywords),
+        )
 
     max_serp_queries = portal_cfg.get("max_serp_queries", 30)
 

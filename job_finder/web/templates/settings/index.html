@@ -173,6 +173,7 @@
             <label class="block text-xs font-medium text-slate-400 mb-1">Keywords <span class="text-slate-500 font-normal">(one per line)</span></label>
             <textarea name="portal_search_keywords" rows="3"
                       class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none resize-y font-mono">{{ config.get('sources', {}).get('portal_search', {}).get('keywords', []) | join('\n') }}</textarea>
+            <p class="text-xs text-slate-600 mt-1">Leave empty to use your target titles.</p>
           </div>
 
           <!-- Keyless free portals -->
