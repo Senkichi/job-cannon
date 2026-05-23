@@ -45,11 +45,15 @@ SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     # Jooble is single-key. The user_agent_email field for USAJobs is the
     # required User-Agent header value (an email address) rather than a
     # secret per se — routed through the same precedence stack for symmetry.
-    "sources.usajobs.user_agent_email":    ("USAJOBS_USER_AGENT_EMAIL",),
-    "sources.usajobs.authorization_key":   ("USAJOBS_AUTHORIZATION_KEY",),
-    "sources.adzuna.app_id":               ("ADZUNA_APP_ID",),
-    "sources.adzuna.app_key":              ("ADZUNA_APP_KEY",),
-    "sources.jooble.api_key":              ("JOOBLE_API_KEY",),
+    # Canonical names mirror the nested config-yaml location
+    # (sources.portal_search.<name>.*) where the Settings UI writes them
+    # — Stage 7.1 reconciled the schema mismatch where the keyring used
+    # top-level paths while config / parser / read sites used nested.
+    "sources.portal_search.usajobs.user_agent_email":    ("USAJOBS_USER_AGENT_EMAIL",),
+    "sources.portal_search.usajobs.authorization_key":   ("USAJOBS_AUTHORIZATION_KEY",),
+    "sources.portal_search.adzuna.app_id":               ("ADZUNA_APP_ID",),
+    "sources.portal_search.adzuna.app_key":              ("ADZUNA_APP_KEY",),
+    "sources.portal_search.jooble.api_key":              ("JOOBLE_API_KEY",),
     # Stage 3 — Google Programmable Search Engine (free 100/day quota).
     # cse_id is the Programmable Search Engine ID, not a secret per se, but
     # routed through the same precedence stack for symmetry with api_key.

@@ -179,6 +179,33 @@ def save():
         _move_secret_to_keyring(
             form_config, ("sources", "jsearch", "rapidapi_key"), "sources.jsearch.rapidapi_key"
         )
+        # Stage 7.1: route USAJobs/Adzuna/Jooble portal_search creds to keyring.
+        # Canonical names mirror the nested config tree (see secrets.py).
+        _move_secret_to_keyring(
+            form_config,
+            ("sources", "portal_search", "usajobs", "user_agent_email"),
+            "sources.portal_search.usajobs.user_agent_email",
+        )
+        _move_secret_to_keyring(
+            form_config,
+            ("sources", "portal_search", "usajobs", "authorization_key"),
+            "sources.portal_search.usajobs.authorization_key",
+        )
+        _move_secret_to_keyring(
+            form_config,
+            ("sources", "portal_search", "adzuna", "app_id"),
+            "sources.portal_search.adzuna.app_id",
+        )
+        _move_secret_to_keyring(
+            form_config,
+            ("sources", "portal_search", "adzuna", "app_key"),
+            "sources.portal_search.adzuna.app_key",
+        )
+        _move_secret_to_keyring(
+            form_config,
+            ("sources", "portal_search", "jooble", "api_key"),
+            "sources.portal_search.jooble.api_key",
+        )
 
         config = _deep_merge(existing, form_config)
 

@@ -1319,7 +1319,10 @@ class TestFetchPortalSearchWiring:
 
         assert mock_fetch.called
         kwargs = mock_fetch.call_args.kwargs
-        assert kwargs["portal_config"] is base_config["sources"]["portal_search"]
+        # Stage 7.1: portal_config is a shallow copy with keyring-resolved creds
+        # injected for USAJobs/Adzuna/Jooble, not the original subtree reference.
+        # Value-equality is the contract that matters here.
+        assert kwargs["portal_config"] == base_config["sources"]["portal_search"]
         assert kwargs["portal_config"]["jobicy"]["enabled"] is True
 
     def test_cse_built_when_enabled_and_credentials_present(self, base_config):
@@ -1647,3 +1650,163 @@ class TestUpsertScoringProviderNotLeaked:
 
         assert row["scoring_provider"] == "ollama"
         assert row["scoring_model"] == "qwen2.5:14b"
+
+
+# ---------------------------------------------------------------------------
+# Stage 7.1 — _inject_portal_search_creds resolves USAJobs/Adzuna/Jooble
+# creds through the secret stack (env > keyring > config-yaml plaintext)
+# ---------------------------------------------------------------------------
+
+
+class TestInjectPortalSearchCreds:
+    """Regression guard for Stage 7.1's keyring-routing fix.
+
+    Settings UI writes USAJobs/Adzuna/Jooble creds to OS keyring under
+    canonical names mirroring the nested config path. _move_secret_to_keyring
+    clears the plaintext leaf so the merged config no longer carries the
+    secret. _fetch_portal_search must inject keyring-resolved values back
+    into portal_cfg before handing it to fetch_all_portals, otherwise the
+    fetchers see empty creds and skip.
+    """
+
+    def _portal_cfg(self, **overrides) -> dict:
+        cfg = {
+            "usajobs": {"enabled": True, "user_agent_email": "", "authorization_key": ""},
+            "adzuna": {"enabled": True, "app_id": "", "app_key": "", "country": "us"},
+            "jooble": {"enabled": True, "api_key": ""},
+        }
+        for k, v in overrides.items():
+            cfg[k] = v
+        return cfg
+
+    def _full_cfg(self, portal_cfg: dict) -> dict:
+        return {"sources": {"portal_search": portal_cfg}}
+
+    def test_keyring_values_injected_when_plaintext_empty(self):
+        """Cred fields empty in config (post-keyring-migration) → keyring values fill them."""
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
+        import keyring
+
+        portal_cfg = self._portal_cfg()
+        full_cfg = self._full_cfg(portal_cfg)
+
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.usajobs.user_agent_email", "kr@x.com"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.usajobs.authorization_key", "KR_KEY"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.adzuna.app_id", "KR_ID"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.adzuna.app_key", "KR_APP_KEY"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.jooble.api_key", "KR_JOOBLE"
+        )
+
+        try:
+            augmented = _inject_portal_search_creds(portal_cfg, full_cfg)
+            assert augmented["usajobs"]["user_agent_email"] == "kr@x.com"
+            assert augmented["usajobs"]["authorization_key"] == "KR_KEY"
+            assert augmented["adzuna"]["app_id"] == "KR_ID"
+            assert augmented["adzuna"]["app_key"] == "KR_APP_KEY"
+            assert augmented["jooble"]["api_key"] == "KR_JOOBLE"
+            # Original portal_cfg untouched (shallow-copy contract).
+            assert portal_cfg["usajobs"]["user_agent_email"] == ""
+            assert portal_cfg["jooble"]["api_key"] == ""
+        finally:
+            for name in (
+                "sources.portal_search.usajobs.user_agent_email",
+                "sources.portal_search.usajobs.authorization_key",
+                "sources.portal_search.adzuna.app_id",
+                "sources.portal_search.adzuna.app_key",
+                "sources.portal_search.jooble.api_key",
+            ):
+                try:
+                    keyring.delete_password("job-cannon", name)
+                except Exception:
+                    pass
+
+    def test_plaintext_values_preserved_when_no_keyring_entry(self):
+        """Legacy plaintext creds in config keep working when keyring is empty.
+
+        Users who haven't re-saved via the Settings UI (or who run with
+        config-yaml-only setups) must continue to ingest from the portals.
+        """
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
+
+        portal_cfg = self._portal_cfg(
+            usajobs={
+                "enabled": True,
+                "user_agent_email": "pt@x.com",
+                "authorization_key": "PT_KEY",
+            },
+            adzuna={
+                "enabled": True,
+                "app_id": "PT_ID",
+                "app_key": "PT_APP_KEY",
+                "country": "us",
+            },
+            jooble={"enabled": True, "api_key": "PT_JOOBLE"},
+        )
+        augmented = _inject_portal_search_creds(portal_cfg, self._full_cfg(portal_cfg))
+        # get_secret with config= falls back to _walk_config which returns the
+        # plaintext value at the same dotted path.
+        assert augmented["usajobs"]["user_agent_email"] == "pt@x.com"
+        assert augmented["usajobs"]["authorization_key"] == "PT_KEY"
+        assert augmented["adzuna"]["app_id"] == "PT_ID"
+        assert augmented["adzuna"]["app_key"] == "PT_APP_KEY"
+        assert augmented["jooble"]["api_key"] == "PT_JOOBLE"
+
+    def test_disabled_portals_not_resolved(self):
+        """Disabled portals skip the get_secret call entirely (no wasted reads)."""
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
+
+        portal_cfg = {
+            "usajobs": {"enabled": False, "user_agent_email": "", "authorization_key": ""},
+            "adzuna": {"enabled": False, "app_id": "", "app_key": "", "country": "us"},
+            "jooble": {"enabled": False, "api_key": ""},
+        }
+        augmented = _inject_portal_search_creds(portal_cfg, self._full_cfg(portal_cfg))
+        # Returned dict is a shallow copy; disabled portals not augmented
+        # (in-place subtree reference is preserved).
+        assert augmented["usajobs"] is portal_cfg["usajobs"]
+        assert augmented["adzuna"] is portal_cfg["adzuna"]
+        assert augmented["jooble"] is portal_cfg["jooble"]
+
+    def test_env_var_wins_over_keyring_and_plaintext(self, monkeypatch):
+        """get_secret precedence: env > keyring > config-yaml plaintext."""
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
+        import keyring
+
+        portal_cfg = self._portal_cfg(
+            jooble={"enabled": True, "api_key": "PLAINTEXT"},
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.jooble.api_key", "KEYRING"
+        )
+        monkeypatch.setenv("JOOBLE_API_KEY", "ENV_VAR_WINS")
+
+        try:
+            augmented = _inject_portal_search_creds(portal_cfg, self._full_cfg(portal_cfg))
+            assert augmented["jooble"]["api_key"] == "ENV_VAR_WINS"
+        finally:
+            try:
+                keyring.delete_password(
+                    "job-cannon", "sources.portal_search.jooble.api_key"
+                )
+            except Exception:
+                pass
+
+    def test_missing_portal_subtree_returns_empty_creds(self):
+        """portal_cfg without a portal section (e.g. only enabled=False omitted) → empty resolved."""
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
+
+        portal_cfg: dict = {}  # no usajobs/adzuna/jooble at all
+        augmented = _inject_portal_search_creds(portal_cfg, self._full_cfg(portal_cfg))
+        # All three portals absent → not added (no enabled flag to trigger inject)
+        assert "usajobs" not in augmented
+        assert "adzuna" not in augmented
+        assert "jooble" not in augmented

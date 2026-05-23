@@ -388,6 +388,14 @@ def _fetch_portal_search(
                     db_path=db_path,
                 )
 
+    # Stage 7.1: inject keyring-resolved creds for USAJobs/Adzuna/Jooble. The
+    # canonical names mirror the nested config tree, so get_secret's
+    # config-yaml fallback walks the same path and finds existing plaintext
+    # for users who haven't migrated to keyring yet. fetch_all_portals's
+    # contract (it reads creds from the portal_config subtree) is unchanged
+    # — we just give it a copy with keyring values injected.
+    portal_cfg_with_creds = _inject_portal_search_creds(portal_cfg, config)
+
     try:
         from job_finder.sources.portal_search_source import fetch_all_portals
 
@@ -395,7 +403,7 @@ def _fetch_portal_search(
             keywords,
             dataforseo_source=dataforseo_source,
             max_serp_queries=max_serp_queries,
-            portal_config=portal_cfg,
+            portal_config=portal_cfg_with_creds,
             google_cse_source=google_cse_source,
         )
         summary["portal_search_fetched"] = len(jobs)
@@ -405,6 +413,55 @@ def _fetch_portal_search(
         summary.setdefault("portal_search_errors", []).append(error_msg)
         logger.warning("Portal search failed: %s", error_msg)
         return []
+
+
+def _inject_portal_search_creds(portal_cfg: dict, config: dict) -> dict:
+    """Return a copy of portal_cfg with USAJobs/Adzuna/Jooble creds resolved.
+
+    Stage 7.1: the Settings UI writes these creds to OS keyring under
+    canonical names mirroring the nested config path. The Settings parser
+    clears the plaintext leaf when keyring write succeeds — so reading
+    plaintext from portal_cfg alone returns empty for keyring-stored creds.
+
+    get_secret() consults env → keyring → config-yaml plaintext in that
+    order, so a single call resolves either source. The returned dict is
+    a shallow copy with per-portal subtrees deep-copied only when modified.
+    """
+    augmented = dict(portal_cfg)
+
+    usajobs = dict(augmented.get("usajobs") or {})
+    if usajobs.get("enabled"):
+        ua = get_secret(
+            "sources.portal_search.usajobs.user_agent_email", config=config
+        ) or usajobs.get("user_agent_email", "") or ""
+        ak = get_secret(
+            "sources.portal_search.usajobs.authorization_key", config=config
+        ) or usajobs.get("authorization_key", "") or ""
+        usajobs["user_agent_email"] = ua
+        usajobs["authorization_key"] = ak
+        augmented["usajobs"] = usajobs
+
+    adzuna = dict(augmented.get("adzuna") or {})
+    if adzuna.get("enabled"):
+        aid = get_secret(
+            "sources.portal_search.adzuna.app_id", config=config
+        ) or adzuna.get("app_id", "") or ""
+        akey = get_secret(
+            "sources.portal_search.adzuna.app_key", config=config
+        ) or adzuna.get("app_key", "") or ""
+        adzuna["app_id"] = aid
+        adzuna["app_key"] = akey
+        augmented["adzuna"] = adzuna
+
+    jooble = dict(augmented.get("jooble") or {})
+    if jooble.get("enabled"):
+        jkey = get_secret(
+            "sources.portal_search.jooble.api_key", config=config
+        ) or jooble.get("api_key", "") or ""
+        jooble["api_key"] = jkey
+        augmented["jooble"] = jooble
+
+    return augmented
 
 
 def _submit_dataforseo_tasks(

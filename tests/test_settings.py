@@ -631,7 +631,10 @@ class TestSettingsStage7FreePortalsTile:
         assert ps["jobicy"]["enabled"] is True
         assert ps["yc_workatastartup"]["enabled"] is True
 
-    def test_save_usajobs_credentials_persists(self, settings_client, settings_app):
+    def test_save_usajobs_credentials_persists_keyring(self, settings_client, settings_app):
+        """Stage 7.1: USAJobs creds route to OS keyring; plaintext is wiped."""
+        import keyring
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -643,14 +646,40 @@ class TestSettingsStage7FreePortalsTile:
             },
         )
         assert resp.status_code == 302
-        with open(settings_app._test_config_path, encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-        usajobs = saved["sources"]["portal_search"]["usajobs"]
-        assert usajobs["enabled"] is True
-        assert usajobs["user_agent_email"] == "me@example.com"
-        assert usajobs["authorization_key"] == "usajobs-test-key"
+        try:
+            assert (
+                keyring.get_password(
+                    "job-cannon", "sources.portal_search.usajobs.user_agent_email"
+                )
+                == "me@example.com"
+            )
+            assert (
+                keyring.get_password(
+                    "job-cannon", "sources.portal_search.usajobs.authorization_key"
+                )
+                == "usajobs-test-key"
+            )
+            with open(settings_app._test_config_path, encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            usajobs = saved["sources"]["portal_search"]["usajobs"]
+            # enabled toggle still in config; cred fields wiped after keyring write.
+            assert usajobs["enabled"] is True
+            assert usajobs.get("user_agent_email", "") == ""
+            assert usajobs.get("authorization_key", "") == ""
+        finally:
+            for name in (
+                "sources.portal_search.usajobs.user_agent_email",
+                "sources.portal_search.usajobs.authorization_key",
+            ):
+                try:
+                    keyring.delete_password("job-cannon", name)
+                except Exception:
+                    pass
 
-    def test_save_adzuna_credentials_persists(self, settings_client, settings_app):
+    def test_save_adzuna_credentials_persists_keyring(self, settings_client, settings_app):
+        """Stage 7.1: Adzuna creds route to OS keyring; country stays plaintext."""
+        import keyring
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -663,15 +692,37 @@ class TestSettingsStage7FreePortalsTile:
             },
         )
         assert resp.status_code == 302
-        with open(settings_app._test_config_path, encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-        adzuna = saved["sources"]["portal_search"]["adzuna"]
-        assert adzuna["enabled"] is True
-        assert adzuna["app_id"] == "adzuna-id"
-        assert adzuna["app_key"] == "adzuna-key"
-        assert adzuna["country"] == "gb"
+        try:
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_id")
+                == "adzuna-id"
+            )
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_key")
+                == "adzuna-key"
+            )
+            with open(settings_app._test_config_path, encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            adzuna = saved["sources"]["portal_search"]["adzuna"]
+            assert adzuna["enabled"] is True
+            assert adzuna.get("app_id", "") == ""
+            assert adzuna.get("app_key", "") == ""
+            # Country is not a secret; stays plaintext.
+            assert adzuna["country"] == "gb"
+        finally:
+            for name in (
+                "sources.portal_search.adzuna.app_id",
+                "sources.portal_search.adzuna.app_key",
+            ):
+                try:
+                    keyring.delete_password("job-cannon", name)
+                except Exception:
+                    pass
 
-    def test_save_jooble_credentials_persists(self, settings_client, settings_app):
+    def test_save_jooble_credentials_persists_keyring(self, settings_client, settings_app):
+        """Stage 7.1: Jooble api_key routes to OS keyring; plaintext is wiped."""
+        import keyring
+
         resp = settings_client.post(
             "/settings/save",
             data={
@@ -682,57 +733,107 @@ class TestSettingsStage7FreePortalsTile:
             },
         )
         assert resp.status_code == 302
-        with open(settings_app._test_config_path, encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-        jooble = saved["sources"]["portal_search"]["jooble"]
-        assert jooble["enabled"] is True
-        assert jooble["api_key"] == "jooble-test-key"
+        try:
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.jooble.api_key")
+                == "jooble-test-key"
+            )
+            with open(settings_app._test_config_path, encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            jooble = saved["sources"]["portal_search"]["jooble"]
+            assert jooble["enabled"] is True
+            assert jooble.get("api_key", "") == ""
+        finally:
+            try:
+                keyring.delete_password(
+                    "job-cannon", "sources.portal_search.jooble.api_key"
+                )
+            except Exception:
+                pass
 
-    def test_save_empty_password_preserves_existing_creds(self, settings_client, settings_app):
-        """No-op save (no creds in form) must not clobber existing values."""
-        # Seed config.yaml with an existing creds
-        cfg_path = settings_app._test_config_path
-        with open(cfg_path, encoding="utf-8") as f:
-            existing = yaml.safe_load(f)
-        existing.setdefault("sources", {})["portal_search"] = {
-            "enabled": True,
-            "usajobs": {"enabled": True, "user_agent_email": "old@x.com", "authorization_key": "OLD"},
-            "adzuna": {"enabled": True, "app_id": "OLD_ID", "app_key": "OLD_KEY", "country": "us"},
-            "jooble": {"enabled": True, "api_key": "OLD_JK"},
-        }
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            yaml.dump(existing, f, default_flow_style=False)
+    def test_save_empty_credentials_preserves_keyring(self, settings_client):
+        """No-op save (toggles on, cred fields empty) must not clobber existing
+        keyring entries. Stage 7.1: parser's `and form[x]` guard prevents the
+        empty leaf from entering form_config at all, so _move_secret_to_keyring
+        finds nothing to migrate and the existing keyring entries are untouched.
+        """
+        import keyring
 
-        # Submit form with toggles re-enabled but blank credential fields
-        # (this is what happens when the user just edits something else).
-        resp = settings_client.post(
-            "/settings/save",
-            data={
-                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
-                "profile_skills": "Python\nSQL\nSpark",
-                "portal_search_enabled": "on",
-                "portal_search_usajobs_enabled": "on",
-                "portal_search_usajobs_user_agent_email": "",
-                "portal_search_usajobs_authorization_key": "",
-                "portal_search_adzuna_enabled": "on",
-                "portal_search_adzuna_app_id": "",
-                "portal_search_adzuna_app_key": "",
-                "portal_search_adzuna_country": "us",
-                "portal_search_jooble_enabled": "on",
-                "portal_search_jooble_api_key": "",
-            },
+        # Seed keyring directly (mimics a prior save() with creds populated)
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.usajobs.user_agent_email", "old@x.com"
         )
-        assert resp.status_code == 302
-        with open(cfg_path, encoding="utf-8") as f:
-            saved = yaml.safe_load(f)
-        ps = saved["sources"]["portal_search"]
-        # Credentials preserved — the `and form[...]` guard in the parser skips
-        # empty submissions so _deep_merge keeps the old values.
-        assert ps["usajobs"]["user_agent_email"] == "old@x.com"
-        assert ps["usajobs"]["authorization_key"] == "OLD"
-        assert ps["adzuna"]["app_id"] == "OLD_ID"
-        assert ps["adzuna"]["app_key"] == "OLD_KEY"
-        assert ps["jooble"]["api_key"] == "OLD_JK"
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.usajobs.authorization_key", "OLD"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.adzuna.app_id", "OLD_ID"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.adzuna.app_key", "OLD_KEY"
+        )
+        keyring.set_password(
+            "job-cannon", "sources.portal_search.jooble.api_key", "OLD_JK"
+        )
+
+        try:
+            # Submit form with toggles re-enabled but blank credential fields
+            # (this is what happens when the user just edits something else).
+            resp = settings_client.post(
+                "/settings/save",
+                data={
+                    "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                    "profile_skills": "Python\nSQL\nSpark",
+                    "portal_search_enabled": "on",
+                    "portal_search_usajobs_enabled": "on",
+                    "portal_search_usajobs_user_agent_email": "",
+                    "portal_search_usajobs_authorization_key": "",
+                    "portal_search_adzuna_enabled": "on",
+                    "portal_search_adzuna_app_id": "",
+                    "portal_search_adzuna_app_key": "",
+                    "portal_search_adzuna_country": "us",
+                    "portal_search_jooble_enabled": "on",
+                    "portal_search_jooble_api_key": "",
+                },
+            )
+            assert resp.status_code == 302
+            # Keyring entries preserved.
+            assert (
+                keyring.get_password(
+                    "job-cannon", "sources.portal_search.usajobs.user_agent_email"
+                )
+                == "old@x.com"
+            )
+            assert (
+                keyring.get_password(
+                    "job-cannon", "sources.portal_search.usajobs.authorization_key"
+                )
+                == "OLD"
+            )
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_id")
+                == "OLD_ID"
+            )
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.adzuna.app_key")
+                == "OLD_KEY"
+            )
+            assert (
+                keyring.get_password("job-cannon", "sources.portal_search.jooble.api_key")
+                == "OLD_JK"
+            )
+        finally:
+            for name in (
+                "sources.portal_search.usajobs.user_agent_email",
+                "sources.portal_search.usajobs.authorization_key",
+                "sources.portal_search.adzuna.app_id",
+                "sources.portal_search.adzuna.app_key",
+                "sources.portal_search.jooble.api_key",
+            ):
+                try:
+                    keyring.delete_password("job-cannon", name)
+                except Exception:
+                    pass
 
     def test_save_jsearch_settings_persists_keyring(self, settings_client, settings_app):
         """JSearch already routed through keyring in save(); the new tile feeds it."""
