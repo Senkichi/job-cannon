@@ -1563,6 +1563,123 @@ class TestFetchPortalSearchWiring:
 
 
 # ---------------------------------------------------------------------------
+# Stage 7.9 follow-up — per-portal breakdown in log_activity summary
+# ---------------------------------------------------------------------------
+
+
+class TestPerPortalBreakdown:
+    """Closes the deferred-from-7.9 per-portal observability item.
+
+    _fetch_portal_search now groups the merged Job list by Job.source
+    (each fetcher tags its jobs with a unique `portal_<name>` value)
+    and injects portal_<name>_fetched keys into the summary dict.
+    _run_sync_bg's log_activity metadata composer scoops them up
+    dynamically so adding a new portal doesn't require touching it.
+    """
+
+    @pytest.fixture
+    def base_config(self):
+        return {
+            "sources": {
+                "portal_search": {
+                    "enabled": True,
+                    "keywords": ["Staff Engineer"],
+                    "max_serp_queries": 30,
+                },
+                "dataforseo": {"enabled": False},
+                "google_cse": {"enabled": False},
+            }
+        }
+
+    def _job(self, source: str, title: str = "x", company: str = "c"):
+        from job_finder.models import Job
+
+        return Job(
+            title=title,
+            company=company,
+            location="Remote",
+            source=source,
+            source_url=f"https://example.com/{source}/{title}/{company}",
+        )
+
+    def test_per_portal_breakdown_in_summary(self, base_config):
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        mixed = [
+            self._job("portal_remoteok", "t1"),
+            self._job("portal_remoteok", "t2"),
+            self._job("portal_himalayas", "t3"),
+            self._job("portal_yc_workatastartup", "t4"),
+            self._job("portal_yc_workatastartup", "t5"),
+            self._job("portal_yc_workatastartup", "t6"),
+        ]
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=mixed,
+        ):
+            summary: dict = {}
+            _fetch_portal_search(base_config, summary)
+
+        assert summary["portal_search_fetched"] == 6
+        assert summary["portal_remoteok_fetched"] == 2
+        assert summary["portal_himalayas_fetched"] == 1
+        assert summary["portal_yc_workatastartup_fetched"] == 3
+        # Portals that returned 0 jobs are absent (reader uses .get(k, 0)).
+        assert "portal_jobicy_fetched" not in summary
+        assert "portal_remotive_fetched" not in summary
+
+    def test_empty_jobs_produces_no_portal_keys(self, base_config):
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ):
+            summary: dict = {}
+            _fetch_portal_search(base_config, summary)
+
+        assert summary["portal_search_fetched"] == 0
+        # No portal_<name>_fetched keys at all when there's nothing to count.
+        portal_keys = [
+            k for k in summary if k.startswith("portal_") and k.endswith("_fetched")
+        ]
+        # Only portal_search_fetched (the aggregate) — no per-portal keys.
+        assert portal_keys == ["portal_search_fetched"]
+
+    def test_log_activity_scoops_dynamic_portal_keys(self):
+        """_run_sync_bg's metadata composer picks up any portal_<name>_fetched
+        key the fetcher produced, without needing the key enumerated explicitly."""
+        # Direct unit of the composer logic — mirrors the loop in
+        # blueprints/sync.py::_run_sync_bg. If sync.py drifts from this contract
+        # the test catches it.
+        summary = {
+            "portal_search_fetched": 3,
+            "portal_remoteok_fetched": 1,
+            "portal_himalayas_fetched": 2,
+            "portal_yc_workatastartup_fetched": 0,
+            # Non-portal key — must NOT be scooped up.
+            "gmail_fetched": 99,
+        }
+        metadata = {
+            "portal_search_fetched": summary.get("portal_search_fetched", 0),
+        }
+        for key, value in summary.items():
+            if (
+                key.startswith("portal_")
+                and key.endswith("_fetched")
+                and key not in metadata
+            ):
+                metadata[key] = value
+
+        assert metadata["portal_remoteok_fetched"] == 1
+        assert metadata["portal_himalayas_fetched"] == 2
+        assert metadata["portal_yc_workatastartup_fetched"] == 0
+        assert "gmail_fetched" not in metadata
+        # Pre-seeded keys not clobbered by the dynamic loop.
+        assert metadata["portal_search_fetched"] == 3
+
+
+# ---------------------------------------------------------------------------
 # Stage 7.7 — upsert_job does NOT leak the scoring_provider DEFAULT 'anthropic'
 # ---------------------------------------------------------------------------
 

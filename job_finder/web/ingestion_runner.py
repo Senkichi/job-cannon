@@ -73,6 +73,9 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
     except Exception as e:
         logger.warning("Failed to query email_parse_log for dedup (proceeding without): %s", e)
 
+    if GmailSource is None:
+        logger.warning("GmailSource import failed; skipping Gmail fetch")
+        return []
     try:
         source = GmailSource()
         jobs, new_ids = source.fetch_jobs(
@@ -178,8 +181,12 @@ def _fetch_imap(config: dict, summary: dict) -> list[Job]:
     port = imap_config.get("port", 993)
     folder = imap_config.get("folder", "INBOX")
 
+    _ImapSource = ImapSource  # bind to local so Pyright narrows after the None check
+    if _ImapSource is None:
+        logger.warning("ImapSource import failed; skipping IMAP fetch")
+        return []
     try:
-        source = ImapSource(
+        source = _ImapSource(
             host=host,
             port=port,
             email_address=email,
@@ -407,6 +414,17 @@ def _fetch_portal_search(
             google_cse_source=google_cse_source,
         )
         summary["portal_search_fetched"] = len(jobs)
+        # Per-portal breakdown: each fetcher tags Job.source with a unique
+        # `portal_<name>` label, so a simple group-by on the merged list
+        # recovers per-source attribution without changing fetch_all_portals's
+        # contract. Closes the deferred per-portal observability follow-up
+        # from Stage 7.9. Only portals that actually returned a job appear;
+        # zero-yield portals are absent (reader uses .get(k, 0)).
+        from collections import Counter
+
+        per_portal = Counter(j.source for j in jobs if j.source)
+        for portal_name, count in per_portal.items():
+            summary[f"{portal_name}_fetched"] = count
         return jobs
     except Exception as e:
         error_msg = str(e)

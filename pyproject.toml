@@ -265,6 +265,15 @@ pythonVersion = "3.13"
 # Tighten to "strict" over time. "basic" matches mypy's posture for
 # the S5 baseline — high-signal errors only, no nag on every untyped
 # parameter.
+#
+# reportUnusedFunction silenced because the `_fetch_*` / `_score_*`
+# / `_prune_*` helpers in ingestion_runner.py are re-exported by
+# pipeline_runner.py for the runtime-patching pattern and called
+# from there. Pyright (in basic mode) reads the leading underscore
+# as "module-private" and treats the cross-module re-export as
+# unused. 8+ false positives at definition sites — toggle on if
+# you want to find actually-dead private helpers in the future.
+reportUnusedFunction = "none"
 
 
 # ── Commitizen (Version Bumping + Changelog) ──────────────────

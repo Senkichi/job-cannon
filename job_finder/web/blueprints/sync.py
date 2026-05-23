@@ -209,23 +209,35 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             conn.commit()
 
         try:
+            metadata = {
+                "jobs_new": jobs_new,
+                "gmail_fetched": summary.get("gmail_fetched", 0),
+                "imap_fetched": summary.get("imap_fetched", 0),
+                "serpapi_fetched": summary.get("serpapi_fetched", 0),
+                "thordata_fetched": summary.get("thordata_fetched", 0),
+                "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
+                "portal_search_fetched": summary.get("portal_search_fetched", 0),
+                "portal_search_used_fallback_keywords": summary.get(
+                    "portal_search_used_fallback_keywords", False
+                ),
+                "duration_seconds": summary.get("duration_seconds", 0.0),
+                "status": "success",
+            }
+            # Per-portal breakdown (Stage 7.9 follow-up). ingestion_runner's
+            # _fetch_portal_search injects portal_<name>_fetched keys for any
+            # portal that returned at least one job. Scoop them up dynamically
+            # so adding a new portal doesn't require touching this dict.
+            for key, value in summary.items():
+                if (
+                    key.startswith("portal_")
+                    and key.endswith("_fetched")
+                    and key not in metadata
+                ):
+                    metadata[key] = value
             log_activity(
                 db_path,
                 ACTION_SYNC,
-                metadata={
-                    "jobs_new": jobs_new,
-                    "gmail_fetched": summary.get("gmail_fetched", 0),
-                    "imap_fetched": summary.get("imap_fetched", 0),
-                    "serpapi_fetched": summary.get("serpapi_fetched", 0),
-                    "thordata_fetched": summary.get("thordata_fetched", 0),
-                    "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
-                    "portal_search_fetched": summary.get("portal_search_fetched", 0),
-                    "portal_search_used_fallback_keywords": summary.get(
-                        "portal_search_used_fallback_keywords", False
-                    ),
-                    "duration_seconds": summary.get("duration_seconds", 0.0),
-                    "status": "success",
-                },
+                metadata=metadata,
             )
         except Exception:
             pass
