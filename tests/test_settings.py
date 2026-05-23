@@ -882,6 +882,190 @@ class TestSettingsStage7FreePortalsTile:
         assert saved["sources"]["portal_search"]["adzuna"]["country"] == "gb"
 
 
+class TestSettingsStage72ImapTile:
+    """Stage 7.2 (2026-05-23): Settings-side IMAP credentials tile.
+
+    Previously IMAP creds could only be set via the onboarding wizard. The
+    Settings tile is the edit/re-issue path — same canonical keyring name
+    as onboarding (sources.imap.app_password), so values written from
+    either page resolve via the same precedence stack at read time.
+    """
+
+    def test_index_renders_imap_tile(self, settings_client):
+        resp = settings_client.get("/settings/")
+        assert resp.status_code == 200
+        body = resp.data.decode("utf-8")
+        assert "Gmail (IMAP)" in body
+        assert "imap_enabled" in body
+        assert "imap_email" in body
+        assert "imap_app_password" in body
+        assert "imap_host" in body
+        assert "imap_port" in body
+        assert "imap_folder" in body
+
+    def test_save_imap_credentials_persists_keyring(self, settings_client, settings_app):
+        """app_password routes to OS keyring; other fields stay plaintext."""
+        import keyring
+
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                "profile_skills": "Python\nSQL\nSpark",
+                "imap_enabled": "on",
+                "imap_email": "me@gmail.com",
+                "imap_app_password": "abcd efgh ijkl mnop",
+                "imap_host": "imap.gmail.com",
+                "imap_port": "993",
+                "imap_folder": "INBOX",
+            },
+        )
+        assert resp.status_code == 302
+        try:
+            assert (
+                keyring.get_password("job-cannon", "sources.imap.app_password")
+                == "abcd efgh ijkl mnop"
+            )
+            with open(settings_app._test_config_path, encoding="utf-8") as f:
+                saved = yaml.safe_load(f)
+            imap = saved["sources"]["imap"]
+            assert imap["enabled"] is True
+            assert imap["email"] == "me@gmail.com"
+            # Keyring captured the secret; config.yaml plaintext wiped.
+            assert imap.get("app_password", "") == ""
+            assert imap["host"] == "imap.gmail.com"
+            assert imap["port"] == 993
+            assert imap["folder"] == "INBOX"
+        finally:
+            try:
+                keyring.delete_password("job-cannon", "sources.imap.app_password")
+            except Exception:
+                pass
+
+    def test_save_empty_app_password_preserves_keyring(self, settings_client):
+        """Empty app_password field on re-save preserves the existing keyring entry.
+
+        This is the common case: user edits some other field and the password
+        input renders empty by design (we never round-trip the secret to HTML).
+        """
+        import keyring
+
+        keyring.set_password("job-cannon", "sources.imap.app_password", "PRESERVED")
+        try:
+            resp = settings_client.post(
+                "/settings/save",
+                data={
+                    "target_titles": "Staff Data Scientist\nSenior Data Scientist",
+                    "profile_skills": "Python\nSQL\nSpark",
+                    "imap_enabled": "on",
+                    "imap_email": "me@gmail.com",
+                    "imap_app_password": "",
+                    "imap_host": "imap.gmail.com",
+                    "imap_port": "993",
+                    "imap_folder": "INBOX",
+                },
+            )
+            assert resp.status_code == 302
+            assert (
+                keyring.get_password("job-cannon", "sources.imap.app_password")
+                == "PRESERVED"
+            )
+        finally:
+            try:
+                keyring.delete_password("job-cannon", "sources.imap.app_password")
+            except Exception:
+                pass
+
+    def test_save_preserves_spaces_in_app_password(self, settings_client):
+        """App passwords from Google may include spaces; never strip()."""
+        import keyring
+
+        # Includes leading + trailing + middle spaces — must survive verbatim.
+        raw = " abcd efgh ijkl mnop "
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist",
+                "profile_skills": "Python",
+                "imap_enabled": "on",
+                "imap_email": "me@gmail.com",
+                "imap_app_password": raw,
+            },
+        )
+        assert resp.status_code == 302
+        try:
+            assert (
+                keyring.get_password("job-cannon", "sources.imap.app_password") == raw
+            )
+        finally:
+            try:
+                keyring.delete_password("job-cannon", "sources.imap.app_password")
+            except Exception:
+                pass
+
+    def test_save_defaults_filled_when_host_port_folder_blank(self, settings_client, settings_app):
+        """Blank host/folder fall back to imap.gmail.com / INBOX; port defaults to 993."""
+        resp = settings_client.post(
+            "/settings/save",
+            data={
+                "target_titles": "Staff Data Scientist",
+                "profile_skills": "Python",
+                "imap_enabled": "on",
+                "imap_email": "me@gmail.com",
+                # leave password blank — we only care about defaults here
+                "imap_app_password": "",
+                # blank host/folder, port omitted entirely
+                "imap_host": "",
+                "imap_folder": "",
+            },
+        )
+        assert resp.status_code == 302
+        with open(settings_app._test_config_path, encoding="utf-8") as f:
+            saved = yaml.safe_load(f)
+        imap = saved["sources"]["imap"]
+        assert imap["email"] == "me@gmail.com"
+        # Blank host string skipped (defaults preserved via ingestion-side fallback).
+        assert "host" not in imap or imap["host"] == "imap.gmail.com"
+        assert "folder" not in imap or imap["folder"] == "INBOX"
+
+    def test_secret_set_flag_drives_placeholder(self, settings_client):
+        """secret_set['sources.imap.app_password'] flips True after a keyring write,
+        which is what swaps the password input's placeholder from (not set) to (set)."""
+        import keyring
+        import re
+
+        # Initially not set — placeholder should be "(not set)"
+        try:
+            keyring.delete_password("job-cannon", "sources.imap.app_password")
+        except Exception:
+            pass
+        resp = settings_client.get("/settings/")
+        body = resp.data.decode("utf-8")
+        # Scope the assertion to the imap_app_password input block.
+        m = re.search(
+            r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body
+        )
+        assert m, "imap_app_password input missing"
+        assert m.group(1) == "(not set)"
+
+        # Set + verify placeholder flip to (set ...)
+        keyring.set_password("job-cannon", "sources.imap.app_password", "x")
+        try:
+            resp2 = settings_client.get("/settings/")
+            body2 = resp2.data.decode("utf-8")
+            m2 = re.search(
+                r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body2
+            )
+            assert m2
+            assert "set" in m2.group(1).lower()
+            assert "type to replace" in m2.group(1).lower()
+        finally:
+            try:
+                keyring.delete_password("job-cannon", "sources.imap.app_password")
+            except Exception:
+                pass
+
+
 class TestSettingsCheckboxBrowserShape:
     """Discovery #4 (2026-05-22 Stage 7.3 shakedown): the settings form
     template emits a hidden empty input AND a real checkbox under the same

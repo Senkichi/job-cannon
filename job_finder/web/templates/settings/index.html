@@ -139,6 +139,67 @@
 
         <hr class="border-slate-700">
 
+        <!-- Stage 7.2: Gmail IMAP (settings-side counterpart to onboarding step) -->
+        {% set imap_cfg = config.get('sources', {}).get('imap', {}) %}
+        <div>
+          <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            Gmail (IMAP)
+          </h3>
+          <p class="text-xs text-slate-400 mb-3">
+            Read job-alert emails over IMAP with a Google App Password — the secondary route in addition to (or instead of) the Gmail API. See onboarding for how to generate one at
+            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">myaccount.google.com/apppasswords</a>.
+          </p>
+          <div class="flex items-center gap-3 mb-3">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="hidden" name="imap_enabled" value="">
+              <input type="checkbox" name="imap_enabled" value="on"
+                     class="w-4 h-4 accent-violet-500"
+                     {% if imap_cfg.get('enabled', False) %}checked{% endif %}>
+              <span class="text-sm text-slate-300">Enabled</span>
+            </label>
+          </div>
+          <div class="grid grid-cols-2 gap-4 mb-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Gmail address</label>
+              <input type="email" name="imap_email"
+                     value="{{ imap_cfg.get('email', '') }}"
+                     placeholder="you@gmail.com"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">App password (16 chars w/ spaces)</label>
+              <input type="password" name="imap_app_password"
+                     value=""
+                     placeholder="{% if secret_set and secret_set.get('sources.imap.app_password') %}(set — type to replace){% else %}(not set){% endif %}"
+                     autocomplete="off"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Host</label>
+              <input type="text" name="imap_host"
+                     value="{{ imap_cfg.get('host', 'imap.gmail.com') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Port</label>
+              <input type="number" name="imap_port" min="1" max="65535"
+                     value="{{ imap_cfg.get('port', 993) }}"
+                     class="w-32 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Folder</label>
+              <input type="text" name="imap_folder"
+                     value="{{ imap_cfg.get('folder', 'INBOX') }}"
+                     class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
+            </div>
+          </div>
+        </div>
+
+        <hr class="border-slate-700">
+
         <!-- Stage 7: Job Portals (free) — visible by default, no signup required for keyless portals -->
         <div>
           <h3 class="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">

@@ -74,6 +74,7 @@ def index():
     secret_set = {
         name: jf_secrets.get_secret(name) is not None
         for name in (
+            "sources.imap.app_password",
             "sources.serpapi.api_key",
             "sources.thordata.api_key",
             "sources.dataforseo.api_key",
@@ -178,6 +179,11 @@ def save():
         )
         _move_secret_to_keyring(
             form_config, ("sources", "jsearch", "rapidapi_key"), "sources.jsearch.rapidapi_key"
+        )
+        # Stage 7.2: route IMAP app_password to keyring (same canonical name
+        # the onboarding wizard writes through).
+        _move_secret_to_keyring(
+            form_config, ("sources", "imap", "app_password"), "sources.imap.app_password"
         )
         # Stage 7.1: route USAJobs/Adzuna/Jooble portal_search creds to keyring.
         # Canonical names mirror the nested config tree (see secrets.py).
@@ -353,6 +359,33 @@ def _parse_form_to_config(form) -> dict:
         gmail["senders"] = senders
     if gmail:
         config.setdefault("sources", {})["gmail"] = gmail
+
+    # --- Sources: IMAP (Stage 7.2) ---
+    # Settings-side counterpart to the onboarding imap_credentials step.
+    # app_password is routed through _move_secret_to_keyring in save(); the
+    # "only if non-empty" guard on the password field is the same pattern
+    # serpapi/thordata/etc. use to avoid clobbering on re-saves with the
+    # field blank.
+    imap = {}
+    if _has("imap_enabled"):
+        imap["enabled"] = _checked("imap_enabled")
+    if _has("imap_email"):
+        imap["email"] = form["imap_email"].strip()
+    if _has("imap_app_password") and form["imap_app_password"]:
+        # Preserve any leading/trailing spaces (app passwords may include them).
+        imap["app_password"] = form["imap_app_password"]
+    if _has("imap_host"):
+        host = form["imap_host"].strip()
+        if host:
+            imap["host"] = host
+    if _has("imap_port"):
+        imap["port"] = safe_int(form["imap_port"], 993)
+    if _has("imap_folder"):
+        folder = form["imap_folder"].strip()
+        if folder:
+            imap["folder"] = folder
+    if imap:
+        config.setdefault("sources", {})["imap"] = imap
 
     # --- Sources: SerpAPI ---
     serpapi = {}
