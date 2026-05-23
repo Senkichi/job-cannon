@@ -215,8 +215,14 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
                 metadata={
                     "jobs_new": jobs_new,
                     "gmail_fetched": summary.get("gmail_fetched", 0),
+                    "imap_fetched": summary.get("imap_fetched", 0),
                     "serpapi_fetched": summary.get("serpapi_fetched", 0),
                     "thordata_fetched": summary.get("thordata_fetched", 0),
+                    "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
+                    "portal_search_fetched": summary.get("portal_search_fetched", 0),
+                    "portal_search_used_fallback_keywords": summary.get(
+                        "portal_search_used_fallback_keywords", False
+                    ),
                     "duration_seconds": summary.get("duration_seconds", 0.0),
                     "status": "success",
                 },

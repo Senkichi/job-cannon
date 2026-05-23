@@ -333,6 +333,7 @@ def _fetch_portal_search(
     # gets meaningful queries. Settings UI hints at this with helper copy
     # under the keywords textarea.
     keywords = portal_cfg.get("keywords") or []
+    used_fallback = False
     if not keywords:
         keywords = list(config.get("profile", {}).get("target_titles") or [])
         if not keywords:
@@ -340,10 +341,15 @@ def _fetch_portal_search(
                 "Portal search: no keywords and no profile.target_titles, skipping"
             )
             return []
+        used_fallback = True
         logger.info(
             "Portal search: keywords empty, falling back to %d target_titles",
             len(keywords),
         )
+    # Stage 7.9 observability: surface whether the 7.4 fallback path fired so
+    # the dashboard activity log can distinguish explicit-keyword runs from
+    # implicit-target_titles runs.
+    summary["portal_search_used_fallback_keywords"] = used_fallback
 
     max_serp_queries = portal_cfg.get("max_serp_queries", 30)
 

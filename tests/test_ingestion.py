@@ -1509,6 +1509,55 @@ class TestFetchPortalSearchWiring:
         assert result == []
         assert not mock_fetch.called
 
+    # Stage 7.9 observability: surface whether the 7.4 fallback fired so the
+    # dashboard's recent-activity panel can distinguish explicit-keyword runs
+    # from implicit-target_titles runs.
+
+    def test_summary_records_fallback_signal_when_keywords_empty(self, base_config):
+        """When the 7.4 fallback fires, summary['portal_search_used_fallback_keywords'] = True."""
+        base_config["sources"]["portal_search"]["keywords"] = []
+        base_config["profile"] = {"target_titles": ["DS"]}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        summary: dict = {}
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ):
+            _fetch_portal_search(base_config, summary)
+
+        assert summary.get("portal_search_used_fallback_keywords") is True
+
+    def test_summary_records_no_fallback_when_keywords_explicit(self, base_config):
+        """When explicit keywords are configured, the fallback signal is False."""
+        base_config["sources"]["portal_search"]["keywords"] = ["explicit kw"]
+        base_config["profile"] = {"target_titles": ["DS"]}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        summary: dict = {}
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ):
+            _fetch_portal_search(base_config, summary)
+
+        assert summary.get("portal_search_used_fallback_keywords") is False
+
+    def test_summary_no_signal_recorded_when_short_circuit(self, base_config):
+        """When both keyword sources are empty, _fetch_portal_search returns early
+        before recording the fallback signal — summary stays clean."""
+        base_config["sources"]["portal_search"]["keywords"] = []
+        base_config["profile"] = {"target_titles": []}
+
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        summary: dict = {}
+        _fetch_portal_search(base_config, summary)
+
+        assert "portal_search_used_fallback_keywords" not in summary
+
 
 # ---------------------------------------------------------------------------
 # Stage 7.7 — upsert_job does NOT leak the scoring_provider DEFAULT 'anthropic'
