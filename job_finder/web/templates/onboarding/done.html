@@ -5,10 +5,13 @@
 <h1 class="text-2xl font-bold text-slate-100 mb-4">Ready to launch</h1>
 <p class="text-slate-300 mb-6">Review what we collected, then click Finish to save and start your first ingest.</p>
 <div class="bg-slate-900/60 border border-slate-700 rounded p-4 mb-6 space-y-2 text-sm">
-  <div><span class="text-slate-400">Provider:</span> <span class="text-slate-200">{{ summary.provider | default('—') }}</span></div>
-  <div><span class="text-slate-400">Gmail:</span> <span class="text-slate-200">{{ summary.email | default('—') }}</span></div>
-  <div><span class="text-slate-400">Schedule:</span> <span class="text-slate-200">{{ summary.cadence | default('—') }}</span></div>
-  <div><span class="text-slate-400">Target titles:</span> <span class="text-slate-200">{{ summary.target_titles | default('—') }}</span></div>
+  <div><span class="text-slate-400">Provider:</span> <span class="text-slate-200">{{ summary.provider or '—' }}</span></div>
+  <div><span class="text-slate-400">Gmail:</span> <span class="text-slate-200">{{ summary.email or 'skipped' }}</span></div>
+  <div><span class="text-slate-400">Schedule:</span> <span class="text-slate-200">{{ summary.cadence or '—' }}</span></div>
+  <div>
+    <span class="text-slate-400">Target titles:</span>
+    <span class="text-slate-200">{{ (summary.target_titles or '—').split('\n') | map('trim') | select | join(', ') }}</span>
+  </div>
 </div>
 <div class="space-y-2 mb-6">
   <p class="text-sm text-slate-400">Optional: set up email alerts on the sites Job Cannon reads from. Each provider sends a daily digest to the inbox you connected; Job Cannon parses those automatically.</p>

@@ -265,6 +265,20 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     def index():
         return redirect(url_for("jobs.index"))
 
+    # --- Favicon: inline SVG so every page stops 404'ing in the browser console ---
+    @app.route("/favicon.ico")
+    def favicon():
+        # Tiny SVG bullseye on transparent ground — matches the "Job Cannon"
+        # naming and avoids shipping a binary asset / adding a static dir.
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+            '<circle cx="16" cy="16" r="14" fill="#1e293b"/>'
+            '<circle cx="16" cy="16" r="10" fill="none" stroke="#3b82f6" stroke-width="2"/>'
+            '<circle cx="16" cy="16" r="4" fill="#3b82f6"/>'
+            "</svg>"
+        )
+        return svg, 200, {"Content-Type": "image/svg+xml"}
+
     # --- Background scheduler ---
     # Start AFTER blueprints are registered so the scheduler job can import from
     # the web package without circular imports. Skipped when TESTING=True.

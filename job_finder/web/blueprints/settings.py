@@ -28,6 +28,7 @@ from job_finder.config import (
     DEFAULT_MIN_SCORE_THRESHOLD,
     load_config,
 )
+from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import get_db
 from job_finder.web.onboarding.inbox_check import run_inbox_check
 
@@ -35,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint("settings", __name__, url_prefix="/settings")
 
-_CONFIG_PATH = "config.yaml"
+# Resolve to the canonical user-data config.yaml (respects $JOB_CANNON_USER_DATA_DIR,
+# falls back to platformdirs). Was a cwd-relative "config.yaml" literal which silently
+# leaked the developer's repo-root config into any non-cwd boot and broke pipx/uv tool
+# installs that run from an arbitrary terminal pwd.
+_CONFIG_PATH = str(user_data_dirs.config_path())
 
 
 @settings_bp.route("/", strict_slashes=False)

@@ -30,9 +30,9 @@
     <!-- Step indicator (D-21) -->
     {% if step_num is defined and step_label is defined %}
       <div class="mb-6">
-        <p class="text-sm text-slate-400">Step {{ step_num }} of 7 &bull; {{ step_label }}</p>
+        <p class="text-sm text-slate-400">Step {{ step_num }} of 8 &bull; {{ step_label }}</p>
         <div class="mt-2 h-1 bg-slate-700 rounded overflow-hidden">
-          <div class="h-1 bg-blue-500" style="width: {{ (step_num * 100 / 7) | round(0, 'floor') }}%"></div>
+          <div class="h-1 bg-blue-500" style="width: {{ (step_num * 100 / 8) | round(0, 'floor') }}%"></div>
         </div>
       </div>
     {% endif %}

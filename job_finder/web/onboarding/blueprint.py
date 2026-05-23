@@ -286,7 +286,7 @@ def profile_edit():
         target_locations=existing_edit.get("target_locations", ""),
         skills=existing_edit.get("skills") or parsed_skills_text,
         min_salary=existing_edit.get("min_salary") or "",
-        step_num=4,
+        step_num=5,
         step_label="Profile",
     )
 
@@ -322,7 +322,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error="Both Gmail address and app password are required.",
                 email=email,
-                step_num=5,
+                step_num=6,
                 step_label="Gmail",
             )
 
@@ -333,7 +333,7 @@ def imap_credentials():
                 "onboarding/imap_credentials.html",
                 error=result.message,
                 email=email,
-                step_num=5,
+                step_num=6,
                 step_label="Gmail",
             )
 
@@ -353,7 +353,7 @@ def imap_credentials():
     return render_template(
         "onboarding/imap_credentials.html",
         email=existing_imap.get("email", ""),
-        step_num=5,
+        step_num=6,
         step_label="Gmail",
     )
 
@@ -370,7 +370,7 @@ def schedule():
 
     return render_template(
         "onboarding/schedule.html",
-        step_num=6,
+        step_num=7,
         step_label="Schedule",
     )
 
@@ -586,6 +586,6 @@ def done():
     return render_template(
         "onboarding/done.html",
         summary=summary,
-        step_num=7,
+        step_num=8,
         step_label="Ready",
     )

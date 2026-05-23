@@ -51,12 +51,12 @@ def test_step_indicator_renders(client):
     """Step indicator passes step_num and step_label to _base.html."""
     resp = client.get("/onboarding/welcome")
     body = resp.get_data(as_text=True)
-    assert "Step 1 of 7" in body
+    assert "Step 1 of 8" in body
     assert "Welcome" in body
 
     resp = client.get("/onboarding/schedule")
     body = resp.get_data(as_text=True)
-    assert "Step 6 of 7" in body
+    assert "Step 7 of 8" in body
     assert "Schedule" in body
 
 
