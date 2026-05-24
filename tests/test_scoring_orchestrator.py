@@ -354,3 +354,96 @@ class TestResolveScoringModel:
             )
             is None
         )
+
+
+class TestCascadeModelPersisted:
+    """The real config uses providers.overrides.{provider}.score, not
+    providers.scoring.model. _resolve_scoring_model can't read that path,
+    so the cascade-reported ScoringResult.model is the only reliable source
+    of model attribution. These tests pin that behavior.
+    """
+
+    def test_result_model_wins_over_config(self, db_conn, seeded_job):
+        """When ScoringResult carries model, it persists even if config has
+        a different value at providers.scoring.model."""
+        conn, _ = db_conn
+        config = {
+            "providers": {
+                "scoring": {"model": "config-fallback-model"},
+            }
+        }
+        assessment = _make_assessment(provider="ollama")
+
+        def stub_scorer(job, conn_arg, cfg, client=None, candidate_context=None):
+            return ScoringResult(
+                status="ok",
+                data=assessment,
+                provider="ollama",
+                model="qwen2.5:14b",
+            )
+
+        so.score_and_persist_job(seeded_job, conn, config, scorer_fn=stub_scorer)
+        row = conn.execute(
+            "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert row["scoring_provider"] == "ollama"
+        assert row["scoring_model"] == "qwen2.5:14b"
+
+    def test_falls_back_to_config_when_result_model_absent(self, db_conn, seeded_job):
+        """Legacy callers / test stubs without a model field still work via
+        the providers.scoring.model fallback path."""
+        conn, _ = db_conn
+        config = {
+            "providers": {
+                "scoring": {"model": "config-fallback-model"},
+            }
+        }
+        assessment = _make_assessment(provider="ollama")
+
+        def stub_scorer(job, conn_arg, cfg, client=None, candidate_context=None):
+            # ScoringResult intentionally without model=
+            return ScoringResult(status="ok", data=assessment, provider="ollama")
+
+        so.score_and_persist_job(seeded_job, conn, config, scorer_fn=stub_scorer)
+        row = conn.execute(
+            "SELECT scoring_model FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        assert row["scoring_model"] == "config-fallback-model"
+
+    def test_real_config_shape_persists_cascade_model(self, db_conn, seeded_job):
+        """Real config.yaml uses providers.overrides.{provider}.score, not
+        providers.scoring.model. Without the result.model preference, this
+        config shape persisted scoring_model=NULL for every cascade-routed
+        score — the leak this fix closes."""
+        conn, _ = db_conn
+        config = {
+            "providers": {
+                "primary": "ollama",
+                "fallback_chain": ["anthropic"],
+                "overrides": {
+                    "ollama": {"score": "qwen2.5:14b"},
+                    "anthropic": {"score": "claude-sonnet-4-6"},
+                },
+            }
+        }
+        assessment = _make_assessment(provider="ollama")
+
+        def stub_scorer(job, conn_arg, cfg, client=None, candidate_context=None):
+            return ScoringResult(
+                status="ok",
+                data=assessment,
+                provider="ollama",
+                model="qwen2.5:14b",
+            )
+
+        so.score_and_persist_job(seeded_job, conn, config, scorer_fn=stub_scorer)
+        row = conn.execute(
+            "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
+            ("job-abc",),
+        ).fetchone()
+        # Pre-fix: scoring_model would be NULL because _resolve_scoring_model
+        # reads providers.scoring.model (absent) and ignores .overrides.
+        assert row["scoring_provider"] == "ollama"
+        assert row["scoring_model"] == "qwen2.5:14b"

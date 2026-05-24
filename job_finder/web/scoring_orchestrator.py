@@ -122,7 +122,12 @@ def score_and_persist_job(
 
     assessment = result.data
     provider = result.provider
-    model = _resolve_scoring_model(config, provider)
+    # Prefer the cascade-reported model (set by call_model → ModelResult.model).
+    # Falls back to the static config path for legacy callers / tests that
+    # stub ScoringResult without a model field. Without this preference the
+    # real-config path (providers.overrides.<name>.score) writes scoring_model
+    # NULL because _resolve_scoring_model reads providers.scoring.model only.
+    model = getattr(result, "model", None) or _resolve_scoring_model(config, provider)
 
     persist_job_assessment(
         conn,

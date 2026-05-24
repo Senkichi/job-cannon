@@ -58,16 +58,18 @@ _MAX_JD_CHARS = 10_000
 class ScoringResult:
     """Envelope returned by score_job(). status ∈ {"ok", "skipped", "error"}.
 
-    - status="ok": data is a JobAssessment, provider is the attribution string.
-    - status="skipped": data is None, provider is None, error is None —
+    - status="ok": data is a JobAssessment, provider + model are the attribution
+      strings reported by the cascade.
+    - status="skipped": data is None, provider/model are None, error is None —
       precondition (jd_full present) was not met. SCORER-05.
-    - status="error": data is None, provider is whatever the dispatcher
+    - status="error": data is None, provider/model are whatever the dispatcher
       reported if the call reached it, error is a human-readable reason.
     """
 
     status: str
     data: JobAssessment | None
     provider: str | None = None
+    model: str | None = None
     error: str | None = None
 
 
@@ -271,8 +273,14 @@ def score_job(
             status="error",
             data=None,
             provider=result.provider,
+            model=result.model,
             error="dispatcher returned empty or schema-invalid data",
         )
 
     assessment = _coerce_assessment(result.data, result.provider)
-    return ScoringResult(status="ok", data=assessment, provider=result.provider)
+    return ScoringResult(
+        status="ok",
+        data=assessment,
+        provider=result.provider,
+        model=result.model,
+    )
