@@ -39,6 +39,7 @@ except ImportError:
 #   patch("job_finder.web.pipeline_runner.GmailSource", ...)   ← still valid (imported above)
 #   patch("job_finder.web.pipeline_runner.upsert_job", ...)    ← still valid (imported above)
 from job_finder.web.ingestion_runner import (  # noqa: F401
+    _apply_title_gate,
     _collect_dataforseo_results,
     _fetch_gmail,
     _fetch_imap,
@@ -149,7 +150,11 @@ def run_ingestion(
         )
 
         # --- DataForSEO: collect results (blocks until ready or timeout) ---
-        dataforseo_jobs = _collect_dataforseo_results(dfse_source, dfse_task_ids, summary)
+        # Pass config so _collect_dataforseo_results applies the Stage 7.6
+        # title-gate (historical pass rate 60.4%, largest absolute non-portal gain).
+        dataforseo_jobs = _collect_dataforseo_results(
+            dfse_source, dfse_task_ids, summary, config=config
+        )
 
         # --- Combine all jobs ---
         all_jobs = (

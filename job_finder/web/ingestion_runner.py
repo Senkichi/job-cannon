@@ -34,6 +34,47 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _apply_title_gate(jobs: list[Job], config: dict, source_label: str) -> list[Job]:
+    """Apply the Stage 7.6 title-gate invariant to a non-portal ingestion source.
+
+    Reads ``profile.target_titles`` + ``profile.exclusions.title_keywords`` from
+    config and applies ``_title_matches`` (word-boundary regex, the same helper
+    every ATS scanner enforces inline and that Stage 7.6 added to
+    ``fetch_all_portals``). When ``target_titles`` is empty this is a no-op —
+    same bypass semantics as ``validate_target_titles`` and the Stage 7.6 gate.
+
+    Empirical context: gmail/serpapi/dataforseo/thordata historically passed
+    ``_title_matches`` at only 26-72%; the rest were off-target rows the
+    upstream ``q=``/alert-config could not filter and that reached scoring
+    anyway. This gate closes that downstream leak with one consistent rule.
+    """
+    if not jobs:
+        return jobs
+    profile = config.get("profile") or {}
+    target_titles = list(profile.get("target_titles") or [])
+    if not target_titles:
+        return jobs
+    exclusions = list((profile.get("exclusions") or {}).get("title_keywords") or [])
+
+    # Lazy import to avoid pulling ats_platforms (and its heavyweight deps)
+    # at module import time. Same pattern as fetch_all_portals.
+    from job_finder.web.ats_platforms import _title_matches
+
+    pre = len(jobs)
+    filtered = [j for j in jobs if _title_matches(j.title, target_titles, exclusions)]
+    post = len(filtered)
+    if post != pre:
+        logger.info(
+            "title-gate %s: %d → %d jobs (target_titles=%d, exclusions=%d)",
+            source_label,
+            pre,
+            post,
+            len(target_titles),
+            len(exclusions),
+        )
+    return filtered
+
+
 def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[Job]:
     """Fetch jobs from Gmail with per-message deduplication via email_parse_log.
 
@@ -82,7 +123,6 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
             lookback_days=lookback_days,
             processed_message_ids=known_ids,
         )
-        summary["gmail_fetched"] = len(jobs)
 
         logger.info(
             "Gmail dedup: %d known, %d newly processed",
@@ -133,6 +173,14 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
                 logger.debug("Zero-job email routed to activity feed: %s", fail_sender)
             except Exception as e:
                 logger.warning("Failed to log parse failure to runs: %s", e)
+
+        # Apply title-gate AFTER message-level dedup writes (above) so the
+        # email_parse_log message-ID inserts still cover every fetched message
+        # — gate filters Job objects, not message tracking. summary +
+        # run-level log use the post-gate count (matches Stage 7.6 portal_search
+        # semantics: dashboard's *_fetched reflects what reached downstream).
+        jobs = _apply_title_gate(jobs, config, "gmail")
+        summary["gmail_fetched"] = len(jobs)
 
         # --- Log the run-level summary to email_parse_log ---
         _log_to_email_parse_log(conn, run_id, "gmail", len(jobs), None)
@@ -194,6 +242,7 @@ def _fetch_imap(config: dict, summary: dict) -> list[Job]:
             folder=folder,
         )
         jobs, _ = source.fetch_jobs()
+        jobs = _apply_title_gate(jobs, config, "imap")
         summary["imap_fetched"] = len(jobs)
 
         logger.info("IMAP: fetched %d jobs", len(jobs))
@@ -238,6 +287,7 @@ def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
         max_pages = serpapi_config.get("max_pages", 5)
         source = SerpAPISource(api_key, max_pages=max_pages)
         jobs = source.fetch_jobs(queries)
+        jobs = _apply_title_gate(jobs, config, "serpapi")
         summary["serpapi_fetched"] = len(jobs)
 
         logger.info("SerpAPI: fetched %d jobs", len(jobs))
@@ -284,6 +334,7 @@ def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
 
         source = ThordataSource(api_key, max_age_days=max_age_days)
         jobs = source.fetch_jobs(queries)
+        jobs = _apply_title_gate(jobs, config, "thordata")
         summary["thordata_fetched"] = len(jobs)
 
         logger.info("Thordata: fetched %d jobs", len(jobs))
@@ -561,6 +612,7 @@ def _collect_dataforseo_results(
     source: Optional["DataForSEOSource"],
     task_ids: list[str],
     summary: dict,
+    config: dict | None = None,
 ) -> list[Job]:
     """Collect results for previously submitted DataForSEO tasks.
 
@@ -569,6 +621,12 @@ def _collect_dataforseo_results(
                 or None if submission was skipped/failed.
         task_ids: Task UUIDs returned by submit_tasks().
         summary: Mutable summary dict to update.
+        config: Optional full config dict. When provided, ``_apply_title_gate``
+            uses ``profile.target_titles`` + ``profile.exclusions.title_keywords``
+            to filter results before persistence (Stage 7.6 follow-up; historical
+            pass rate against this gate was 60.4%). When omitted (legacy callers
+            in tests), the gate is skipped — same bypass semantics as everywhere
+            else in this module.
 
     Returns:
         List of Job objects. Empty if source is None or task_ids is empty.
@@ -580,6 +638,8 @@ def _collect_dataforseo_results(
         t0 = time.monotonic()
         jobs = source.collect_results(task_ids)
         elapsed = time.monotonic() - t0
+        if config is not None:
+            jobs = _apply_title_gate(jobs, config, "dataforseo")
         summary["dataforseo_fetched"] = len(jobs)
         logger.info("DataForSEO collect: %.1fs, %d jobs", elapsed, len(jobs))
         return jobs

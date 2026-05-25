@@ -55,7 +55,12 @@ def minimal_config(migrated_db_path):
             },
         },
         "profile": {
-            "target_titles": ["Senior Data Scientist"],
+            # Generic target so tests using shorthand titles like "Staff DS" /
+            # "Senior DS" / "Principal DS" / "Unified DS" word-boundary-match
+            # after _normalize_title expansion ("DS" -> "Data Scientist").
+            # Tests that exercise the Stage 7.6 title-gate directly override
+            # target_titles in their own fixture.
+            "target_titles": ["Data Scientist"],
             "target_locations": ["Remote"],
             "min_salary": 100000,
             "exclusions": {"title_keywords": [], "companies": []},
@@ -2052,3 +2057,231 @@ class TestFetchPortalSearchTitleGate:
         assert len(jobs) == 1
         assert jobs[0].title == "Senior Data Scientist"
         assert summary["portal_search_fetched"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Stage 7.6 follow-up — _apply_title_gate helper + non-portal source gates.
+#
+# Mirrors the same invariant fetch_all_portals enforces (Stage 7.6). The
+# helper is invoked inside every non-portal `_fetch_*` so summary["*_fetched"]
+# reflects post-gate inventory — same dashboard semantics as Stage 7.6.
+# ---------------------------------------------------------------------------
+
+
+class TestApplyTitleGateHelper:
+    """Unit tests for `_apply_title_gate` — the shared filter applied inside
+    every non-portal ingestion fetcher."""
+
+    def _jobs(self, *titles: str) -> list[Job]:
+        return [
+            Job(
+                title=t,
+                company="Acme",
+                location="Remote",
+                source="test",
+                source_url=f"https://example.com/{i}",
+            )
+            for i, t in enumerate(titles)
+        ]
+
+    def test_empty_jobs_returns_empty(self):
+        """Defensive — never iterate or filter when nothing was fetched."""
+        from job_finder.web.ingestion_runner import _apply_title_gate
+
+        config = {"profile": {"target_titles": ["Data Scientist"]}}
+        assert _apply_title_gate([], config, "x") == []
+
+    def test_no_target_titles_is_noop(self):
+        """Empty target_titles preserves legacy bypass semantics — matches
+        Stage 7.6 fetch_all_portals contract (target_titles=None passes all)."""
+        from job_finder.web.ingestion_runner import _apply_title_gate
+
+        config = {"profile": {"target_titles": []}}
+        jobs = self._jobs("Senior Data Scientist", "Marketing Manager")
+        result = _apply_title_gate(jobs, config, "x")
+        assert result == jobs
+
+    def test_missing_profile_section_is_noop(self):
+        """No `profile` key at all → no-op (graceful when callers omit profile)."""
+        from job_finder.web.ingestion_runner import _apply_title_gate
+
+        jobs = self._jobs("Senior Data Scientist", "Marketing Manager")
+        result = _apply_title_gate(jobs, {}, "x")
+        assert result == jobs
+
+    def test_off_target_jobs_filtered(self):
+        """Jobs whose title fails `_title_matches` are dropped."""
+        from job_finder.web.ingestion_runner import _apply_title_gate
+
+        config = {"profile": {"target_titles": ["Data Scientist"]}}
+        jobs = self._jobs(
+            "Senior Data Scientist",  # passes
+            "Marketing Manager",  # filtered
+            "Sr DS",  # passes via abbreviation expansion
+            "Database Admin",  # filtered — word-boundary distinguishes 'Data' from 'Database'
+        )
+        result = _apply_title_gate(jobs, config, "x")
+        assert [j.title for j in result] == ["Senior Data Scientist", "Sr DS"]
+
+    def test_exclusions_respected(self):
+        """`profile.exclusions.title_keywords` filters even when target matches."""
+        from job_finder.web.ingestion_runner import _apply_title_gate
+
+        config = {
+            "profile": {
+                "target_titles": ["Data Scientist"],
+                "exclusions": {"title_keywords": ["Intern"]},
+            }
+        }
+        jobs = self._jobs("Senior Data Scientist", "Data Scientist Intern")
+        result = _apply_title_gate(jobs, config, "x")
+        assert [j.title for j in result] == ["Senior Data Scientist"]
+
+
+class TestNonPortalIngestionTitleGate:
+    """Stage 7.6 follow-up — gate fires inside each non-portal `_fetch_*`
+    so off-target rows from gmail/imap/serpapi/thordata/dataforseo never
+    reach persistence + scoring. Historical pass rate for these sources
+    was 26-72%; the gate closes the same downstream leak Stage 7.6 closed
+    for portal_search."""
+
+    @pytest.fixture
+    def gated_config(self):
+        return {
+            "sources": {
+                "gmail": {"enabled": True, "lookback_days": 7},
+                "imap": {
+                    "enabled": True,
+                    "email": "a@b.c",
+                    "app_password": "p",
+                    "host": "imap.gmail.com",
+                    "port": 993,
+                    "folder": "INBOX",
+                },
+                "serpapi": {
+                    "enabled": True,
+                    "api_key": "x",
+                    "queries": [{"query": "ds"}],
+                },
+                "thordata": {
+                    "enabled": True,
+                    "api_key": "x",
+                    "queries": [{"query": "ds"}],
+                },
+            },
+            "profile": {
+                "target_titles": ["Data Scientist"],
+                "exclusions": {"title_keywords": []},
+            },
+        }
+
+    def _mixed_jobs(self, source: str) -> list[Job]:
+        return [
+            Job(
+                title="Senior Data Scientist",
+                company="Co1",
+                location="Remote",
+                source=source,
+                source_url=f"https://x/{source}/1",
+            ),
+            Job(
+                title="IT Service Lead",
+                company="Co2",
+                location="Remote",
+                source=source,
+                source_url=f"https://x/{source}/2",
+            ),
+        ]
+
+    def test_serpapi_gate_drops_off_target(self, gated_config):
+        """`_fetch_serpapi`: post-gate jobs + post-gate summary count."""
+        from job_finder.web.ingestion_runner import _fetch_serpapi
+
+        with patch("job_finder.sources.serpapi_source.SerpAPISource") as MockSerp:
+            MockSerp.return_value.fetch_jobs.return_value = self._mixed_jobs("serpapi")
+            summary: dict = {"serpapi_errors": []}
+            jobs = _fetch_serpapi(gated_config, summary)
+
+        assert [j.title for j in jobs] == ["Senior Data Scientist"]
+        assert summary["serpapi_fetched"] == 1
+
+    def test_thordata_gate_drops_off_target(self, gated_config):
+        """`_fetch_thordata`: same shape as serpapi."""
+        from job_finder.web.ingestion_runner import _fetch_thordata
+
+        with patch("job_finder.sources.thordata_source.ThordataSource") as MockThor:
+            MockThor.return_value.fetch_jobs.return_value = self._mixed_jobs("thordata")
+            summary: dict = {"thordata_errors": []}
+            jobs = _fetch_thordata(gated_config, summary)
+
+        assert [j.title for j in jobs] == ["Senior Data Scientist"]
+        assert summary["thordata_fetched"] == 1
+
+    def test_gmail_gate_drops_off_target(self, gated_config, migrated_db_path):
+        """`_fetch_gmail`: gate fires AFTER message-level dedup writes so
+        email_parse_log still tracks every message ID, gate only filters Jobs."""
+        import sqlite3
+
+        from job_finder.web.ingestion_runner import _fetch_gmail
+
+        conn = sqlite3.connect(migrated_db_path)
+        with patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail:
+            MockGmail.return_value.fetch_jobs.return_value = (
+                self._mixed_jobs("gmail"),
+                {"msg1", "msg2"},
+            )
+            MockGmail.return_value.parse_failures = []
+            summary: dict = {"gmail_errors": []}
+            jobs = _fetch_gmail(gated_config, conn, summary)
+
+        assert [j.title for j in jobs] == ["Senior Data Scientist"]
+        assert summary["gmail_fetched"] == 1
+        # email_parse_log still tracks both raw messages — dedup unaffected.
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM email_parse_log WHERE message_id IN ('msg1','msg2')"
+        ).fetchone()
+        assert rows[0] == 2
+        conn.close()
+
+    def test_imap_gate_drops_off_target(self, gated_config):
+        """`_fetch_imap`: same shape as gmail but no email_parse_log writes."""
+        from job_finder.web.ingestion_runner import _fetch_imap
+
+        with patch("job_finder.web.ingestion_runner.ImapSource") as MockImap:
+            MockImap.return_value.fetch_jobs.return_value = (
+                self._mixed_jobs("imap"),
+                {},
+            )
+            summary: dict = {"imap_errors": []}
+            jobs = _fetch_imap(gated_config, summary)
+
+        assert [j.title for j in jobs] == ["Senior Data Scientist"]
+        assert summary["imap_fetched"] == 1
+
+    def test_dataforseo_gate_drops_off_target_when_config_passed(self, gated_config):
+        """`_collect_dataforseo_results`: gate fires when config kwarg is provided."""
+        from job_finder.web.ingestion_runner import _collect_dataforseo_results
+
+        mock_source = MagicMock()
+        mock_source.collect_results.return_value = self._mixed_jobs("dataforseo")
+        summary: dict = {"dataforseo_errors": []}
+        jobs = _collect_dataforseo_results(
+            mock_source, ["task1"], summary, config=gated_config
+        )
+
+        assert [j.title for j in jobs] == ["Senior Data Scientist"]
+        assert summary["dataforseo_fetched"] == 1
+
+    def test_dataforseo_no_gate_when_config_omitted(self):
+        """`_collect_dataforseo_results`: legacy callers (no config kwarg)
+        get bypass semantics — matches the rest of the module's defaults."""
+        from job_finder.web.ingestion_runner import _collect_dataforseo_results
+
+        mock_source = MagicMock()
+        mock_source.collect_results.return_value = self._mixed_jobs("dataforseo")
+        summary: dict = {"dataforseo_errors": []}
+        # No `config=` kwarg → no gate.
+        jobs = _collect_dataforseo_results(mock_source, ["task1"], summary)
+
+        assert len(jobs) == 2
+        assert summary["dataforseo_fetched"] == 2
