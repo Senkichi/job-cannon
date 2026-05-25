@@ -715,6 +715,8 @@ def fetch_all_portals(
     serp_portals: list[dict[str, str]] | None = None,
     portal_config: dict | None = None,
     google_cse_source: _SerpBackend | None = None,
+    target_titles: list[str] | None = None,
+    exclusions: list[str] | None = None,
 ) -> list[Job]:
     """Fetch from all portals: free APIs first, then SERP fallback.
 
@@ -731,9 +733,19 @@ def fetch_all_portals(
         google_cse_source: Optional GoogleCSESource backend. Used only when
             ``dataforseo_source`` is None — Stage 3's free substitute for the
             DataForSEO ``site:`` query path.
+        target_titles: Optional title-gate list. When provided (non-empty),
+            ``_title_matches`` (word-boundary regex over normalized titles)
+            is applied to the merged result set; jobs whose title does not
+            match any target_title are dropped. Mirrors the per-job inline
+            filter that ``ats_platforms.scan_*`` already enforces, closing
+            a documented Stage-0 gap (free portals' upstream ``q=`` is
+            full-text and lets non-title-matching rows through). When None
+            or empty, the gate is skipped (legacy / benchmark behavior).
+        exclusions: Optional exclusion-keyword list paired with
+            ``target_titles``. Ignored when ``target_titles`` is None/empty.
 
     Returns:
-        Combined, deduplicated job list.
+        Combined, deduplicated job list (post title-gate when configured).
     """
     seen_urls: set[str] = set()
     all_jobs: list[Job] = []
@@ -802,7 +814,30 @@ def fetch_all_portals(
     else:
         logger.info("Portal search: no SERP backend (DataForSEO or CSE), skipping SERP portals")
 
-    logger.info("Portal search total: %d jobs from all portals", len(all_jobs))
+    pre_gate_count = len(all_jobs)
+
+    # Stage 7.6 title-gate: applied after merge so per-portal logs above stay
+    # comparable to historical numbers (raw fetched count) while persistence
+    # downstream sees only title-matching rows. Mirrors the inline
+    # ``_title_matches`` filter used by every ats_platforms.scan_* function.
+    # Closes the documented Stage-0 gap where free portals' upstream ``q=``
+    # is full-text and routed off-target rows into scoring (the apply-bias
+    # surfaced by the 2026-05-23 option-D shakedown).
+    if target_titles:
+        from job_finder.web.ats_platforms import _title_matches
+
+        excl = exclusions or []
+        all_jobs = [j for j in all_jobs if _title_matches(j.title, target_titles, excl)]
+        logger.info(
+            "Portal search title-gate: %d → %d jobs (target_titles=%d, exclusions=%d)",
+            pre_gate_count,
+            len(all_jobs),
+            len(target_titles),
+            len(excl),
+        )
+    else:
+        logger.info("Portal search total: %d jobs from all portals", pre_gate_count)
+
     return all_jobs
 
 

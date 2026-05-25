@@ -1927,3 +1927,128 @@ class TestInjectPortalSearchCreds:
         assert "usajobs" not in augmented
         assert "adzuna" not in augmented
         assert "jooble" not in augmented
+
+
+# ---------------------------------------------------------------------------
+# Stage 7.6 — title-gate wiring through _fetch_portal_search
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPortalSearchTitleGate:
+    """Stage 7.6 — `profile.target_titles` + `exclusions.title_keywords` thread
+    from config through `_fetch_portal_search` into `fetch_all_portals` so the
+    portal-boundary title-gate fires. Closes the architectural gap where free
+    portals' upstream ``q=`` full-text matching let off-target rows reach
+    persistence + scoring (the apply-bias surfaced 2026-05-23 option-D run).
+    """
+
+    @pytest.fixture
+    def gated_config(self):
+        return {
+            "sources": {
+                "portal_search": {
+                    "enabled": True,
+                    "keywords": ["Data Scientist"],
+                    "max_serp_queries": 30,
+                },
+                "dataforseo": {"enabled": False},
+                "google_cse": {"enabled": False},
+            },
+            "profile": {
+                "target_titles": ["Senior Data Scientist", "Analytics Manager"],
+                "exclusions": {"title_keywords": ["Intern"]},
+            },
+        }
+
+    def test_target_titles_threaded_to_fetch_all_portals(self, gated_config):
+        """`profile.target_titles` reaches fetch_all_portals as kwarg."""
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(gated_config, {})
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["target_titles"] == [
+            "Senior Data Scientist",
+            "Analytics Manager",
+        ]
+        assert kwargs["exclusions"] == ["Intern"]
+
+    def test_no_profile_section_passes_empty_lists(self):
+        """Missing profile entirely → empty target_titles + empty exclusions
+        (gate becomes no-op inside fetch_all_portals)."""
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        cfg = {
+            "sources": {
+                "portal_search": {
+                    "enabled": True,
+                    "keywords": ["x"],
+                    "max_serp_queries": 30,
+                },
+                "dataforseo": {"enabled": False},
+                "google_cse": {"enabled": False},
+            }
+            # no `profile`
+        }
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(cfg, {})
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["target_titles"] == []
+        assert kwargs["exclusions"] == []
+
+    def test_empty_exclusions_section_passes_empty_list(self, gated_config):
+        """`profile.exclusions = {}` → exclusions kwarg = []."""
+        gated_config["profile"]["exclusions"] = {}
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=[],
+        ) as mock_fetch:
+            _fetch_portal_search(gated_config, {})
+
+        kwargs = mock_fetch.call_args.kwargs
+        assert kwargs["exclusions"] == []
+
+    def test_gate_is_end_to_end_against_real_fetch_all_portals(self, gated_config):
+        """End-to-end through real fetch_all_portals: off-target dropped, on-target retained."""
+        from job_finder.models import Job
+        from job_finder.web.ingestion_runner import _fetch_portal_search
+
+        def _job(title: str, src: str = "portal_himalayas") -> Job:
+            return Job(
+                title=title,
+                company="Acme",
+                location="Remote",
+                source=src,
+                source_url=f"https://example.com/{title}",
+            )
+
+        # _fetch_himalayas returns 3 jobs: 1 on-target, 1 off-target, 1 excluded.
+        with patch(
+            "job_finder.sources.portal_search_source._fetch_himalayas",
+            return_value=[
+                _job("Senior Data Scientist"),  # passes gate
+                _job("IT Service Lead"),  # off-target, dropped
+                _job("Senior Data Scientist Intern"),  # excluded
+            ],
+        ), patch(
+            "job_finder.sources.portal_search_source._fetch_remoteok", return_value=[]
+        ), patch(
+            "job_finder.sources.portal_search_source._fetch_remotive", return_value=[]
+        ):
+            summary: dict = {}
+            jobs = _fetch_portal_search(gated_config, summary)
+
+        # Only the on-target row survives — gate fired through the runner.
+        assert len(jobs) == 1
+        assert jobs[0].title == "Senior Data Scientist"
+        assert summary["portal_search_fetched"] == 1

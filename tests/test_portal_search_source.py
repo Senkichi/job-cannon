@@ -260,6 +260,114 @@ class TestFetchAllPortals:
 
 
 # ---------------------------------------------------------------------------
+# Stage 7.6: title-gate at portal boundary
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAllPortalsTitleGate:
+    """Stage 7.6 — `_title_matches` gate applied at fetch_all_portals boundary.
+
+    Closes the documented Stage-0 architectural gap where portal_search's
+    upstream ``q=`` full-text matching let non-title-matching rows through
+    into the DB and the scorer. The fix mirrors the inline per-job filter
+    that every ats_platforms.scan_* function already enforces.
+    """
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_filters_off_target_titles(self, mock_rok, mock_rem, mock_him):
+        """Off-target titles dropped; on-target retained."""
+        mock_rok.return_value = [
+            _make_job(title="IT Service Lead", url="https://x/1"),
+            _make_job(title="Senior Data Scientist", url="https://x/2"),
+            _make_job(title="Compliance Lead", url="https://x/3"),
+        ]
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            target_titles=["Senior Data Scientist"],
+        )
+        assert len(jobs) == 1
+        assert jobs[0].title == "Senior Data Scientist"
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_none_passes_all(self, mock_rok, mock_rem, mock_him):
+        """target_titles=None preserves legacy behavior (no filter)."""
+        mock_rok.return_value = [
+            _make_job(title="IT Service Lead", url="https://x/1"),
+            _make_job(title="Senior Data Scientist", url="https://x/2"),
+        ]
+        jobs = fetch_all_portals(["Engineer"], dataforseo_source=None, target_titles=None)
+        assert len(jobs) == 2
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_empty_list_passes_all(self, mock_rok, mock_rem, mock_him):
+        """target_titles=[] is equivalent to no gate."""
+        mock_rok.return_value = [
+            _make_job(title="IT Service Lead", url="https://x/1"),
+            _make_job(title="Senior Data Scientist", url="https://x/2"),
+        ]
+        jobs = fetch_all_portals(["Engineer"], dataforseo_source=None, target_titles=[])
+        assert len(jobs) == 2
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_respects_exclusions(self, mock_rok, mock_rem, mock_him):
+        """Exclusion keyword overrides target_title match."""
+        mock_rok.return_value = [
+            _make_job(title="Senior Data Scientist", url="https://x/1"),
+            _make_job(title="Senior Data Scientist Intern", url="https://x/2"),
+        ]
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            target_titles=["Data Scientist"],
+            exclusions=["Intern"],
+        )
+        assert len(jobs) == 1
+        assert "Intern" not in jobs[0].title
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_uses_word_boundary(self, mock_rok, mock_rem, mock_him):
+        """Word-boundary regex — substring matches are rejected."""
+        mock_rok.return_value = [
+            _make_job(title="Database Administrator", url="https://x/1"),
+            _make_job(title="Data Engineer", url="https://x/2"),
+        ]
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            target_titles=["Data"],
+        )
+        # "Database" should NOT match \bData\b; "Data Engineer" should.
+        assert len(jobs) == 1
+        assert jobs[0].title == "Data Engineer"
+
+    @patch("job_finder.sources.portal_search_source._fetch_himalayas", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[])
+    @patch("job_finder.sources.portal_search_source._fetch_remoteok")
+    def test_gate_normalizes_abbreviations(self, mock_rok, mock_rem, mock_him):
+        """`_normalize_title` expansion lets `Sr DS` match `Senior Data Scientist`."""
+        mock_rok.return_value = [
+            _make_job(title="Sr DS, Growth", url="https://x/1"),
+        ]
+        jobs = fetch_all_portals(
+            ["Engineer"],
+            dataforseo_source=None,
+            target_titles=["Senior Data Scientist"],
+        )
+        assert len(jobs) == 1
+
+
+# ---------------------------------------------------------------------------
 # Ingestion runner integration
 # ---------------------------------------------------------------------------
 

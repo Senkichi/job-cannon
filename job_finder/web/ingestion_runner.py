@@ -403,6 +403,18 @@ def _fetch_portal_search(
     # — we just give it a copy with keyring values injected.
     portal_cfg_with_creds = _inject_portal_search_creds(portal_cfg, config)
 
+    # Stage 7.6 title-gate config. Read from `profile` so the gate uses the
+    # same target_titles the ATS scanners already enforce. `exclusions` is
+    # an optional dict whose `title_keywords` list mirrors the scanner-side
+    # exclusion signature (`scan_lever(slug, target_titles, exclusions)`).
+    # When target_titles is empty (caller bypassed validate_target_titles)
+    # the gate is a no-op — preserves legacy behavior.
+    profile = config.get("profile") or {}
+    gate_target_titles = list(profile.get("target_titles") or [])
+    gate_exclusions = list(
+        ((profile.get("exclusions") or {}).get("title_keywords") or [])
+    )
+
     try:
         from job_finder.sources.portal_search_source import fetch_all_portals
 
@@ -412,6 +424,8 @@ def _fetch_portal_search(
             max_serp_queries=max_serp_queries,
             portal_config=portal_cfg_with_creds,
             google_cse_source=google_cse_source,
+            target_titles=gate_target_titles,
+            exclusions=gate_exclusions,
         )
         summary["portal_search_fetched"] = len(jobs)
         # Per-portal breakdown: each fetcher tags Job.source with a unique
