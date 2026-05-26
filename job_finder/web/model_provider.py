@@ -13,7 +13,7 @@ import logging
 import sqlite3
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date as _date
 
 import requests
@@ -423,6 +423,25 @@ def _sanitize_output(data: dict, schema: dict | None) -> dict:
     return result
 
 
+def _sanitized_result(
+    result: ModelResult, schema: dict | None, provider_name: str
+) -> ModelResult:
+    """Return a ModelResult with ``_sanitize_output`` applied to its ``data``.
+
+    Sanitization is skipped for Anthropic results (the Anthropic adapter
+    historically returns already-validated payloads), for non-dict data,
+    and when the sanitize pass returns the same object (identity-preserving
+    fast path). Otherwise a new ModelResult is produced via
+    ``dataclasses.replace`` so future fields are picked up automatically.
+    """
+    if provider_name == "anthropic" or not isinstance(result.data, dict):
+        return result
+    sanitized = _sanitize_output(result.data, schema)
+    if sanitized is result.data:
+        return result
+    return replace(result, data=sanitized)
+
+
 def _augment_with_errors(messages: list[dict], errors: list[str]) -> list[dict]:
     """Return a NEW messages list with schema errors appended to the last message.
 
@@ -694,18 +713,7 @@ def call_model(
                     timeout,
                 )
                 # Sanitize output for non-Anthropic providers (strip extra keys, coerce types)
-                if entry_provider != "anthropic" and isinstance(result.data, dict):
-                    sanitized = _sanitize_output(result.data, output_schema)
-                    if sanitized is not result.data:
-                        result = ModelResult(
-                            data=sanitized,
-                            cost_usd=result.cost_usd,
-                            input_tokens=result.input_tokens,
-                            output_tokens=result.output_tokens,
-                            model=result.model,
-                            provider=result.provider,
-                            schema_valid=result.schema_valid,
-                        )
+                result = _sanitized_result(result, output_schema, entry_provider)
                 # Schema validation + retry (per-provider, using original messages)
                 errors = _validate_schema(result.data, output_schema)
                 if errors:
@@ -719,18 +727,7 @@ def call_model(
                         max_tokens,
                         timeout,
                     )
-                    if entry_provider != "anthropic" and isinstance(result.data, dict):
-                        sanitized = _sanitize_output(result.data, output_schema)
-                        if sanitized is not result.data:
-                            result = ModelResult(
-                                data=sanitized,
-                                cost_usd=result.cost_usd,
-                                input_tokens=result.input_tokens,
-                                output_tokens=result.output_tokens,
-                                model=result.model,
-                                provider=result.provider,
-                                schema_valid=result.schema_valid,
-                            )
+                    result = _sanitized_result(result, output_schema, entry_provider)
                     errors = _validate_schema(result.data, output_schema)
                 if not errors:
                     _increment_usage(entry_provider)
