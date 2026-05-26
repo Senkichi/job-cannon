@@ -598,6 +598,55 @@ class TestRunAgenticBackfill:
             if os.path.exists(path):
                 os.remove(path)
 
+    def test_passes_open_conn_to_enrich_single_job(self):
+        """Regression: outer SELECT conn was closed at fetchall(), then reused
+        for the per-job enrich call, which broke the cascade cost-recording
+        write ("Cannot operate on a closed database"). Each iteration must
+        now receive a fresh OPEN conn.
+        """
+        from job_finder.web.agentic_enricher import run_agentic_backfill
+
+        path, conn = _make_migrated_db()
+        try:
+            _insert_job(conn, "acme|ds|remote", enrichment_tier="exhausted")
+            conn.close()
+
+            mock_pw_ctx = MagicMock()
+            mock_pw_ctx.__enter__ = MagicMock(return_value=MagicMock())
+            mock_pw_ctx.__exit__ = MagicMock(return_value=False)
+            mock_playwright_mod = MagicMock()
+            mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
+
+            received_conns: list[sqlite3.Connection] = []
+
+            def _capture(_job, _page, *, conn, config):  # noqa: ARG001
+                # The cascade calls conn.execute() on this — must be open.
+                conn.execute("SELECT 1").fetchone()
+                received_conns.append(conn)
+                return "dummy JD" * 50
+
+            with (
+                patch.dict(
+                    "sys.modules",
+                    {"playwright.sync_api": mock_playwright_mod},
+                ),
+                patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                patch(
+                    "job_finder.web.agentic_enricher.enrich_single_job",
+                    side_effect=_capture,
+                ),
+            ):
+                mock_browser.return_value = (MagicMock(), MagicMock())
+                run_agentic_backfill(path, {}, limit=10)
+
+            assert len(received_conns) == 1, (
+                f"enrich_single_job should be called exactly once, got {len(received_conns)}"
+            )
+
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
 
 # ---------------------------------------------------------------------------
 # _fetch_page_text() — LinkedIn routing

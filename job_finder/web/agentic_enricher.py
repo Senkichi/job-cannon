@@ -622,8 +622,14 @@ def run_agentic_backfill(
                 logger.info("[%d/%d] %s @ %s", i, total, title, company)
 
                 t0 = time.time()
-                # All LLM calls now route through call_model with cascade
-                jd = enrich_single_job(job, page, conn=conn, config=config)
+                # Per-job conn: the outer conn from line 576's `with` block
+                # was closed at `.fetchall()`; reusing it here broke the
+                # cascade cost-recording write ("Cannot operate on a closed
+                # database"). Open a fresh short-lived conn scoped to this
+                # one job — matches the write_conn pattern below and keeps
+                # the per-operation hold the module-level note prescribes.
+                with standalone_connection(db_path) as enrich_conn:
+                    jd = enrich_single_job(job, page, conn=enrich_conn, config=config)
                 elapsed = time.time() - t0
 
                 if jd:
