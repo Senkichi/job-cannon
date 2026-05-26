@@ -1,6 +1,6 @@
 """SQLite persistence layer for job deduplication and run history.
 
-Package layout (post-S7d):
+Package layout:
 
 - ``_classification.py`` — JobAssessment + derive_classification +
   ``_SUB_SCORE_KEYS`` (pure scoring-rule logic, zero DB deps).
@@ -13,12 +13,16 @@ Package layout (post-S7d):
   that consumes it MUST stay co-located inside ``_queries.py`` (S7d
   security invariant — see CLAUDE.md and the comment on ``allowed_sort_cols``
   inside ``get_filtered_jobs``).
+- ``_pipeline_queries.py`` — pipeline-detection read queries
+  (``get_pending_detections``, ``get_pipeline_events``, ``resolve_detection``).
+- ``_dashboard_queries.py`` — dashboard / read-side aggregates
+  (``get_dashboard_stats``, ``get_jobs_by_status``, ``get_pipeline_summary``,
+  ``get_recent_activity``, ``get_recent_pipeline_events``, ``get_recent_runs``,
+  ``get_distinct_locations``).
 
 This ``__init__.py`` is now lifecycle-and-re-exports only — no module-level
-functions live here. Sibling modules ``job_finder/db_pipeline.py`` and
-``job_finder/db_queries.py`` are NOT inside this package; they remain at the
-``job_finder/`` level and their public functions are re-exported below so
-existing ``from job_finder.db import X`` paths keep working unchanged.
+functions live here. ``from job_finder.db import X`` continues to be the
+canonical import path for every public name in the package.
 
 Dual-path note (CLI-era / web-era): this module is the original CLI-era DB
 layer (module-level functions accept a ``sqlite3.Connection`` directly).
@@ -53,14 +57,16 @@ from ._jobs import upsert_job as upsert_job
 from ._queries import get_distinct_sources as get_distinct_sources
 from ._queries import get_filtered_jobs as get_filtered_jobs
 
-# Sibling-module re-exports (job_finder/db_pipeline.py + db_queries.py).
-from job_finder.db_pipeline import get_pending_detections as get_pending_detections
-from job_finder.db_pipeline import get_pipeline_events as get_pipeline_events
-from job_finder.db_pipeline import resolve_detection as resolve_detection
-from job_finder.db_queries import get_dashboard_stats as get_dashboard_stats
-from job_finder.db_queries import get_distinct_locations as get_distinct_locations
-from job_finder.db_queries import get_jobs_by_status as get_jobs_by_status
-from job_finder.db_queries import get_pipeline_summary as get_pipeline_summary
-from job_finder.db_queries import get_recent_activity as get_recent_activity
-from job_finder.db_queries import get_recent_pipeline_events as get_recent_pipeline_events
-from job_finder.db_queries import get_recent_runs as get_recent_runs
+# Pipeline-detection + dashboard read queries (formerly job_finder/db_pipeline.py
+# + db_queries.py at the package root; moved into db/ in the polish-review
+# 2026-05-26 sweep, see ``_pipeline_queries.py`` + ``_dashboard_queries.py``).
+from ._pipeline_queries import get_pending_detections as get_pending_detections
+from ._pipeline_queries import get_pipeline_events as get_pipeline_events
+from ._pipeline_queries import resolve_detection as resolve_detection
+from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
+from ._dashboard_queries import get_distinct_locations as get_distinct_locations
+from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status
+from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
+from ._dashboard_queries import get_recent_activity as get_recent_activity
+from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events
+from ._dashboard_queries import get_recent_runs as get_recent_runs
