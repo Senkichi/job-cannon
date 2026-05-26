@@ -350,11 +350,15 @@ class TestSidebarNav:
         assert "/costs" in html
 
     def test_sidebar_contains_costs_label(self, client):
-        """Sidebar contains 'Costs' label."""
+        """Sidebar contains the API Activity label (renamed from 'Costs').
+
+        The label was renamed because /costs now defaults to the Usage tab
+        (tokens in/out across all providers) and the dollar-cost view is
+        the secondary tab. The route stays /costs for backward compat.
+        """
         response = client.get("/costs")
         html = response.data.decode("utf-8")
-        # Check sidebar label
-        assert ">Costs<" in html
+        assert ">API Activity<" in html
 
 
 # ---------------------------------------------------------------------------

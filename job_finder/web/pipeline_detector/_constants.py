@@ -119,6 +119,7 @@ ATS_DOMAINS = {
     "rippling.com",
     "pinpointhq.com",
     "modernloop.io",  # Modern Loop interview scheduling — used by Upstart, others
+    "governmentjobs.com",  # NEOGOV / GovernmentJobs.com — public-sector ATS (counties, states, cities)
 }
 
 # Pipeline statuses that indicate a job is no longer active

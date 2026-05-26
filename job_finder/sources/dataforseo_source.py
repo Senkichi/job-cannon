@@ -172,6 +172,18 @@ class DataForSEOSource:
                 json=payload,
                 timeout=30,
             )
+            # 402 specifically = account out of credit. Surface this as an
+            # actionable message — the user needs to either top up at the
+            # DataForSEO dashboard or set sources.dataforseo.enabled=false in
+            # config.yaml to silence the warnings until they do.
+            if resp.status_code == 402:
+                logger.warning(
+                    "DataForSEO task_post returned 402 (account credit "
+                    "exhausted). Top up at https://app.dataforseo.com/billing "
+                    "or set sources.dataforseo.enabled=false in config.yaml "
+                    "to disable until resolved."
+                )
+                return []
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:

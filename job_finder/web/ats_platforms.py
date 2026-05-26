@@ -342,10 +342,33 @@ def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[s
     url = (
         f"https://api.ashbyhq.com/posting-api/job-board/{job_board_name}?includeCompensation=true"
     )
-    try:
-        resp = requests.get(url, timeout=_PROBE_TIMEOUT)
-    except Exception as e:
-        logger.warning("scan_ashby('%s') request failed: %s", job_board_name, e)
+    # Single retry on transient timeout. The 2026-05-26 07:41-07:50 incident
+    # showed Ashby returning Read timeouts for ~20 tenants in sequence over a
+    # 9-minute window — that pattern is Ashby-side intermittency, not us
+    # hammering them, and a fresh attempt 2s later typically succeeds. We
+    # cap at one retry so a sustained Ashby outage doesn't double the run
+    # time of the whole ATS scan.
+    resp = None
+    for attempt in (1, 2):
+        try:
+            resp = requests.get(url, timeout=_PROBE_TIMEOUT)
+            break
+        except requests.exceptions.Timeout as e:
+            if attempt == 1:
+                logger.debug(
+                    "scan_ashby('%s') timed out attempt 1, retrying in 2s",
+                    job_board_name,
+                )
+                time.sleep(2)
+                continue
+            logger.warning(
+                "scan_ashby('%s') timed out after retry: %s", job_board_name, e
+            )
+            return []
+        except Exception as e:
+            logger.warning("scan_ashby('%s') request failed: %s", job_board_name, e)
+            return []
+    if resp is None:
         return []
 
     if resp.status_code != 200:
