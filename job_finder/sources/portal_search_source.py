@@ -95,14 +95,14 @@ def _fetch_remoteok(keywords: list[str]) -> list[Job]:
 
         jobs.append(
             Job(
-                title=title,
-                company=company,
-                location=item.get("location") or "Remote",
+                title=_clean_text(title),
+                company=_clean_text(company),
+                location=_clean_text(item.get("location") or "") or "Remote",
                 source="portal_remoteok",
                 source_url=item.get("apply_url") or item.get("url") or "",
                 salary_min=_safe_int(item.get("salary_min")),
                 salary_max=_safe_int(item.get("salary_max")),
-                description=_truncate(item.get("description")),
+                description=_truncate(_clean_text(item.get("description"))),
             )
         )
 
@@ -142,14 +142,14 @@ def _fetch_remotive(keywords: list[str]) -> list[Job]:
 
         jobs.append(
             Job(
-                title=title,
-                company=company,
-                location=item.get("candidate_required_location") or "Remote",
+                title=_clean_text(title),
+                company=_clean_text(company),
+                location=_clean_text(item.get("candidate_required_location") or "") or "Remote",
                 source="portal_remotive",
                 source_url=item.get("url") or "",
                 salary_min=salary_min,
                 salary_max=salary_max,
-                description=_truncate(item.get("description")),
+                description=_truncate(_clean_text(item.get("description"))),
             )
         )
 
@@ -448,14 +448,14 @@ def _fetch_usajobs(
 
             all_jobs.append(
                 Job(
-                    title=title,
-                    company=company,
-                    location=location_str or "United States",
+                    title=_clean_text(title),
+                    company=_clean_text(company),
+                    location=_clean_text(location_str) or "United States",
                     source="portal_usajobs",
                     source_url=descriptor.get("PositionURI") or "",
                     salary_min=salary_min,
                     salary_max=salary_max,
-                    description=_truncate(description),
+                    description=_truncate(_clean_text(description)),
                 )
             )
 
@@ -523,14 +523,14 @@ def _fetch_adzuna(
 
             all_jobs.append(
                 Job(
-                    title=title,
-                    company=company,
-                    location=location_str,
+                    title=_clean_text(title),
+                    company=_clean_text(company),
+                    location=_clean_text(location_str),
                     source="portal_adzuna",
                     source_url=item.get("redirect_url") or "",
                     salary_min=_safe_int(item.get("salary_min")),
                     salary_max=_safe_int(item.get("salary_max")),
-                    description=_truncate(item.get("description")),
+                    description=_truncate(_clean_text(item.get("description"))),
                 )
             )
 
@@ -583,14 +583,14 @@ def _fetch_jooble(keywords: list[str], *, api_key: str) -> list[Job]:
 
             all_jobs.append(
                 Job(
-                    title=title,
-                    company=company,
-                    location=item.get("location") or "Remote",
+                    title=_clean_text(title),
+                    company=_clean_text(company),
+                    location=_clean_text(item.get("location") or "") or "Remote",
                     source="portal_jooble",
                     source_url=item.get("link") or "",
                     salary_min=salary_min,
                     salary_max=salary_max,
-                    description=_truncate(item.get("snippet")),
+                    description=_truncate(_clean_text(item.get("snippet"))),
                 )
             )
 

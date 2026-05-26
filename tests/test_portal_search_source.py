@@ -1274,3 +1274,289 @@ class TestStage78JobicyMojibakeRepair:
         assert len(jobs) == 1
         # Empty string OK; eager-promote logic in upsert_job skips short/empty
         assert jobs[0].description in ("", None)
+
+
+# ---------------------------------------------------------------------------
+# Proactive ftfy adoption (post-Stage-7.8 — extends Jobicy/Himalayas pattern
+# to the remaining 5 portal fetchers: RemoteOK, Remotive, USAJobs, Adzuna,
+# Jooble). Defense-in-depth — these portals haven't surfaced mojibake yet
+# but the cleanup is mechanically identical and cheap.
+# ---------------------------------------------------------------------------
+
+
+class TestRemoteokMojibakeRepair:
+    """ftfy hygiene for RemoteOK title/company/location/description fields."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_title_company_location_mojibake_repaired(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        # RemoteOK returns [metadata, listing1, listing2, ...]
+        mock_resp.json.return_value = [
+            {"legal": "metadata"},
+            {
+                "position": "Weâ€™re hiring: Senior Engineer",
+                "company": "Sociâ€™étê",
+                "location": "Île-de-France",
+                "description": "Joinâ€™ our team",
+                "tags": ["engineer"],
+                "url": "https://remoteok.com/jobs/1",
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_remoteok
+
+        jobs = _fetch_remoteok(["engineer"])
+        assert len(jobs) == 1
+        assert "â€™" not in jobs[0].title
+        assert "â€™" not in jobs[0].company
+        assert "we're hiring: senior engineer" in jobs[0].title.lower()
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_missing_description_does_not_crash(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [
+            {"legal": "metadata"},
+            {
+                "position": "Engineer",
+                "company": "MinimalCo",
+                "tags": ["engineer"],
+                "url": "https://remoteok.com/jobs/2",
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_remoteok
+
+        jobs = _fetch_remoteok(["engineer"])
+        assert len(jobs) == 1
+        assert jobs[0].description in ("", None)
+
+
+class TestRemotiveMojibakeRepair:
+    """ftfy hygiene for Remotive title/company/location/description fields."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_title_company_location_mojibake_repaired(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Weâ€™re hiring Engineer",
+                    "company_name": "Sociâ€™étê",
+                    "candidate_required_location": "Île-de-France",
+                    "description": "Joinâ€™ us",
+                    "tags": ["engineer"],
+                    "url": "https://remotive.com/jobs/1",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_remotive
+
+        jobs = _fetch_remotive(["engineer"])
+        assert len(jobs) == 1
+        assert "â€™" not in jobs[0].title
+        assert "â€™" not in jobs[0].company
+        assert "we're hiring engineer" in jobs[0].title.lower()
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_missing_description_does_not_crash(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Engineer",
+                    "company_name": "MinimalCo",
+                    "tags": ["engineer"],
+                    "url": "https://remotive.com/jobs/2",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_remotive
+
+        jobs = _fetch_remotive(["engineer"])
+        assert len(jobs) == 1
+        assert jobs[0].description in ("", None)
+
+
+class TestUsajobsMojibakeRepair:
+    """ftfy hygiene for USAJobs title/company/location/description fields."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_title_company_location_mojibake_repaired(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "SearchResult": {
+                "SearchResultItems": [
+                    {
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Weâ€™re hiring Analyst",
+                            "OrganizationName": "Sociâ€™étê Federal",
+                            "PositionLocation": [
+                                {"LocationName": "San Joséâ€™, CA"}
+                            ],
+                            "PositionURI": "https://usajobs.gov/jobs/1",
+                            "UserArea": {
+                                "Details": {"JobSummary": "Joinâ€™ the team"}
+                            },
+                        }
+                    }
+                ]
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_usajobs
+
+        jobs = _fetch_usajobs(
+            ["analyst"],
+            user_agent_email="test@example.com",
+            authorization_key="dummy",
+        )
+        assert len(jobs) == 1
+        assert "â€™" not in jobs[0].title
+        assert "â€™" not in jobs[0].company
+        assert "we're hiring analyst" in jobs[0].title.lower()
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_missing_description_does_not_crash(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "SearchResult": {
+                "SearchResultItems": [
+                    {
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Analyst",
+                            "OrganizationName": "MinimalCo",
+                            "PositionURI": "https://usajobs.gov/jobs/2",
+                        }
+                    }
+                ]
+            }
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_usajobs
+
+        jobs = _fetch_usajobs(
+            ["analyst"],
+            user_agent_email="test@example.com",
+            authorization_key="dummy",
+        )
+        assert len(jobs) == 1
+        assert jobs[0].description in ("", None)
+
+
+class TestAdzunaMojibakeRepair:
+    """ftfy hygiene for Adzuna title/company/location/description fields."""
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_title_company_location_mojibake_repaired(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "results": [
+                {
+                    "title": "Weâ€™re hiring Engineer",
+                    "company": {"display_name": "Sociâ€™étê"},
+                    "location": {"display_name": "Île-de-France"},
+                    "description": "Joinâ€™ us",
+                    "redirect_url": "https://adzuna.com/jobs/1",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_adzuna
+
+        jobs = _fetch_adzuna(
+            ["engineer"], app_id="dummy", app_key="dummy"
+        )
+        assert len(jobs) == 1
+        assert "â€™" not in jobs[0].title
+        assert "â€™" not in jobs[0].company
+        assert "we're hiring engineer" in jobs[0].title.lower()
+
+    @patch("job_finder.sources.portal_search_source.requests.get")
+    def test_missing_description_does_not_crash(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "results": [
+                {
+                    "title": "Engineer",
+                    "company": {"display_name": "MinimalCo"},
+                    "location": {"display_name": "Remote"},
+                    "redirect_url": "https://adzuna.com/jobs/2",
+                }
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_adzuna
+
+        jobs = _fetch_adzuna(
+            ["engineer"], app_id="dummy", app_key="dummy"
+        )
+        assert len(jobs) == 1
+        assert jobs[0].description in ("", None)
+
+
+class TestJoobleMojibakeRepair:
+    """ftfy hygiene for Jooble title/company/location/snippet fields."""
+
+    @patch("job_finder.sources.portal_search_source.requests.post")
+    def test_title_company_location_mojibake_repaired(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Weâ€™re hiring Engineer",
+                    "company": "Sociâ€™étê",
+                    "location": "Île-de-France",
+                    "snippet": "Joinâ€™ us",
+                    "link": "https://jooble.org/jobs/1",
+                }
+            ]
+        }
+        mock_post.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_jooble
+
+        jobs = _fetch_jooble(["engineer"], api_key="dummy")
+        assert len(jobs) == 1
+        assert "â€™" not in jobs[0].title
+        assert "â€™" not in jobs[0].company
+        assert "we're hiring engineer" in jobs[0].title.lower()
+
+    @patch("job_finder.sources.portal_search_source.requests.post")
+    def test_missing_snippet_does_not_crash(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "title": "Engineer",
+                    "company": "MinimalCo",
+                    "link": "https://jooble.org/jobs/2",
+                }
+            ]
+        }
+        mock_post.return_value = mock_resp
+
+        from job_finder.sources.portal_search_source import _fetch_jooble
+
+        jobs = _fetch_jooble(["engineer"], api_key="dummy")
+        assert len(jobs) == 1
+        assert jobs[0].description in ("", None)
