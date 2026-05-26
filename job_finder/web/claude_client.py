@@ -183,6 +183,10 @@ def record_cost(
 def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
     """Return per-provider cost breakdown scoped to the current calendar month.
 
+    Paid providers only — excludes ``FREE_PROVIDERS`` so the table doesn't list
+    e.g. "ollama / 10000 calls / $0.00" when the cascade is fully subscription-funded.
+    Symmetric with ``get_cost_stats`` and ``cost_gate``.
+
     Args:
         conn: Open SQLite connection with scoring_costs table.
 
@@ -193,13 +197,16 @@ def get_monthly_provider_breakdown(conn: sqlite3.Connection) -> list[dict]:
     now = datetime.now(UTC)
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
+    free = tuple(FREE_PROVIDERS)
+    free_placeholders = ",".join("?" * len(free))
+
     rows = conn.execute(
-        "SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
-        "FROM scoring_costs "
-        "WHERE timestamp >= ? "
-        "GROUP BY provider "
-        "ORDER BY spend DESC",
-        (month_start,),
+        f"SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        f"FROM scoring_costs "
+        f"WHERE timestamp >= ? AND provider NOT IN ({free_placeholders}) "
+        f"GROUP BY provider "
+        f"ORDER BY spend DESC",
+        (month_start, *free),
     ).fetchall()
 
     return [{"provider": row[0], "calls": int(row[1]), "spend": float(row[2])} for row in rows]
@@ -264,14 +271,18 @@ def cost_gate(
 
 
 def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) -> dict:
-    """Return aggregated cost statistics.
+    """Return aggregated cost statistics (paid providers only).
+
+    Excludes rows from ``FREE_PROVIDERS`` (Ollama, Gemini, the Anthropic/Gemini
+    CLI subscription paths, etc.) — matches the same filter ``cost_gate``
+    applies to the budget check. Subscription-funded calls never count as cost.
 
     Returns a dict with keys:
-        today (float): Total spend today (UTC).
-        week (float): Total spend in last 7 days.
-        month (float): Total spend this calendar month.
+        today (float): Total paid spend today (UTC).
+        week (float): Total paid spend in last 7 days.
+        month (float): Total paid spend this calendar month.
         projected_monthly (float): month_spend / days_elapsed * 30.
-        by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose.
+        by_feature (list[dict]): [{purpose, calls, spend}] grouped by purpose (paid only).
         budget_cap (float): The daily budget cap.
 
     Args:
@@ -292,14 +303,18 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
+    free = tuple(FREE_PROVIDERS)
+    free_placeholders = ",".join("?" * len(free))
+
     # Single query computes all three time-window sums in one index scan
     row = conn.execute(
-        "SELECT "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0) "
-        "FROM scoring_costs WHERE timestamp >= ?",
-        (today_start, week_start, month_start, month_start),
+        f"SELECT "
+        f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
+        f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
+        f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0) "
+        f"FROM scoring_costs "
+        f"WHERE timestamp >= ? AND provider NOT IN ({free_placeholders})",
+        (today_start, week_start, month_start, month_start, *free),
     ).fetchone()
     today_spend = float(row[0])
     week_spend = float(row[1])
@@ -309,12 +324,14 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
     days_elapsed = max(now.day, 1)  # day-of-month, at least 1 to avoid division by zero
     projected_monthly = (month_spend / days_elapsed) * 30.0
 
-    # By-feature breakdown
+    # By-feature breakdown (paid providers only — symmetric with totals above)
     rows = conn.execute(
-        "SELECT purpose, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
-        "FROM scoring_costs "
-        "GROUP BY purpose "
-        "ORDER BY spend DESC",
+        f"SELECT purpose, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        f"FROM scoring_costs "
+        f"WHERE provider NOT IN ({free_placeholders}) "
+        f"GROUP BY purpose "
+        f"ORDER BY spend DESC",
+        free,
     ).fetchall()
     by_feature = [{"purpose": row[0], "calls": row[1], "spend": float(row[2])} for row in rows]
 
@@ -334,7 +351,9 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
 
 
 def get_daily_cost_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[dict]:
-    """Return per-day, per-purpose cost breakdown for the last N days.
+    """Return per-day, per-purpose cost breakdown for the last N days (paid only).
+
+    Excludes ``FREE_PROVIDERS`` — see ``get_cost_stats`` docstring.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
@@ -347,20 +366,25 @@ def get_daily_cost_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[d
     now = datetime.now(UTC)
     start_date = (now - timedelta(days=days - 1)).strftime("%Y-%m-%dT00:00:00Z")
 
+    free = tuple(FREE_PROVIDERS)
+    free_placeholders = ",".join("?" * len(free))
+
     rows = conn.execute(
-        "SELECT date(timestamp) AS day, purpose, COALESCE(SUM(cost_usd), 0.0) AS spend "
-        "FROM scoring_costs "
-        "WHERE timestamp >= ? "
-        "GROUP BY date(timestamp), purpose "
-        "ORDER BY day ASC, purpose ASC",
-        (start_date,),
+        f"SELECT date(timestamp) AS day, purpose, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        f"FROM scoring_costs "
+        f"WHERE timestamp >= ? AND provider NOT IN ({free_placeholders}) "
+        f"GROUP BY date(timestamp), purpose "
+        f"ORDER BY day ASC, purpose ASC",
+        (start_date, *free),
     ).fetchall()
 
     return [{"date": row[0], "purpose": row[1], "spend": float(row[2])} for row in rows]
 
 
 def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
-    """Return per-feature cost breakdown scoped to the current calendar month.
+    """Return per-feature cost breakdown scoped to the current calendar month (paid only).
+
+    Excludes ``FREE_PROVIDERS`` — see ``get_cost_stats`` docstring.
 
     Args:
         conn: Open SQLite connection with scoring_costs table.
@@ -372,16 +396,196 @@ def get_monthly_feature_breakdown(conn: sqlite3.Connection) -> list[dict]:
     now = datetime.now(UTC)
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
+    free = tuple(FREE_PROVIDERS)
+    free_placeholders = ",".join("?" * len(free))
+
     rows = conn.execute(
-        "SELECT purpose, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
-        "FROM scoring_costs "
-        "WHERE timestamp >= ? "
-        "GROUP BY purpose "
-        "ORDER BY spend DESC",
-        (month_start,),
+        f"SELECT purpose, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0.0) AS spend "
+        f"FROM scoring_costs "
+        f"WHERE timestamp >= ? AND provider NOT IN ({free_placeholders}) "
+        f"GROUP BY purpose "
+        f"ORDER BY spend DESC",
+        (month_start, *free),
     ).fetchall()
 
     return [{"purpose": row[0], "calls": int(row[1]), "spend": float(row[2])} for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Usage statistics (tokens in/out, all providers)
+# ---------------------------------------------------------------------------
+#
+# Cost helpers above answer "how much did I spend?" and filter FREE_PROVIDERS
+# out, because subscription-funded calls don't move a dollar meter. Usage
+# helpers below answer "what is the system doing?" and include every row —
+# token volume is the same regardless of who paid the bill.
+
+
+def get_usage_stats(conn: sqlite3.Connection) -> dict:
+    """Return aggregated token-usage statistics across all providers.
+
+    Returns a dict with keys:
+        today (dict): {calls, input_tokens, output_tokens} for today (UTC).
+        week (dict):  …last 7 days.
+        month (dict): …this calendar month.
+        projected_monthly (dict): month-pace * 30/days_elapsed (calls + tokens).
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+    """
+    now = datetime.now(UTC)
+    today_start = now.strftime("%Y-%m-%dT00:00:00Z")
+    week_start = (
+        now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+
+    # Single-pass aggregation: 3 windows × 3 metrics in one scan.
+    row = conn.execute(
+        "SELECT "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN input_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN input_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN input_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0) "
+        "FROM scoring_costs WHERE timestamp >= ?",
+        (
+            today_start, today_start, today_start,
+            week_start, week_start, week_start,
+            month_start, month_start, month_start,
+            month_start,
+        ),
+    ).fetchone()
+
+    today = {"calls": int(row[0]), "input_tokens": int(row[1]), "output_tokens": int(row[2])}
+    week = {"calls": int(row[3]), "input_tokens": int(row[4]), "output_tokens": int(row[5])}
+    month = {"calls": int(row[6]), "input_tokens": int(row[7]), "output_tokens": int(row[8])}
+
+    days_elapsed = max(now.day, 1)
+    scale = 30.0 / days_elapsed
+    projected_monthly = {
+        "calls": int(month["calls"] * scale),
+        "input_tokens": int(month["input_tokens"] * scale),
+        "output_tokens": int(month["output_tokens"] * scale),
+    }
+
+    return {
+        "today": today,
+        "week": week,
+        "month": month,
+        "projected_monthly": projected_monthly,
+    }
+
+
+def get_daily_usage_breakdown(conn: sqlite3.Connection, days: int = 30) -> list[dict]:
+    """Return per-day, per-purpose token usage for the last N days.
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+        days: Number of days to look back (inclusive). Defaults to 30.
+
+    Returns:
+        List of dicts: {date, purpose, calls, input_tokens, output_tokens}.
+        Sorted ascending by date, then purpose.
+    """
+    now = datetime.now(UTC)
+    start_date = (now - timedelta(days=days - 1)).strftime("%Y-%m-%dT00:00:00Z")
+
+    rows = conn.execute(
+        "SELECT date(timestamp) AS day, purpose, COUNT(*) AS calls, "
+        "       COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+        "       COALESCE(SUM(output_tokens), 0) AS output_tokens "
+        "FROM scoring_costs "
+        "WHERE timestamp >= ? "
+        "GROUP BY date(timestamp), purpose "
+        "ORDER BY day ASC, purpose ASC",
+        (start_date,),
+    ).fetchall()
+
+    return [
+        {
+            "date": r[0],
+            "purpose": r[1],
+            "calls": int(r[2]),
+            "input_tokens": int(r[3]),
+            "output_tokens": int(r[4]),
+        }
+        for r in rows
+    ]
+
+
+def get_monthly_feature_usage(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-feature token-usage breakdown scoped to the current calendar month.
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+
+    Returns:
+        List of dicts: {purpose, calls, input_tokens, output_tokens}.
+        Sorted descending by output_tokens (the more expensive side of the meter).
+    """
+    now = datetime.now(UTC)
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+
+    rows = conn.execute(
+        "SELECT purpose, COUNT(*) AS calls, "
+        "       COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+        "       COALESCE(SUM(output_tokens), 0) AS output_tokens "
+        "FROM scoring_costs "
+        "WHERE timestamp >= ? "
+        "GROUP BY purpose "
+        "ORDER BY output_tokens DESC, calls DESC",
+        (month_start,),
+    ).fetchall()
+
+    return [
+        {
+            "purpose": r[0],
+            "calls": int(r[1]),
+            "input_tokens": int(r[2]),
+            "output_tokens": int(r[3]),
+        }
+        for r in rows
+    ]
+
+
+def get_monthly_provider_usage(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-provider token-usage breakdown scoped to the current calendar month.
+
+    Args:
+        conn: Open SQLite connection with scoring_costs table.
+
+    Returns:
+        List of dicts: {provider, calls, input_tokens, output_tokens}.
+        Sorted descending by output_tokens.
+    """
+    now = datetime.now(UTC)
+    month_start = now.strftime("%Y-%m-01T00:00:00Z")
+
+    rows = conn.execute(
+        "SELECT provider, COUNT(*) AS calls, "
+        "       COALESCE(SUM(input_tokens), 0) AS input_tokens, "
+        "       COALESCE(SUM(output_tokens), 0) AS output_tokens "
+        "FROM scoring_costs "
+        "WHERE timestamp >= ? "
+        "GROUP BY provider "
+        "ORDER BY output_tokens DESC, calls DESC",
+        (month_start,),
+    ).fetchall()
+
+    return [
+        {
+            "provider": r[0],
+            "calls": int(r[1]),
+            "input_tokens": int(r[2]),
+            "output_tokens": int(r[3]),
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

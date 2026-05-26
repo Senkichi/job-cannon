@@ -239,51 +239,67 @@ class TestGetMonthlyFeatureBreakdown:
 
 class TestCostsRoute:
     def test_get_costs_returns_200(self, client):
-        """GET /costs returns 200 with full HTML page."""
+        """GET /costs (default Usage view) returns 200."""
         response = client.get("/costs")
         assert response.status_code == 200
 
+    def test_get_costs_view_cost_returns_200(self, client):
+        """GET /costs?view=cost returns 200."""
+        response = client.get("/costs?view=cost")
+        assert response.status_code == 200
+
+    def test_invalid_view_falls_back_to_usage(self, client):
+        """Unknown ?view= values quietly fall back to Usage — never 4xx."""
+        response = client.get("/costs?view=bogus")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        # Usage view's heading + chart container
+        assert "Output Tokens by Purpose" in html
+        assert 'id="usage-chart"' in html
+
     def test_costs_html_contains_canvas(self, client):
-        """GET /costs HTML contains canvas element with id 'cost-chart'."""
-        response = client.get("/costs")
+        """Cost view contains canvas#cost-chart."""
+        response = client.get("/costs?view=cost")
         html = response.data.decode("utf-8")
         assert 'id="cost-chart"' in html
 
     def test_costs_html_contains_budget_progress_bar(self, client):
-        """GET /costs HTML contains budget progress bar div."""
-        response = client.get("/costs")
+        """Cost view contains the budget progress bar div."""
+        response = client.get("/costs?view=cost")
         html = response.data.decode("utf-8")
-        # Budget progress bar uses bg-slate-700 rounded-full h-2 pattern
         assert 'id="budget-progress-bar"' in html, "Budget progress bar element must be present"
 
     def test_costs_html_contains_chartjs_cdn(self, client):
-        """GET /costs HTML contains Chart.js CDN script tag."""
-        response = client.get("/costs")
-        html = response.data.decode("utf-8")
-        assert "chart.umd.min.js" in html
+        """Both views load the Chart.js CDN script tag."""
+        for view in ("usage", "cost"):
+            response = client.get(f"/costs?view={view}")
+            html = response.data.decode("utf-8")
+            assert "chart.umd.min.js" in html, f"chart.js missing from view={view}"
 
     def test_costs_has_stat_cards(self, client):
-        """GET /costs HTML contains period stat cards section."""
-        response = client.get("/costs")
-        html = response.data.decode("utf-8")
-        assert "Today" in html
-        assert "This Week" in html or "This Month" in html
+        """Both views render Today / This Week / This Month stat cards."""
+        for view in ("usage", "cost"):
+            response = client.get(f"/costs?view={view}")
+            html = response.data.decode("utf-8")
+            assert "Today" in html, f"Today card missing from view={view}"
+            assert "This Week" in html or "This Month" in html
 
     def test_costs_has_feature_breakdown_table(self, client):
-        """GET /costs HTML contains the 'This Month by Feature' table heading."""
-        response = client.get("/costs")
-        html = response.data.decode("utf-8")
-        assert "This Month by Feature" in html
+        """Both views render a 'This Month by Feature' table."""
+        for view in ("usage", "cost"):
+            response = client.get(f"/costs?view={view}")
+            html = response.data.decode("utf-8")
+            assert "This Month by Feature" in html, f"Feature table missing from view={view}"
 
     def test_costs_page_renders_provider_breakdown_table(self, client):
-        """GET /costs includes the 'This Month by Provider' section heading."""
-        response = client.get("/costs")
-        assert response.status_code == 200
-        html = response.data.decode("utf-8")
-        assert "This Month by Provider" in html
+        """Both views render a 'This Month by Provider' table."""
+        for view in ("usage", "cost"):
+            response = client.get(f"/costs?view={view}")
+            html = response.data.decode("utf-8")
+            assert "This Month by Provider" in html, f"Provider table missing from view={view}"
 
     def test_budget_cap_from_config(self, tmp_db_path):
-        """Budget cap is read from config, not hardcoded — custom value appears in rendered page."""
+        """Budget cap is read from config and rendered in the Cost-view progress bar."""
         from job_finder.web import create_app
 
         test_config = {
@@ -307,11 +323,18 @@ class TestCostsRoute:
         app.config["TESTING"] = True
         client = app.test_client()
 
-        response = client.get("/costs")
+        response = client.get("/costs?view=cost")
         assert response.status_code == 200
         html = response.data.decode("utf-8")
         # Template renders: Cap: ${{ "%.0f" | format(budget_cap) }} → "Cap: $42"
         assert "42" in html
+
+    def test_view_toggle_links_present(self, client):
+        """Both view links are rendered in the toggle so the user can switch."""
+        response = client.get("/costs")
+        html = response.data.decode("utf-8")
+        assert "view=usage" in html
+        assert "view=cost" in html
 
 
 # ---------------------------------------------------------------------------
@@ -401,3 +424,279 @@ class TestProviderBreakdownRendering:
         assert "anthropic" in html
         assert "gemini" in html
         assert "This Month by Provider" in html
+
+
+# ---------------------------------------------------------------------------
+# Tests: Cost view excludes FREE_PROVIDERS (subscription/CLI rows don't count)
+# ---------------------------------------------------------------------------
+
+
+def _make_app(tmp_db_path):
+    """Build a minimal Flask app + client over the given migrated DB."""
+    from job_finder.web import create_app
+
+    test_config = {
+        "db": {"path": tmp_db_path},
+        "scoring": {"min_score_threshold": 40, "daily_budget_usd": 25.0},
+        "profile": {
+            "target_titles": ["Staff Data Scientist"],
+            "target_locations": ["Remote"],
+            "min_salary": 150000,
+            "industries": [],
+            "exclusions": {"title_keywords": [], "companies": []},
+            "skills": [],
+        },
+        "sources": {},
+        "output": {"default_format": "cli", "max_results": 50},
+    }
+    app = create_app(config=test_config)
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+def _insert_rows_with_provider(conn, rows):
+    """rows: list of (job_id, purpose, model, in_tok, out_tok, cost_usd, ts, provider)."""
+    conn.executemany(
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+
+
+class TestCostViewExcludesFreeProviders:
+    """The Cost view answers 'how much did I spend?' — subscription-funded calls
+    (Ollama, Claude CLI, Gemini CLI, etc.) must not appear in the rollup, even
+    if they were stored with cost_usd > 0 by some upstream bug."""
+
+    def test_get_cost_stats_excludes_free_providers(self, tmp_db_path):
+        from job_finder.web.claude_client import get_cost_stats
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "claude-haiku-4-5", 100, 50, 0.50, ts, "anthropic"),
+                # 99.00 "spend" on a free provider must be ignored entirely
+                ("j2", "score_job", "qwen2.5:14b", 1000, 500, 99.00, ts, "ollama"),
+                ("j3", "score_job", "claude-haiku-4-5", 100, 50, 0.25, ts, "claude_cli"),
+            ],
+        )
+        stats = get_cost_stats(conn, budget_cap=25.0)
+        assert abs(stats["month"] - 0.50) < 1e-9
+        assert abs(stats["today"] - 0.50) < 1e-9
+        # by_feature only counts the anthropic row
+        purposes = {f["purpose"]: f for f in stats["by_feature"]}
+        assert purposes["score_job"]["calls"] == 1
+        assert abs(purposes["score_job"]["spend"] - 0.50) < 1e-9
+        conn.close()
+
+    def test_get_monthly_provider_breakdown_drops_free_providers(self, tmp_db_path):
+        from job_finder.web.claude_client import get_monthly_provider_breakdown
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j2", "score_job", "x", 1, 1, 0.00, ts, "ollama"),
+                ("j3", "score_job", "x", 1, 1, 0.00, ts, "gemini"),
+                ("j4", "score_job", "x", 1, 1, 0.00, ts, "claude_cli"),
+            ],
+        )
+        result = get_monthly_provider_breakdown(conn)
+        providers = {r["provider"] for r in result}
+        assert providers == {"anthropic"}
+        conn.close()
+
+    def test_cost_view_html_hides_free_provider_rows(self, tmp_db_path):
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "real_paid_purpose_xyz", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j2", "free_purpose_zzz", "qwen2.5:14b", 1, 1, 0.00, ts, "ollama"),
+            ],
+        )
+        conn.close()
+
+        client = _make_app(tmp_db_path)
+        response = client.get("/costs?view=cost")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "real_paid_purpose_xyz" in html
+        assert "free_purpose_zzz" not in html
+        assert "anthropic" in html
+        assert "ollama" not in html  # free provider hidden from Cost view
+
+    def test_usage_view_still_shows_all_providers(self, tmp_db_path):
+        """Usage view answers a different question — show every provider."""
+        from job_finder.web.db_migrate import run_migrations
+
+        run_migrations(tmp_db_path)
+        conn = sqlite3.connect(tmp_db_path)
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "paid_p", "x", 100, 200, 0.10, ts, "anthropic"),
+                ("j2", "free_p", "y", 300, 400, 0.00, ts, "ollama"),
+            ],
+        )
+        conn.close()
+
+        client = _make_app(tmp_db_path)
+        response = client.get("/costs?view=usage")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "anthropic" in html
+        assert "ollama" in html
+        assert "paid_p" in html
+        assert "free_p" in html
+
+
+# ---------------------------------------------------------------------------
+# Tests: usage helpers (tokens in/out, all providers)
+# ---------------------------------------------------------------------------
+
+
+class TestGetUsageStats:
+    def test_empty_db_returns_zero_metrics(self, migrated_db):
+        from job_finder.web.claude_client import get_usage_stats
+
+        _, conn = migrated_db
+        stats = get_usage_stats(conn)
+        for window in ("today", "week", "month", "projected_monthly"):
+            assert stats[window] == {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+    def test_sums_tokens_across_providers(self, migrated_db):
+        from job_finder.web.claude_client import get_usage_stats
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "haiku", 100, 50, 0.0001, ts, "anthropic"),
+                ("j2", "score_job", "qwen", 300, 250, 0.0, ts, "ollama"),
+                ("j3", "extract_jobs", "qwen", 200, 100, 0.0, ts, "ollama"),
+            ],
+        )
+        stats = get_usage_stats(conn)
+        assert stats["today"]["calls"] == 3
+        assert stats["today"]["input_tokens"] == 100 + 300 + 200
+        assert stats["today"]["output_tokens"] == 50 + 250 + 100
+        # month >= today
+        assert stats["month"]["calls"] >= stats["today"]["calls"]
+
+    def test_projected_monthly_scales_by_day_of_month(self, migrated_db):
+        from job_finder.web.claude_client import get_usage_stats
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "x", 100, 200, 0.0, ts, "anthropic"),
+            ],
+        )
+        stats = get_usage_stats(conn)
+        day = max(datetime.now(UTC).day, 1)
+        expected = int(stats["month"]["output_tokens"] * 30.0 / day)
+        assert stats["projected_monthly"]["output_tokens"] == expected
+
+
+class TestGetDailyUsageBreakdown:
+    def test_empty_db(self, migrated_db):
+        from job_finder.web.claude_client import get_daily_usage_breakdown
+
+        _, conn = migrated_db
+        assert get_daily_usage_breakdown(conn) == []
+
+    def test_groups_by_date_and_purpose_with_tokens(self, migrated_db):
+        from job_finder.web.claude_client import get_daily_usage_breakdown
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "x", 100, 50, 0.0, ts, "anthropic"),
+                ("j2", "score_job", "x", 100, 50, 0.0, ts, "ollama"),
+                ("j3", "extract_jobs", "x", 200, 100, 0.0, ts, "ollama"),
+            ],
+        )
+        rows = get_daily_usage_breakdown(conn)
+        by_purpose = {r["purpose"]: r for r in rows}
+        assert by_purpose["score_job"]["calls"] == 2
+        assert by_purpose["score_job"]["input_tokens"] == 200
+        assert by_purpose["score_job"]["output_tokens"] == 100
+        assert by_purpose["extract_jobs"]["calls"] == 1
+
+    def test_includes_free_providers(self, migrated_db):
+        """Usage helpers must NOT filter free providers — that's the cost helper's job."""
+        from job_finder.web.claude_client import get_daily_usage_breakdown
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "extract_jobs", "qwen", 999, 999, 0.0, ts, "ollama"),
+            ],
+        )
+        rows = get_daily_usage_breakdown(conn)
+        assert len(rows) == 1
+        assert rows[0]["input_tokens"] == 999
+
+
+class TestGetMonthlyFeatureUsage:
+    def test_returns_input_and_output_tokens(self, migrated_db):
+        from job_finder.web.claude_client import get_monthly_feature_usage
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "score_job", "x", 100, 200, 0.0, ts, "ollama"),
+                ("j2", "score_job", "x", 100, 200, 0.0, ts, "ollama"),
+            ],
+        )
+        rows = get_monthly_feature_usage(conn)
+        assert len(rows) == 1
+        assert rows[0]["purpose"] == "score_job"
+        assert rows[0]["calls"] == 2
+        assert rows[0]["input_tokens"] == 200
+        assert rows[0]["output_tokens"] == 400
+
+
+class TestGetMonthlyProviderUsage:
+    def test_groups_by_provider(self, migrated_db):
+        from job_finder.web.claude_client import get_monthly_provider_usage
+
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        _insert_rows_with_provider(
+            conn,
+            [
+                ("j1", "p", "x", 100, 200, 0.0, ts, "ollama"),
+                ("j2", "p", "x", 50, 50, 0.0, ts, "claude_cli"),
+                ("j3", "p", "x", 50, 50, 0.5, ts, "anthropic"),
+            ],
+        )
+        rows = get_monthly_provider_usage(conn)
+        providers = {r["provider"]: r for r in rows}
+        assert providers["ollama"]["output_tokens"] == 200
+        assert providers["claude_cli"]["output_tokens"] == 50
+        assert providers["anthropic"]["output_tokens"] == 50

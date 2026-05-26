@@ -1,24 +1,144 @@
 {% extends "base.html" %}
 
-{% block title %}Cost Monitor — Job Finder{% endblock %}
+{% block title %}API Activity — Job Finder{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto space-y-6">
 
-  <!-- Page header -->
+  <!-- Page header + view toggle -->
   <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-bold text-slate-100">Cost Monitor</h1>
-    <span class="text-sm text-slate-400">30-day overview</span>
+    <h1 class="text-2xl font-bold text-slate-100">API Activity</h1>
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-slate-400 hidden sm:inline">30-day overview</span>
+      <div role="tablist" aria-label="View" class="inline-flex rounded-lg border border-slate-700 overflow-hidden text-sm">
+        <a href="{{ url_for('costs.index', view='usage') }}"
+           role="tab"
+           aria-selected="{{ 'true' if view == 'usage' else 'false' }}"
+           class="px-3 py-1.5 {% if view == 'usage' %}bg-slate-700 text-slate-100 font-semibold{% else %}bg-slate-900 text-slate-400 hover:text-slate-200{% endif %}">
+          Usage
+        </a>
+        <a href="{{ url_for('costs.index', view='cost') }}"
+           role="tab"
+           aria-selected="{{ 'true' if view == 'cost' else 'false' }}"
+           class="px-3 py-1.5 border-l border-slate-700 {% if view == 'cost' %}bg-slate-700 text-slate-100 font-semibold{% else %}bg-slate-900 text-slate-400 hover:text-slate-200{% endif %}">
+          Cost
+        </a>
+      </div>
+    </div>
   </div>
+
+  {% if view == 'usage' %}
+  {# ====================================================================== #}
+  {# USAGE VIEW — tokens in/out across all providers (incl. free/CLI/local). #}
+  {# ====================================================================== #}
+
+  <!-- 30-day stacked output-tokens chart -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">Output Tokens by Purpose (30 Days)</h2>
+    <p class="text-xs text-slate-500 mb-4">Includes every provider — Ollama, Claude CLI, Anthropic SDK, etc.</p>
+    <div style="position: relative; height: 320px;">
+      <canvas id="usage-chart"></canvas>
+    </div>
+    <div id="usage-chart-empty" class="hidden items-center justify-center" style="height: 320px;">
+      <p class="text-slate-500 text-sm">No API calls recorded yet.</p>
+    </div>
+  </div>
+
+  <!-- Period stat cards: calls + tokens -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    {% for label, key in [('Today', 'today'), ('This Week', 'week'), ('This Month', 'month'), ('Projected / mo', 'projected_monthly')] %}
+    {% set s = usage_stats[key] %}
+    <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+      <div class="text-xs text-slate-500 uppercase tracking-wide text-center">{{ label }}</div>
+      <div class="text-2xl font-bold text-slate-100 mt-1 text-center">{{ "{:,}".format(s.calls) }}<span class="text-sm font-normal text-slate-500 ml-1">calls</span></div>
+      <div class="flex justify-between mt-3 pt-3 border-t border-slate-700/60 text-xs">
+        <div>
+          <div class="text-slate-500">In</div>
+          <div class="text-slate-300 font-mono">{{ "{:,}".format(s.input_tokens) }}</div>
+        </div>
+        <div class="text-right">
+          <div class="text-slate-500">Out</div>
+          <div class="text-slate-300 font-mono">{{ "{:,}".format(s.output_tokens) }}</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Feature breakdown table (current calendar month) -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Feature</h2>
+    {% if monthly_feature_usage %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-2 font-medium">Feature</th>
+          <th class="pb-2 font-medium text-right">Calls</th>
+          <th class="pb-2 font-medium text-right">Input tokens</th>
+          <th class="pb-2 font-medium text-right">Output tokens</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in monthly_feature_usage %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
+          <td class="py-2 text-slate-300 font-mono">{{ item.purpose }}</td>
+          <td class="py-2 text-slate-400 text-right">{{ "{:,}".format(item.calls) }}</td>
+          <td class="py-2 text-slate-400 text-right font-mono">{{ "{:,}".format(item.input_tokens) }}</td>
+          <td class="py-2 text-slate-300 text-right font-mono">{{ "{:,}".format(item.output_tokens) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    {% endif %}
+  </div>
+
+  <!-- Provider breakdown table (current calendar month) -->
+  <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Provider</h2>
+    {% if monthly_provider_usage %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-slate-500 border-b border-slate-700">
+          <th class="pb-2 font-medium">Provider</th>
+          <th class="pb-2 font-medium text-right">Calls</th>
+          <th class="pb-2 font-medium text-right">Input tokens</th>
+          <th class="pb-2 font-medium text-right">Output tokens</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in monthly_provider_usage %}
+        <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
+          <td class="py-2 text-slate-300 font-mono">{{ item.provider }}</td>
+          <td class="py-2 text-slate-400 text-right">{{ "{:,}".format(item.calls) }}</td>
+          <td class="py-2 text-slate-400 text-right font-mono">{{ "{:,}".format(item.input_tokens) }}</td>
+          <td class="py-2 text-slate-300 text-right font-mono">{{ "{:,}".format(item.output_tokens) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    {% endif %}
+  </div>
+
+  {% else %}
+  {# ====================================================================== #}
+  {# COST VIEW — paid providers only. Subscription/free rows excluded by SQL #}
+  {# in get_cost_stats / get_*_breakdown (FREE_PROVIDERS filter, mirroring   #}
+  {# cost_gate semantics).                                                   #}
+  {# ====================================================================== #}
 
   <!-- 30-day stacked bar chart -->
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
-    <h2 class="text-sm font-semibold text-slate-300 mb-4">API Spend by Feature (30 Days)</h2>
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">API Spend by Feature (30 Days)</h2>
+    <p class="text-xs text-slate-500 mb-4">Subscription &amp; CLI paths ($0) excluded. Switch to Usage view to see all activity.</p>
     <div style="position: relative; height: 320px;">
       <canvas id="cost-chart"></canvas>
     </div>
     <div id="cost-chart-empty" class="hidden items-center justify-center" style="height: 320px;">
-      <p class="text-slate-500 text-sm">No API calls recorded yet.</p>
+      <p class="text-slate-500 text-sm">No paid API calls in the last 30 days.</p>
     </div>
   </div>
 
@@ -95,7 +215,7 @@
       </tbody>
     </table>
     {% else %}
-    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    <p class="text-slate-500 text-sm text-center py-4">No paid API calls this month.</p>
     {% endif %}
   </div>
 
@@ -122,70 +242,141 @@
       </tbody>
     </table>
     {% else %}
-    <p class="text-slate-500 text-sm text-center py-4">No API calls this month.</p>
+    <p class="text-slate-500 text-sm text-center py-4">No paid API calls this month.</p>
     {% endif %}
   </div>
+
+  {% endif %}
 
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+{% if view == 'usage' %}
 <script>
 (function () {
-  const rawData = {{ daily_breakdown | tojson }};
-  const budgetCap = {{ budget_cap | tojson }};
+  const rawData = {{ daily_usage | tojson }};
 
+  const canvas = document.getElementById('usage-chart');
+  const empty = document.getElementById('usage-chart-empty');
   if (rawData.length === 0) {
-    const canvas = document.getElementById('cost-chart');
-    const empty = document.getElementById('cost-chart-empty');
     if (canvas) canvas.style.display = 'none';
     if (empty) { empty.classList.remove('hidden'); empty.style.display = 'flex'; }
     return;
   }
 
-  const FEATURE_COLORS = {
-    // 'scoring' is the canonical post-Phase-34-Plan-3 purpose for unified
-    // scoring rows. 'haiku_score' / 'sonnet_eval' are historical-row aliases
-    // (kept so the chart renders correctly against rows written before the
-    // unified scorer landed). 'resume_gen' and 'rejection_analysis' are
-    // orphan purposes from the deleted Phase 4/5 features; 0 rows match in
-    // a reachable user DB, but the mappings are harmless.
-    'scoring':            'rgba(139, 92, 246, 0.8)',
-    'haiku_score':        'rgba(139, 92, 246, 0.8)',
-    'sonnet_eval':        'rgba(99, 102, 241, 0.8)',
-    'resume_gen':         'rgba(16, 185, 129, 0.8)',
-    'rejection_analysis': 'rgba(239, 68, 68, 0.8)',
-    'enrichment':         'rgba(14, 165, 233, 0.8)',
-  };
-  const DEFAULT_COLOR = 'rgba(100, 116, 139, 0.8)';
+  // Pleasant palette — cycled across whatever purposes show up.
+  // Order-stable: same purpose always gets the same color within a render.
+  const PALETTE = [
+    'rgba(139, 92, 246, 0.85)',  // violet
+    'rgba(14, 165, 233, 0.85)',  // sky
+    'rgba(16, 185, 129, 0.85)',  // emerald
+    'rgba(245, 158, 11, 0.85)',  // amber
+    'rgba(236, 72, 153, 0.85)',  // pink
+    'rgba(99, 102, 241, 0.85)',  // indigo
+    'rgba(248, 113, 113, 0.85)', // red-400
+    'rgba(45, 212, 191, 0.85)',  // teal
+    'rgba(168, 85, 247, 0.85)',  // purple
+    'rgba(132, 204, 22, 0.85)',  // lime
+  ];
 
-  // Extract unique dates and purposes
   const dateSet = new Set();
   const purposeSet = new Set();
-  rawData.forEach(d => {
-    dateSet.add(d.date);
-    purposeSet.add(d.purpose);
-  });
+  rawData.forEach(d => { dateSet.add(d.date); purposeSet.add(d.purpose); });
   const dates = Array.from(dateSet).sort();
-  const purposes = Array.from(purposeSet);
+  const purposes = Array.from(purposeSet).sort();
 
-  // Build lookup: date+purpose -> spend
+  // lookup: date+purpose -> output_tokens
   const lookup = {};
   rawData.forEach(d => {
-    lookup[d.date + '|' + d.purpose] = d.spend;
+    lookup[d.date + '|' + d.purpose] = d.output_tokens;
   });
 
-  // Build bar datasets (one per purpose)
-  const barDatasets = purposes.map(purpose => ({
+  const datasets = purposes.map((purpose, i) => ({
     type: 'bar',
     label: purpose,
     data: dates.map(date => lookup[date + '|' + purpose] || 0),
-    backgroundColor: FEATURE_COLORS[purpose] || DEFAULT_COLOR,
+    backgroundColor: PALETTE[i % PALETTE.length],
+    stack: 'tokens',
+  }));
+
+  new Chart(canvas, {
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { color: 'rgb(148, 163, 184)' }, grid: { color: 'rgba(100, 116, 139, 0.3)' } },
+        y: {
+          stacked: true,
+          ticks: {
+            color: 'rgb(148, 163, 184)',
+            callback: (v) => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v,
+          },
+          grid: { color: 'rgba(100, 116, 139, 0.3)' },
+        },
+      },
+      plugins: {
+        legend: { display: true, labels: { color: 'rgb(148, 163, 184)' } },
+        tooltip: {
+          callbacks: {
+            title: (items) => items[0].label,
+            label: (item) => `${item.dataset.label}: ${item.raw.toLocaleString()} tokens out`,
+            footer: (items) => {
+              const total = items.reduce((sum, i) => sum + i.raw, 0);
+              return `Day total: ${total.toLocaleString()} tokens out`;
+            },
+          },
+        },
+      },
+    },
+  });
+})();
+</script>
+{% else %}
+<script>
+(function () {
+  const rawData = {{ daily_breakdown | tojson }};
+  const budgetCap = {{ budget_cap | tojson }};
+
+  const canvas = document.getElementById('cost-chart');
+  const empty = document.getElementById('cost-chart-empty');
+  if (rawData.length === 0) {
+    if (canvas) canvas.style.display = 'none';
+    if (empty) { empty.classList.remove('hidden'); empty.style.display = 'flex'; }
+    return;
+  }
+
+  const PALETTE = [
+    'rgba(139, 92, 246, 0.85)',
+    'rgba(14, 165, 233, 0.85)',
+    'rgba(16, 185, 129, 0.85)',
+    'rgba(245, 158, 11, 0.85)',
+    'rgba(236, 72, 153, 0.85)',
+    'rgba(99, 102, 241, 0.85)',
+    'rgba(248, 113, 113, 0.85)',
+    'rgba(45, 212, 191, 0.85)',
+  ];
+
+  const dateSet = new Set();
+  const purposeSet = new Set();
+  rawData.forEach(d => { dateSet.add(d.date); purposeSet.add(d.purpose); });
+  const dates = Array.from(dateSet).sort();
+  const purposes = Array.from(purposeSet).sort();
+
+  const lookup = {};
+  rawData.forEach(d => { lookup[d.date + '|' + d.purpose] = d.spend; });
+
+  const barDatasets = purposes.map((purpose, i) => ({
+    type: 'bar',
+    label: purpose,
+    data: dates.map(date => lookup[date + '|' + purpose] || 0),
+    backgroundColor: PALETTE[i % PALETTE.length],
     stack: 'costs',
   }));
 
-  // Budget pace line dataset
   const budgetPerDay = budgetCap / 30;
   const paceDataset = {
     type: 'line',
@@ -198,40 +389,23 @@
     order: 0,
   };
 
-  const datasets = [...barDatasets, paceDataset];
-
-  const ctx = document.getElementById('cost-chart');
-  if (!ctx) return;
-
-  new Chart(ctx, {
-    data: { labels: dates, datasets },
+  new Chart(canvas, {
+    data: { labels: dates, datasets: [...barDatasets, paceDataset] },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: {
-          stacked: true,
-          ticks: { color: 'rgb(148, 163, 184)' },
-          grid: { color: 'rgba(100, 116, 139, 0.3)' },
-        },
-        y: {
-          stacked: true,
-          ticks: { color: 'rgb(148, 163, 184)' },
-          grid: { color: 'rgba(100, 116, 139, 0.3)' },
-        },
+        x: { stacked: true, ticks: { color: 'rgb(148, 163, 184)' }, grid: { color: 'rgba(100, 116, 139, 0.3)' } },
+        y: { stacked: true, ticks: { color: 'rgb(148, 163, 184)' }, grid: { color: 'rgba(100, 116, 139, 0.3)' } },
       },
       plugins: {
-        legend: {
-          display: true,
-          labels: { color: 'rgb(148, 163, 184)' },
-        },
+        legend: { display: true, labels: { color: 'rgb(148, 163, 184)' } },
         tooltip: {
           callbacks: {
             title: (items) => items[0].label,
             label: (item) => {
               if (item.dataset.type === 'line') return null;
-              const value = item.raw;
-              return `${item.dataset.label}: $${value.toFixed(4)}`;
+              return `${item.dataset.label}: $${item.raw.toFixed(4)}`;
             },
             footer: (items) => {
               const total = items
@@ -246,4 +420,5 @@
   });
 })();
 </script>
+{% endif %}
 {% endblock %}

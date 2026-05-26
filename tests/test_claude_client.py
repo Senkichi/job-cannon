@@ -66,8 +66,8 @@ class TestGetMonthlyProviderBreakdown:
         assert result == []
 
     def test_groups_by_provider(self, migrated_db):
-        """After inserting 3 rows (2 anthropic, 1 gemini), returns 2 dicts ordered by spend DESC."""
-        path, conn = migrated_db
+        """After inserting 3 rows from two paid providers, returns 2 dicts ordered by spend DESC."""
+        _, conn = migrated_db
         now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
         conn.executemany(
@@ -76,7 +76,7 @@ class TestGetMonthlyProviderBreakdown:
             [
                 ("j1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.01, ts, "anthropic"),
                 ("j2", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.05, ts, "anthropic"),
-                ("j3", "haiku_score", "gemini-2.0-flash", 150, 75, 0.0, ts, "gemini"),
+                ("j3", "judge", "openrouter-model", 150, 75, 0.02, ts, "openrouter"),
             ],
         )
         conn.commit()
@@ -87,9 +87,30 @@ class TestGetMonthlyProviderBreakdown:
         assert result[0]["provider"] == "anthropic"  # higher spend first
         assert result[0]["calls"] == 2
         assert result[0]["spend"] == pytest.approx(0.06)
-        assert result[1]["provider"] == "gemini"
+        assert result[1]["provider"] == "openrouter"
         assert result[1]["calls"] == 1
-        assert result[1]["spend"] == pytest.approx(0.0)
+        assert result[1]["spend"] == pytest.approx(0.02)
+
+    def test_excludes_free_providers(self, migrated_db):
+        """Free/subscription providers must not appear — symmetric with cost_gate semantics."""
+        _, conn = migrated_db
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        conn.executemany(
+            "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("j1", "p", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j2", "p", "x", 1, 1, 0.00, ts, "ollama"),
+                ("j3", "p", "x", 1, 1, 0.00, ts, "claude_cli"),
+                ("j4", "p", "x", 1, 1, 0.00, ts, "gemini"),
+                ("j5", "p", "x", 1, 1, 0.00, ts, "claude_code_cli"),
+            ],
+        )
+        conn.commit()
+        from job_finder.web.claude_client import get_monthly_provider_breakdown
+
+        result = get_monthly_provider_breakdown(conn)
+        assert {r["provider"] for r in result} == {"anthropic"}
 
     def test_dict_keys(self, migrated_db):
         """Each dict has keys 'provider', 'calls', 'spend' with correct types."""
