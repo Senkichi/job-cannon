@@ -2,13 +2,16 @@
 
 import logging
 import threading
-from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, render_template, url_for
 
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.activity_tracker import ACTION_SYNC, log_activity
-from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.db_helpers import (
+    PollingSessionConfig,
+    render_polling_status,
+    standalone_connection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,84 +69,50 @@ def sync_start():
     )
 
 
+_SYNC_PHASE_LABELS = {"running": "Starting...", "gmail": "Syncing..."}
+
+
+def _sync_done_ctx(session, status: str, error_msg: str | None) -> dict:
+    return {
+        "status": status,
+        "error_msg": error_msg,
+        "total": session["total"],
+        "scored": session["scored"],
+        "skipped": session["skipped"],
+    }
+
+
+def _sync_progress_ctx(session) -> dict:
+    return {
+        "session_id": session["id"],
+        "phase_label": _SYNC_PHASE_LABELS.get(session["status"], "Syncing..."),
+    }
+
+
 @sync_bp.route("/sync/status/<int:session_id>", strict_slashes=False)
 def sync_status(session_id):
-    """Poll route for sync progress.
+    """Poll route for sync progress (delegates to ``render_polling_status``).
 
     Returns _sync_progress.html (WITH hx-trigger) when still running.
     Returns _sync_done.html (WITHOUT polling hx-trigger) when done/error.
-    Uses own sqlite3 connection — safe for HTMX polling outside request context.
     """
-    db_path = current_app.config["DB_PATH"]
-
-    with standalone_connection(db_path) as conn:
-        session = conn.execute(
-            "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-
-    if session is None:
-        return render_template(
-            "dashboard/_sync_done.html",
-            status="error",
-            error_msg="Session not found",
-            total=0,
-            scored=0,
-            skipped=0,
-        )
-
-    status = session["status"]
-
-    # Timeout safety net: if session has been running for >30 minutes, auto-mark as error
-    if status not in ("done", "error", "cancelled") and session["started_at"]:
-        try:
-            started = datetime.fromisoformat(session["started_at"])
-            elapsed_minutes = (
-                datetime.now(UTC).replace(tzinfo=None) - started
-            ).total_seconds() / 60
-            if elapsed_minutes > 30:
-                logger.warning(
-                    "Sync session %s timed out after %.1f minutes", session_id, elapsed_minutes
-                )
-                with standalone_connection(db_path) as timeout_conn:
-                    timeout_conn.execute(
-                        "UPDATE batch_score_sessions SET status='error', error_msg=?, finished_at=? "
-                        "WHERE id=? AND status NOT IN ('done', 'error', 'cancelled')",
-                        ("Session timed out (>30 min)", utc_now_iso(), session_id),
-                    )
-                    timeout_conn.commit()
-                return render_template(
-                    "dashboard/_sync_done.html",
-                    status="error",
-                    error_msg="Session timed out (>30 min)",
-                    total=session["total"],
-                    scored=session["scored"],
-                    skipped=session["skipped"],
-                )
-        except (ValueError, TypeError):
-            logger.debug("Sync timeout check failed for session %s", session_id, exc_info=True)
-
-    # Terminal states: done, error, cancelled — return done fragment (NO polling hx-trigger)
-    if status in ("done", "error", "cancelled"):
-        return render_template(
-            "dashboard/_sync_done.html",
-            status=status,
-            error_msg=session["error_msg"] if status == "error" else None,
-            total=session["total"],
-            scored=session["scored"],
-            skipped=session["skipped"],
-        )
-
-    # Still running — determine phase label from status field
-    phase_labels = {
-        "running": "Starting...",
-        "gmail": "Syncing...",
-    }
-    phase_label = phase_labels.get(status, "Syncing...")
-
-    return render_template(
-        "dashboard/_sync_progress.html",
-        session_id=session_id,
-        phase_label=phase_label,
+    return render_polling_status(
+        current_app.config["DB_PATH"],
+        session_id,
+        PollingSessionConfig(
+            progress_template="dashboard/_sync_progress.html",
+            done_template="dashboard/_sync_done.html",
+            progress_ctx=_sync_progress_ctx,
+            done_ctx=_sync_done_ctx,
+            not_found_ctx={
+                "status": "error",
+                "error_msg": "Session not found",
+                "total": 0,
+                "scored": 0,
+                "skipped": 0,
+            },
+            session_label="Sync",
+        ),
     )
 
 

@@ -5,16 +5,18 @@ Single ``batch_score_start`` route plus ``_run_batch_bg`` worker.
 still store ``haiku`` / ``sonnet``; the status UI treats them as scoring).
 """
 
-import json
 import logging
 import threading
-from datetime import UTC, datetime
 
-from flask import Blueprint, current_app, make_response, render_template
+from flask import Blueprint, current_app, render_template
 
 from job_finder.db import JOBS_ALL_COLUMNS, update_pipeline_status
 from job_finder.json_utils import utc_now_iso
-from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.db_helpers import (
+    PollingSessionConfig,
+    render_polling_status,
+    standalone_connection,
+)
 from job_finder.web.exclusion_filter import count_scorable, should_exclude
 
 logger = logging.getLogger(__name__)
@@ -99,94 +101,54 @@ def batch_score_start():
     return _start_batch_session()
 
 
+def _batch_done_ctx(session, status: str, error_msg: str | None) -> dict:
+    return {
+        "scored": session["scored"],
+        "skipped": session["skipped"],
+        "status": status,
+        "message": None,
+        "error_msg": error_msg,
+    }
+
+
+def _batch_progress_ctx(session) -> dict:
+    return {
+        "session_id": session["id"],
+        "total": session["total"],
+        "scored": session["scored"],
+        "skipped": session["skipped"],
+        "cancelling": (session["status"] == "cancelling"),
+    }
+
+
+_BATCH_HX_TRIGGER = {"dashboard-refresh": None, "jobs-updated": None}
+
+
 @batch_scoring_bp.route("/batch-score/status/<int:session_id>", strict_slashes=False)
 def batch_score_status(session_id):
-    """Poll route for batch scoring progress.
+    """Poll route for batch scoring progress (delegates to ``render_polling_status``).
 
     Returns _batch_score_progress.html (WITH hx-trigger) when still running.
-    Returns _batch_score_done.html (WITHOUT hx-trigger) when done/error/cancelled.
-    Uses own sqlite3 connection — safe for HTMX polling outside request context.
+    Returns _batch_score_done.html (WITH HX-Trigger-After-Settle) on terminal/timeout.
     """
-    db_path = current_app.config["DB_PATH"]
-
-    with standalone_connection(db_path) as conn:
-        session = conn.execute(
-            "SELECT * FROM batch_score_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-
-    if session is None:
-        return render_template(
-            "dashboard/_batch_score_done.html",
-            scored=0,
-            skipped=0,
-            status="error",
-            message=None,
-            error_msg="Session not found.",
-        )
-
-    status = session["status"]
-
-    # Timeout safety net: if session has been running for >30 minutes, auto-mark as error
-    if status in ("running", "cancelling") and session["started_at"]:
-        try:
-            started = datetime.fromisoformat(session["started_at"])
-            elapsed_minutes = (
-                datetime.now(UTC).replace(tzinfo=None) - started
-            ).total_seconds() / 60
-            if elapsed_minutes > 30:
-                logger.warning(
-                    "Batch session %s timed out after %.1f minutes", session_id, elapsed_minutes
-                )
-                with standalone_connection(db_path) as timeout_conn:
-                    timeout_conn.execute(
-                        "UPDATE batch_score_sessions SET status = 'error', error_msg = ?, finished_at = ? "
-                        "WHERE id = ? AND status IN ('running', 'cancelling')",
-                        ("Session timed out (>30 min)", utc_now_iso(), session_id),
-                    )
-                    timeout_conn.commit()
-                resp = make_response(
-                    render_template(
-                        "dashboard/_batch_score_done.html",
-                        scored=session["scored"],
-                        skipped=session["skipped"],
-                        status="error",
-                        message=None,
-                        error_msg="Session timed out (>30 min)",
-                    )
-                )
-                resp.headers["HX-Trigger-After-Settle"] = json.dumps(
-                    {"dashboard-refresh": None, "jobs-updated": None}
-                )
-                return resp
-        except (ValueError, TypeError):
-            pass
-
-    # Terminal states: done, error, cancelled — return done fragment (NO hx-trigger)
-    if status in ("done", "error", "cancelled"):
-        resp = make_response(
-            render_template(
-                "dashboard/_batch_score_done.html",
-                scored=session["scored"],
-                skipped=session["skipped"],
-                status=status,
-                message=None,
-                error_msg=session["error_msg"] if status == "error" else None,
-            )
-        )
-        # Trigger dashboard stats refresh + jobs table refresh (if on jobs page)
-        resp.headers["HX-Trigger-After-Settle"] = json.dumps(
-            {"dashboard-refresh": None, "jobs-updated": None}
-        )
-        return resp
-
-    # Still running (running or cancelling) — return progress fragment (WITH hx-trigger)
-    return render_template(
-        "dashboard/_batch_score_progress.html",
-        session_id=session_id,
-        total=session["total"],
-        scored=session["scored"],
-        skipped=session["skipped"],
-        cancelling=(status == "cancelling"),
+    return render_polling_status(
+        current_app.config["DB_PATH"],
+        session_id,
+        PollingSessionConfig(
+            progress_template="dashboard/_batch_score_progress.html",
+            done_template="dashboard/_batch_score_done.html",
+            progress_ctx=_batch_progress_ctx,
+            done_ctx=_batch_done_ctx,
+            not_found_ctx={
+                "scored": 0,
+                "skipped": 0,
+                "status": "error",
+                "message": None,
+                "error_msg": "Session not found",
+            },
+            hx_trigger_after_settle=_BATCH_HX_TRIGGER,
+            session_label="Batch",
+        ),
     )
 
 
