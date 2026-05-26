@@ -2,7 +2,6 @@
 
 from flask import (
     Blueprint,
-    current_app,
     render_template,
     request,
 )
@@ -26,8 +25,7 @@ HIDDEN_COLUMNS = ["archived", "withdrawn"]
 @pipeline_bp.route("/", strict_slashes=False)
 def index():
     """Kanban pipeline view — jobs grouped by pipeline stage."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     jobs_by_status = get_jobs_by_status(conn)
 
@@ -80,8 +78,7 @@ def move():
     if new_status not in PIPELINE_STATUSES:
         return (f"Invalid status: {new_status}", 400)
 
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     update_pipeline_status(conn, job_id, new_status, source="manual")
 
     return ("", 200)

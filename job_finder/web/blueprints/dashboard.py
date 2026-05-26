@@ -170,8 +170,7 @@ def _get_quick_actions_context(conn, config):
 @dashboard_bp.route("/", strict_slashes=False)
 def index():
     """Dashboard landing page — stat cards, activity feed, pipeline summary."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     config = current_app.config.get("JF_CONFIG", {})
 
     stats_ctx = _get_stats_context(conn, config)
@@ -250,8 +249,7 @@ def stats_fragment():
 
     Triggered by dashboard-refresh event after sync/batch scoring completes.
     """
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     config = current_app.config.get("JF_CONFIG", {})
     ctx = _get_stats_context(conn, config)
     return render_template("dashboard/_stats_cards.html", **ctx)
@@ -264,8 +262,7 @@ def quick_actions_fragment():
     Triggered by dashboard-refresh event (with 5s delay) after sync/batch scoring completes.
     Detects active sessions and shows progress bars or fresh buttons with updated counts.
     """
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     config = current_app.config.get("JF_CONFIG", {})
     ctx = _get_quick_actions_context(conn, config)
     return render_template("dashboard/_quick_actions.html", **ctx)
@@ -276,8 +273,7 @@ def cost_detail():
     """HTMX partial — returns cost breakdown panel."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("dashboard.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     config = current_app.config.get("JF_CONFIG", {})
     budget_cap = config.get("scoring", {}).get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
     cost_stats = get_cost_stats(conn, budget_cap=budget_cap)

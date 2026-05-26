@@ -43,8 +43,7 @@ _PAGE_SIZE = 50
 @companies_bp.route("/", strict_slashes=False)
 def index():
     """Companies list page with sortable table, search, and ATS filter."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     search = request.args.get("search", "").strip()
     ats_platform = request.args.get("ats_platform", "").strip().lower()
@@ -128,8 +127,7 @@ def index():
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
 def expand(company_id):
     """HTMX: expand company row with jobs and scan history."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
@@ -188,8 +186,7 @@ def expand(company_id):
 @companies_bp.route("/<int:company_id>/collapse", strict_slashes=False)
 def collapse(company_id):
     """HTMX: collapse company row back to compact view."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute(
         """SELECT c.*, COUNT(j.dedup_key) as job_count_live
@@ -209,8 +206,7 @@ def collapse(company_id):
 @companies_bp.route("/add", methods=["POST"], strict_slashes=False)
 def add():
     """Create a new company record and trigger ATS probe."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company_name = request.form.get("company_name", "").strip()
     homepage_url = request.form.get("homepage_url", "").strip() or None
@@ -245,8 +241,7 @@ def add():
 @companies_bp.route("/<int:company_id>/toggle", methods=["POST"], strict_slashes=False)
 def toggle(company_id):
     """Toggle scan_enabled for a company. Returns updated _row.html fragment."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
@@ -277,8 +272,7 @@ def toggle(company_id):
 @companies_bp.route("/<int:company_id>/update-slug", methods=["POST"], strict_slashes=False)
 def update_slug(company_id):
     """Update ATS platform and slug manually. Returns updated expanded view."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
@@ -379,9 +373,8 @@ def retry(company_id):
 
     Returns updated _row.html fragment (innerHTML swap into #company-{id}).
     """
-    db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 
@@ -521,8 +514,7 @@ def research(company_id):
 )
 def research_status(company_id, research_id):
     """Poll research generation status. Returns final section or keeps polling."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
 

@@ -13,7 +13,7 @@ import logging
 import sqlite3
 from contextlib import contextmanager
 
-from flask import g
+from flask import current_app, g
 
 from job_finder.json_utils import (
     safe_json_load,  # noqa: F401 -- re-exported for backward compatibility
@@ -22,14 +22,18 @@ from job_finder.json_utils import (
 logger = logging.getLogger(__name__)
 
 
-def get_db(db_path: str) -> sqlite3.Connection:
+def get_db(db_path: str | None = None) -> sqlite3.Connection:
     """Return the per-request SQLite connection, creating it if needed.
 
     The connection uses sqlite3.Row as its row_factory, enabling column
     access by name (e.g., row["title"]) in addition to index.
 
     Args:
-        db_path: Path to the SQLite database file.
+        db_path: Optional path to the SQLite database file. When None
+            (default), reads from ``current_app.config["DB_PATH"]``. Most
+            blueprint routes should omit this argument; pass it explicitly
+            only when constructing a connection outside the canonical
+            request-scoped path (rare).
 
     Returns:
         An open sqlite3.Connection scoped to the current Flask request context.
@@ -42,7 +46,8 @@ def get_db(db_path: str) -> sqlite3.Connection:
         Violating this contract causes silent data corruption under concurrent load.
     """
     if "db" not in g:
-        g.db = sqlite3.connect(db_path, check_same_thread=False)
+        path = db_path if db_path is not None else current_app.config["DB_PATH"]
+        g.db = sqlite3.connect(path, check_same_thread=False)
         g.db.row_factory = sqlite3.Row
     return g.db
 

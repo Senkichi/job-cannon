@@ -217,8 +217,7 @@ def _register_filters(state):
 @jobs_bp.route("/", strict_slashes=False)
 def index():
     """Job Board landing page -- full page render with filter bar."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     filters = _get_filter_kwargs()
     jobs = get_filtered_jobs(conn, **filters)
@@ -250,8 +249,7 @@ def table():
     """HTMX partial -- returns only the table body rows (no full page)."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     filters = _get_filter_kwargs()
     jobs = get_filtered_jobs(conn, **filters)
@@ -268,8 +266,7 @@ def archived_table():
     """HTMX partial -- archived job rows for the collapsible section."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     jobs = get_filtered_jobs(
         conn, status="archived", sort_by="first_seen", sort_dir="DESC", limit=200
     )
@@ -293,8 +290,7 @@ def add_from_listing():
         flash('Add a job from the Dashboard using the "Add Job Manually" dialog.', "info")
         return redirect(url_for("dashboard.index"))
 
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     config = current_app.config.get("JF_CONFIG", {}) or {}
 
     listing_url = (request.form.get("listing_url") or "").strip()
@@ -494,8 +490,7 @@ def expand(dedup_key: str):
     """HTMX partial -- returns accordion expansion row for a job."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     ctx = load_job_context(conn, dedup_key)
     if ctx is None:
@@ -529,8 +524,7 @@ def collapse(dedup_key: str):
     """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
@@ -544,8 +538,7 @@ def collapse(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)
 def update_status(dedup_key: str):
     """HTMX POST -- change pipeline status and return updated status cell."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     new_status = request.form.get("pipeline_status", "")
     if new_status not in PIPELINE_STATUSES:
@@ -608,8 +601,7 @@ def detail_inline(dedup_key: str):
     """HTMX partial -- returns full detail as inline table row."""
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
@@ -629,8 +621,7 @@ def paste_jd(dedup_key: str):
     Stores jd_text in jobs.jd_full, then routes through the v3.0 unified
     scorer. Budget-gated via cost_gate. Returns updated expanded row partial.
     """
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     ctx = load_job_context(conn, dedup_key)
     if ctx is None:
@@ -812,8 +803,7 @@ def rescore(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/score-cell", strict_slashes=False)
 def score_cell(dedup_key: str):
     """HTMX partial -- returns just the score <td> for a single job."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
@@ -876,8 +866,7 @@ def save_jd(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>/jd-edit-form", strict_slashes=False)
 def jd_edit_form(dedup_key: str):
     """HTMX GET -- return the JD paste form pre-filled with existing jd_full."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
     job = get_job(conn, dedup_key)
     if job is None:
         return "", 404
@@ -887,8 +876,7 @@ def jd_edit_form(dedup_key: str):
 @jobs_bp.route("/<path:dedup_key>", strict_slashes=False)
 def detail(dedup_key: str):
     """Full job detail page at /jobs/<dedup_key>."""
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     job = get_job(conn, dedup_key)
     if job is None:

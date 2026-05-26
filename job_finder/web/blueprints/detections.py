@@ -25,10 +25,7 @@ def confirm(detection_id: int):
 
     Returns an HTMX partial (_detection_confirmed.html) that auto-removes after 3 seconds.
     """
-    from flask import current_app
-
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     # Fetch the detection record
     row = conn.execute(
@@ -91,10 +88,7 @@ def dismiss(detection_id: int):
 
     Returns an empty string so HTMX outerHTML swap removes the card from the DOM.
     """
-    from flask import current_app
-
-    db_path = current_app.config["DB_PATH"]
-    conn = get_db(db_path)
+    conn = get_db()
 
     # Verify detection exists
     row = conn.execute(
