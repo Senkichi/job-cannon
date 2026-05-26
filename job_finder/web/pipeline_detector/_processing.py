@@ -41,6 +41,7 @@ from job_finder.web.pipeline_detector._db import (
     _insert_detection,
     _mark_processed,
 )
+from job_finder.web.pipeline_detector._off_platform import _try_create_stub_job
 from job_finder.web.pipeline_detector._signals import _extract_snippet, score_match
 
 logger = logging.getLogger(__name__)
@@ -105,8 +106,51 @@ def _process_email(
                 best_signals = signals
 
     # Company signal is mandatory -- without it, we can't confidently
-    # attribute an email to a specific job
+    # attribute an email to a specific job. Exception: off-platform
+    # application capture. A confirmation or interview email from a
+    # company-domain sender for a company we have no job for is
+    # almost certainly an application the user filed directly with
+    # the company (bypassing JF). Create a stub job from the sender's
+    # domain, attribute the email to it, and let enrichment +
+    # scoring fill in the rest on the next cycle. Rejection emails
+    # are NOT used for stubbing -- no value in tracking applications
+    # we lost without ever seeing them.
     if "company" not in best_signals:
+        if detection_type in ("confirmation", "interview"):
+            stub = _try_create_stub_job(email, conn)
+            if stub is not None:
+                target_status = DETECTION_TYPE_TO_STATUS[detection_type]
+                update_pipeline_status(
+                    conn,
+                    stub["dedup_key"],
+                    target_status,
+                    source="off-platform",
+                    evidence=(
+                        f"off-platform stub from "
+                        f"{email.get('from_address', '')!r}"
+                    ),
+                )
+                snippet = _extract_snippet(email.get("body", ""), detection_type)
+                _insert_detection(
+                    conn,
+                    message_id,
+                    detection_type,
+                    stub["dedup_key"],
+                    score=0,
+                    signals=["off_platform_stub"],
+                    snippet=snippet,
+                    email_subject=email.get("subject", ""),
+                    email_from=email.get("from_address", ""),
+                    email_date=email.get("date", ""),
+                    status="auto-applied",
+                )
+                _mark_processed(
+                    conn,
+                    message_id,
+                    email.get("from_address", ""),
+                    detection_type,
+                )
+                return "auto_updated"
         return "skipped"
 
     # Extract snippet for the detection record

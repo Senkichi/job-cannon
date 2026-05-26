@@ -837,11 +837,13 @@ class TestProcessEmail:
 
         jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
 
+        # gmail.com is in PERSONAL_EMAIL_DOMAINS so the off-platform
+        # fallback can't extract a company either -> truly skipped.
         email = self._make_email(
             message_id="no_company_001",
             subject="Phone screen - Information Systems Manager",
             body="We'd like to schedule a phone screen for the Information Systems Manager role with Alameda County.",
-            from_address="no-reply@governmentjobs.com",
+            from_address="recruiter@gmail.com",
             detection_type="interview",
         )
 
@@ -1451,3 +1453,396 @@ class TestDismissedJobsExcludedFromCandidates:
         from job_finder.web.pipeline_detector import INACTIVE_STATUSES
 
         assert "dismissed" in INACTIVE_STATUSES
+
+
+# ---------------------------------------------------------------------------
+# Phase B Option 1: off-platform application capture
+# ---------------------------------------------------------------------------
+
+
+class TestExtractCompanyFromSender:
+    """Tests for the sender-domain extraction heuristic."""
+
+    def test_extracts_simple_company_domain(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        assert _extract_company_from_sender("no-reply@waymo.com") == "Waymo"
+
+    def test_strips_subdomain_noise(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        # careers.acme.com → Acme
+        assert _extract_company_from_sender("hr@careers.acme.com") == "Acme"
+
+    def test_handles_two_label_public_suffix(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        # careers@acme.co.uk → Acme (NOT Co)
+        assert _extract_company_from_sender("hr@careers.acme.co.uk") == "Acme"
+
+    def test_rejects_ats_domain(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        # Greenhouse-routed thank-you doesn't identify a specific employer
+        assert _extract_company_from_sender("no-reply@us.greenhouse-mail.io") is None
+        assert _extract_company_from_sender("hr@ashbyhq.com") is None
+        assert _extract_company_from_sender("notifications@greenhouse.io") is None
+
+    def test_rejects_personal_email_service(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        assert _extract_company_from_sender("samuel@gmail.com") is None
+        assert _extract_company_from_sender("user@yahoo.com") is None
+        assert _extract_company_from_sender("user@proton.me") is None
+
+    def test_rejects_scheduling_tool(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        assert _extract_company_from_sender("no-reply@otter.ai") is None
+        assert _extract_company_from_sender("invites@calendly.com") is None
+        # modernloop is already in ATS_DOMAINS — covered via that path
+        assert _extract_company_from_sender("invites@modernloop.io") is None
+
+    def test_handles_name_bracket_format(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        assert (
+            _extract_company_from_sender("Waymo Careers <no-reply@waymo.com>")
+            == "Waymo"
+        )
+
+    def test_returns_none_for_empty_or_unparseable(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        assert _extract_company_from_sender("") is None
+        assert _extract_company_from_sender("no-at-sign") is None
+        assert _extract_company_from_sender("@") is None
+
+    def test_titlecases_single_token_compound(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _extract_company_from_sender,
+        )
+
+        # hingehealth.com → Hingehealth (compound stays one token —
+        # dedup pass normalises through whitespace to attribute to an
+        # existing "Hinge Health" job)
+        assert _extract_company_from_sender("hr@hingehealth.com") == "Hingehealth"
+
+
+class TestNormalizeForDedup:
+    """Tests for the dedup normalisation helper."""
+
+    def test_strips_whitespace_for_match(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _normalize_for_dedup,
+        )
+
+        assert _normalize_for_dedup("Hinge Health") == _normalize_for_dedup(
+            "Hingehealth"
+        )
+
+    def test_strips_punctuation_for_match(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _normalize_for_dedup,
+        )
+
+        assert _normalize_for_dedup("AT&T") == _normalize_for_dedup("at-t")
+
+    def test_handles_empty_string(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _normalize_for_dedup,
+        )
+
+        assert _normalize_for_dedup("") == ""
+
+    def test_case_insensitive(self):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _normalize_for_dedup,
+        )
+
+        assert _normalize_for_dedup("WAYMO") == _normalize_for_dedup("waymo")
+
+
+class TestTryCreateStubJob:
+    """Tests for _try_create_stub_job dedup + insertion logic."""
+
+    def _make_email(self, from_address, subject="Thank you for applying"):
+        return {
+            "message_id": "off_msg_001",
+            "subject": subject,
+            "body": "We received your application.",
+            "from_address": from_address,
+            "date": datetime.now().isoformat(),
+            "detection_type": "confirmation",
+        }
+
+    def test_creates_stub_when_no_existing_job(self, migrated_db):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _try_create_stub_job,
+        )
+
+        path, conn = migrated_db
+        email = self._make_email("hr@brand-new-co.com")
+
+        stub = _try_create_stub_job(email, conn)
+
+        assert stub is not None
+        assert stub["company"] == "Brand-New-Co"
+        assert stub["attributed_existing"] is False
+        # Verify row landed in jobs
+        row = conn.execute(
+            "SELECT title, company, pipeline_status, jd_full, sources "
+            "FROM jobs WHERE dedup_key = ?",
+            (stub["dedup_key"],),
+        ).fetchone()
+        assert row is not None
+        assert row["company"] == "Brand-New-Co"
+        assert row["pipeline_status"] == "discovered"
+        # jd_full=NULL is the trigger for enrichment_backfill pickup
+        assert row["jd_full"] is None
+        assert "off_platform_email" in row["sources"]
+
+    def test_attributes_to_existing_job_by_normalised_company(self, migrated_db):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _try_create_stub_job,
+        )
+
+        path, conn = migrated_db
+        _insert_job(
+            conn,
+            "hinge|sde|remote",
+            "Software Engineer",
+            "Hinge Health",
+            pipeline_status="reviewing",
+        )
+
+        # hingehealth.com → "Hingehealth", which normalises to "hingehealth"
+        # which matches "Hinge Health" → "hingehealth"
+        email = self._make_email("hr@hingehealth.com")
+        stub = _try_create_stub_job(email, conn)
+
+        assert stub is not None
+        assert stub["dedup_key"] == "hinge|sde|remote"
+        assert stub["attributed_existing"] is True
+        # No duplicate inserted
+        count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company = 'Hinge Health'"
+        ).fetchone()[0]
+        assert count == 1
+
+    def test_returns_none_when_extraction_fails(self, migrated_db):
+        from job_finder.web.pipeline_detector._off_platform import (
+            _try_create_stub_job,
+        )
+
+        path, conn = migrated_db
+        # ATS sender → can't attribute
+        email = self._make_email("no-reply@greenhouse.io")
+
+        stub = _try_create_stub_job(email, conn)
+
+        assert stub is None
+        # No row created
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        assert count == 0
+
+
+class TestProcessEmailOffPlatform:
+    """Integration: end-to-end off-platform capture via _process_email."""
+
+    def _make_email(
+        self,
+        message_id,
+        subject,
+        body,
+        from_address,
+        detection_type="confirmation",
+        date=None,
+    ):
+        if date is None:
+            date = datetime.now().isoformat()
+        return {
+            "message_id": message_id,
+            "subject": subject,
+            "body": body,
+            "from_address": from_address,
+            "date": date,
+            "detection_type": detection_type,
+        }
+
+    def test_confirmation_with_unknown_company_creates_stub_and_applies(
+        self, migrated_db
+    ):
+        """Confirmation email from a company-domain sender we have no job for
+        creates a stub job, marks it applied, writes pipeline_events +
+        pipeline_detections, and returns auto_updated."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        path, conn = migrated_db
+        # No existing jobs at all
+        jobs = []
+
+        email = self._make_email(
+            message_id="off_e2e_001",
+            subject="Thank you for applying",
+            body="We received your application and will be in touch.",
+            from_address="no-reply@waymo.com",
+            detection_type="confirmation",
+        )
+
+        result = _process_email(email, conn, jobs)
+        assert result == "auto_updated"
+
+        # Stub job exists
+        stub = conn.execute(
+            "SELECT dedup_key, company, pipeline_status FROM jobs "
+            "WHERE company = 'Waymo'"
+        ).fetchone()
+        assert stub is not None
+        assert stub["pipeline_status"] == "applied"
+
+        # pipeline_events row with source='off-platform'
+        event = conn.execute(
+            "SELECT * FROM pipeline_events WHERE job_id = ? "
+            "AND source = 'off-platform'",
+            (stub["dedup_key"],),
+        ).fetchone()
+        assert event is not None
+
+        # pipeline_detections row with off_platform_stub marker
+        det = conn.execute(
+            "SELECT matched_signals, status FROM pipeline_detections "
+            "WHERE gmail_message_id = ?",
+            ("off_e2e_001",),
+        ).fetchone()
+        assert det is not None
+        assert "off_platform_stub" in det["matched_signals"]
+        assert det["status"] == "auto-applied"
+
+    def test_interview_email_creates_stub_and_moves_to_phone_screen(
+        self, migrated_db
+    ):
+        """Interview-type detection should land the stub in phone_screen,
+        not applied."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        path, conn = migrated_db
+
+        email = self._make_email(
+            message_id="off_e2e_002",
+            subject="Phone screen invitation",
+            body="We'd like to schedule a phone screen with you.",
+            from_address="recruiting@anthropic.com",
+            detection_type="interview",
+        )
+
+        result = _process_email(email, conn, [])
+        assert result == "auto_updated"
+
+        stub = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE company = 'Anthropic'"
+        ).fetchone()
+        assert stub is not None
+        assert stub["pipeline_status"] == "phone_screen"
+
+    def test_rejection_with_unknown_company_does_NOT_create_stub(self, migrated_db):
+        """Rejection emails are NOT used for off-platform stubbing — no
+        value tracking applications we lost without ever seeing them."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        path, conn = migrated_db
+
+        email = self._make_email(
+            message_id="off_e2e_rej",
+            subject="Application update",
+            body="Unfortunately, we are not moving forward.",
+            from_address="hr@brand-new-co.com",
+            detection_type="rejection",
+        )
+
+        result = _process_email(email, conn, [])
+        assert result == "skipped"
+
+        # No stub created
+        count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company = 'Brand-New-Co'"
+        ).fetchone()[0]
+        assert count == 0
+
+    def test_confirmation_from_ats_sender_falls_through_to_skipped(
+        self, migrated_db
+    ):
+        """Confirmation email from an ATS sender (no employer identity in
+        domain) should still be skipped — Option 1's rules can't extract
+        the company. Option 2 (LLM fallback) would handle this case."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        path, conn = migrated_db
+
+        email = self._make_email(
+            message_id="off_e2e_ats",
+            subject="Thank you for applying",
+            body="We received your application.",
+            from_address="no-reply@us.greenhouse-mail.io",
+            detection_type="confirmation",
+        )
+
+        result = _process_email(email, conn, [])
+        assert result == "skipped"
+
+        count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        assert count == 0
+
+    def test_confirmation_dedups_to_existing_job(self, migrated_db):
+        """Existing Hinge Health job + confirmation from hingehealth.com
+        should attribute to existing job, not create a duplicate."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        path, conn = migrated_db
+        _insert_job(
+            conn,
+            "hingehealth|sde|remote",
+            "Software Engineer",
+            "Hinge Health",
+            pipeline_status="reviewing",
+        )
+
+        email = self._make_email(
+            message_id="off_e2e_dedup",
+            subject="Thank you for applying",
+            body="We received your application.",
+            from_address="hr@hingehealth.com",
+            detection_type="confirmation",
+        )
+
+        result = _process_email(email, conn, [])
+        assert result == "auto_updated"
+
+        # Existing job promoted to applied
+        row = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
+            ("hingehealth|sde|remote",),
+        ).fetchone()
+        assert row["pipeline_status"] == "applied"
+
+        # No duplicate created
+        count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE company LIKE '%inge%ealth%'"
+        ).fetchone()[0]
+        assert count == 1

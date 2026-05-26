@@ -269,7 +269,10 @@ def test_company_mandatory_gate_runs_after_scoring(conn_with_email_log):
         "message_id": "msg-no-company",
         "subject": "Software engineer technical interview",  # title hits + interview keyword
         "body": "Looking forward to your technical interview.",
-        "from_address": "human@example.com",  # not an ATS domain
+        # gmail.com is in PERSONAL_EMAIL_DOMAINS so the off-platform fallback
+        # also can't extract a company; the email is truly skipped, isolating
+        # the company-mandatory gate as the deciding contract here.
+        "from_address": "human@gmail.com",
         "date": "2026-05-03T12:00:00",
         "detection_type": "interview",
     }
