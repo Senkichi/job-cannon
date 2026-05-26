@@ -231,10 +231,11 @@ scoring:
 providers:
   primary: ollama              # Provider tried first for every call
   fallback_chain:              # Tried in order if primary fails / schema-invalidates / hits a daily limit
-    - groq
-    - cerebras
-    - gemini
-    - anthropic
+    - groq                     # BYO API key (free tier)
+    - cerebras                 # BYO API key (free tier)
+    - gemini                   # BYO API key (free tier)
+    - claude_code_cli          # $0 via your Claude.ai subscription (no API key needed)
+    - anthropic                # Paid SDK — final emergency only, costs real money
   overrides: {}                # Optional: per-provider per-workload model override, e.g. {ollama: {score: "llama3.1:70b"}}
   daily_limits: {}             # Optional: {provider_name: max_requests_per_day}
   throttle_delays: {}          # Optional: {provider_name: seconds_between_calls}
@@ -247,7 +248,7 @@ providers:
 #
 # providers:
 #   primary: ollama
-#   fallback_chain: [groq, cerebras, gemini, anthropic]
+#   fallback_chain: [groq, cerebras, gemini, claude_code_cli, anthropic]
 #   overrides:
 #     ollama:    {score: qwen2.5:14b}
 #     anthropic: {score: claude-sonnet-4-6}
