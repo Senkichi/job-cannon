@@ -42,9 +42,14 @@ def init_scheduler(app) -> None:
     """
     global _scheduler
 
-    # Guard 1: Skip in test mode
-    if app.config.get("TESTING", False):
-        logger.debug("Scheduler: skipped (TESTING=True)")
+    # Guard 1: Skip in test mode or when caller has asked for "scheduler off,
+    # but jobs themselves still do real work" (scripts/run_overnight.py pattern).
+    # SKIP_SCHEDULER is the right flag for secondary app instances that share
+    # a live Flask's DB but must NOT race its scheduler. TESTING also gates
+    # several job functions to no-op (careers_crawl, ats_scan, ats_slug_probe,
+    # ats_identity_reconcile) — wrong shape for run_overnight.py.
+    if app.config.get("TESTING", False) or app.config.get("SKIP_SCHEDULER", False):
+        logger.debug("Scheduler: skipped (TESTING or SKIP_SCHEDULER)")
         return
 
     # Guard 2: Flask debug reloader -- skip in child process.

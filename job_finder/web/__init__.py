@@ -140,7 +140,11 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     # Runs after migration so all columns exist.
     # Skipped when config has TESTING key OR when running under pytest (sys.modules check).
     # This prevents Windows sqlite3 file lock issues during pytest teardown.
-    _is_testing = cfg.get("TESTING") or "pytest" in sys.modules
+    # SKIP_SCHEDULER also trips this gate: a secondary app instance (e.g.,
+    # scripts/run_overnight.py) needs to skip startup file logging + keyring
+    # probe + cache passes, but must NOT propagate TESTING into job functions
+    # that check it (careers_crawl, ats_scan, ats_slug_probe, ats_identity_reconcile).
+    _is_testing = cfg.get("TESTING") or cfg.get("SKIP_SCHEDULER") or "pytest" in sys.modules
 
     # Diagnostic / operational escape hatch: skip the long-running startup
     # backfill threads (description reformat + data backfill) without entering

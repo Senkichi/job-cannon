@@ -62,7 +62,13 @@ def main() -> None:
     _pause("pipeline_detection")
 
     cfg = yaml.safe_load(open("config.yaml"))
-    cfg["TESTING"] = True  # prevents init_scheduler from starting a second scheduler
+    # SKIP_SCHEDULER (not TESTING) is the right flag here. TESTING also makes
+    # 4 job functions no-op silently (careers_crawl, ats_scan, ats_slug_probe,
+    # ats_identity_reconcile) — see job_finder/web/scheduler/__init__.py:46
+    # for both flags' shared "scheduler off" semantics; only TESTING propagates
+    # into the job-function guards. This script is supposed to run the jobs
+    # for real, so SKIP_SCHEDULER is correct.
+    cfg["SKIP_SCHEDULER"] = True
 
     from job_finder.web import create_app
     app = create_app(config=cfg)

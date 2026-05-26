@@ -86,6 +86,17 @@ class TestSchedulerTesting:
 
         assert get_scheduler() is None
 
+    def test_scheduler_not_started_when_skip_scheduler_flag_set(self):
+        """init_scheduler skips when SKIP_SCHEDULER=True (without propagating TESTING into job functions)."""
+        from job_finder.web.scheduler import get_scheduler, init_scheduler
+
+        app = MagicMock()
+        app.config = {"TESTING": False, "SKIP_SCHEDULER": True}
+
+        init_scheduler(app)
+
+        assert get_scheduler() is None
+
     def test_scheduler_starts_when_not_testing(self):
         """init_scheduler starts the scheduler when TESTING is False/absent."""
         from job_finder.web.scheduler import get_scheduler, init_scheduler
