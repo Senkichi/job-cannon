@@ -1,13 +1,9 @@
-"""Provider adapter implementations (added in Phase 25)."""
+"""Provider adapter implementations.
 
-from job_finder.web.providers.anthropic_provider import AnthropicProvider
-from job_finder.web.providers.gemini_provider import GeminiProvider
-from job_finder.web.providers.ollama_provider import OllamaProvider
-from job_finder.web.providers.openrouter_provider import OpenRouterProvider
+Concrete providers live in sibling modules and are imported lazily by
+``job_finder.web.model_provider._make_adapter`` (one branch per provider).
+There is no canonical package-root entry point — always import the
+specific module:
 
-__all__ = [
-    "AnthropicProvider",
-    "GeminiProvider",
-    "OllamaProvider",
-    "OpenRouterProvider",
-]
+    from job_finder.web.providers.ollama_provider import OllamaProvider
+"""
