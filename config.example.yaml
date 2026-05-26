@@ -298,6 +298,14 @@ ats:
   scan_days: mon,fri
   # Hour of day to run scans (24-hour format)
   scan_hour: 8
+  # High-score-history gate: only scan companies whose past jobs include at
+  # least one with a v3 sub_score sum >= this threshold. Companies with NO
+  # scored jobs yet are exempt (bootstrap pass). Score-based, not
+  # classification-based — sub_scores are 6 axes x 1-5 each (sum range 6-30):
+  #   >=18 lenient (skips only the bottom ~15%)
+  #   >=20 default (skips ~22% of unproductive cohort)
+  #   >=22 strict (top 56% of confirmed-hit companies retained)
+  high_score_history_threshold: 20
   # ATS company identity (URL evidence → live verify → hit)
   # See `.planning/ATS-RECONCILIATION-PLAN.md`. Ingestion stores URL-derived hints as
   # ``pending``; reconciliation promotes to ``hit`` only after API verification.

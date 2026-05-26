@@ -35,19 +35,25 @@ def _run_html_fallback_scan(
     title_exclusions: list,
     summary: dict,
     all_new_job_keys: list,
+    high_score_threshold: int,
 ) -> None:
     """Phase C: HTML scrape miss/error companies that have a homepage_url."""
     # Companies with ats_probe_status='miss' but with homepage_url get scraped.
     # This loop runs AFTER the ATS API loop (which handles hit companies).
-    # Guard: only run if careers_scraper was imported successfully.
+    # Same high-score-history gate as Phase A — see _run.py for the clause.
+    # Function-local import breaks the _run <-> _run_html cycle.
+    from job_finder.web.ats_scanner._run import _high_score_history_clause
+
     if find_careers_url is None or scrape_careers_page is None:
         return
 
     miss_companies = conn.execute(
-        """SELECT id, name_raw, homepage_url, careers_url FROM companies
+        f"""SELECT id, name_raw, homepage_url, careers_url FROM companies
            WHERE ats_probe_status IN ('miss', 'error')
              AND homepage_url IS NOT NULL
-             AND scan_enabled = 1"""
+             AND scan_enabled = 1
+             AND {_high_score_history_clause()}""",
+        (high_score_threshold,),
     ).fetchall()
 
     for miss_company in miss_companies:

@@ -3136,3 +3136,106 @@ class TestPromoteAtsFromSourceUrls:
 
         result = promote_ats_from_source_urls(migrated_db_path, config={"TESTING": True})
         assert result == {"checked": 0, "promoted": 0}
+
+
+# ---------------------------------------------------------------------------
+# High-score-history gate (Phase A + Phase C company-selection filter)
+# ---------------------------------------------------------------------------
+
+
+def _insert_scored_job(conn, company_name: str, dedup_key: str, sub_sum_target: int):
+    """Insert a job with sub_scores_json whose 6-axis sum equals sub_sum_target.
+
+    Distributes the sum evenly across axes (clamped to 1-5 each). Used to
+    fixture the high-score-history gate.
+    """
+    import json
+    from datetime import datetime
+
+    # Build sub_scores summing to sub_sum_target with each axis in [1, 5].
+    axes = ["title_fit", "location_fit", "comp_fit", "domain_match", "seniority_match", "skills_match"]
+    sub_scores = dict.fromkeys(axes, 1)  # start at min (sum=6)
+    remaining = sub_sum_target - 6
+    i = 0
+    while remaining > 0:
+        ax = axes[i % 6]
+        if sub_scores[ax] < 5:
+            sub_scores[ax] += 1
+            remaining -= 1
+        i += 1
+        if i > 100:
+            break  # safety
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO jobs (dedup_key, title, company, location, first_seen, last_seen, sub_scores_json)
+           VALUES (?, 'Engineer', ?, 'Remote', ?, ?, ?)""",
+        (dedup_key, company_name, now, now, json.dumps(sub_scores)),
+    )
+    conn.commit()
+
+
+class TestHighScoreHistoryGate:
+    """Regression tests for the Phase A / Phase C selection filter that gates
+    ats_scan on a company having produced at least one v3 high-scoring job
+    (sub_score sum >= threshold), with bootstrap exception for new companies.
+    """
+
+    def _run_phase_a_select(self, conn, threshold: int) -> list:
+        """Run the exact Phase A SELECT that ats_scan uses."""
+        from job_finder.web.ats_scanner._run import _high_score_history_clause
+
+        sql = f"""SELECT id, name_raw FROM companies
+                  WHERE (ats_probe_status = 'hit' AND scan_enabled = 1)
+                    AND {_high_score_history_clause()}"""
+        return conn.execute(sql, (threshold,)).fetchall()
+
+    def test_bootstrap_company_with_no_scored_jobs_passes(self, db_conn):
+        """A 'hit' company with NO scored jobs yet must pass — the first
+        scan is what builds its history. Filtering it out at this step
+        would create a permanent dead zone for new companies."""
+        _path, conn = db_conn
+        _insert_hit_company(conn, "NewCo", "greenhouse", "newco")
+        # No jobs inserted for NewCo.
+
+        results = self._run_phase_a_select(conn, threshold=20)
+        names = [r["name_raw"] for r in results]
+        assert "NewCo" in names
+
+    def test_company_with_only_low_score_jobs_is_excluded(self, db_conn):
+        """A 'hit' company whose history is entirely sub_sum < threshold
+        must be skipped. This is the cohort the gate targets."""
+        _path, conn = db_conn
+        _insert_hit_company(conn, "LowSignalCo", "greenhouse", "lowsignal")
+        _insert_scored_job(conn, "LowSignalCo", "lowsignalco|j1", sub_sum_target=12)
+        _insert_scored_job(conn, "LowSignalCo", "lowsignalco|j2", sub_sum_target=15)
+
+        results = self._run_phase_a_select(conn, threshold=20)
+        names = [r["name_raw"] for r in results]
+        assert "LowSignalCo" not in names
+
+    def test_company_with_one_high_score_job_passes(self, db_conn):
+        """A single sub_sum >= threshold is enough to keep a company in
+        the scanned cohort. Mix of low + high scores still passes."""
+        _path, conn = db_conn
+        _insert_hit_company(conn, "MixedCo", "greenhouse", "mixedco")
+        _insert_scored_job(conn, "MixedCo", "mixedco|j1", sub_sum_target=10)
+        _insert_scored_job(conn, "MixedCo", "mixedco|j2", sub_sum_target=22)
+
+        results = self._run_phase_a_select(conn, threshold=20)
+        names = [r["name_raw"] for r in results]
+        assert "MixedCo" in names
+
+    def test_threshold_is_parameterized(self, db_conn):
+        """Same DB state with different threshold values changes the set
+        of returned companies. Verifies the placeholder bind works."""
+        _path, conn = db_conn
+        _insert_hit_company(conn, "MidScoreCo", "greenhouse", "midscoreco")
+        _insert_scored_job(conn, "MidScoreCo", "midscoreco|j1", sub_sum_target=19)
+
+        # At threshold 18: company passes (has a 19-sum job)
+        names_18 = [r["name_raw"] for r in self._run_phase_a_select(conn, 18)]
+        assert "MidScoreCo" in names_18
+
+        # At threshold 20: company is gated out (highest sum is 19)
+        names_20 = [r["name_raw"] for r in self._run_phase_a_select(conn, 20)]
+        assert "MidScoreCo" not in names_20

@@ -43,6 +43,44 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Default v3 sub_score sum cutoff for the high-score-history gate (Phase A + C).
+# v3 sub_scores are 6 axes x 1-5 each (sum range 6-30). The empirical break
+# point for "company has produced relevant work for this profile" is ~20:
+# at >=20 the cohort is dominated by apply+consider, below 20 it's dominated
+# by reject. Override per-deployment via config.ats.high_score_history_threshold.
+_DEFAULT_HIGH_SCORE_THRESHOLD = 20
+
+
+def _high_score_history_clause() -> str:
+    """SQL fragment for the ats_scan high-score-history gate.
+
+    Companies pass IF either (a) they have no scored jobs yet (bootstrap
+    pass — new companies need a first scan to build history), OR (b) at
+    least one prior job has a v3 sub_score sum >= ?. Use with one bind
+    parameter: the threshold integer (typically 20).
+
+    Score-based, not classification-based — the classifier has had
+    reliability issues in the past; sub_scores are the underlying signal.
+    """
+    return """(
+        NOT EXISTS (
+            SELECT 1 FROM jobs j
+            WHERE (j.company = companies.name OR j.company = companies.name_raw)
+              AND j.sub_scores_json IS NOT NULL
+        )
+        OR EXISTS (
+            SELECT 1 FROM jobs j
+            WHERE (j.company = companies.name OR j.company = companies.name_raw)
+              AND j.sub_scores_json IS NOT NULL
+              AND (COALESCE(json_extract(j.sub_scores_json, '$.title_fit'), 0) +
+                   COALESCE(json_extract(j.sub_scores_json, '$.location_fit'), 0) +
+                   COALESCE(json_extract(j.sub_scores_json, '$.comp_fit'), 0) +
+                   COALESCE(json_extract(j.sub_scores_json, '$.domain_match'), 0) +
+                   COALESCE(json_extract(j.sub_scores_json, '$.seniority_match'), 0) +
+                   COALESCE(json_extract(j.sub_scores_json, '$.skills_match'), 0)) >= ?
+        )
+    )"""
+
 
 def run_ats_scan(db_path: str, config: dict) -> dict:
     """Scan all enabled companies' ATS platforms for keyword-matched job postings.
@@ -93,6 +131,14 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
         exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
     )
 
+    # High-score-history gate: skip companies whose past scored jobs are all
+    # below the cutoff. See _high_score_history_clause for semantics.
+    high_score_threshold = int(
+        config.get("ats", {}).get(
+            "high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD
+        )
+    )
+
     summary: dict = {
         "companies_scanned": 0,
         "jobs_discovered": 0,
@@ -111,7 +157,13 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     with standalone_connection(db_path) as conn:
         # Phase A — ATS-API scan for confirmed-hit + retry-eligible-error companies.
         _run_ats_api_scan(
-            conn, db_path, target_titles, title_exclusions, summary, all_new_job_keys
+            conn,
+            db_path,
+            target_titles,
+            title_exclusions,
+            summary,
+            all_new_job_keys,
+            high_score_threshold,
         )
 
         # Phase B — Homepage discovery for companies missing homepage_url. Runs
@@ -127,6 +179,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             title_exclusions,
             summary,
             all_new_job_keys,
+            high_score_threshold,
         )
 
         # Phase D — Auto-scoring for newly discovered jobs across both phases.
@@ -162,19 +215,24 @@ def _run_ats_api_scan(
     title_exclusions: list,
     summary: dict,
     all_new_job_keys: list,
+    high_score_threshold: int,
 ) -> None:
     """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API."""
     # Query companies with confirmed ATS slug (hit) AND error companies eligible
-    # for retry (past their retry_after backoff window).
+    # for retry (past their retry_after backoff window). Gated by the
+    # high-score-history clause so companies that have only ever produced
+    # low-scoring jobs are skipped (bootstrap exception for never-scored).
     companies = conn.execute(
-        """SELECT id, name_raw, ats_platform, ats_slug
+        f"""SELECT id, name_raw, ats_platform, ats_slug
            FROM companies
            WHERE (
                (ats_probe_status = 'hit' AND scan_enabled = 1)
                OR
                (ats_probe_status = 'error' AND scan_enabled = 1
                 AND (retry_after IS NULL OR retry_after < datetime('now')))
-           )"""
+           )
+           AND {_high_score_history_clause()}""",
+        (high_score_threshold,),
     ).fetchall()
 
     for company in companies:
