@@ -253,8 +253,9 @@ class TestCostsRoute:
         response = client.get("/costs?view=bogus")
         assert response.status_code == 200
         html = response.data.decode("utf-8")
-        # Usage view's heading + chart container
-        assert "Output Tokens by Purpose" in html
+        # Usage chart container always renders, regardless of whether the
+        # dynamic insight title or the static fallback heading is showing
+        # (depends on whether scoring_costs has any rows this session).
         assert 'id="usage-chart"' in html
 
     def test_costs_html_contains_canvas(self, client):

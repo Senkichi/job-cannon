@@ -34,8 +34,18 @@
 
   <!-- 30-day stacked output-tokens chart -->
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
+    {% if top_purpose_insight %}
+    <h2 class="text-sm font-semibold text-slate-300 mb-1 flex items-baseline gap-1.5 flex-wrap">
+      <span class="font-mono text-violet-300 text-base">{{ top_purpose_insight.purpose }}</span>
+      <span class="font-normal">drives</span>
+      <span class="text-violet-300 text-base font-bold">{{ "%.0f" | format(top_purpose_insight.share_pct) }}%</span>
+      <span class="text-slate-400 font-normal">of output tokens (last 30 days)</span>
+    </h2>
+    <p class="text-xs text-slate-500 mb-4">{{ "{:,}".format(top_purpose_insight.share_tokens) }} of {{ "{:,}".format(top_purpose_insight.total_tokens) }} tokens · all providers (Ollama, Claude CLI, Anthropic SDK, etc.)</p>
+    {% else %}
     <h2 class="text-sm font-semibold text-slate-300 mb-1">Output Tokens by Purpose (30 Days)</h2>
     <p class="text-xs text-slate-500 mb-4">Includes every provider — Ollama, Claude CLI, Anthropic SDK, etc.</p>
+    {% endif %}
     <div style="position: relative; height: 320px;">
       <canvas id="usage-chart"></canvas>
     </div>
@@ -69,6 +79,10 @@
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Feature</h2>
     {% if monthly_feature_usage %}
+    {# Column maxes drive the bar-in-cell widths; computed once per render. #}
+    {% set feat_max_calls = (monthly_feature_usage | map(attribute='calls') | max) or 1 %}
+    {% set feat_max_input = (monthly_feature_usage | map(attribute='input_tokens') | max) or 1 %}
+    {% set feat_max_output = (monthly_feature_usage | map(attribute='output_tokens') | max) or 1 %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-slate-500 border-b border-slate-700">
@@ -80,11 +94,14 @@
       </thead>
       <tbody>
         {% for item in monthly_feature_usage %}
+        {% set call_pct = (item.calls / feat_max_calls * 100) %}
+        {% set in_pct = (item.input_tokens / feat_max_input * 100) %}
+        {% set out_pct = (item.output_tokens / feat_max_output * 100) %}
         <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
           <td class="py-2 text-slate-300 font-mono">{{ item.purpose }}</td>
-          <td class="py-2 text-slate-400 text-right">{{ "{:,}".format(item.calls) }}</td>
-          <td class="py-2 text-slate-400 text-right font-mono">{{ "{:,}".format(item.input_tokens) }}</td>
-          <td class="py-2 text-slate-300 text-right font-mono">{{ "{:,}".format(item.output_tokens) }}</td>
+          <td class="py-2 text-slate-400 text-right" style="background: linear-gradient(to left, rgba(148,163,184,0.18) {{ call_pct }}%, transparent {{ call_pct }}%);">{{ "{:,}".format(item.calls) }}</td>
+          <td class="py-2 text-slate-400 text-right font-mono" style="background: linear-gradient(to left, rgba(56,189,248,0.18) {{ in_pct }}%, transparent {{ in_pct }}%);">{{ "{:,}".format(item.input_tokens) }}</td>
+          <td class="py-2 text-slate-300 text-right font-mono" style="background: linear-gradient(to left, rgba(139,92,246,0.25) {{ out_pct }}%, transparent {{ out_pct }}%);">{{ "{:,}".format(item.output_tokens) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -98,6 +115,9 @@
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Provider</h2>
     {% if monthly_provider_usage %}
+    {% set prov_max_calls = (monthly_provider_usage | map(attribute='calls') | max) or 1 %}
+    {% set prov_max_input = (monthly_provider_usage | map(attribute='input_tokens') | max) or 1 %}
+    {% set prov_max_output = (monthly_provider_usage | map(attribute='output_tokens') | max) or 1 %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-slate-500 border-b border-slate-700">
@@ -109,11 +129,14 @@
       </thead>
       <tbody>
         {% for item in monthly_provider_usage %}
+        {% set call_pct = (item.calls / prov_max_calls * 100) %}
+        {% set in_pct = (item.input_tokens / prov_max_input * 100) %}
+        {% set out_pct = (item.output_tokens / prov_max_output * 100) %}
         <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
           <td class="py-2 text-slate-300 font-mono">{{ item.provider }}</td>
-          <td class="py-2 text-slate-400 text-right">{{ "{:,}".format(item.calls) }}</td>
-          <td class="py-2 text-slate-400 text-right font-mono">{{ "{:,}".format(item.input_tokens) }}</td>
-          <td class="py-2 text-slate-300 text-right font-mono">{{ "{:,}".format(item.output_tokens) }}</td>
+          <td class="py-2 text-slate-400 text-right" style="background: linear-gradient(to left, rgba(148,163,184,0.18) {{ call_pct }}%, transparent {{ call_pct }}%);">{{ "{:,}".format(item.calls) }}</td>
+          <td class="py-2 text-slate-400 text-right font-mono" style="background: linear-gradient(to left, rgba(56,189,248,0.18) {{ in_pct }}%, transparent {{ in_pct }}%);">{{ "{:,}".format(item.input_tokens) }}</td>
+          <td class="py-2 text-slate-300 text-right font-mono" style="background: linear-gradient(to left, rgba(139,92,246,0.25) {{ out_pct }}%, transparent {{ out_pct }}%);">{{ "{:,}".format(item.output_tokens) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -196,6 +219,8 @@
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Feature</h2>
     {% if monthly_breakdown %}
+    {% set cf_max_calls = (monthly_breakdown | map(attribute='calls') | max) or 1 %}
+    {% set cf_max_spend = (monthly_breakdown | map(attribute='spend') | max) or 1 %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-slate-500 border-b border-slate-700">
@@ -206,10 +231,12 @@
       </thead>
       <tbody>
         {% for item in monthly_breakdown %}
+        {% set call_pct = (item.calls / cf_max_calls * 100) %}
+        {% set spend_pct = (item.spend / cf_max_spend * 100) %}
         <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
           <td class="py-2 text-slate-300 font-mono">{{ item.purpose }}</td>
-          <td class="py-2 text-slate-400 text-right">{{ item.calls }}</td>
-          <td class="py-2 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+          <td class="py-2 text-slate-400 text-right" style="background: linear-gradient(to left, rgba(148,163,184,0.18) {{ call_pct }}%, transparent {{ call_pct }}%);">{{ item.calls }}</td>
+          <td class="py-2 text-slate-300 text-right" style="background: linear-gradient(to left, rgba(139,92,246,0.25) {{ spend_pct }}%, transparent {{ spend_pct }}%);">${{ "%.4f" | format(item.spend) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -223,6 +250,8 @@
   <div class="bg-slate-800 rounded-xl border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-4">This Month by Provider</h2>
     {% if monthly_provider_breakdown %}
+    {% set cp_max_calls = (monthly_provider_breakdown | map(attribute='calls') | max) or 1 %}
+    {% set cp_max_spend = (monthly_provider_breakdown | map(attribute='spend') | max) or 1 %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-slate-500 border-b border-slate-700">
@@ -233,10 +262,12 @@
       </thead>
       <tbody>
         {% for item in monthly_provider_breakdown %}
+        {% set call_pct = (item.calls / cp_max_calls * 100) %}
+        {% set spend_pct = (item.spend / cp_max_spend * 100) %}
         <tr class="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
           <td class="py-2 text-slate-300 font-mono">{{ item.provider }}</td>
-          <td class="py-2 text-slate-400 text-right">{{ item.calls }}</td>
-          <td class="py-2 text-slate-300 text-right">${{ "%.4f" | format(item.spend) }}</td>
+          <td class="py-2 text-slate-400 text-right" style="background: linear-gradient(to left, rgba(148,163,184,0.18) {{ call_pct }}%, transparent {{ call_pct }}%);">{{ item.calls }}</td>
+          <td class="py-2 text-slate-300 text-right" style="background: linear-gradient(to left, rgba(139,92,246,0.25) {{ spend_pct }}%, transparent {{ spend_pct }}%);">${{ "%.4f" | format(item.spend) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -267,26 +298,31 @@
     return;
   }
 
-  // Pleasant palette — cycled across whatever purposes show up.
-  // Order-stable: same purpose always gets the same color within a render.
-  const PALETTE = [
-    'rgba(139, 92, 246, 0.85)',  // violet
-    'rgba(14, 165, 233, 0.85)',  // sky
-    'rgba(16, 185, 129, 0.85)',  // emerald
-    'rgba(245, 158, 11, 0.85)',  // amber
-    'rgba(236, 72, 153, 0.85)',  // pink
-    'rgba(99, 102, 241, 0.85)',  // indigo
-    'rgba(248, 113, 113, 0.85)', // red-400
-    'rgba(45, 212, 191, 0.85)',  // teal
-    'rgba(168, 85, 247, 0.85)',  // purple
-    'rgba(132, 204, 22, 0.85)',  // lime
+  // Top-N palette: distinct colors for the heavyweights, neutral gray
+  // for the "Other" bucket. Franconeri: more than ~5 categorical colors
+  // and the viewer stops matching swatches to legend entries.
+  const TOP_PALETTE = [
+    'rgba(139, 92, 246, 0.85)',  // violet — #1
+    'rgba(14, 165, 233, 0.85)',  // sky — #2
+    'rgba(16, 185, 129, 0.85)',  // emerald — #3
+    'rgba(245, 158, 11, 0.85)',  // amber — #4
   ];
+  const OTHER_COLOR = 'rgba(100, 116, 139, 0.65)';  // slate-500 — Other bucket
+  const TOP_N = 4;
 
   const dateSet = new Set();
-  const purposeSet = new Set();
-  rawData.forEach(d => { dateSet.add(d.date); purposeSet.add(d.purpose); });
+  rawData.forEach(d => dateSet.add(d.date));
   const dates = Array.from(dateSet).sort();
-  const purposes = Array.from(purposeSet).sort();
+
+  // 30-day total per purpose, used both for sort order AND top-N bucketing.
+  const purposeTotals = {};
+  rawData.forEach(d => {
+    purposeTotals[d.purpose] = (purposeTotals[d.purpose] || 0) + d.output_tokens;
+  });
+  const purposesSorted = Object.keys(purposeTotals)
+    .sort((a, b) => purposeTotals[b] - purposeTotals[a]);  // DESC by total
+  const topPurposes = purposesSorted.slice(0, TOP_N);
+  const tailPurposes = new Set(purposesSorted.slice(TOP_N));
 
   // lookup: date+purpose -> output_tokens
   const lookup = {};
@@ -294,13 +330,39 @@
     lookup[d.date + '|' + d.purpose] = d.output_tokens;
   });
 
-  const datasets = purposes.map((purpose, i) => ({
-    type: 'bar',
-    label: purpose,
-    data: dates.map(date => lookup[date + '|' + purpose] || 0),
-    backgroundColor: PALETTE[i % PALETTE.length],
-    stack: 'tokens',
-  }));
+  // Build datasets in reverse-sorted order so the LARGEST series sits at
+  // the bottom of the stack (Cleveland: bottom-of-stack shares the
+  // common baseline and reads most accurately). Chart.js stacks in
+  // dataset-declaration order, top-most listed = top of stack.
+  const datasets = [];
+  // Largest first → bottom of stack.
+  topPurposes.forEach((purpose, i) => {
+    datasets.push({
+      type: 'bar',
+      label: purpose,
+      data: dates.map(date => lookup[date + '|' + purpose] || 0),
+      backgroundColor: TOP_PALETTE[i],
+      stack: 'tokens',
+    });
+  });
+  // Tail purposes collapsed into a single "Other" series.
+  if (tailPurposes.size > 0) {
+    const otherData = dates.map(date => {
+      let sum = 0;
+      tailPurposes.forEach(p => { sum += lookup[date + '|' + p] || 0; });
+      return sum;
+    });
+    datasets.push({
+      type: 'bar',
+      label: `Other (${tailPurposes.size})`,
+      data: otherData,
+      backgroundColor: OTHER_COLOR,
+      stack: 'tokens',
+      _tailPurposes: Array.from(tailPurposes),  // surface in tooltip on demand
+    });
+  }
+
+  const axisColor = 'rgba(148, 163, 184, 0.65)';
 
   new Chart(canvas, {
     data: { labels: dates, datasets },
@@ -308,14 +370,21 @@
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { stacked: true, ticks: { color: 'rgb(148, 163, 184)' }, grid: { color: 'rgba(100, 116, 139, 0.3)' } },
+        x: {
+          stacked: true,
+          ticks: { color: 'rgb(148, 163, 184)' },
+          grid: { display: false },
+          border: { display: true, color: axisColor },
+        },
         y: {
           stacked: true,
           ticks: {
             color: 'rgb(148, 163, 184)',
+            stepSize: 500000,
             callback: (v) => v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v,
           },
-          grid: { color: 'rgba(100, 116, 139, 0.3)' },
+          grid: { display: false },
+          border: { display: true, color: axisColor },
         },
       },
       plugins: {

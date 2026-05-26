@@ -41,13 +41,32 @@ def index():
         view = "usage"
 
     if view == "usage":
+        daily_usage = get_daily_usage_breakdown(conn)
+        # Headline insight: which purpose dominates the 30-day output-token
+        # window? Sums are computed from the same payload the chart renders,
+        # so the title and the chart can never disagree.
+        top_purpose_insight = None
+        if daily_usage:
+            totals: dict[str, int] = {}
+            for row in daily_usage:
+                totals[row["purpose"]] = totals.get(row["purpose"], 0) + row["output_tokens"]
+            grand_total = sum(totals.values())
+            if grand_total > 0:
+                top_purpose, top_tokens = max(totals.items(), key=lambda kv: kv[1])
+                top_purpose_insight = {
+                    "purpose": top_purpose,
+                    "share_tokens": top_tokens,
+                    "total_tokens": grand_total,
+                    "share_pct": top_tokens / grand_total * 100,
+                }
         return render_template(
             "costs/index.html",
             view=view,
             usage_stats=get_usage_stats(conn),
-            daily_usage=get_daily_usage_breakdown(conn),
+            daily_usage=daily_usage,
             monthly_feature_usage=get_monthly_feature_usage(conn),
             monthly_provider_usage=get_monthly_provider_usage(conn),
+            top_purpose_insight=top_purpose_insight,
         )
 
     # Cost view — budget cap drives the progress bar.
