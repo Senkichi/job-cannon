@@ -31,6 +31,7 @@ from datetime import datetime
 
 from job_finder.web.pipeline_detector._constants import (
     ATS_DOMAINS,
+    COMPANY_STOP_WORDS,
     CONFIRMATION_KEYWORDS,
     INTERVIEW_KEYWORDS,
     REJECTION_KEYWORDS,
@@ -71,38 +72,67 @@ def _classify_email(subject: str, body: str) -> str | None:
     return None
 
 
-def _company_in_email(company: str | None, body: str, subject: str) -> bool:
-    """Check if a company name appears in email subject or body.
+def _company_in_email(
+    company: str | None,
+    body: str,
+    subject: str,
+    from_address: str = "",
+) -> bool:
+    """Check if a company name appears in the email's *attribution surface*.
 
-    Uses word-boundary regex to avoid false positives like 'Apple' in 'Pineapple'.
-    Falls back to checking individual significant words (5+ chars).
+    The attribution surface = subject + sender address. The body is excluded
+    by design — application/interview emails routinely embed unrelated
+    company names in marketing footers, benefits copy ("Apple stock
+    options"), social-media links ("follow us on YouTube"), or boilerplate
+    ("our Company values"). Restricting the match to subject + sender
+    eliminates ~80%% of the historical false-positive cases without losing
+    any legitimate match observed in the audit (every real interview /
+    confirmation email named its company in the subject or sender).
+
+    Two strategies tried in order:
+      1. Full company name with word-boundary match (e.g. "Hinge Health").
+      2. Distinctive-token match: split into tokens, drop short (<4) and
+         drop generic-suffix tokens from ``COMPANY_STOP_WORDS`` (Health,
+         Inc, Corporation, Solutions, Tech, …). If at least one distinctive
+         token remains, ALL must word-boundary match. This catches
+         minor formatting variants ("Hinge Health Inc." vs "Hinge Health").
 
     Args:
         company: Company name from the jobs DB. Returns False if None or empty.
-        body: Email body text.
+        body: Email body text. Unused for matching — kept in signature for
+            backward compatibility with callers and tests that still pass it.
         subject: Email subject line.
+        from_address: Full From header (``Name <addr@domain>`` or ``addr@domain``).
 
     Returns:
-        True if the company is found with word-boundary matching.
+        True if the company is attributed in subject or sender.
     """
+    _ = body  # explicitly unused — see docstring
     if not company:
         return False
 
-    text = f"{subject} {body}".lower()
+    surface = f"{subject} {from_address}".lower()
     company_lower = company.lower().strip()
 
-    # Strategy 1: word-boundary exact match
+    # Strategy 1: full word-boundary exact match in subject or sender
     pattern = r"\b" + re.escape(company_lower) + r"\b"
-    if re.search(pattern, text):
+    if re.search(pattern, surface):
         return True
 
-    # Strategy 2: ALL significant words (5+ chars) must match
-    # e.g., "BetterHelp" (1 word) -> "betterhelp" must match
-    # e.g., "Alameda County" (2 words) -> both "alameda" AND "county" must match
-    words = company_lower.split()
-    sig_words = [w for w in words if len(w) >= 5]
-    return bool(
-        sig_words and all(re.search(r"\b" + re.escape(word) + r"\b", text) for word in sig_words)
+    # Strategy 2: distinctive-token match
+    tokens = [t.strip(".,;:()&") for t in company_lower.split()]
+    tokens = [t for t in tokens if t]
+    distinctive = [
+        t for t in tokens if len(t) >= 4 and t not in COMPANY_STOP_WORDS
+    ]
+    if not distinctive:
+        # All tokens are generic suffixes or too short (e.g. "CVS Health",
+        # "EQT Corporation"). Only Strategy 1 (already failed) can attribute
+        # — fail closed.
+        return False
+
+    return all(
+        re.search(r"\b" + re.escape(t) + r"\b", surface) for t in distinctive
     )
 
 
@@ -202,6 +232,43 @@ def _sender_is_ats(from_address: str) -> bool:
     return any(sender_domain == d or sender_domain.endswith("." + d) for d in ATS_DOMAINS)
 
 
+def _sender_matches_company(from_address: str, company: str | None) -> bool:
+    """Return True when the sender's domain belongs to the company.
+
+    Strong corroborator: ``no-reply@waymo.com`` for the Waymo job,
+    ``careers@anthropic.com`` for the Anthropic job. As reliable for
+    attribution as an ATS-domain sender (often more so), but uses the
+    company's own infrastructure instead of a third-party.
+
+    Logic: extract the sender domain (host portion after ``@``); compute
+    the company's distinctive tokens (the same set
+    ``_company_in_email`` uses); return True if every distinctive token
+    appears as a substring of the domain.
+
+    Args:
+        from_address: Full From header value.
+        company: Job's company string.
+
+    Returns:
+        True if the sender domain plausibly belongs to this company.
+    """
+    if not from_address or not company:
+        return False
+
+    match = re.search(r"@([\w.-]+)", from_address)
+    if not match:
+        return False
+    sender_domain = match.group(1).lower()
+
+    tokens = [t.strip(".,;:()&") for t in company.lower().split()]
+    distinctive = [
+        t for t in tokens if len(t) >= 4 and t and t not in COMPANY_STOP_WORDS
+    ]
+    if not distinctive:
+        return False
+    return all(t in sender_domain for t in distinctive)
+
+
 def _extract_snippet(body: str, detection_type: str) -> str:
     """Extract the most relevant sentence from email body.
 
@@ -237,17 +304,24 @@ def _extract_snippet(body: str, detection_type: str) -> str:
 
 
 def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
-    """Compute 0-4 confidence score by checking four independent signals.
+    """Compute 0-5 confidence score by checking five independent signals.
 
     Signals (in this exact order -- the returned matched list reflects
     the order, and the order is part of the read contract for
     pipeline_detections.matched_signals):
 
-    1. company: company name appears in email body/subject
+    1. company: company name appears in email subject or sender
     2. title: job title keywords appear in email body/subject
     3. timing: email received within timing window of job activity
     4. ats_domain: From header domain is a known ATS (only if
        detection_type is set -- Pitfall 3)
+    5. sender_company: sender's email domain belongs to the job's company
+
+    ``ats_domain`` and ``sender_company`` are both "trust corroborators"
+    for the threshold gate in ``_processing.py``: either is sufficient
+    alongside score>=3 to auto-apply. ``sender_company`` covers the
+    common case of a company sending directly from its own domain
+    (e.g. ``no-reply@waymo.com``), which third-party ATS domains miss.
 
     Args:
         email: Email dict with keys: subject, body, from_address, date,
@@ -256,16 +330,17 @@ def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
             pipeline_status.
 
     Returns:
-        (score, matched_signals_list) where score is 0-4 and the list
-        is in the [company, title, timing, ats_domain] order.
+        (score, matched_signals_list) where score is 0-5 and the list
+        is in the [company, title, timing, ats_domain, sender_company] order.
     """
     matched = []
 
-    # Signal 1: company name
+    # Signal 1: company name (subject + sender only — body is too noisy)
     if _company_in_email(
         job.get("company", ""),
         email.get("body", ""),
         email.get("subject", ""),
+        email.get("from_address", ""),
     ):
         matched.append("company")
 
@@ -284,5 +359,11 @@ def score_match(email: dict, job: dict) -> tuple[int, list[str]]:
     # Signal 4: ATS domain -- only counts if detection_type is classified (Pitfall 3)
     if email.get("detection_type") is not None and _sender_is_ats(email.get("from_address", "")):
         matched.append("ats_domain")
+
+    # Signal 5: sender domain == company (companies emailing from their own infra)
+    if email.get("detection_type") is not None and _sender_matches_company(
+        email.get("from_address", ""), job.get("company", "")
+    ):
+        matched.append("sender_company")
 
     return len(matched), matched

@@ -192,12 +192,14 @@ class TestCompanyInEmail:
         assert result is False
 
     def test_case_insensitive_match(self):
+        """Company must match in subject or sender (case-insensitive)."""
         from job_finder.web.pipeline_detector import _company_in_email
 
+        # Subject has BETTERHELP (upper); body is irrelevant under tightened rules.
         result = _company_in_email(
             "BetterHelp",
-            body="Thank you for your interest in BETTERHELP.",
-            subject="Application update",
+            body="",
+            subject="Application update from BETTERHELP",
         )
         assert result is True
 
@@ -223,12 +225,13 @@ class TestCompanyInEmail:
         assert result is False
 
     def test_multi_word_company_matches_when_all_present(self):
+        """Distinctive token match in subject."""
         from job_finder.web.pipeline_detector import _company_in_email
 
         result = _company_in_email(
             "Alameda County",
-            body="Thank you for your interest in Alameda County.",
-            subject="Update",
+            body="",
+            subject="Thank you for your interest in Alameda County.",
         )
         assert result is True
 
@@ -718,11 +721,13 @@ class TestProcessEmail:
         jobs = conn.execute("SELECT * FROM jobs").fetchall()
         jobs = [dict(j) for j in jobs]
 
-        # Only company signal: Thumbtack in body, but no ATS domain, old timing
+        # Company in subject (passes new attribution gate); body keeps the
+        # rejection keyword. No ATS sender, old timing -> score = 1 ("company"
+        # only) -> pending detection.
         email = self._make_email(
             message_id="low_conf_001",
-            subject="Application update",
-            body="Thank you for your interest in Thumbtack. Unfortunately, we are not moving forward.",
+            subject="Thumbtack - application update",
+            body="Unfortunately, we are not moving forward.",
             from_address="hr@gmail.com",
             detection_type="rejection",
         )
@@ -1108,3 +1113,341 @@ class TestUpdatePipelineStatusDedup:
             "SELECT COUNT(*) FROM pipeline_events WHERE job_id = 'stripe|senior-data-scientist|remote'"
         ).fetchone()[0]
         assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: the false-positive patterns from the 2026-05-26 audit.
+# Each case is a real example from the production DB. The fix is the
+# tighter `_company_in_email` (subject + sender attribution only, with
+# distinctive-token filter that drops COMPANY_STOP_WORDS).
+# ---------------------------------------------------------------------------
+
+
+class TestCompanyMatcherFalsePositiveRegressions:
+    """Each name documents the company that was incorrectly auto-promoted."""
+
+    def test_meru_health_not_matched_by_midi_health_email(self):
+        """`Meru Health` reduced to single sig-word 'health' under old rules."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Meru Health",
+            body="Greenhouse interview reminder body text",
+            subject="Reminder for interview with Midi Health for the Senior role",
+            from_address="Greenhouse <no-reply@greenhouse.io>",
+        ) is False
+
+    def test_cvs_health_not_matched_by_midi_health_email(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "CVS Health",
+            body="",
+            subject="Midi Health Interview Confirmation - Zoom Link Enclosed",
+            from_address="Patricia Stark <patricia.stark@midihealth.com>",
+        ) is False
+
+    def test_john_muir_health_not_matched_by_midi_health(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "John Muir Health",
+            body="",
+            subject="Next Steps with Midi Health - Interview Availability",
+            from_address="Patricia Stark <patricia.stark@midihealth.com>",
+        ) is False
+
+    def test_relx_inc_company_not_matched_by_hinge_health_email(self):
+        """`RELX Inc. Company` reduced to single sig-word 'company' under old rules."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "RELX Inc. Company",
+            body="",
+            subject="Samuel, Thank you for applying to Hinge Health!",
+            from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
+        ) is False
+
+    def test_eqt_corporation_not_matched_by_mozilla_email(self):
+        """`EQT Corporation` reduces to 'corporation' (stop-word) under old rules."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "EQT Corporation",
+            body="",
+            subject="Thank you for applying to Mozilla!",
+            from_address="no-reply@us.greenhouse-mail.io",
+        ) is False
+
+    def test_us_tech_solutions_not_matched_by_cadence_email(self):
+        """`US Tech Solutions` reduces to 'solutions' (stop-word) under new rules."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "US Tech Solutions",
+            body="",
+            subject="Next steps for the Data Analytics Lead role at Cadence",
+            from_address="Rachel Oh <rachel.oh@cadencerp.com>",
+        ) is False
+
+    def test_target_not_matched_by_gitlab_interview(self):
+        """`Target` is short and not in subject — body 'target start date' is ignored."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Target",
+            body="Please pick a target start date for the interview.",
+            subject="Your interview with GitLab is scheduled for Apr 28",
+            from_address="GitLab <no-reply@interviews.modernloop.io>",
+        ) is False
+
+    def test_youtube_not_matched_by_okta_application(self):
+        """Marketing footer 'follow us on YouTube' must not attribute."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "YouTube",
+            body="Follow us on YouTube, LinkedIn, Twitter for updates.",
+            subject="Thank you for applying to Okta!",
+            from_address="no-reply@okta.com",
+        ) is False
+
+    def test_apple_not_matched_by_ironclad_application(self):
+        """Body mentions like 'Apple stock options' must not attribute."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Apple",
+            body="Apple stock options as part of our benefits package.",
+            subject="Ironclad | Samuel, we received your application!",
+            from_address="Ironclad Hiring Team <no-reply@ashbyhq.com>",
+        ) is False
+
+
+class TestCompanyMatcherTruePositiveRegressions:
+    """Confirm the tightened matcher still accepts every observed legit case."""
+
+    def test_hinge_health_matched_by_own_email(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Hinge Health",
+            body="",
+            subject="Samuel, Thank you for applying to Hinge Health!",
+            from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
+        ) is True
+
+    def test_gitlab_matched_by_own_email(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "GitLab",
+            body="",
+            subject="Thank you for applying to GitLab",
+            from_address="no-reply@us.greenhouse-mail.io",
+        ) is True
+
+    def test_scale_matched_by_own_email(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Scale",
+            body="",
+            subject="Samuel, Phone Interview with Scale!",
+            from_address="Bryce Knox <bryce.knox@scale.com>",
+        ) is True
+
+    def test_doximity_matched_by_own_email(self):
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Doximity",
+            body="",
+            subject="Doximity Next Steps",
+            from_address="Tiffany Nguyen <tinguyen@doximity.com>",
+        ) is True
+
+    def test_company_matched_via_sender_when_subject_is_generic(self):
+        """Subject lacks company; sender domain has it."""
+        from job_finder.web.pipeline_detector import _company_in_email
+
+        assert _company_in_email(
+            "Anthropic",
+            body="",
+            subject="Your application has been received",
+            from_address="careers@anthropic.com",
+        ) is True
+
+
+class TestAutoApplyThreshold:
+    """The new threshold: score>=4 OR (score>=3 AND 'ats_domain')."""
+
+    def _make_processed_email(self, subject, body, from_address, detection_type):
+        return {
+            "message_id": "thresh_test_001",
+            "subject": subject,
+            "body": body,
+            "from_address": from_address,
+            "date": datetime.now().isoformat() + "Z",
+            "detection_type": detection_type,
+        }
+
+    def _insert_job(self, conn, dedup_key, title, company, status="discovered"):
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, sources, "
+            "source_urls, salary_min, salary_max, description, first_seen, "
+            "last_seen, pipeline_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                dedup_key, title, company, "Remote", '["linkedin"]', '["https://x"]',
+                None, None, "", datetime.now().isoformat(), datetime.now().isoformat(),
+                status,
+            ),
+        )
+        conn.commit()
+
+    def test_score_3_without_corroborator_is_pending_not_auto(self, migrated_db):
+        """The exact FP pattern: company+title+timing but no ATS / sender-co — must be pending."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        _, conn = migrated_db
+        self._insert_job(conn, "acme|senior data analyst|remote",
+                         "Senior Data Analyst", "Acme")
+        jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
+
+        # Acme in subject + "analyst" in subject + recent timing.
+        # Sender is an Otter.ai meeting summary (not an ATS, not Acme's domain).
+        email = self._make_processed_email(
+            subject="Acme Next Steps for Senior Analyst role",
+            body="We'd like to schedule a phone screen.",
+            from_address="Samuel Martin via Otter.ai <no-reply@otter.ai>",
+            detection_type="interview",
+        )
+        result = _process_email(email, conn, jobs)
+        assert result == "queued", "score=3 without any corroborator must be pending"
+        status = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key=?",
+            ("acme|senior data analyst|remote",),
+        ).fetchone()[0]
+        assert status == "discovered", "Job must NOT have been auto-promoted"
+
+    def test_score_3_with_sender_company_is_auto(self, migrated_db):
+        """Company emailing from its own domain (no-reply@waymo.com) auto-applies."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        _, conn = migrated_db
+        self._insert_job(conn, "waymo|sr product data scientist|remote",
+                         "Sr Product Data Scientist", "Waymo")
+        jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
+
+        email = self._make_processed_email(
+            subject="Thank You for Applying to Waymo!",
+            body="",
+            from_address="no-reply@waymo.com",
+            detection_type="confirmation",
+        )
+        result = _process_email(email, conn, jobs)
+        assert result == "auto_updated"
+        status = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key=?",
+            ("waymo|sr product data scientist|remote",),
+        ).fetchone()[0]
+        assert status == "applied"
+
+    def test_score_3_with_ats_domain_is_auto(self, migrated_db):
+        """ATS sender provides the corroborating unfakeable signal -> auto-apply allowed."""
+        from job_finder.web.pipeline_detector import _process_email
+
+        _, conn = migrated_db
+        self._insert_job(conn, "scale|analytics lead|remote",
+                         "Analytics Lead", "Scale")
+        jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
+
+        # Scale in subject + "analytics" in subject + recent + ats sender (greenhouse).
+        email = self._make_processed_email(
+            subject="Scale - Analytics Lead role next steps",
+            body="",
+            from_address="no-reply@greenhouse.io",
+            detection_type="interview",
+        )
+        result = _process_email(email, conn, jobs)
+        assert result == "auto_updated"
+        status = conn.execute(
+            "SELECT pipeline_status FROM jobs WHERE dedup_key=?",
+            ("scale|analytics lead|remote",),
+        ).fetchone()[0]
+        assert status == "phone_screen"
+
+
+class TestSenderMatchesCompany:
+    """The new corroborator signal — sender domain belongs to the company."""
+
+    def test_company_own_noreply_domain(self):
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        assert _sender_matches_company("no-reply@waymo.com", "Waymo") is True
+
+    def test_company_with_stop_word_only_uses_distinctive_tokens(self):
+        """`Hinge Health` -> distinctive=['hinge'] -> sender 'hingehealth.com' matches."""
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        assert _sender_matches_company(
+            "Lily Fang <lily.fang@hingehealth.com>", "Hinge Health"
+        ) is True
+
+    def test_personal_address_does_not_match(self):
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        assert _sender_matches_company(
+            "samuel.martin@gmail.com", "Waymo"
+        ) is False
+
+    def test_third_party_ats_does_not_match(self):
+        """Greenhouse-mail.io is the ATS, not the company — must not corroborate."""
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        assert _sender_matches_company(
+            "no-reply@us.greenhouse-mail.io", "Anthropic"
+        ) is False
+
+    def test_company_with_all_stop_words_never_matches(self):
+        """`EQT Corporation` -> distinctive=[] (eqt<4, corporation in stop set) -> never matches."""
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        # Even if EQT sent from eqt.com, distinctive set is empty so we fail closed.
+        assert _sender_matches_company("careers@eqt.com", "EQT Corporation") is False
+
+    def test_unrelated_domain_does_not_match(self):
+        from job_finder.web.pipeline_detector._signals import _sender_matches_company
+
+        assert _sender_matches_company(
+            "no-reply@okta.com", "YouTube"
+        ) is False
+
+
+class TestDismissedJobsExcludedFromCandidates:
+    """Manual dismissal must be terminal — auto-detect cannot resurrect."""
+
+    def test_dismissed_job_not_in_active_pool(self, migrated_db):
+        from job_finder.web.pipeline_detector import _load_active_jobs
+
+        _, conn = migrated_db
+        now = datetime.now().isoformat()
+        conn.execute(
+            "INSERT INTO jobs (dedup_key, title, company, location, sources, "
+            "source_urls, salary_min, salary_max, description, first_seen, "
+            "last_seen, pipeline_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "apple|data sci|remote", "Senior DS", "Apple", "Remote",
+                '["linkedin"]', '["https://x"]', None, None, "",
+                now, now, "dismissed",
+            ),
+        )
+        conn.commit()
+
+        active = _load_active_jobs(conn)
+        assert all(j["dedup_key"] != "apple|data sci|remote" for j in active)
+
+    def test_dismissed_in_inactive_statuses_constant(self):
+        from job_finder.web.pipeline_detector import INACTIVE_STATUSES
+
+        assert "dismissed" in INACTIVE_STATUSES

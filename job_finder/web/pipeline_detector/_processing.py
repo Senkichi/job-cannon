@@ -13,9 +13,16 @@ observable and would invalidate
   3. Score-and-tiebreak loop over active jobs (``score_match``)
   4. Company-mandatory gate (``"company" in best_signals``) -> skip
   5. Score-band branch:
-       score >= 3 -> auto-update + insert "auto-applied" + mark processed
+       auto-apply when score >= 4
+         OR (score >= 3 AND ("ats_domain" OR "sender_company" in signals))
        score >= 1 -> insert "pending" + mark processed
        score == 0 -> drop silently (no record, NOT marked processed)
+
+The score>=3 floor used to auto-apply unconditionally; in practice that
+hit the false-positive sweet spot (a loose company body-match plus any
+title token plus timing). Real attribution either scores >=4 outright or
+scores 3 with a sender-trust corroborator — an ATS-domain sender, or the
+company's own domain. Either is unfakeable by accident.
 
 Tests pin each gate's position; see
 ``test_dedup_gate_runs_before_classification_and_scoring``,
@@ -107,7 +114,13 @@ def _process_email(
     new_status = DETECTION_TYPE_TO_STATUS.get(detection_type, "applied")
     job_id = best_job["dedup_key"] if best_job else None
 
-    if best_score >= 3:
+    # Two corroborator signals unlock the score>=3 auto-apply: an ATS-domain
+    # sender (third-party but trusted) or a sender-domain match against the
+    # company itself (company's own infra). Either is unfakeable by accident.
+    has_corroborator = "ats_domain" in best_signals or "sender_company" in best_signals
+    auto_apply = best_score >= 4 or (best_score >= 3 and has_corroborator)
+
+    if auto_apply:
         # High confidence: auto-update pipeline status
         if best_job is not None:
             update_pipeline_status(

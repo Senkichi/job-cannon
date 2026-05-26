@@ -100,6 +100,7 @@ SIGNAL_KEYWORDS = {
 
 ATS_DOMAINS = {
     "greenhouse.io",
+    "greenhouse-mail.io",  # Greenhouse's outbound mail domain (no-reply@us.greenhouse-mail.io)
     "lever.co",
     "ashbyhq.com",
     "workday.com",
@@ -117,10 +118,39 @@ ATS_DOMAINS = {
     "kronos.net",
     "rippling.com",
     "pinpointhq.com",
+    "modernloop.io",  # Modern Loop interview scheduling — used by Upstart, others
 }
 
 # Pipeline statuses that indicate a job is no longer active
-INACTIVE_STATUSES = {"archived", "rejected", "withdrawn"}
+# Why "dismissed" is here: a manual dismissal is a deliberate user signal.
+# Auto-detect was previously allowed to resurrect dismissed jobs to "applied"
+# when an unrelated confirmation email coincidentally name-matched (e.g.
+# Apple/Ironclad). Treating dismissed as inactive keeps user intent terminal.
+INACTIVE_STATUSES = {"archived", "rejected", "withdrawn", "dismissed"}
+
+# Generic company-name tokens that must NOT be the only signal carrying a match.
+# Why: "Meru Health" / "John Muir Health" / "CVS Health" all reduce to the
+# single significant token "health" under the 5+ char filter — so an interview
+# email mentioning *any* other "Health" company (Midi Health, Hinge Health)
+# matched all of them. Same pattern with "Inc Company" / "Corporation" /
+# "Solutions" / "Tech" / etc. The matcher now drops these from the
+# distinctive-token set; a company with no distinctive tokens left after
+# this filter must fall back to a stricter subject/sender check.
+COMPANY_STOP_WORDS = frozenset(
+    {
+        # legal-form suffixes
+        "inc", "incorporated", "llc", "llp", "ltd", "limited", "corp",
+        "corporation", "company", "co", "holdings", "holding", "group",
+        "groups", "international", "global", "worldwide",
+        # generic industry tags that recur as suffixes
+        "health", "healthcare", "medical", "labs", "lab", "technologies",
+        "tech", "technology", "solutions", "systems", "system", "services",
+        "service", "media", "networks", "network", "partners", "ventures",
+        "capital", "studios", "industries", "enterprise", "enterprises",
+        "consulting", "agency", "platform", "platforms", "digital", "cloud",
+        "data", "ai", "labs",
+    }
+)
 
 # Common job title words to exclude from title matching
 TITLE_STOP_WORDS = {
