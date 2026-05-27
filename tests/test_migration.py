@@ -890,10 +890,17 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migration_18_existing_record_cost_insert_still_works(self, tmp_db_path):
-        """The exact INSERT from record_cost() (no provider column) succeeds post-migration."""
+        """A pre-m018-shaped INSERT (no provider column) still succeeds — m018's
+        ALTER TABLE adds provider with DEFAULT, so legacy SQL keeps working.
+
+        Note: record_cost() itself now passes provider + schema_valid explicitly
+        (claude_client.py:180-182). This test guards the migration's compat
+        promise, not the current record_cost SQL.
+        """
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        # This is the exact INSERT statement from claude_client.py record_cost()
+        # Pre-m018 INSERT shape (no provider column). The DEFAULT clause is
+        # m018's compat surface — verified here.
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
