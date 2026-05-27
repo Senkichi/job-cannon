@@ -1,246 +1,328 @@
-# FOLLOWUPS — 2026-05-27 round 6 (audit corrected; Pinpoint was already done)
+# FOLLOWUPS — 2026-05-27 round 7 (B1–B4 + 4 new ATS platforms shipped)
 
 ## Project goal (briefly restated)
 
 Job Cannon is a single-user, local-only Flask command center for job
-search. Round 5 (prior session) shipped two scheduler/ingestion drift
-fixes and produced an ATS coverage audit recommending "build Pinpoint
-scanner first." Round 6 (this session) **verified that Pinpoint and
-Breezy were already fully shipped** in the F1 polish-review refactor
-of 2026-05-26 — the day before round 5's audit was written. The audit
-was based on SQL queries against a correct DB but never grepped the
-codebase to check scanner-file existence. Round 6 rewrote the audit
-as v2 with corrected scanner-status table, refreshed B1 cohort count
-(41 rows, not 5–10), and corrected execution-order priorities.
+search. Round 6 corrected a stale audit and surfaced the real
+remaining work. Round 7 (this session) shipped all 7 of the user-
+approved items from that corrected list in 5 commits:
+B1a (cohort gate) + B1b (FP reset migration) + B2 (URL fast-path) +
+B4 (categorical miss_reason) + 4 new ATS platforms (Workable, Jobvite,
+Paylocity, Rippling). Two user-reported bugs (ATS scan 30-min timeout,
+location parsing architectural overhaul) remain explicitly deferred
+per round-6 user instruction.
 
 ## What this session shipped
 
-**No code commits.** This session was an audit-refresh + planning
-session. The deliverable is the corrected audit doc.
+Commits, in order (newest first):
 
-Files changed:
-1. `.planning/ATS-COVERAGE-AUDIT-2026-05-27.md` — rewritten as v2.
-   Added v1→v2 changelog at the bottom for audit-trail honesty.
-   File is gitignored (`.planning/*` is in `.gitignore`), so no
-   commit; this is consistent with how the prior audit was tracked.
-2. `FOLLOWUPS.md` — this file.
+1. `f50c98b` — `feat(ats): add Workable / Jobvite / Paylocity /
+   Rippling platforms (items 5-8)`. 16 ATS platforms now registered.
+   Workable / Paylocity / Rippling: real scanners with public JSON
+   APIs. Jobvite: stub returning [] (no public unauthenticated API;
+   probe-only). +4 URL detection patterns. +4 probes. +31 tests.
+   ATS_EXTRACTOR_VERSION: m049-v3 → m049-v4.
+
+2. `4f00ba8` — `feat(ats_probe): categorical miss_reason on probe
+   failures (B4)`. Speculative probe writes `speculative_exhausted`
+   or `speculative_rejected`; explicit-platform probe writes
+   `platform_slug_404` / `platform_slug_blocked`; reconcile/blocked
+   paths unchanged. Future audits become meaningfully cheaper.
+   Legacy 2563 NULL rows NOT backfilled (no signal to backfill with).
+
+3. `c514e7f` — `feat(ats_probe): careers_url hostname fast-path for
+   unambiguous ATS URLs (B2)`. Step 0 of `probe_ats_slugs`:
+   extract_ats_from_url_best on careers_url → if known platform AND
+   live probe verifies → write hit with
+   `ats_evidence_trigger='careers_url:...'`. Runs BEFORE brand
+   blocklist (URL evidence > collision risk). Allows FP-prone
+   platform assignment when URL evidence is unambiguous (overrides
+   B1a's speculative-ladder exclusion). +6 tests.
+
+4. `7dff596` — `feat(migrations): m064 reset speculative-probe FPs
+   for FP-prone platforms (B1b)`. Reset migration: NULL
+   platform/slug + status='pending' for 40 rows matching `hit AND
+   platform IN (bamboohr/personio/recruitee/breezy) AND
+   ats_evidence_trigger IS NULL`. Live-DB: 40 → 0 (pending 233 →
+   273). +11 m064 tests. Bumped len(MIGRATIONS) assertions to 64.
+
+5. `c683125` — `feat(ats_probe): exclude FP-prone platforms from
+   speculative ladder (B1a)`. Removed bamboohr/personio/recruitee/
+   breezy from `_PROBES` in `_probe.py`. Module-level assert locks
+   the invariant. `_verify_live` in `ats_identity_reconcile.py`
+   extended to cover all 7 stage-4 platforms so the evidence-based
+   reconcile path can still promote them. +4 tests.
+
+(0. `a05bdc4` — round-6 FOLLOWUPS correction + audit v2 rewrite.
+   Listed for context; not new code this session.)
+
+Full test impact: **+57 new tests** across 4 test files
+(test_speculative_probe_consistency.py +13, test_round6_ats_scanners.py
++31, test_migration_064_*.py +11, test_stage4_ats_scanners.py +1 +
+modified). All ATS/probe/migration suites pass: 510 tests green.
 
 ## How to verify (this session's work)
 
 ```powershell
-# Verify Pinpoint scanner actually exists and is dispatched:
-Get-Content job_finder/web/ats_platforms_internal/_platforms_pinpoint.py | Select-String -Pattern "SCANNER"
-# Expected: line 69, SCANNER = PlatformScanner(name="pinpoint", ...)
-
-# Verify Pinpoint is in the dispatcher:
-Select-String -Path job_finder/web/ats_scanner/_run.py -Pattern "PINPOINT_SCANNER"
-# Expected: 2 hits (import line + dict entry line ~69)
-
-# Verify Pinpoint companies are being scanned today:
-uv run --active python -c "
-import sqlite3
-c = sqlite3.connect('jobs.db')
-rows = c.execute('''
-SELECT id, name_raw, last_scanned_at, jobs_found_total
-FROM companies WHERE ats_platform=\"pinpoint\"
-  AND last_scanned_at > \"2026-05-27\"
-ORDER BY last_scanned_at DESC LIMIT 5
-''').fetchall()
-for r in rows: print(r)
-"
-# Expected: 5 rows with today's date, jobs_found_total > 0
-
-# Verify B1 FAANG FP cohort count (now 41, not 5-10):
-uv run --active python -c "
-import sqlite3
-c = sqlite3.connect('jobs.db')
-print(c.execute('''
-SELECT COUNT(*) FROM companies
-WHERE jobs_found_total > 0
-  AND ats_evidence_trigger IS NULL
-  AND ats_platform IN (\"bamboohr\",\"personio\",\"recruitee\",\"breezy\")
-''').fetchone())
-"
-# Expected: (41,)
-
-# Round-5 tests still pass (unchanged):
+# All B1–B4 + platforms commits' tests:
 uv run --active pytest `
-  tests/test_ingestion.py::TestPerPortalBreakdown::test_portal_search_logged_in_runs_table `
-  tests/test_scheduler.py::TestScheduledSyncPortalMetadata -v
+  tests/test_speculative_probe_consistency.py `
+  tests/test_round6_ats_scanners.py `
+  tests/test_migration_064_reset_fp_prone_speculative_hits.py `
+  tests/test_migration_invariants.py `
+  tests/test_stage4_ats_scanners.py `
+  -v
+
+# B1b migration applied to live DB:
+uv run --active python -c "
+import sqlite3
+c = sqlite3.connect('jobs.db')
+print('user_version =', c.execute('PRAGMA user_version').fetchone()[0])
+fp = c.execute('''
+SELECT COUNT(*) FROM companies
+WHERE ats_probe_status=\"hit\"
+  AND ats_platform IN (\"bamboohr\",\"personio\",\"recruitee\",\"breezy\")
+  AND ats_evidence_trigger IS NULL
+''').fetchone()[0]
+print(f'B1 FP cohort remaining: {fp} (expected 0)')
+pending = c.execute('SELECT COUNT(*) FROM companies WHERE ats_probe_status=\"pending\"').fetchone()[0]
+print(f'Pending: {pending}')
+"
+# Expected: user_version=64, B1 FP cohort=0, pending around 273
+
+# 16 platforms registered:
+uv run --active python -c "
+from job_finder.web.ats_scanner._run import _PLATFORM_SCANNERS
+print('Platforms:', len(_PLATFORM_SCANNERS))
+for p in sorted(_PLATFORM_SCANNERS.keys()):
+    print(f'  - {p}')
+"
+# Expected: 16 platforms incl. workable, jobvite, paylocity, rippling
 ```
+
+The next ingestion + probe cycle will:
+- Re-probe the 40 reset-by-m064 rows (FAANG cohort) — with the
+  FP-prone-excluded ladder, almost all should land as miss with
+  `speculative_exhausted` reason. The 3 Microsoft/Amazon/Meta rows
+  in particular will not be re-tagged with bamboohr/personio/recruitee.
+- Tag the 7 jobvite + 4 workable + 4 paylocity + 3 rippling
+  careers_url companies via the B2 fast-path with
+  `ats_evidence_trigger='careers_url:...'`.
+- Write categorical `miss_reason` on every new miss.
 
 ## What I tried / considered but didn't do
 
-- **Pivot straight to Jobvite (the audit's true #1) without surfacing
-  the audit error.** User explicitly approved "Pinpoint first" in the
-  round-5 FOLLOWUPS edit. Silently switching targets would have
-  inherited the prior session's blind spot. Stopped and surfaced
-  the divergence first; user chose "fix audit, then re-decide."
+- **Backfill `miss_reason` for the 2563 legacy NULL miss rows.** We
+  don't know what specifically failed for them at the time the
+  speculative probe ran — assigning `'speculative_exhausted'` to all
+  would be a fiction. Better: let them stay NULL until the company is
+  re-probed (which the m064 reset triggers for the 40 FP rows; manual
+  retry handles the rest).
 
-- **Apply the B1 reset migration this session.** Tempted — user has
-  already approved it. But the cohort turned out to be 41 rows, not
-  5-10. That's an 8x bigger blast radius than approved. And there's a
-  prerequisite: without the corroboration gate landing first, the next
-  probe cycle will recreate the FPs. Both decisions deserve user
-  reconsideration after seeing the corrected numbers.
+- **Build a real Jobvite scraper.** Jobvite hosted career sites have
+  no public unauthenticated JSON API and frequently redirect to
+  tenant-custom domains (e.g. `jobs.jobvite.com/victaulic` redirects
+  to `careers.victaulic.com`). A real scraper needs per-tenant HTML
+  parsing — too speculative to ship without sample testing across
+  the 7 known tenants. Shipped a stub scanner (returns []) so the
+  platform is registered for URL-evidence promotion via B2; the real
+  scraper is a separate session.
 
-- **Add a Jobvite/Workable/Paylocity/Rippling scanner stub.** Out of
-  scope per the user's "fix audit, then re-decide" answer.
+- **Fetch per-job descriptions for Rippling.** Rippling's list endpoint
+  omits descriptions; fetching them requires N additional HTTP calls
+  per scan. Matched the existing Recruitee pattern (description=""
+  in scanner output, enrichment_tier pipeline fills jd_full
+  asynchronously) instead of doubling the scan time.
 
-- **Investigate the ATS-scan 30-minute timeout user bug.** Deferred
-  per user instruction ("address ats scan after all other follow ups").
+- **Investigate or fix the ATS-scan 30-min timeout.** Deferred per
+  round-6 user instruction ("address ats scan after all other follow
+  ups"). All other followups are done as of this session; this is the
+  next thing.
 
-- **Brainstorm location parsing.** Deferred per user instruction
-  ("then brainstorm the location parsing solution and spec out the
-  solution for a follow up session"). Should be its own session —
-  user explicitly asked for established patterns / well-trodden
-  prior art, which warrants research + spec before any code.
+- **Brainstorm location parsing.** Same — deferred per user
+  instruction ("then brainstorm the location parsing solution and
+  spec out the solution for a follow up session"). Should be its
+  own session because the user explicitly asked for research into
+  established patterns before any code.
+
+- **Apply Pyright `int | None` cleanup in test_ats_scanner.py.**
+  Still on the carry-forward list; not relevant to this session's
+  scope.
+
+- **Apply the `_make_app` helper fix in test_scheduler.py.** Still
+  carried forward.
 
 ## What's deferred / remaining
 
-### Newly elevated (audit v2 corrected priorities)
+### NEW priority (next session): user bug 1
 
-1. **B1 reset migration + cohort-bias gate** — user approved with the
-   "5-10 rows" estimate; actual is 41 rows. User should reconfirm
-   before this lands. Migration must run AFTER the probe gate, or
-   the next probe pass will recreate the FPs. See audit B1 for the
-   exact SQL.
+1. **ATS scan session timeout (>30 min).** User question: "why do we
+   have a timeout on this?" Investigation should cover:
+   - Is the timeout a Flask session-cookie age (e.g. `SESSION_COOKIE_AGE`
+     or `PERMANENT_SESSION_LIFETIME`)? Check `web/__init__.py`.
+   - Is it APScheduler's `misfire_grace_time` or `max_instances`?
+   - Is it a per-company `_PROBE_TIMEOUT` (8s) accumulating across
+     hundreds of companies in `run_ats_scan`?
+   - Is it the WSGI worker timeout (Flask dev server has no built-in
+     request timeout; gunicorn would, but this app uses dev server)?
+   - Or is it the user's BROWSER session timing out the long-polled
+     UI page, not the server-side scan itself?
+   
+   Fix direction depends on diagnosis. If browser-side: stream
+   progress events so the UI keeps the connection alive. If
+   server-side: investigate whether the scan should be cancellable
+   or background-only (it already runs in APScheduler, so likely
+   the issue is the UI session, not the scan).
 
-2. **B2 hostname-pattern fast-path** in `ats_prober.py` — adds regex
-   pre-pass for `jobs.ashbyhq.com / careers.smartrecruiters.com /
-   jobs.lever.co / boards.greenhouse.io` before the platform-discovery
-   loop. ~50 LOC. Reclassifies 6 probe-regression rows (Ashby×3,
-   SmartRecruiters×3) and prevents future regressions.
+### NEW priority (separate session): user bug 2
 
-3. **B4 populate `miss_reason`** — thread categorical failure reason
-   through probe → upsert. Migration column or codes table needed.
-   2563 misses currently lack a reason. Pays back every future audit.
+2. **Location parsing architectural overhaul.** User asked for
+   "architecturally robust way to parse location" with research into
+   "existing, well-established code patterns." This is a brainstorm +
+   spec session, NOT inline code. Established patterns to research:
+   - **libpostal** (street-address parser, Python via pypostal).
+   - **geonames** / **geopy** (place-name normalization, lat/long lookup).
+   - **CLDR locale data** (city/region canonical names by territory).
+   - **Greenhouse / Ashby / Workday native location shapes** — most
+     have a structured `{city, region, country, remote_type}` model
+     we could canonicalize to.
+   - Industry "Remote / Hybrid / Onsite" flag conventions (LinkedIn
+     uses `workplaceType ∈ {REMOTE, HYBRID, ONSITE}` — Rippling
+     already emits this; we should adopt it as the canonical shape).
+   
+   Spec deliverable: a normalization schema + remote/hybrid/onsite
+   flag + multi-city handling rules + city-name canonicalization
+   (so all "San Francisco" / "SF" / "San Francisco, CA" / "SFO"
+   variants collapse to one canonical form).
 
-### Audit-roadmap (still genuinely missing platforms)
+### Audit-track follow-ups
 
-4. **Jobvite scanner** — 7 careers_url hits. Mirrors
-   `_platforms_pinpoint.py` (76 LOC). Add to `_PLATFORM_SCANNERS`
-   dict in `_run.py`.
+3. **Real Jobvite scraper** (replace the stub). Per-tenant HTML
+   parsing with redirect handling. 7 known companies (Victaulic,
+   Capcom, ASH, The Institutes, Havas, PulsePoint, NeoGenomics).
+   `_platforms_jobvite.py` module docstring documents the deferral.
 
-5. **Workable scanner** — 4 careers_url hits. Public job-board API.
+4. **Workable widget endpoint shape verification.** Datadog and
+   Canonical both returned empty `jobs: []` from the widget endpoint
+   even though both have many active jobs publicly. The shipped
+   scanner uses the documented widget endpoint; if real Workable
+   tenants in our DB also return empty, switch to a different
+   endpoint (maybe `apply.workable.com/api/v3/accounts/{slug}/jobs`
+   — 404'd in my exploration but the docs claim it's the v3 path).
+   Verify on the 4 careers_url-tagged companies after they get
+   probed.
 
-6. **Paylocity scanner** — 4 careers_url hits.
+5. **AI-nav recipes for in-house custom ATS** (Apple, Tesla, Oracle
+   Recruiting Cloud, AMD, NVIDIA, ByteDance, Deloitte, Genentech,
+   Citi, Kaiser Permanente). Each is a per-company AI-nav recipe
+   (Tier-4 crawler). Lower priority than the platform scanners
+   because each one only unlocks 1 company.
 
-7. **Rippling scanner** — 3 careers_url hits.
+### Code (carried forward unchanged from rounds 4-6)
 
-### User-reported bugs (deferred per user instruction)
+6. **Manual company aliases UI** (round-3 deferred). m063 can merge
+   by shared job board but not by name alone; salesforce/nvidia/
+   amazon duplicate cohorts need manual aliasing.
 
-8. **ATS scan session timeout (>30 min).** User asked: "why do we
-   have a timeout on this?" Address after items 1–7. Investigation
-   should cover: where the timeout is set, whether it's a Flask
-   session timeout (32-bit cookie age?) vs an APScheduler job timeout
-   vs a per-company HTTP timeout, and whether the scan should be
-   cancellable rather than time-bounded.
+7. **Pyright `int | None` cleanup** in test_ats_scanner.py. ~5 min.
 
-9. **Location parsing architectural overhaul.** User asked for an
-   "architecturally robust way" with research into "existing,
-   well-established code patterns." This is a brainstorm + spec
-   session, NOT an inline fix. Established patterns to research:
-   libpostal (street-address parser, has Python bindings via pypostal),
-   geopy / geonames (place-name normalization), CLDR locale data
-   (city/region canonical names), and how Greenhouse / Ashby /
-   Workday themselves represent locations (most have a structured
-   `{city, region, country, remote_type}` shape we could canonicalize
-   to). Spec deliverable: a normalization schema +
-   remote/hybrid/onsite flag + multi-city handling rules.
+8. **`_make_app` helper bug** in test_scheduler.py (the
+   `app.config.get = lambda` assignment on a real dict). Dormant.
 
-### Code (carried forward unchanged from round 5)
-
-- **Manual company aliases UI** (round-3 deferred). Still relevant —
-  audit B3.
-- **Pyright `int | None` cleanup** in test_ats_scanner.py. ~5 min.
-- **`_make_app` helper bug** in test_scheduler.py (the
-  `app.config.get = lambda` assignment on a real dict). Dormant.
-- **m063 slug-case-sensitivity edge case**, **salary single-value
-  extraction**, **mid-name punctuation in company dedupe**.
+9. **m063 slug-case-sensitivity edge case**, **salary single-value
+   extraction**, **mid-name punctuation in company dedupe** — all
+   carried forward.
 
 ## Quirks the next session should know
 
-All round-3 + round-4 + round-5 quirks still apply. Adding:
+All round-3 + round-4 + round-5 + round-6 quirks still apply. Adding:
 
-- **Audit v1 was wrong; audit v2 is the source of truth.** If you
-  read references to "Pinpoint scanner is missing" anywhere in
-  `.planning/` or in earlier round handoffs, the actual state is:
-  Pinpoint + Breezy were shipped 2026-05-26 in the F1 polish-review
-  refactor (commit 62024c3) and are running daily. The v1 audit doc
-  was overwritten in place; this FOLLOWUPS (round 6) supersedes
-  round 5's recommendations.
+- **The ATS probe has THREE provenance classes for `hit` rows.**
+  Distinguishable by `ats_evidence_trigger`:
+  - `'careers_url:...'`           → B2 fast-path (this session)
+  - `'scheduled_promote'` / etc.   → reconcile_company_ats path
+  - NULL                          → legacy speculative-probe hit
+    (no longer creatable for FP-prone platforms after B1a)
+  Cohort filters (e.g. B1's NULL evidence + FP platforms) rely on
+  this distinction.
 
-- **Before claiming an ATS platform scanner is "missing," do BOTH
-  checks:**
-  1. `Glob job_finder/web/ats_platforms_internal/*<name>*` — does
-     a `_platforms_<name>.py` file exist?
-  2. `Grep "<name>_SCANNER" job_finder/web/ats_scanner/_run.py`
-     — is it in the `_PLATFORM_SCANNERS` dispatcher dict?
+- **`_FP_PRONE_PLATFORMS = {bamboohr, personio, recruitee, breezy}`
+  is a load-bearing invariant.** Defined in
+  `job_finder/web/ats_scanner/_probe.py:45`. The module-level
+  `assert` (line ~75) guarantees these are never re-added to
+  `_PROBES`. If you ever want to put one back, you must ALSO remove
+  it from `_FP_PRONE_PLATFORMS` AND remove the test
+  `TestSpeculativeProbeFpExclusion.test_fp_prone_set_is_disjoint_from_probes_ladder`.
 
-  v1 ran live DB queries (correct numbers) but never grepped the
-  codebase. That's the failure mode to avoid.
+- **`_URL_FASTPATH_PLATFORMS` is the set of platforms B2 can
+  promote via URL evidence.** Includes all 12 stage-4 platforms PLUS
+  the 4 round-6 additions = 16 total. Adding a new platform requires
+  updates in 5+ places (see _platforms_X.py modules for the
+  checklist). Tests in `TestDispatcherWiring` (in
+  test_round6_ats_scanners.py) assert all 4 round-6 platforms are
+  consistently wired.
 
-- **B1 cohort is bigger than v1 estimated.** 41 rows, not 5-10. The
-  expanded list includes YouTube, Accenture, EY, Microsoft, Meta,
-  Amazon, IQVIA, EY, Leidos, Scribd, KBR, Tata, Gong, Hilton,
-  Under Armour, Conduent, AnswerLab, Specright… The cohort gate
-  is mandatory before any reset, or the same FPs come back on the
-  next probe cycle.
+- **Paylocity's "slug" is a GUID, not a name.** The URL regex
+  extracts it from the path (e.g.
+  `b181f77f-0432-453f-b229-869d786bb46c` from
+  `/recruiting/jobs/All/{guid}/...`). Don't confuse with the
+  subdomain-slug pattern used by other platforms. `companies.ats_slug`
+  for Paylocity rows will look like a GUID; that's correct.
 
-- **The user is paused on items 8 + 9 deliberately.** Don't pull
-  the ATS-scan timeout investigation or location-parsing brainstorm
-  forward without explicit user request — they specifically said
-  "address ats scan AFTER all other follow ups."
+- **Jobvite scanner is a stub.** Calls to `scan_jobvite` always
+  return [] — no jobs come in. This is by design (no public API).
+  Companies tagged with `ats_platform='jobvite'` still get
+  `last_scanned_at` updated and `jobs_found_total += 0` (no error).
+  Do NOT try to enable the scanner without building a real per-tenant
+  HTML scraper first.
+
+- **`_make_app` helper bug in test_scheduler.py is STILL not fixed.**
+  Round 5 noted it as dormant. Still dormant. If you write a test
+  that calls `_make_app(testing=False)`, it will crash on
+  `app.config.get = lambda` line. Use `_minimal_app` in those tests
+  (round 5's workaround pattern).
 
 ## Suggested next step (in priority order)
 
-User has already directed: "fix the audit, then re-decide." Audit is
-fixed. **The natural next decision is item 1 (B1 reset migration +
-cohort-bias gate)** — it was the most operationally relevant of the
-v1 deferreds, and the user already approved it (subject to the
-cohort-count reconfirmation noted above).
+User has previously indicated: items 1-7 first, then ATS scan
+timeout, then brainstorm location parsing. All of items 1-7 are
+done. The two remaining user-bugs are next.
 
-Alternative orderings worth considering:
+1. **ATS scan 30-min timeout investigation.** Diagnostic-first: read
+   `web/__init__.py` for session config + `scheduler/_jobs.py` for
+   scan job config + `blueprints/companies.py` for the UI route that
+   triggers ATS scans. The fix depends entirely on diagnosis.
 
-- **B2 first** (hostname-pattern fast-path) — pure addition, no
-  destructive migration, smallest blast radius. Could land alongside
-  B1 if both are landing this milestone.
+2. **Location parsing brainstorm + spec.** Separate session.
+   Deliverable should be a SPEC.md describing the canonical location
+   schema, the canonicalization rules, the remote/hybrid/onsite
+   flag, and the migration plan from current freeform strings.
 
-- **Jobvite scanner first** if user wants to demonstrate a new
-  platform shipping cleanly before touching the probe layer. Zero
-  risk to existing data.
+If you want to ship more code instead of moving to the user bugs,
+the next-highest-value followup is **#3 (real Jobvite scraper)** —
+unlocks 7 companies that are currently scanner-stubbed.
 
 ## Open questions
 
-- **B1 cohort count is 41, not 5–10. Reconfirm the reset is still
-  approved at this larger scale?** Alternative: filter the destructive
-  reset to a narrower cohort (e.g. only rows where the probe's
-  no-evidence claim is corroborated by a follow-up `_probe_<platform>`
-  returning False at audit time).
+- **B1a cohort exclusion is permanent for now.** If a future legitimate
+  bamboohr/personio/recruitee/breezy tenant lands in the DB with a
+  careers_url that B2 fast-path verifies, the platform gets assigned
+  via the URL path. But if the careers_url is missing AND the company
+  is legitimately on that platform, the speculative ladder won't find
+  them. That's an acceptable trade-off given the 100% historical FP
+  rate, but worth revisiting if real ground-truth bamboohr/etc.
+  companies turn up.
 
-- **Order of operations for B1 + cohort gate:** the gate MUST land
-  first or simultaneously. Suggested approach: ship the cohort-bias
-  gate to `ats_prober.py` as commit 1 (test-covered, no data
-  changes), then the migration as commit 2 (runs against the now-safe
-  probe path).
+- **Workable widget endpoint reliability.** Both test fetches
+  (Datadog + Canonical) returned empty `jobs: []` even though those
+  companies have active careers. Either (a) those companies don't
+  use Workable for public careers, (b) the widget endpoint has tenant
+  opt-in we don't know about, or (c) the wrong endpoint. Watch the
+  first real ingestion+scan cycle that hits the 4 tagged Workable
+  companies. If they all return 0 jobs, see followup #4.
 
-- **Jobvite vs Workable as first new scanner:** Jobvite has more
-  indirect hits (7 vs 4) but Workable has a cleaner public API and
-  more permissive CORS. Either is fine; default recommendation =
-  Jobvite for raw coverage win.
+## User Bug List (no longer carried — see deferred items 1-2 above)
 
-## User Bug List (carried forward, do NOT address until items 1–7 land)
-
-- ATS scan failed: Session timed out (>30 min) — why do we have a
-  timeout on this? *(round 6 expanded scope: see deferred item 8)*
-
-- We need to take a step back and find an architecturally robust way
-  to parse location. I mean, just look at all the varieties of san
-  francisco. that can't be good for the scorer/parsers, either. need
-  to find a way to flag remote/hybrid jobs, need a way to parse
-  multi city locations better, need to find a way to parse multiple
-  formattings better. this is probably a problem that has already
-  been solved - what are the existing, well established code
-  patterns for such a thing? *(round 6: brainstorm + spec session,
-  see deferred item 9 for research starting points)*
+The two user bugs (ATS scan timeout + location parsing) are now
+formally tracked as the next-priority items, not buried at the
+bottom of the doc.
