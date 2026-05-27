@@ -36,6 +36,7 @@ def _run_html_fallback_scan(
     summary: dict,
     all_new_job_keys: list,
     high_score_threshold: int,
+    tracker=None,
 ) -> None:
     """Phase C: HTML scrape miss/error companies that have a homepage_url."""
     # Companies with ats_probe_status='miss' but with homepage_url get scraped.
@@ -67,6 +68,8 @@ def _run_html_fallback_scan(
             summary,
             all_new_job_keys,
         )
+        if tracker is not None:
+            tracker.tick()
         # Polite delay — HTML scraping is slower than ATS API calls
         time.sleep(1.0)
 

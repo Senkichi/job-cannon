@@ -2040,7 +2040,9 @@ class TestScanRouteProbeBeforeScan:
             call_order.append("probe")
             return {"probed": 1, "hits": 1, "misses": 0}
 
-        def mock_scan(db_path, config):
+        # **kwargs absorbs the new progress_callback= keyword threaded
+        # through by _run_ats_scan_bg (per-company progress).
+        def mock_scan(db_path, config, **kwargs):
             call_order.append("scan")
             return {
                 "companies_scanned": 1,
@@ -2060,6 +2062,56 @@ class TestScanRouteProbeBeforeScan:
         assert call_order == ["probe", "scan"], (
             f"Expected probe called before scan, got call order: {call_order}"
         )
+
+    def test_scan_bg_passes_progress_callback_that_updates_session(
+        self, app_with_db, migrated_db_path
+    ):
+        """_run_ats_scan_bg's progress callback must persist (scored, total).
+
+        Verifies the contract that the bg thread provides a progress_callback
+        keyword arg to run_ats_scan and that invoking it updates the
+        batch_score_sessions row's scored + total columns so the polling
+        fragment can render "Scanned N of M".
+        """
+        import sqlite3
+
+        from job_finder.web.blueprints.companies import _run_ats_scan_bg
+
+        def mock_scan(db_path, config, **kwargs):
+            cb = kwargs.get("progress_callback")
+            assert cb is not None, "bg thread must pass progress_callback"
+            cb(1, 3)
+            cb(2, 3)
+            cb(3, 3)
+            return {
+                "companies_scanned": 3,
+                "jobs_discovered": 0,
+                "jobs_new": 0,
+                "html_scraped": 0,
+                "errors": [],
+            }
+
+        session_id = self._seed_session(migrated_db_path)
+        with (
+            patch(
+                "job_finder.web.blueprints.companies.probe_ats_slugs",
+                return_value={"probed": 0, "hits": 0, "misses": 0},
+            ),
+            patch("job_finder.web.blueprints.companies.run_ats_scan", side_effect=mock_scan),
+        ):
+            _run_ats_scan_bg(migrated_db_path, session_id, {})
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT scored, total FROM batch_score_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+        # Final UPDATE at end-of-scan sets scored to companies_scanned (3) and
+        # leaves total at whatever the last tick wrote.
+        assert row["scored"] == 3, f"Expected scored=3 (terminal), got {row['scored']}"
+        assert row["total"] == 3, f"Expected total=3 (last tick), got {row['total']}"
 
     def test_scan_bg_logs_probe_result(self, app_with_db, migrated_db_path):
         """_run_ats_scan_bg logs the probe result via logger.info."""

@@ -349,20 +349,29 @@ def update_slug(company_id):
 _SESSION_TYPE_ATS_SCAN = "ats_scan"
 
 
-def _scannable_count(conn) -> int:
-    """Count companies that would actually be scanned by run_ats_scan.
+def _scannable_count(conn, config: dict) -> int:
+    """Estimate the total companies run_ats_scan will iterate (Phase A + Phase C).
 
-    Mirrors the WHERE clause used by run_ats_scan when it iterates the
-    cohort (``ats_probe_status='hit' AND scan_enabled=1``), ignoring the
-    high-score-history gate. The count is for progress display, not for
-    deciding what to scan — being slightly off is harmless.
+    Used only for the initial UI render before the bg-thread's progress
+    callback ticks the first time. The first tick corrects ``total`` on the
+    session row from the live count computed inside run_ats_scan, so this
+    estimate being slightly off is harmless.
     """
+    from job_finder.web.ats_scanner._run import (
+        _count_phase_a_eligible,
+        _count_phase_c_eligible,
+        _DEFAULT_HIGH_SCORE_THRESHOLD,
+    )
+
     try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM companies "
-            "WHERE ats_probe_status = 'hit' AND scan_enabled = 1"
-        ).fetchone()
-        return int(row[0]) if row else 0
+        threshold = int(
+            config.get("ats", {}).get(
+                "high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD
+            )
+        )
+        return _count_phase_a_eligible(conn, threshold) + _count_phase_c_eligible(
+            conn, threshold
+        )
     except Exception:
         return 0
 
@@ -384,7 +393,7 @@ def scan():
     testing = current_app.config.get("TESTING", False)
 
     with standalone_connection(db_path) as conn:
-        total = _scannable_count(conn)
+        total = _scannable_count(conn, config)
 
         if total == 0:
             return render_template(
@@ -421,12 +430,12 @@ def scan():
 
 
 def _scan_progress_ctx(session) -> dict:
+    # Per-company progress: the bg thread's callback updates ``scored`` and
+    # ``total`` after each company scan, so the fragment renders the live
+    # "Scanned X of N" count on each 2s poll.
     return {
         "session_id": session["id"],
         "total": session["total"],
-        # We don't get per-company progress (run_ats_scan iterates internally
-        # and only returns a summary at the end). Showing 0/N during the run
-        # is honest — the spinner conveys liveness, the count conveys scope.
         "scanned": session["scored"] or 0,
     }
 
@@ -501,11 +510,29 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
     progress fragment's percent-complete bar lines up with the planned
     total. ``total`` was set by the POST route from ``_scannable_count``.
     """
+    def _tick(scanned: int, total: int) -> None:
+        """Persist live (scanned, total) so the polling fragment shows N of M.
+
+        Opens a transient connection per tick — runs inside the scanner's
+        per-company loop which already sleeps 0.5-1.0s between companies,
+        so the per-write cost is negligible. Tick failures must never abort
+        the scan, so the connection helper's exceptions are swallowed.
+        """
+        try:
+            with standalone_connection(db_path) as tick_conn:
+                tick_conn.execute(
+                    "UPDATE batch_score_sessions SET scored=?, total=? WHERE id=?",
+                    (scanned, total, session_id),
+                )
+                tick_conn.commit()
+        except Exception:
+            logger.debug("scan-progress tick failed for session %s", session_id, exc_info=True)
+
     try:
         with standalone_connection(db_path) as conn:
             probe_result = probe_ats_slugs(db_path, config)
             logger.info("ATS probe before scan: %s", probe_result)
-            result = run_ats_scan(db_path, config)
+            result = run_ats_scan(db_path, config, progress_callback=_tick)
             result["probe"] = probe_result
 
             conn.execute(

@@ -14,7 +14,11 @@
     </svg>
     <div class="flex-1">
       <p class="text-indigo-100 text-sm font-medium">
-        Scanning {{ total }} compan{% if total == 1 %}y{% else %}ies{% endif %}...
+        {% if scanned and scanned > 0 %}
+          Scanned {{ scanned }} of {{ total }} compan{% if total == 1 %}y{% else %}ies{% endif %}...
+        {% else %}
+          Scanning {{ total }} compan{% if total == 1 %}y{% else %}ies{% endif %}...
+        {% endif %}
       </p>
       <p class="text-indigo-300 text-xs">
         Running in background — feel free to navigate away. Results will land here when complete.

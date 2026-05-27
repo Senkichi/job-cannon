@@ -17,6 +17,7 @@ Re-exported from the package for backward compatibility.
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime
 
 from job_finder.db import derive_classification
@@ -87,6 +88,34 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+ProgressCallback = Callable[[int, int], None]
+
+
+class _ProgressTracker:
+    """Shared counter for Phase A + Phase C company-level progress.
+
+    Both phases iterate companies; tick() bumps the count and forwards
+    (scanned, total) to the caller-supplied callback. A failing callback
+    must never abort a scan, so the call is wrapped in a broad try.
+    """
+
+    __slots__ = ("_callback", "_scanned", "_total")
+
+    def __init__(self, callback: ProgressCallback | None, total: int) -> None:
+        self._callback = callback
+        self._scanned = 0
+        self._total = total
+
+    def tick(self) -> None:
+        self._scanned += 1
+        if self._callback is None:
+            return
+        try:
+            self._callback(self._scanned, self._total)
+        except Exception:
+            logger.debug("progress callback raised — continuing scan", exc_info=True)
+
+
 # Default v3 sub_score sum cutoff for the high-score-history gate (Phase A + C).
 # v3 sub_scores are 6 axes x 1-5 each (sum range 6-30). The empirical break
 # point for "company has produced relevant work for this profile" is ~20:
@@ -126,7 +155,40 @@ def _high_score_history_clause() -> str:
     )"""
 
 
-def run_ats_scan(db_path: str, config: dict) -> dict:
+def _count_phase_a_eligible(conn: sqlite3.Connection, threshold: int) -> int:
+    """Count Phase A companies (hit OR retry-eligible error) subject to the gate."""
+    row = conn.execute(
+        f"""SELECT COUNT(*) FROM companies
+           WHERE (
+               (ats_probe_status = 'hit' AND scan_enabled = 1)
+               OR
+               (ats_probe_status = 'error' AND scan_enabled = 1
+                AND (retry_after IS NULL OR retry_after < datetime('now')))
+           )
+           AND {_high_score_history_clause()}""",
+        (threshold,),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _count_phase_c_eligible(conn: sqlite3.Connection, threshold: int) -> int:
+    """Count Phase C companies (miss/error with homepage) subject to the gate."""
+    row = conn.execute(
+        f"""SELECT COUNT(*) FROM companies
+           WHERE ats_probe_status IN ('miss', 'error')
+             AND homepage_url IS NOT NULL
+             AND scan_enabled = 1
+             AND {_high_score_history_clause()}""",
+        (threshold,),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def run_ats_scan(
+    db_path: str,
+    config: dict,
+    progress_callback: ProgressCallback | None = None,
+) -> dict:
     """Scan all enabled companies' ATS platforms for keyword-matched job postings.
 
     Thread-safe: creates its own sqlite3 connection (same pattern as stale_detector.py).
@@ -199,6 +261,16 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
     all_new_job_keys: list[str] = []
 
     with standalone_connection(db_path) as conn:
+        # Compute total upfront so the progress-callback's (scanned, total)
+        # pair is stable for the full scan (Phase A + Phase C). Phase B and
+        # Phase D aren't per-company iterations and don't tick the tracker.
+        # The route's initial _scannable_count is a Phase-A-only estimate;
+        # the first callback invocation corrects total on the session row.
+        total_companies = _count_phase_a_eligible(
+            conn, high_score_threshold
+        ) + _count_phase_c_eligible(conn, high_score_threshold)
+        tracker = _ProgressTracker(progress_callback, total_companies)
+
         # Phase A — ATS-API scan for confirmed-hit + retry-eligible-error companies.
         _run_ats_api_scan(
             conn,
@@ -208,6 +280,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             summary,
             all_new_job_keys,
             high_score_threshold,
+            tracker,
         )
 
         # Phase B — Homepage discovery for companies missing homepage_url. Runs
@@ -224,6 +297,7 @@ def run_ats_scan(db_path: str, config: dict) -> dict:
             summary,
             all_new_job_keys,
             high_score_threshold,
+            tracker,
         )
 
         # Phase D — Auto-scoring for newly discovered jobs across both phases.
@@ -260,6 +334,7 @@ def _run_ats_api_scan(
     summary: dict,
     all_new_job_keys: list,
     high_score_threshold: int,
+    tracker: "_ProgressTracker | None" = None,
 ) -> None:
     """Phase A: scan confirmed-hit companies (and retry-eligible errors) via ATS API."""
     # Query companies with confirmed ATS slug (hit) AND error companies eligible
@@ -283,6 +358,8 @@ def _run_ats_api_scan(
         _scan_one_company_via_ats_api(
             conn, db_path, company, target_titles, title_exclusions, summary, all_new_job_keys
         )
+        if tracker is not None:
+            tracker.tick()
         # Polite delay between companies (0.5s)
         time.sleep(0.5)
 
