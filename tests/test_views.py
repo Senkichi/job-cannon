@@ -739,13 +739,17 @@ def app_with_unscored_jobs(tmp_db_path):
 
     conn = sqlite3.connect(tmp_db_path)
     conn.row_factory = sqlite3.Row
+    # jd_full required: count_scorable filters on jd_full IS NOT NULL AND
+    # TRIM(jd_full) != '' (see exclusion_filter.py). Without it, the two rows
+    # below would not be considered scorable and TestBatchScoreStart's
+    # "unscored jobs exist" assertions would fail.
     conn.executemany(
         """INSERT INTO jobs
             (dedup_key, title, company, location, sources, source_urls,
-             source_id, salary_min, salary_max, description,
+             source_id, salary_min, salary_max, description, jd_full,
              first_seen, last_seen, score, score_breakdown, pipeline_status,
              classification, sub_scores_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 "acme|data-scientist|remote",
@@ -758,6 +762,8 @@ def app_with_unscored_jobs(tmp_db_path):
                 150000,
                 200000,
                 "Build ML models",
+                "Build ML models across product surfaces. Own pipeline, "
+                "experimentation, and shipping. 5+ years experience required.",
                 "2026-03-01T10:00:00",
                 "2026-03-09T10:00:00",
                 8.5,
@@ -777,6 +783,8 @@ def app_with_unscored_jobs(tmp_db_path):
                 200000,
                 280000,
                 "Lead data science.",
+                "Lead data science org. Define roadmap, hire and grow team, "
+                "partner cross-functionally with eng and product. 10+ years.",
                 "2026-03-03T12:00:00",
                 "2026-03-09T12:00:00",
                 9.1,
