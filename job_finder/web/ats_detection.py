@@ -99,8 +99,38 @@ _TEAMTAILOR_HUMAN_URL = re.compile(
     re.IGNORECASE,
 )
 
+# Round 6 (2026-05-27 audit B2-roadmap) — Workable / Jobvite / Paylocity /
+# Rippling. URL patterns use a first-path-segment slug rather than the
+# subdomain shape of the older platforms.
+#
+# Workable: https://apply.workable.com/{slug} (root) or
+#           https://apply.workable.com/{slug}/j/{shortcode} (job detail)
+_WORKABLE_HUMAN_URL = re.compile(
+    r"https?://apply\.workable\.com/([^/?#]+)",
+    re.IGNORECASE,
+)
+# Jobvite: https://jobs.jobvite.com/{slug}[/jobs[/alljobs]]
+_JOBVITE_HUMAN_URL = re.compile(
+    r"https?://jobs\.jobvite\.com/([^/?#]+)",
+    re.IGNORECASE,
+)
+# Paylocity: https://recruiting.paylocity.com/recruiting/jobs/All/{guid}/...
+# The "slug" is the tenant GUID. Accept both lowercase and TitleCase paths
+# (audit observed both `/recruiting/jobs/...` and `/Recruiting/Jobs/...`).
+_PAYLOCITY_HUMAN_URL = re.compile(
+    r"https?://(?:[^/]*)recruiting\.paylocity\.com/[Rr]ecruiting/[Jj]obs/All/"
+    r"([0-9a-f-]{36})",
+    re.IGNORECASE,
+)
+# Rippling: https://ats.rippling.com/{slug}/jobs[...]
+_RIPPLING_HUMAN_URL = re.compile(
+    r"https?://ats\.rippling\.com/([^/?#]+)",
+    re.IGNORECASE,
+)
+
 # Bump alongside material changes to the regex patterns above (contract tests).
-ATS_EXTRACTOR_VERSION = "m049-v3"
+# m049-v4: + workable / jobvite / paylocity / rippling URL patterns (round 6 audit).
+ATS_EXTRACTOR_VERSION = "m049-v4"
 
 # Relative pattern strength within a URL: API/canonical traces win ties in reconciliation.
 _SPECIFICITY_API = 10
@@ -188,6 +218,25 @@ def extract_ats_from_url_best(url: str) -> tuple[str, str, int] | None:
     m = _TEAMTAILOR_HUMAN_URL.search(url)
     if m:
         return "teamtailor", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    # Round 6 -- Workable / Jobvite / Paylocity / Rippling.
+    m = _WORKABLE_HUMAN_URL.search(url)
+    if m:
+        return "workable", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _JOBVITE_HUMAN_URL.search(url)
+    if m:
+        return "jobvite", m.group(1).lower(), _SPECIFICITY_BOARD
+
+    m = _PAYLOCITY_HUMAN_URL.search(url)
+    if m:
+        # Paylocity slug is a GUID, kept as-is (no .lower() to preserve casing
+        # in case some tenants use uppercase characters — unlikely but cheap).
+        return "paylocity", m.group(1), _SPECIFICITY_BOARD
+
+    m = _RIPPLING_HUMAN_URL.search(url)
+    if m:
+        return "rippling", m.group(1).lower(), _SPECIFICITY_BOARD
 
     return None
 

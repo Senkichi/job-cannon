@@ -39,6 +39,10 @@ from job_finder.web.ats_platforms_internal._platforms_teamtailor import (
     SCANNER as _TEAMTAILOR_SCANNER,
 )
 from job_finder.web.ats_platforms_internal._platforms_workday import SCANNER as _WORKDAY_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_workable import SCANNER as _WORKABLE_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_paylocity import SCANNER as _PAYLOCITY_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_rippling import SCANNER as _RIPPLING_SCANNER
 from job_finder.web.ats_platforms_internal._registry import run_platform_scan
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.description_formatter import strip_html_to_text
@@ -452,3 +456,48 @@ def scan_teamtailor(slug: str, target_titles: list[str], exclusions: list[str]) 
     public unkeyed feed (not the keyed api.teamtailor.com path).
     """
     return run_platform_scan(_TEAMTAILOR_SCANNER, slug, target_titles, exclusions)
+
+
+# Round 6 (2026-05-27 audit B2-roadmap) — Workable / Jobvite / Paylocity / Rippling.
+
+
+def scan_workable(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Workable public widget endpoint for keyword-matched postings.
+
+    API: GET https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true
+    → {"name": ..., "jobs": [...]}. Empty-jobs path is a clean miss.
+    """
+    return run_platform_scan(_WORKABLE_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_jobvite(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Jobvite — stub. Always returns [].
+
+    Jobvite hosted career pages have no public unauthenticated JSON API
+    and frequently redirect to tenant-custom domains. A real scraper
+    requires per-tenant HTML parsing; deferred. The stub exists so the
+    platform is registered for URL-evidence promotion via B2 fast-path.
+    See _platforms_jobvite.py for the full rationale.
+    """
+    return run_platform_scan(_JOBVITE_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_paylocity(guid: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Paylocity public v2 job feed for keyword-matched postings.
+
+    API: GET https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/{guid}
+    → {"organization": ..., "jobs": [...]}. Each job includes summary,
+    requirements, benefits as separate sections (stitched into description).
+    The "slug" is the tenant GUID extracted from the careers URL path.
+    """
+    return run_platform_scan(_PAYLOCITY_SCANNER, guid, target_titles, exclusions)
+
+
+def scan_rippling(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Rippling public board API for keyword-matched postings.
+
+    API: GET https://ats.rippling.com/api/v2/board/{slug}/jobs → paginated
+    {"items": [...], "page": ..., "totalPages": ...}. Description is NOT
+    in the list endpoint; enrichment fills jd_full asynchronously.
+    """
+    return run_platform_scan(_RIPPLING_SCANNER, slug, target_titles, exclusions)

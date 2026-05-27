@@ -21,12 +21,16 @@ from job_finder.web.ats_prober import (
     _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
+    _probe_jobvite,
     _probe_lever,
+    _probe_paylocity,
     _probe_personio,
     _probe_pinpoint,
     _probe_recruitee,
+    _probe_rippling,
     _probe_smartrecruiters,
     _probe_teamtailor,
+    _probe_workable,
     _probe_workday,
 )
 from job_finder.web.brand_blocklist import is_blocked_brand
@@ -98,6 +102,11 @@ _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
         "personio",
         "recruitee",
         "breezy",
+        # Round 6 -- audit B2-roadmap additions:
+        "workable",
+        "jobvite",
+        "paylocity",
+        "rippling",
     }
 )
 
@@ -133,6 +142,15 @@ def _verify_fastpath_live(platform: str, slug: str) -> bool:
         return bool(_probe_recruitee(slug))
     if platform == "breezy":
         return bool(_probe_breezy(slug))
+    # Round 6 -- audit B2-roadmap additions:
+    if platform == "workable":
+        return bool(_probe_workable(slug))
+    if platform == "jobvite":
+        return bool(_probe_jobvite(slug))
+    if platform == "paylocity":
+        return bool(_probe_paylocity(slug))
+    if platform == "rippling":
+        return bool(_probe_rippling(slug))
     return False
 
 

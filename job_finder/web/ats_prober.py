@@ -725,3 +725,104 @@ def _probe_teamtailor(slug: str) -> bool:
     except Exception as e:
         logger.debug("_probe_teamtailor('%s') failed: %s", slug, e)
         return False
+
+
+def _probe_workable(slug: str) -> bool:
+    """Return True if slug resolves to a Workable tenant with active jobs.
+
+    Probes the public widget endpoint
+    ``https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true``
+    which returns ``{"name": ..., "jobs": [...]}``. Empty-jobs path is a
+    miss (same pitfall pattern as Lever/Recruitee/etc.).
+
+    Args:
+        slug: Workable account slug (first path segment of apply.workable.com URL).
+    """
+    url = f"https://apply.workable.com/api/v1/widget/accounts/{slug}"
+    try:
+        r = requests.get(url, params={"details": "true"}, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        jobs = data.get("jobs") or []
+        return isinstance(jobs, list) and len(jobs) > 0
+    except Exception as e:
+        logger.debug("_probe_workable('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_jobvite(slug: str) -> bool:
+    """Return True if slug resolves to a live Jobvite hosted career page.
+
+    Jobvite has no public unauthenticated JSON API; this probe only
+    verifies that ``https://jobs.jobvite.com/{slug}`` resolves to a 200
+    page (which it does for any active tenant, including those whose
+    careers redirect to a custom domain). A 200 here is necessary but
+    not sufficient for a real scanner -- see
+    ``_platforms_jobvite.py`` for the stub scanner rationale.
+
+    Args:
+        slug: Jobvite tenant slug (first path segment of jobs.jobvite.com URL).
+    """
+    url = f"https://jobs.jobvite.com/{slug}"
+    try:
+        # allow_redirects=True so custom-domain tenants (e.g. Victaulic ->
+        # careers.victaulic.com) still register as live.
+        r = requests.get(url, timeout=_PROBE_TIMEOUT, allow_redirects=True)
+        return r.status_code == 200
+    except Exception as e:
+        logger.debug("_probe_jobvite('%s') failed: %s", slug, e)
+        return False
+
+
+def _probe_paylocity(guid: str) -> bool:
+    """Return True if guid resolves to a Paylocity tenant with active jobs.
+
+    Probes the public v2 feed at
+    ``https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/{guid}``
+    which returns ``{"organization": ..., "jobs": [...]}``. Empty-jobs is a miss.
+
+    Args:
+        guid: Paylocity tenant GUID (UUID-shaped, extracted from
+            ``/recruiting/jobs/All/{guid}`` careers URL).
+    """
+    url = f"https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/{guid}"
+    try:
+        r = requests.get(url, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        jobs = data.get("jobs") or []
+        return isinstance(jobs, list) and len(jobs) > 0
+    except Exception as e:
+        logger.debug("_probe_paylocity('%s') failed: %s", guid, e)
+        return False
+
+
+def _probe_rippling(slug: str) -> bool:
+    """Return True if slug resolves to a Rippling tenant with active jobs.
+
+    Probes the public v2 board API at
+    ``https://ats.rippling.com/api/v2/board/{slug}/jobs`` which returns
+    ``{"items": [...], "page": N, ...}``. Empty-items is a miss.
+
+    Args:
+        slug: Rippling board slug (first path segment of ats.rippling.com URL).
+    """
+    url = f"https://ats.rippling.com/api/v2/board/{slug}/jobs"
+    try:
+        r = requests.get(url, params={"pageSize": 1}, timeout=_PROBE_TIMEOUT)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        if not isinstance(data, dict):
+            return False
+        items = data.get("items") or []
+        return isinstance(items, list) and len(items) > 0
+    except Exception as e:
+        logger.debug("_probe_rippling('%s') failed: %s", slug, e)
+        return False

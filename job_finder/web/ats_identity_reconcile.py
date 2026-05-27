@@ -20,12 +20,16 @@ from job_finder.web.ats_prober import (
     _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
+    _probe_jobvite,
     _probe_lever,
+    _probe_paylocity,
     _probe_personio,
     _probe_pinpoint,
     _probe_recruitee,
+    _probe_rippling,
     _probe_smartrecruiters,
     _probe_teamtailor,
+    _probe_workable,
     _probe_workday,
 )
 from job_finder.web.enrichment_sources import parse_source_urls
@@ -97,6 +101,15 @@ def _verify_live(platform: str, slug: str) -> bool:
         return bool(_probe_jazzhr(slug))
     if platform == "teamtailor":
         return bool(_probe_teamtailor(slug))
+    # Round 6 -- audit B2-roadmap additions:
+    if platform == "workable":
+        return bool(_probe_workable(slug))
+    if platform == "jobvite":
+        return bool(_probe_jobvite(slug))
+    if platform == "paylocity":
+        return bool(_probe_paylocity(slug))
+    if platform == "rippling":
+        return bool(_probe_rippling(slug))
     return False
 
 

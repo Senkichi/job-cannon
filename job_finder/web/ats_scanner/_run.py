@@ -31,7 +31,11 @@ from job_finder.web.ats_platforms_internal._platforms_greenhouse import (
     SCANNER as _GREENHOUSE_SCANNER,
 )
 from job_finder.web.ats_platforms_internal._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
 from job_finder.web.ats_platforms_internal._platforms_lever import SCANNER as _LEVER_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_paylocity import (
+    SCANNER as _PAYLOCITY_SCANNER,
+)
 from job_finder.web.ats_platforms_internal._platforms_personio import (
     SCANNER as _PERSONIO_SCANNER,
 )
@@ -41,11 +45,17 @@ from job_finder.web.ats_platforms_internal._platforms_pinpoint import (
 from job_finder.web.ats_platforms_internal._platforms_recruitee import (
     SCANNER as _RECRUITEE_SCANNER,
 )
+from job_finder.web.ats_platforms_internal._platforms_rippling import (
+    SCANNER as _RIPPLING_SCANNER,
+)
 from job_finder.web.ats_platforms_internal._platforms_smartrecruiters import (
     SCANNER as _SMARTRECRUITERS_SCANNER,
 )
 from job_finder.web.ats_platforms_internal._platforms_teamtailor import (
     SCANNER as _TEAMTAILOR_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_workable import (
+    SCANNER as _WORKABLE_SCANNER,
 )
 from job_finder.web.ats_platforms_internal._platforms_workday import SCANNER as _WORKDAY_SCANNER
 from job_finder.web.ats_platforms_internal._registry import PlatformScanner, run_platform_scan
@@ -70,6 +80,11 @@ _PLATFORM_SCANNERS: dict[str, PlatformScanner] = {
     "personio": _PERSONIO_SCANNER,
     "bamboohr": _BAMBOOHR_SCANNER,
     "teamtailor": _TEAMTAILOR_SCANNER,
+    # Round 6 (2026-05-27 audit B2-roadmap):
+    "workable": _WORKABLE_SCANNER,
+    "jobvite": _JOBVITE_SCANNER,  # stub: probe-only, see _platforms_jobvite.py
+    "paylocity": _PAYLOCITY_SCANNER,
+    "rippling": _RIPPLING_SCANNER,
 }
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
