@@ -1,4 +1,6 @@
 {# Dashboard stat cards partial — auto-refreshed via dashboard-refresh event.
+   Rendered inside #dashboard-stats wrapper in dashboard/index.html, and as
+   the response body of /dashboard/stats fragment route.
    Required context: stats, cost_stats, budget_cap, pending_count,
    company_count, ats_tracked_count, ats_last_scan. #}
 
@@ -9,9 +11,9 @@
     Budget cap reached. Paid scoring providers paused. Free tiers (Ollama, Groq, Cerebras, Gemini, Claude CLI) still active.
   </span>
   <div class="flex gap-3 text-xs">
-    <button hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML"
+    <button hx-get="{{ url_for('dashboard.cost_detail') }}" hx-target="#cost-detail-panel" hx-swap="innerHTML"
             class="text-red-300 hover:text-red-200 underline">View costs</button>
-    <a href="/settings" class="text-red-300 hover:text-red-200 underline">Adjust in Settings</a>
+    <a href="{{ url_for('settings.index') }}" class="text-red-300 hover:text-red-200 underline">Adjust in Settings</a>
   </div>
 </div>
 {% endif %}
@@ -54,11 +56,11 @@
   {% endif %}
 
   <div class="bg-slate-800 rounded-xl border {{ cost_border }} p-5 flex flex-col gap-1 cursor-pointer"
-       hx-get="/dashboard/cost-detail" hx-target="#cost-detail-panel" hx-swap="innerHTML">
+       hx-get="{{ url_for('dashboard.cost_detail') }}" hx-target="#cost-detail-panel" hx-swap="innerHTML">
     <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Today's Cost</span>
     <span class="text-2xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
     <span class="text-xs text-slate-500">${{ "%.2f" | format(cost_stats.month) }} / ${{ "%.0f" | format(budget_cap) }} this month</span>
-    <a href="/costs"
+    <a href="{{ url_for('costs.index') }}"
        class="text-xs text-violet-400 hover:text-violet-300 transition-colors mt-1"
        hx-on:click="event.stopPropagation()">View details &rarr;</a>
   </div>
@@ -75,7 +77,7 @@
 
 <!-- ATS Discovery stat card (below main stats row) -->
 <div class="mt-4">
-  <a href="/companies" class="block bg-slate-800 rounded-xl border border-slate-700 p-4 hover:border-indigo-600 transition-colors">
+  <a href="{{ url_for('companies.index') }}" class="block bg-slate-800 rounded-xl border border-slate-700 p-4 hover:border-indigo-600 transition-colors">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
         <svg class="w-5 h-5 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

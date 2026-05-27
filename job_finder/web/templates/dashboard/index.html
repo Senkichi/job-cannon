@@ -25,165 +25,37 @@
   </div>
   {% endif %}
 
-  <!-- Budget exceeded persistent banner -->
-  {% set budget_pct = (cost_stats.month / budget_cap * 100) if budget_cap > 0 else 0 %}
-  {% if budget_pct >= 100 %}
-  <div class="bg-red-900/60 border border-red-700 rounded-lg px-4 py-3 flex items-center justify-between">
-    <span class="text-red-200 text-sm">
-      Budget cap reached. Paid scoring providers paused. Free tiers (Ollama, Groq, Cerebras, Gemini, Claude CLI) still active.
-    </span>
-    <div class="flex gap-3 text-xs">
-      <button hx-get="{{ url_for('dashboard.cost_detail') }}" hx-target="#cost-detail-panel" hx-swap="innerHTML"
-              class="text-red-300 hover:text-red-200 underline">View costs</button>
-      <a href="{{ url_for('settings.index') }}" class="text-red-300 hover:text-red-200 underline">Adjust in Settings</a>
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- ── Stat Cards ── -->
+  {# ── Stat Cards (incl. budget banner) — auto-refresh on dashboard-refresh ── #}
+  {# After a sync or batch scoring run the polling helper emits           #}
+  {# HX-Trigger: {"dashboard-refresh": null}; this wrapper re-fetches the #}
+  {# stats partial so counts (and the budget banner) update without a    #}
+  {# full page reload. See _BATCH_HX_TRIGGER in blueprints/batch_scoring. #}
   <section aria-label="Key metrics">
-    <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
-
-      <!-- Total Jobs -->
-      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex flex-col gap-1">
-        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Jobs</span>
-        <span class="text-4xl font-bold text-slate-100">{{ stats.total_jobs }}</span>
-        {% if stats.stale_count > 0 %}
-        <span class="text-xs text-amber-500">{{ stats.stale_count }} stale</span>
-        {% endif %}
-      </div>
-
-      <!-- New Today -->
-      <div class="bg-slate-800 rounded-xl border {% if stats.new_today > 0 %}border-emerald-600{% else %}border-slate-700{% endif %} p-5 flex flex-col gap-1">
-        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">New Today</span>
-        <span class="text-4xl font-bold {% if stats.new_today > 0 %}text-emerald-400{% else %}text-slate-100{% endif %}">
-          {{ stats.new_today }}
-        </span>
-      </div>
-
-      <!-- In Review -->
-      <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 flex flex-col gap-1">
-        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">In Review</span>
-        <span class="text-4xl font-bold text-slate-100">{{ stats.reviewing_count }}</span>
-      </div>
-
-      <!-- Today's Cost -->
-      {% if budget_pct >= 100 %}
-        {% set cost_border = "border-red-600" %}
-        {% set cost_text = "text-red-400" %}
-      {% elif budget_pct >= 80 %}
-        {% set cost_border = "border-amber-600" %}
-        {% set cost_text = "text-amber-400" %}
-      {% else %}
-        {% set cost_border = "border-slate-700" %}
-        {% set cost_text = "text-slate-100" %}
-      {% endif %}
-
-      <div class="bg-slate-800 rounded-xl border {{ cost_border }} p-5 flex flex-col gap-1 cursor-pointer"
-           hx-get="{{ url_for('dashboard.cost_detail') }}" hx-target="#cost-detail-panel" hx-swap="innerHTML">
-        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Today's Cost</span>
-        <span class="text-2xl font-bold {{ cost_text }}">${{ "%.2f" | format(cost_stats.today) }}</span>
-        <span class="text-xs text-slate-500">${{ "%.2f" | format(cost_stats.month) }} / ${{ "%.0f" | format(budget_cap) }} this month</span>
-        <a href="{{ url_for('costs.index') }}"
-           class="text-xs text-violet-400 hover:text-violet-300 transition-colors mt-1"
-           hx-on:click="event.stopPropagation()">View details &rarr;</a>
-      </div>
-
-      <!-- Pending Review -->
-      <div class="bg-slate-800 rounded-xl border {% if pending_count > 0 %}border-amber-600{% else %}border-slate-700{% endif %} p-5 flex flex-col gap-1">
-        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Pending Review</span>
-        <span class="text-4xl font-bold {% if pending_count > 0 %}text-amber-400{% else %}text-slate-100{% endif %}">
-          {{ pending_count }}
-        </span>
-      </div>
-
+    <div id="dashboard-stats"
+         hx-get="{{ url_for('dashboard.stats_fragment') }}"
+         hx-trigger="dashboard-refresh from:body"
+         hx-swap="innerHTML">
+      {% include "dashboard/_stats_cards.html" %}
     </div>
-
-    <!-- ATS Discovery stat card (below main stats row) -->
-    <div class="mt-4">
-      <a href="{{ url_for('companies.index') }}" class="block bg-slate-800 rounded-xl border border-slate-700 p-4 hover:border-indigo-600 transition-colors">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-            </svg>
-            <div>
-              <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">ATS Discovery</span>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-sm font-semibold text-slate-100">{{ company_count }} companies tracked</span>
-                {% if ats_tracked_count > 0 %}
-                <span class="text-xs text-slate-400">({{ ats_tracked_count }} on ATS)</span>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-          <div class="text-right">
-            {% if ats_last_scan %}
-            <div class="text-xs text-slate-400">Last scan: {{ ats_last_scan.scanned_at | relative_date }}</div>
-            <div class="text-xs text-emerald-400 mt-0.5">
-              +{{ ats_last_scan.total_found or 0 }} jobs from {{ ats_last_scan.companies_scanned }} companies
-            </div>
-            {% else %}
-            <span class="text-xs text-slate-500">No ATS scans yet</span>
-            {% endif %}
-          </div>
-        </div>
-      </a>
-    </div>
-
-    <!-- Cost detail expandable panel -->
-    <div id="cost-detail-panel"></div>
-
   </section>
 
   <!-- ── Quick Actions ── -->
   <section aria-label="Quick actions">
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
     <div class="flex flex-wrap gap-3 items-start">
-      <!-- Sync Now — async with HTMX progress polling -->
-      <div id="sync-status">
-        <form hx-post="{{ url_for('sync.sync_start') }}"
-              hx-target="#sync-status"
-              hx-swap="outerHTML">
-          <button type="submit"
-                  class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
-            Sync Now
-          </button>
-        </form>
+      {# Dynamic actions — auto-refresh on dashboard-refresh. 5s delay gives    #}
+      {# the backend time to finalize session state (status='done', counts).   #}
+      {# class="contents" makes the wrapper layout-transparent so its children #}
+      {# participate in the parent flex row. #}
+      <div id="dashboard-quick-actions"
+           class="contents"
+           hx-get="{{ url_for('dashboard.quick_actions_fragment') }}"
+           hx-trigger="dashboard-refresh from:body delay:5s"
+           hx-swap="innerHTML">
+        {% include "dashboard/_quick_actions.html" %}
       </div>
 
-      <!-- Unified batch scoring — async with HTMX polling progress bar -->
-      {% if active_scoring %}
-        {% with session_id=active_scoring.id, total=active_scoring.total,
-                scored=active_scoring.scored, skipped=active_scoring.skipped,
-                cancelling=(active_scoring.status == 'cancelling') %}
-          {% include "dashboard/_batch_score_progress.html" %}
-        {% endwith %}
-      {% elif scoring_available and unscored_count > 0 %}
-        <div id="batch-score-status">
-          <form hx-post="{{ url_for('batch_scoring.batch_score_start') }}"
-                hx-target="#batch-score-status"
-                hx-swap="outerHTML">
-            <button type="submit"
-                    class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
-                    title="Run AI scoring on {{ unscored_count }} scorable jobs">
-              Score {{ unscored_count }} unscored {% if unscored_count == 1 %}job{% else %}jobs{% endif %}
-              <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ unscored_count }}</span>
-            </button>
-          </form>
-        </div>
-      {% else %}
-        <div id="batch-score-status">
-          <button type="button"
-                  disabled
-                  class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
-                  title="{{ 'No scoring provider configured' if not scoring_available else 'No scorable jobs to process' }}">
-            No jobs to score
-          </button>
-        </div>
-      {% endif %}
-
+      {# Static action — does not need to refresh on dashboard-refresh. #}
       <button type="button"
               onclick="(function(){ var d=document.getElementById('manual-job-dialog'); var f=document.getElementById('manual-job-form'); var r=document.getElementById('manual-job-dialog-result'); if(f) f.reset(); if(r) r.innerHTML=''; d.showModal(); })()"
               class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-lg transition-colors">

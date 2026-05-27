@@ -1,57 +1,62 @@
-{# Quick actions partial — auto-refreshed via dashboard-refresh event.
+{# Quick actions dynamic widgets — auto-refreshed via dashboard-refresh event.
+
+   Rendered inside #dashboard-quick-actions wrapper in dashboard/index.html,
+   and as the response body of /dashboard/quick-actions fragment route.
+
+   This partial renders ONLY the dynamic items that should refresh after a
+   sync / batch-score run (Sync Now button or active-sync progress; Score
+   Unscored button or active-scoring progress). The "Add Job Manually"
+   button and its dialog live outside this partial in dashboard/index.html
+   because they are static UI.
+
    Required context: active_sync, active_scoring, unscored_count, scoring_available. #}
 
-<h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Quick Actions</h2>
-<div class="flex flex-wrap gap-3 items-start">
-
-  <!-- Sync Now -->
-  {% if active_sync %}
-    {% with session_id=active_sync.id,
-            phase_label={"running": "Starting...", "gmail": "Syncing..."}.get(active_sync.status, "Syncing...") %}
-      {% include "dashboard/_sync_progress.html" %}
-    {% endwith %}
-  {% else %}
-    <div id="sync-status">
-      <form hx-post="/dashboard/sync/start"
-            hx-target="#sync-status"
-            hx-swap="outerHTML">
-        <button type="submit"
-                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
-          Sync Now
-        </button>
-      </form>
-    </div>
-  {% endif %}
-
-  <!-- Unified Scoring -->
-  {% if active_scoring %}
-    {% with session_id=active_scoring.id, total=active_scoring.total,
-            scored=active_scoring.scored, skipped=active_scoring.skipped,
-            cancelling=(active_scoring.status == 'cancelling') %}
-      {% include "dashboard/_batch_score_progress.html" %}
-    {% endwith %}
-  {% elif scoring_available and unscored_count > 0 %}
-    <div id="batch-score-status">
-      <form hx-post="/dashboard/batch-score/start"
-            hx-target="#batch-score-status"
-            hx-swap="outerHTML">
-        <button type="submit"
-                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
-                title="Run AI scoring on {{ unscored_count }} scorable jobs">
-          Score {{ unscored_count }} unscored {% if unscored_count == 1 %}job{% else %}jobs{% endif %}
-          <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ unscored_count }}</span>
-        </button>
-      </form>
-    </div>
-  {% else %}
-    <div id="batch-score-status">
-      <button type="button"
-              disabled
-              class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
-              title="{{ 'No scoring provider configured' if not scoring_available else 'No scorable jobs to process' }}">
-        No jobs to score
+{# Sync Now / sync progress bar #}
+{% if active_sync %}
+  {% with session_id=active_sync.id,
+          phase_label={"running": "Starting...", "gmail": "Syncing..."}.get(active_sync.status, "Syncing...") %}
+    {% include "dashboard/_sync_progress.html" %}
+  {% endwith %}
+{% else %}
+  <div id="sync-status">
+    <form hx-post="{{ url_for('sync.sync_start') }}"
+          hx-target="#sync-status"
+          hx-swap="outerHTML">
+      <button type="submit"
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors">
+        Sync Now
       </button>
-    </div>
-  {% endif %}
+    </form>
+  </div>
+{% endif %}
 
-</div>
+{# Unified batch scoring — async with HTMX polling progress bar #}
+{% if active_scoring %}
+  {% with session_id=active_scoring.id, total=active_scoring.total,
+          scored=active_scoring.scored, skipped=active_scoring.skipped,
+          cancelling=(active_scoring.status == 'cancelling') %}
+    {% include "dashboard/_batch_score_progress.html" %}
+  {% endwith %}
+{% elif scoring_available and unscored_count > 0 %}
+  <div id="batch-score-status">
+    <form hx-post="{{ url_for('batch_scoring.batch_score_start') }}"
+          hx-target="#batch-score-status"
+          hx-swap="outerHTML">
+      <button type="submit"
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors"
+              title="Run AI scoring on {{ unscored_count }} scorable jobs">
+        Score {{ unscored_count }} unscored {% if unscored_count == 1 %}job{% else %}jobs{% endif %}
+        <span class="ml-1 bg-emerald-500 text-white text-xs rounded-full px-1.5 py-0.5">{{ unscored_count }}</span>
+      </button>
+    </form>
+  </div>
+{% else %}
+  <div id="batch-score-status">
+    <button type="button"
+            disabled
+            class="px-4 py-2 bg-slate-700 text-slate-500 text-sm font-medium rounded-lg cursor-not-allowed opacity-50"
+            title="{{ 'No scoring provider configured' if not scoring_available else 'No scorable jobs to process' }}">
+      No jobs to score
+    </button>
+  </div>
+{% endif %}

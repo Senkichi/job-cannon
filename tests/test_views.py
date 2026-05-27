@@ -1428,6 +1428,49 @@ class TestDashboardAtsStat:
 
 
 # ---------------------------------------------------------------------------
+# Tests for /dashboard/stats and /dashboard/quick-actions HTMX fragment routes
+# wired by dashboard-refresh auto-refresh in dashboard/index.html
+# ---------------------------------------------------------------------------
+
+
+class TestDashboardRefreshFragments:
+    def test_stats_fragment_returns_200_and_renders_stat_cards(self, client):
+        """GET /dashboard/stats returns the stats partial body."""
+        response = client.get("/dashboard/stats")
+        assert response.status_code == 200
+        data = response.data.decode()
+        # Stat-card labels rendered by _stats_cards.html
+        assert "Total Jobs" in data
+        assert "New Today" in data
+        assert "Pending Review" in data
+        assert "ATS Discovery" in data
+
+    def test_quick_actions_fragment_returns_200_and_renders_action_buttons(self, client):
+        """GET /dashboard/quick-actions returns the quick-actions partial body."""
+        response = client.get("/dashboard/quick-actions")
+        assert response.status_code == 200
+        data = response.data.decode()
+        # Either Sync Now button or sync-progress markup is rendered
+        assert "Sync Now" in data or "sync-progress" in data
+        # Either a Score button or "No jobs to score" placeholder
+        assert "Score" in data or "No jobs to score" in data
+
+    def test_dashboard_index_includes_refresh_listening_wrappers(self, client):
+        """Dashboard page must wrap stat cards and quick actions in containers
+        that subscribe to the 'dashboard-refresh' event from the body — this is
+        what makes the post-batch-score HX-Trigger payload actually do something.
+        """
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'id="dashboard-stats"' in data
+        assert 'id="dashboard-quick-actions"' in data
+        assert 'hx-trigger="dashboard-refresh from:body"' in data
+        # Quick actions wrapper uses a 5s delay so backend session state settles
+        assert 'hx-trigger="dashboard-refresh from:body delay:5s"' in data
+
+
+# ---------------------------------------------------------------------------
 # Tests for /dashboard/cost-detail HTMX route (SCORE-07)
 # ---------------------------------------------------------------------------
 
