@@ -431,13 +431,18 @@ function restoreFilters() {
   try {
     var state = JSON.parse(raw);
     var form = document.getElementById('filter-form');
+    var firstRestored = null;
     PERSISTED_FILTERS.forEach(function(name) {
       var el = form.querySelector('[name="' + name + '"]');
       if (!el || !(name in state)) return;
       if (el.type === 'checkbox') { el.checked = state[name]; }
       else { el.value = state[name]; }
+      if (!firstRestored) firstRestored = el;
     });
-    htmx.trigger(form, 'change');
+    // Fire change on a restored element (not the form) so the form's
+    // `change from:select, change from:input` hx-trigger picks it up.
+    // Dispatching on the form directly does not match the `from:` filter.
+    if (firstRestored) htmx.trigger(firstRestored, 'change');
   } catch (e) { /* ignore corrupt storage */ }
 }
 

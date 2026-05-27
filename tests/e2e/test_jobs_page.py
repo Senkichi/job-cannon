@@ -238,3 +238,42 @@ class TestDOMIntegrity:
         assert sort_val == "first_seen", (
             f"Sort filter should be restored from localStorage, got: {sort_val!r}"
         )
+
+    def test_posted_within_restore_actually_refreshes_table(
+        self, page: Page, live_server: str
+    ):
+        """posted_within=today restored from localStorage must drive an HTMX fetch
+        so the table reflects the filter, not just the dropdown UI.
+
+        Regression: dispatching `change` on the form did not match the form's
+        `hx-trigger="change from:select"` filter, so the dropdown displayed
+        'Today' while the table still showed all jobs.
+        """
+        page.goto(f"{live_server}/jobs")
+        page.evaluate("localStorage.clear()")
+        page.reload()
+        page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
+        page.wait_for_load_state("networkidle")
+
+        # Apply 'today' filter and wait for the HTMX table refresh.
+        page.select_option("#filter-posted-within", "today")
+        page.wait_for_load_state("networkidle")
+        filtered_html = page.locator("#job-table-body").inner_html()
+
+        # Reload — localStorage should reapply 'today' and fire an HTMX request
+        # that refreshes #job-table-body to the same filtered contents.
+        page.reload()
+        page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
+        page.wait_for_load_state("networkidle")
+
+        # Dropdown should show 'today'
+        assert page.locator("#filter-posted-within").input_value() == "today"
+
+        # AND the table body must match the filtered state — not the all-jobs
+        # initial render. We compare to the locally-filtered HTML rather than
+        # asserting a row count, because fixture data may produce 0 today-rows.
+        restored_html = page.locator("#job-table-body").inner_html()
+        assert restored_html == filtered_html, (
+            "Table body did not refresh to match restored posted_within=today; "
+            "dropdown shows 'today' but listing reflects the unfiltered initial render."
+        )
