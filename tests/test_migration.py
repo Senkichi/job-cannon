@@ -394,11 +394,12 @@ def test_migration_count_is_thirteen():
     Migration 61: reconcile semantic company-name dupes (paren-abbrev + corporate-suffix variants).
     Migration 62: backfill salary_min/max from existing jd_full via deterministic regex.
     Migration 63: merge companies by shared job board (ats_platform+slug, then careers_url).
+    Migration 64: reset FP-prone speculative-probe hits (B1b — paired with B1a probe gate).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 63
+    assert len(MIGRATIONS) == 64
 
 
 class TestMigration27:
@@ -929,8 +930,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 63 entries (through Migration 63: merge by job board)."""
-        assert len(MIGRATIONS) == 63
+        """MIGRATIONS list has 64 entries (through Migration 64: reset FP-prone speculative hits)."""
+        assert len(MIGRATIONS) == 64
 
 
 class TestMigration40:
@@ -1378,7 +1379,7 @@ class TestMigration52And53:
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 63, f"Expected PRAGMA user_version=63, got: {version}"
+        assert version == 64, f"Expected PRAGMA user_version=64, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(
