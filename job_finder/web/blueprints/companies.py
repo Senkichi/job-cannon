@@ -1,18 +1,21 @@
 """Companies blueprint — Company registry management routes.
 
 Routes:
-    GET  /companies                   -- Companies list with search and ATS filter
-    GET  /companies/<id>/expand       -- HTMX: expand company row with jobs + scan history
-    GET  /companies/<id>/collapse     -- HTMX: collapse company row back to compact
-    POST /companies/add               -- Create new company record
-    POST /companies/<id>/toggle       -- Toggle scan_enabled between 0 and 1
-    POST /companies/<id>/update-slug  -- Update ATS platform/slug manually
-    POST /companies/scan              -- Trigger immediate ATS scan (synchronous)
-    POST /companies/<id>/research     -- Start or return cached company research
+    GET  /companies                            -- Companies list with search and ATS filter
+    GET  /companies/<id>/expand                -- HTMX: expand company row with jobs + scan history
+    GET  /companies/<id>/collapse              -- HTMX: collapse company row back to compact
+    POST /companies/add                        -- Create new company record
+    POST /companies/<id>/toggle                -- Toggle scan_enabled between 0 and 1
+    POST /companies/<id>/update-slug           -- Update ATS platform/slug manually
+    POST /companies/scan                       -- Start async ATS scan; returns polling progress fragment
+    GET  /companies/scan/status/<id>           -- Poll route for scan progress / terminal result
+    POST /companies/<id>/research              -- Start or return cached company research
     GET  /companies/<id>/research/status/<rid> -- Poll research status
 """
 
+import json
 import logging
+import threading
 from datetime import UTC, datetime
 
 from flask import (
@@ -25,9 +28,15 @@ from flask import (
     url_for,
 )
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_prober import probe_single_company
 from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
-from job_finder.web.db_helpers import get_db
+from job_finder.web.db_helpers import (
+    PollingSessionConfig,
+    get_db,
+    render_polling_status,
+    standalone_connection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,22 +120,6 @@ def index():
     # Compute health metrics for full page
     health = _compute_health_metrics(conn)
 
-    # Rough scannable-cohort count + ETA for the in-flight progress card.
-    # Upper bound: counts all hit companies with scan_enabled, ignoring the
-    # high-score-history gate applied inside run_ats_scan — that gate's
-    # threshold lives in config and varies, so the simple count keeps the
-    # template independent of scanner internals. The ~4s-per-company ETA is
-    # a heuristic, not a measurement; the actual scan can be faster or much
-    # slower depending on ATS response times.
-    try:
-        scannable_count = conn.execute(
-            "SELECT COUNT(*) FROM companies "
-            "WHERE ats_probe_status = 'hit' AND scan_enabled = 1"
-        ).fetchone()[0]
-    except Exception:
-        scannable_count = 0
-    scan_eta_seconds = max(5, scannable_count * 4)
-
     return render_template(
         "companies/index.html",
         companies=companies,
@@ -137,8 +130,6 @@ def index():
         has_more=has_more,
         total_count=total_count,
         health=health,
-        scannable_count=scannable_count,
-        scan_eta_seconds=scan_eta_seconds,
     )
 
 
@@ -355,30 +346,193 @@ def update_slug(company_id):
     )
 
 
+_SESSION_TYPE_ATS_SCAN = "ats_scan"
+
+
+def _scannable_count(conn) -> int:
+    """Count companies that would actually be scanned by run_ats_scan.
+
+    Mirrors the WHERE clause used by run_ats_scan when it iterates the
+    cohort (``ats_probe_status='hit' AND scan_enabled=1``), ignoring the
+    high-score-history gate. The count is for progress display, not for
+    deciding what to scan — being slightly off is harmless.
+    """
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM companies "
+            "WHERE ats_probe_status = 'hit' AND scan_enabled = 1"
+        ).fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
 @companies_bp.route("/scan", methods=["POST"], strict_slashes=False)
 def scan():
-    """Trigger immediate ATS scan synchronously. Returns _scan_result.html fragment.
+    """Start an async ATS scan; return the polling progress fragment.
 
-    Two-layer exception handling:
-    - Inner try: scan logic errors (probe + run_ats_scan). Caught and shown as scan failure.
-    - render_template is OUTSIDE the try block: template errors propagate as 500 with traceback.
+    Mirrors the batch_scoring pattern (session row + bg thread + polling
+    endpoint + done fragment). Replaces the previous synchronous route
+    that blocked the request until the scan finished (multi-minute wait
+    with no progress feedback).
+
+    Returns the progress fragment that HTMX-polls /companies/scan/status
+    every 2s until terminal.
     """
     db_path = current_app.config["DB_PATH"]
     config = current_app.config.get("JF_CONFIG", {})
+    testing = current_app.config.get("TESTING", False)
 
-    scan_error = None
+    with standalone_connection(db_path) as conn:
+        total = _scannable_count(conn)
+
+        if total == 0:
+            return render_template(
+                "companies/_scan_ats_done.html",
+                status="done",
+                result=None,
+                message="No companies eligible to scan (need ats_probe_status='hit' AND scan_enabled=1).",
+                error_msg=None,
+            )
+
+        now = utc_now_iso()
+        conn.execute(
+            "INSERT INTO batch_score_sessions (session_type, status, total, scored, started_at) "
+            "VALUES (?, 'running', ?, 0, ?)",
+            (_SESSION_TYPE_ATS_SCAN, total, now),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    if not testing:
+        t = threading.Thread(
+            target=_run_ats_scan_bg,
+            args=(db_path, session_id, config),
+            daemon=True,
+        )
+        t.start()
+
+    return render_template(
+        "companies/_scan_ats_progress.html",
+        session_id=session_id,
+        total=total,
+        scanned=0,
+    )
+
+
+def _scan_progress_ctx(session) -> dict:
+    return {
+        "session_id": session["id"],
+        "total": session["total"],
+        # We don't get per-company progress (run_ats_scan iterates internally
+        # and only returns a summary at the end). Showing 0/N during the run
+        # is honest — the spinner conveys liveness, the count conveys scope.
+        "scanned": session["scored"] or 0,
+    }
+
+
+def _scan_done_ctx(session, status: str, error_msg: str | None) -> dict:
+    """Reconstruct the run_ats_scan summary dict from the session row.
+
+    The bg thread serializes the summary into ``batch_score_sessions.error_msg``
+    when status='done' (the column is reused for both purposes; status is
+    the discriminator). The shared ``render_polling_status`` helper only
+    surfaces ``error_msg`` to ``done_ctx`` for status='error', so we read
+    the column straight off the ``session`` row when status='done'.
+    """
     result = None
-    try:
-        probe_result = probe_ats_slugs(db_path, config)
-        logger.info("ATS probe before scan: %s", probe_result)
-        result = run_ats_scan(db_path, config)
-        result["probe"] = probe_result
-    except Exception as e:
-        logger.error("ATS scan failed: %s", e)
-        scan_error = str(e)
+    msg = None
+    err = None
+    if status == "done":
+        raw_summary = session["error_msg"]
+        if raw_summary:
+            try:
+                result = json.loads(raw_summary)
+            except (json.JSONDecodeError, TypeError):
+                msg = raw_summary
+    elif status == "error":
+        err = error_msg
+    elif status == "cancelled":
+        msg = "Scan cancelled."
 
-    # render_template is OUTSIDE the try block — TemplateErrors propagate as 500
-    return render_template("companies/_scan_result.html", result=result, error=scan_error)
+    return {
+        "status": status,
+        "result": result,
+        "message": msg,
+        "error_msg": err,
+    }
+
+
+_ATS_SCAN_HX_TRIGGER = {"dashboard-refresh": None, "jobs-updated": None}
+
+
+@companies_bp.route("/scan/status/<int:session_id>", strict_slashes=False)
+def scan_status(session_id):
+    """Poll route for ATS scan progress (mirrors batch_scoring.batch_score_status)."""
+    return render_polling_status(
+        current_app.config["DB_PATH"],
+        session_id,
+        PollingSessionConfig(
+            progress_template="companies/_scan_ats_progress.html",
+            done_template="companies/_scan_ats_done.html",
+            progress_ctx=_scan_progress_ctx,
+            done_ctx=_scan_done_ctx,
+            not_found_ctx={
+                "status": "error",
+                "result": None,
+                "message": None,
+                "error_msg": "Scan session not found.",
+            },
+            hx_trigger_after_settle=_ATS_SCAN_HX_TRIGGER,
+            session_label="ATS scan",
+        ),
+    )
+
+
+def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
+    """Background thread: run probe + scan, serialize summary into the session.
+
+    On success, the summary dict is JSON-serialized into
+    ``batch_score_sessions.error_msg`` (the column is used for both
+    structured-success payloads and error strings; ``status`` is the
+    discriminator).
+
+    The session's ``scored`` column tracks ``companies_scanned`` so the
+    progress fragment's percent-complete bar lines up with the planned
+    total. ``total`` was set by the POST route from ``_scannable_count``.
+    """
+    try:
+        with standalone_connection(db_path) as conn:
+            probe_result = probe_ats_slugs(db_path, config)
+            logger.info("ATS probe before scan: %s", probe_result)
+            result = run_ats_scan(db_path, config)
+            result["probe"] = probe_result
+
+            conn.execute(
+                "UPDATE batch_score_sessions "
+                "SET status='done', scored=?, error_msg=?, finished_at=? "
+                "WHERE id=?",
+                (
+                    result.get("companies_scanned", 0),
+                    json.dumps(result),
+                    utc_now_iso(),
+                    session_id,
+                ),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error("ATS scan background thread failed: %s", e)
+        try:
+            with standalone_connection(db_path) as conn:
+                conn.execute(
+                    "UPDATE batch_score_sessions "
+                    "SET status='error', error_msg=?, finished_at=? "
+                    "WHERE id=?",
+                    (str(e)[:500], utc_now_iso(), session_id),
+                )
+                conn.commit()
+        except Exception:
+            logger.exception("Failed to record ATS scan error for session %s", session_id)
 
 
 @companies_bp.route("/<int:company_id>/retry", methods=["POST"], strict_slashes=False)

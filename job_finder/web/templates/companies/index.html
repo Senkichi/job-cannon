@@ -12,19 +12,17 @@
       <p class="text-slate-400 text-sm mt-1">Tracked companies with ATS discovery and careers page scraping.</p>
     </div>
     <div class="flex items-center gap-3">
-      <!-- Scan ATS button.
-           hx-disabled-elt="this" prevents a second click while the scan is
-           running; hx-indicator targets BOTH the in-button spinner AND the
-           prominent #scan-progress card below so users get unmissable feedback
-           even for multi-minute scans. -->
+      {# Scan ATS button. The POST returns a polling-progress fragment that
+         lives in #scan-result and re-fetches /companies/scan/status every
+         2s. hx-disabled-elt only blocks the button for the duration of the
+         POST itself (~ms); polling keeps the user informed without blocking. #}
       <button
         hx-post="{{ url_for('companies.scan') }}"
         hx-target="#scan-result"
-        hx-swap="innerHTML"
-        hx-indicator=".scan-busy"
+        hx-swap="outerHTML"
         hx-disabled-elt="this"
         class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-wait text-white text-sm font-medium rounded-lg transition-colors">
-        <svg class="htmx-indicator scan-busy w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="htmx-indicator w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
         </svg>
         <span>Scan ATS</span>
@@ -43,76 +41,11 @@
     </div>
   </div>
 
-  {# In-flight scan indicator. Made visible by hx-indicator=".scan-busy" on
-     the Scan ATS button. Lives OUTSIDE #scan-result so it survives the
-     innerHTML swap that delivers the eventual scan summary. The countdown
-     is best-effort — actual scan time varies by ATS responsiveness. #}
-  <div id="scan-progress" class="htmx-indicator scan-busy">
-    <div class="bg-indigo-900/40 border border-indigo-700 rounded-lg px-4 py-3 flex items-center gap-3">
-      <svg class="w-5 h-5 animate-spin flex-shrink-0 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-      </svg>
-      <div class="flex-1">
-        <p class="text-indigo-100 text-sm font-medium">
-          Scanning {{ scannable_count }} compan{% if scannable_count == 1 %}y{% else %}ies{% endif %}...
-        </p>
-        <p class="text-indigo-300 text-xs">
-          This page is synchronous — stay here until it finishes.
-          Estimated ~<span id="scan-eta-seconds">{{ scan_eta_seconds }}</span> seconds remaining.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Scan result area -->
+  {# Scan result slot. The Scan ATS button replaces this div with either the
+     progress fragment (which polls every 2s) or the terminal done/error
+     fragment. Both fragments keep id="scan-result" so subsequent polls
+     swap into the same slot. #}
   <div id="scan-result"></div>
-
-  {# Best-effort countdown for the scan-progress ETA. Starts when the .htmx-indicator
-     becomes visible (htmx adds .htmx-request to it), resets when the request settles. #}
-  <script>
-    (function () {
-      var progress = document.getElementById("scan-progress");
-      var counter = document.getElementById("scan-eta-seconds");
-      if (!progress || !counter) return;
-
-      var initial = parseInt(counter.textContent, 10);
-      var timer = null;
-
-      function start() {
-        if (timer) return;
-        var remaining = initial;
-        timer = setInterval(function () {
-          remaining = Math.max(0, remaining - 1);
-          counter.textContent = remaining;
-        }, 1000);
-      }
-      function stop() {
-        if (timer) {
-          clearInterval(timer);
-          timer = null;
-        }
-        counter.textContent = initial;
-      }
-
-      // hx-indicator adds htmx-request class to the indicator element when the
-      // request fires, and removes it when the request settles.
-      document.body.addEventListener("htmx:beforeRequest", function (evt) {
-        if (evt.detail && evt.detail.requestConfig &&
-            evt.detail.requestConfig.path &&
-            evt.detail.requestConfig.path.endsWith("/companies/scan")) {
-          start();
-        }
-      });
-      document.body.addEventListener("htmx:afterRequest", function (evt) {
-        if (evt.detail && evt.detail.requestConfig &&
-            evt.detail.requestConfig.path &&
-            evt.detail.requestConfig.path.endsWith("/companies/scan")) {
-          stop();
-        }
-      });
-    })();
-  </script>
 
   <!-- Pipeline health metrics -->
   {% if health %}

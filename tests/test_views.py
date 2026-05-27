@@ -8,7 +8,7 @@ Tests cover:
 - Base template has dark mode class
 """
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 import pytest
 
@@ -2628,64 +2628,248 @@ class TestGapClosureFixes:
 # ---------------------------------------------------------------------------
 
 
-class TestScanExceptionSeparation:
-    """Verify that template rendering errors are distinct from scan logic errors."""
+class TestAsyncScanFlow:
+    """Verify the async ATS-scan flow: POST starts a session and returns a
+    polling progress fragment; the bg thread serializes its result into the
+    session row; the polling endpoint surfaces progress / done / error.
+    """
 
-    def test_scan_logic_error_returns_scan_failure_message(self, app_with_companies):
-        """POST /companies/scan where run_ats_scan raises RuntimeError returns 200 with error."""
-        from unittest.mock import patch
+    def test_post_scan_with_scannable_cohort_starts_session(self, app_with_companies):
+        """POST /companies/scan creates a row in batch_score_sessions with
+        session_type='ats_scan' status='running' and returns the polling
+        progress fragment (session_id embedded in hx-get URL)."""
+        import sqlite3
 
         client = app_with_companies.test_client()
-        with (
-            patch(
-                "job_finder.web.blueprints.companies.run_ats_scan",
-                side_effect=RuntimeError("connection timeout"),
-            ),
-            patch(
-                "job_finder.web.blueprints.companies.probe_ats_slugs",
-                return_value={"probed": 0},
-            ),
-        ):
-            response = client.post("/companies/scan")
+        response = client.post("/companies/scan")
 
         assert response.status_code == 200
         data = response.data.decode()
-        assert "connection timeout" in data
+        # Progress fragment polls itself on /companies/scan/status/<id>
+        assert "/companies/scan/status/" in data
+        assert 'hx-trigger="every 2s"' in data
+        assert 'id="scan-result"' in data
+        # 'Scanning N companies' — the fixture seeds 2 hit companies
+        assert "Scanning 2" in data
 
-    def test_scan_template_error_not_reported_as_scan_failure(self, app_with_companies):
-        """POST /companies/scan where run_ats_scan succeeds but render_template raises propagates.
+        # Session row exists
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT session_type, status, total FROM batch_score_sessions "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == "ats_scan"
+        assert row[1] == "running"
+        assert row[2] == 2
 
-        In Flask TESTING mode, unhandled exceptions propagate to the test instead of
-        returning 500. We verify the exception is a TemplateSyntaxError (not swallowed
-        as a generic scan failure), which confirms render_template is outside the try block.
-        """
-        from unittest.mock import patch
+    def test_post_scan_with_empty_cohort_returns_done_immediately(self, client):
+        """When no companies are eligible to scan, POST returns the done
+        fragment directly without creating a session row."""
+        response = client.post("/companies/scan")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "No companies eligible" in data
+        # No polling — done fragment must omit the hx-trigger
+        assert 'hx-trigger="every 2s"' not in data
 
-        import jinja2
+    def test_scan_status_returns_progress_while_running(self, app_with_companies):
+        """GET /companies/scan/status/<id> returns the progress fragment with
+        polling enabled when status='running'."""
+        import sqlite3
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at) "
+            "VALUES ('ats_scan', 'running', 5, 0, ?)",
+            (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
 
         client = app_with_companies.test_client()
-        with (
-            patch(
-                "job_finder.web.blueprints.companies.run_ats_scan",
-                return_value={
-                    "jobs_found": 5,
-                    "companies_scanned": 2,
-                    "html_scraped": 0,
-                    "errors": [],
-                },
+        response = client.get(f"/companies/scan/status/{session_id}")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'hx-trigger="every 2s"' in data
+        assert "Scanning 5" in data
+
+    def test_scan_status_returns_done_with_summary_when_terminal(self, app_with_companies):
+        """When status='done' and error_msg holds the JSON summary, the
+        polling endpoint renders the done fragment with the parsed result."""
+        import json
+        import sqlite3
+
+        summary = {
+            "companies_scanned": 4,
+            "jobs_discovered": 12,
+            "jobs_new": 3,
+            "html_scraped": 0,
+            "errors": [],
+        }
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at, finished_at, error_msg) "
+            "VALUES ('ats_scan', 'done', 4, 4, ?, ?, ?)",
+            (
+                datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                json.dumps(summary),
             ),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+
+        client = app_with_companies.test_client()
+        response = client.get(f"/companies/scan/status/{session_id}")
+        assert response.status_code == 200
+        data = response.data.decode()
+        # Done fragment has NO hx-trigger so HTMX stops polling
+        assert 'hx-trigger="every 2s"' not in data
+        # Summary values rendered
+        assert "Scanned 4 companies" in data
+        assert "12 jobs" in data
+        assert "(3 new)" in data
+        # Dashboard-refresh trigger emitted so the dashboard auto-refreshes
+        assert response.headers.get("HX-Trigger-After-Settle") is not None
+        assert "dashboard-refresh" in response.headers["HX-Trigger-After-Settle"]
+
+    def test_scan_status_returns_error_when_bg_thread_failed(self, app_with_companies):
+        """status='error' surfaces the recorded error string."""
+        import sqlite3
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at, finished_at, error_msg) "
+            "VALUES ('ats_scan', 'error', 5, 0, ?, ?, ?)",
+            (
+                datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                "connection timeout",
+            ),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+
+        client = app_with_companies.test_client()
+        response = client.get(f"/companies/scan/status/{session_id}")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert "ATS scan failed" in data
+        assert "connection timeout" in data
+        assert 'hx-trigger="every 2s"' not in data
+
+    def test_bg_thread_records_summary_on_success(self, app_with_companies):
+        """_run_ats_scan_bg writes status='done' and a JSON summary into
+        the session row when run_ats_scan returns normally."""
+        import json
+        import sqlite3
+        from unittest.mock import patch
+
+        from job_finder.web.blueprints.companies import _run_ats_scan_bg
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at) "
+            "VALUES ('ats_scan', 'running', 2, 0, ?)",
+            (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+
+        with (
             patch(
                 "job_finder.web.blueprints.companies.probe_ats_slugs",
                 return_value={"probed": 2},
             ),
             patch(
-                "job_finder.web.blueprints.companies.render_template",
-                side_effect=jinja2.TemplateSyntaxError("unexpected char", 1, filename="test.html"),
+                "job_finder.web.blueprints.companies.run_ats_scan",
+                return_value={
+                    "companies_scanned": 2,
+                    "jobs_discovered": 6,
+                    "jobs_new": 2,
+                    "html_scraped": 0,
+                    "errors": [],
+                },
             ),
         ):
-            # Template error must propagate (not be swallowed as "ATS scan failed")
-            with pytest.raises(jinja2.TemplateSyntaxError):
-                client.post("/companies/scan")
+            _run_ats_scan_bg(db_path, session_id, {})
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT status, scored, error_msg, finished_at "
+            "FROM batch_score_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+        status, scored, error_msg, finished_at = row
+        assert status == "done"
+        assert scored == 2  # companies_scanned written to scored column
+        assert finished_at is not None
+        # error_msg holds the JSON summary payload on success (column is reused
+        # for both purposes; status is the discriminator)
+        parsed = json.loads(error_msg)
+        assert parsed["companies_scanned"] == 2
+        assert parsed["jobs_new"] == 2
+
+    def test_bg_thread_records_error_when_run_ats_scan_raises(self, app_with_companies):
+        """_run_ats_scan_bg writes status='error' and the exception message
+        into the session row when run_ats_scan raises."""
+        import sqlite3
+        from unittest.mock import patch
+
+        from job_finder.web.blueprints.companies import _run_ats_scan_bg
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at) "
+            "VALUES ('ats_scan', 'running', 2, 0, ?)",
+            (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+
+        with (
+            patch(
+                "job_finder.web.blueprints.companies.probe_ats_slugs",
+                return_value={"probed": 2},
+            ),
+            patch(
+                "job_finder.web.blueprints.companies.run_ats_scan",
+                side_effect=RuntimeError("connection timeout"),
+            ),
+        ):
+            _run_ats_scan_bg(db_path, session_id, {})
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT status, error_msg, finished_at "
+            "FROM batch_score_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+        status, error_msg, finished_at = row
+        assert status == "error"
+        assert "connection timeout" in (error_msg or "")
+        assert finished_at is not None
 
 
 # ---------------------------------------------------------------------------

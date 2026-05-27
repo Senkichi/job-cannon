@@ -2008,8 +2008,32 @@ class TestScanRouteProbeBeforeScan:
         app.config["TESTING"] = True
         return app
 
-    def test_scan_route_calls_probe_before_run_scan(self, app_with_db):
-        """POST /companies/scan calls probe_ats_slugs BEFORE run_ats_scan."""
+    def _seed_session(self, migrated_db_path):
+        """Insert a running ats_scan session row and return its id."""
+        import sqlite3
+        from datetime import UTC, datetime
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at) "
+            "VALUES ('ats_scan', 'running', 1, 0, ?)",
+            (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+        return session_id
+
+    def test_scan_bg_calls_probe_before_run_scan(self, app_with_db, migrated_db_path):
+        """_run_ats_scan_bg calls probe_ats_slugs BEFORE run_ats_scan.
+
+        Previously this verified the request path of POST /companies/scan
+        (synchronous). After the async refactor probe + scan happen in
+        the background thread, so the contract moved with them.
+        """
+        from job_finder.web.blueprints.companies import _run_ats_scan_bg
+
         call_order = []
 
         def mock_probe(db_path, config):
@@ -2022,57 +2046,44 @@ class TestScanRouteProbeBeforeScan:
                 "companies_scanned": 1,
                 "jobs_discovered": 2,
                 "jobs_new": 2,
-                "scored": 2,
-                "classified_apply": 0,
-                "classified_consider": 0,
-                "classified_skip": 2,
-                "classified_reject": 0,
                 "html_scraped": 0,
                 "errors": [],
-                "probe": {},
             }
 
+        session_id = self._seed_session(migrated_db_path)
         with (
-            app_with_db.test_client() as client,
             patch("job_finder.web.blueprints.companies.probe_ats_slugs", side_effect=mock_probe),
             patch("job_finder.web.blueprints.companies.run_ats_scan", side_effect=mock_scan),
         ):
-            response = client.post("/companies/scan")
+            _run_ats_scan_bg(migrated_db_path, session_id, {})
 
-        assert response.status_code == 200
         assert call_order == ["probe", "scan"], (
             f"Expected probe called before scan, got call order: {call_order}"
         )
 
-    def test_scan_route_logs_probe_result(self, app_with_db):
-        """POST /companies/scan logs the probe result via logger.info."""
+    def test_scan_bg_logs_probe_result(self, app_with_db, migrated_db_path):
+        """_run_ats_scan_bg logs the probe result via logger.info."""
+        from job_finder.web.blueprints.companies import _run_ats_scan_bg
+
         probe_result = {"probed": 2, "hits": 1, "misses": 1}
         scan_result = {
             "companies_scanned": 1,
             "jobs_discovered": 0,
             "jobs_new": 0,
-            "scored": 0,
-            "classified_apply": 0,
-            "classified_consider": 0,
-            "classified_skip": 0,
-            "classified_reject": 0,
             "html_scraped": 0,
             "errors": [],
-            "probe": probe_result,
         }
 
+        session_id = self._seed_session(migrated_db_path)
         with (
-            app_with_db.test_client() as client,
             patch(
                 "job_finder.web.blueprints.companies.probe_ats_slugs", return_value=probe_result
             ),
             patch("job_finder.web.blueprints.companies.run_ats_scan", return_value=scan_result),
             patch("job_finder.web.blueprints.companies.logger") as mock_logger,
         ):
-            response = client.post("/companies/scan")
+            _run_ats_scan_bg(migrated_db_path, session_id, {})
 
-        assert response.status_code == 200
-        # Verify logger.info was called with probe result
         info_calls = [str(c) for c in mock_logger.info.call_args_list]
         assert any("probe" in c.lower() for c in info_calls), (
             f"Expected logger.info called with probe result, got: {info_calls}"
