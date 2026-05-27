@@ -1,162 +1,193 @@
-# FOLLOWUPS — observed during 2026-05-26 polish review execution
+# FOLLOWUPS — 2026-05-27 user-bug-list + parser-audit cleanup
 
-These were noticed while implementing F3–F7 of the polish-review plan. They
-are not in scope for that work and are recorded here so they don't get lost.
+## What this session shipped
 
-## Pre-existing Pyright errors in `blueprints/jobs.py`
+Job Cannon is a single-user, local-only Flask command center for job search
+(see CLAUDE.md). This session worked through the full triage list left in the
+prior FOLLOWUPS.md (F3–F7 polish carryover + 2026-05-27 parser-bug audit) and
+the **User Generated Bug List** the user appended at the bottom. Every item
+that wasn't explicitly marked "informational only" was addressed.
 
-`jobs.py` has six reportOptionalSubscript / reportArgumentType errors that
-predate F4 (visible on `git show 00df37e:job_finder/web/blueprints/jobs.py`).
-They cluster around `load_job_context` / `get_job` returning `dict | None`
-followed by unguarded subscripting. F4 surfaced them via Pyright diagnostics
-but the spec was explicit that F4 is mechanical refactoring only.
+Commits, in order:
 
-- Fix would be: narrow with `if ctx is None: return ...` or use
-  `cast(dict, get_job(...))` after a guard — the routes already do an
-  `is None` check but Pyright doesn't pick up the narrowing for `dict | None`
-  uniformly when `dict` is also returned.
+1. `refactor(blueprints): drop unreachable _render_scoring_done helper` — deleted
+   the dead 18-line function in `batch_scoring.py:29`.
+2. `fix(parsers): reject 'Confidential' aggregator placeholder` — hard-coded
+   reject in `classify_company_name` so aggregator-withheld rows don't pollute
+   the companies UI or burn scoring spend. Tests in
+   `tests/test_ats_company.py` (new file).
+3. `fix(blueprints): guard load_job_context re-fetch points in jobs.py` — six
+   pyright `reportOptionalSubscript` errors cleared by adding `if ctx is None:
+   return "", 404` guards at the re-fetch sites (paste_jd, rescore, save_jd).
+4. `fix(scoring): stop counting skipped envelopes as scored; require jd_full
+   for scorable` — the marquee bug from the user list. Two compounding
+   problems: `_run_batch_bg` was treating any non-None `ScoringResult`
+   envelope as a "scored" row (skipped/error envelopes are non-None too, and
+   don't write classification), and `count_scorable` was advertising
+   pre-enrichment rows the v3 scorer can't process. Both fixed; regression
+   tests in `tests/test_batch_scoring.py::test_skipped_envelopes_do_not_count_as_scored`
+   and `tests/test_exclusion_filter.py::TestCountScorable`.
+5. `fix(detections): OOB-swap pipeline-review badge on confirm/dismiss` —
+   extracted the section header into `_pipeline_review_header.html`, return
+   it as `hx-swap-oob="true"` from the confirm/dismiss routes so the badge
+   count decrements with the same request that fades the card. Test updated
+   in `test_detections_blueprint.py::test_dismiss_response_carries_oob_header_only`.
+6. `fix(companies): use 'intersect once' trigger so infinite scroll fires
+   inside the scrolling main-content container` — root cause was
+   `base.html:42` wrapping content in `overflow-y-auto`, and HTMX's
+   `revealed` trigger doesn't fire reliably inside CSS-overflow scroll
+   containers. Switched both `_table.html` and `_rows_partial.html` to
+   `intersect once`.
+7. `feat(companies): visible progress card + button-disable for Scan ATS` —
+   added a `#scan-progress` indicator card with scannable count + JS
+   countdown (4 s/company heuristic), `hx-indicator=".scan-busy"` to make
+   it visible during the request, `hx-disabled-elt="this"` on the button
+   to block double-click. Route is still synchronous (see "Next step" below).
+8. `fix(settings): show '(saved)' placeholder for Adzuna/Jooble/USAJobs after
+   keyring move` — display-only bug. `settings.index()` builds a `secret_set`
+   dict but the dict was missing the five `sources.portal_search.*` canonical
+   names. Template placeholders now use `secret_set` like JSearch already
+   does. **The ingestion path was never broken** — `_inject_portal_search_creds`
+   in `ingestion_runner.py` correctly calls `get_secret()` for all three
+   portals.
+9. `fix(companies): m058 consolidates duplicate company rows` — one-shot
+   data heal. Numeric-prefix orphans (`100 Salesforce`, `001_ bcbsa`, etc.)
+   re-pointed and merged into their canonical row; exact-name duplicates
+   collapsed to the lowest id. FK re-points covered: `jobs.company_id`,
+   `company_scan_log.company_id`, `company_research.company_id` (latter
+   table-exists-guarded). Migration is idempotent on re-run, no-op on
+   clean DBs. Tests in `tests/test_migration_058_consolidate_duplicate_companies.py`.
+10. `fix(careers_crawler): reject metadata-blob titles before they enter the
+    pipeline` — added `_is_metadata_blob()` predicate in `_title_filters.py`
+    that catches titles >140 chars, titles containing "Posted ", "Apply by",
+    "Agency", "Post level", req-ID-pipe patterns, or dollar signs. Wired
+    into `_extract_jobs_from_soup` so blob rows are dropped before
+    persistence. **Existing polluted rows are unaffected** — see "Next step".
+11. `fix(careers_crawler): guard _CITY_SUFFIX_RE against short-ALLCAPS
+    overstrip` — `MSI - Marvell Semiconductor` was collapsing to `MSI`.
+    Guarded the regex with a check that the prefix has ≥5 chars and
+    contains at least one lowercase letter; ALLCAPS abbreviations now
+    survive intact. Tradeoff captured in commit message: bare-city suffixes
+    after short titles will leak through, but those titles are still
+    informative.
 
-## Dead helper `_render_scoring_done` in `blueprints/batch_scoring.py`
+## How to verify the work
 
-`_render_scoring_done` at `batch_scoring.py:29` is defined but never called
-(verified by grep across `job_finder/` and `tests/`). It was probably used by
-the old `batch_score_status` body before being inlined; nothing references it
-now. Out of F3 scope (F3 was about consolidating the polling spine, not
-hunting other dead code), so left in place.
+```powershell
+# All affected test files pass (350 tests; takes ~2 min on this machine)
+uv run --active pytest tests/test_ats_company.py tests/test_exclusion_filter.py `
+  tests/test_batch_scoring.py tests/test_detections_blueprint.py `
+  tests/test_companies.py tests/test_settings.py tests/test_migration.py `
+  tests/test_migration_058_consolidate_duplicate_companies.py `
+  tests/test_careers_crawler.py tests/test_polling_status.py `
+  tests/test_v3_rescore.py tests/test_scoring_orchestrator.py
 
-- Fix: delete it (and update any tests that import it — none currently).
+# Pyright clean on jobs.py
+uv run --active pyright job_finder/web/blueprints/jobs.py
 
-## Pyright union-narrowing warnings in `tests/test_polling_status.py`
+# Browser-side checks (require the dev server running on :5000):
+# - Dashboard: click "Score N unscored jobs". Once jobs that need enrichment
+#   are excluded, the button should now show 0 or fewer scorable.
+# - Pipeline Review: confirm/dismiss any detection. The badge in the section
+#   header should decrement in the same response (no full reload needed).
+# - Companies: scroll to bottom of a >50-row company list. "Loading more..."
+#   should fire the next page automatically.
+# - Companies: click "Scan ATS". The card under the button should show
+#   "Scanning N companies..." with a live countdown.
+# - Settings: enter an Adzuna app_id, save, reload. The input should show
+#   "(saved — type to replace)" placeholder, not "(not set)".
+```
 
-`render_polling_status` returns `str | Response` depending on
-`hx_trigger_after_settle`. Tests that exercise both branches trigger
-"Operator 'in' not supported for Response" warnings from Pyright (false
-positive — the assertions are runtime-correct because the test sets up the
-config to force one branch or the other). No fix needed; flagged only as a
-note for anyone running Pyright on the test suite.
+## What's deferred / remaining
 
-## `make_response` import scope in `db_helpers._attach_hx_trigger`
+### From the original FOLLOWUPS (carried forward, informational)
 
-`_attach_hx_trigger` does a lazy `from flask import make_response` inside the
-function. This is intentional to keep `db_helpers` import-graph slim (it's
-imported from very early in startup), but if you find yourself adding more
-lazy Flask imports inside helpers in this file, consider whether to move
-them to the module-level import block.
+- **Pyright union-narrowing warnings in `tests/test_polling_status.py`** —
+  `render_polling_status` returns `str | Response`; tests trigger pyright
+  false positives. No fix needed; runtime is correct.
+- **`make_response` lazy import in `db_helpers._attach_hx_trigger`** —
+  intentional to keep the early-startup import graph slim. Noted only as a
+  hint for future contributors.
 
----
+### New deferred items surfaced this session
 
-# 2026-05-27 — parser-bug audit follow-ups
+- **Scan ATS is still synchronous.** Commit 7 adds visible progress feedback
+  but the route blocks the request until the scan finishes. The proper fix
+  mirrors `batch_scoring`: background thread + session row + polling
+  endpoint + done-fragment. Estimated 1–2 hours of work. The progress card
+  already exists, so wiring polling on top of it is mostly mechanical.
+- **`dashboard-refresh` HX-Trigger has no listener.** `_quick_actions.html`
+  and `_stats_cards.html` carry comments claiming "auto-refreshed via
+  dashboard-refresh event", but no element in any template has
+  `hx-trigger="dashboard-refresh from:body"`. Either the listening wrapper
+  was removed during a refactor and the comment never caught up, or this
+  was always aspirational. The pipeline-review-header OOB pattern from
+  commit 5 sidesteps this for that one element, but stats cards / quick
+  actions silently rely on full-page reloads instead of the documented
+  event-driven refresh. Worth a focused audit + restore.
+- **Existing `careers_crawl` rows with title bleed are not cleaned up.**
+  Commit 10's guard only stops new bleed. A one-shot heal migration could
+  null-out or re-derive titles for the ~30+ existing rows; query is
+  `SELECT title FROM jobs WHERE LENGTH(title) > 140 AND sources LIKE
+  '%careers_crawl%'`. Decide whether to drop the row, blank the title (and
+  re-fetch), or accept the existing pollution.
+- **`_CITY_SUFFIX_RE` is still imperfect.** The new guard fixes the worst
+  failure mode (short ALLCAPS prefixes), but bare multi-word cities without
+  a state code (e.g. `Senior Engineer - New York`) still won't be stripped.
+  The structural shape is identical to a brand name; a curated
+  location-name allowlist is the only fully-correct fix. Lower priority
+  than the cleanup migration above.
 
-These were surfaced by the wider audit during the legal-entity prefix + Blue
-State title cleanup but were out of scope for the user-reported bugs. Captured
-here so they aren't lost.
+## Quirks the next session should know
 
-## careers_crawl titles bleeding description/snippet text
+- **Full `uv run --active pytest tests/` takes >2 min to produce any
+  output**, then 2–3 min to finish. A targeted suite that hits only the
+  affected files (above) runs in ~140 s and exercises every behaviour this
+  session changed. If you need to dial in faster: `pytest -x` stops on the
+  first failure, `-k name` filters by test-id substring.
+- **`_insert_unscored_job` in `test_batch_scoring.py` now seeds `jd_full`
+  by default.** Pre-this-session it inserted rows without a JD, which
+  matched `count_scorable`'s old (incorrect) predicate. Several existing
+  tests that called the helper without thinking about JD were silently
+  relying on that. Tests that need an empty `jd_full` should `UPDATE` the
+  row after insert.
+- **`hx-indicator` accepts a CSS selector that can match multiple
+  elements.** Commit 7 uses `hx-indicator=".scan-busy"` and puts the class
+  on both the in-button spinner and the prominent progress card — both
+  receive the `.htmx-request` class together and become visible in sync.
+- **Migration files are auto-discovered** by `migrations/__init__.py::_discover`
+  via filename pattern `m{NNN}_*.py`. m058 is wired automatically; no
+  registry update needed. When adding the next migration, mirror the m057
+  / m058 pattern (single `MIGRATION = Migration(...)` constant).
+- **`classify_company_name` runs `normalize_company()` first**, which strips
+  legal suffixes (Inc, LLC, Holdings, etc.). The new "Confidential"
+  hardcoded reject catches `Confidential, LLC` and `Confidential Holdings`
+  alongside the bare form — useful when an aggregator adds a legal suffix.
+- **`get_secret(canonical_name)`** is the only correct way to read a
+  keyring-migrated secret. Plain `config.get(...)` returns empty string
+  after `_move_secret_to_keyring` ran. Pre-session bug 8 was caused by the
+  Settings-page template forgetting this; ingestion was never affected
+  because `_inject_portal_search_creds` already routes through `get_secret`.
 
-Many `careers_crawl`-sourced rows have job titles that include the entire
-job description, posting date, company name, and recruiter blurb concatenated
-together. They come from aggregator-style careers pages where the underlying
-HTML lays out title, company logo letter(s), location, description preview,
-and "X days ago" metadata as adjacent inline siblings — `get_text(strip=True)`
-on the wrapping `<a>` glues them all into one string with no separators.
+## Suggested next step
 
-**Examples** (truncated to ~120 chars each, all from the DB):
+Pick from the "deferred items" list above. Ordered by user-visible impact:
 
-- `Confidential` (LinkedIn aggregator):
-  `CSenior Vice President - Portfolio Credit Risk Management 2nd LOD Sr. Lead Analyst - Risk (Hybrid)CitigroupDescription The Senior Vice President...`
-  → leading `C` is Citigroup's logo letter (handled by my new
-  `_strip_leading_logo_letters`), but the trailing `CitigroupDescription The
-  Senior Vice President...` continues into the full description body.
-- `Confidential`:
-  `EHApplication Development Lead AnalystEvernorth Health Servicesmore accessible to millions of people. Innovation and Automation...`
-- `Bristol-Myers Squibb` (Workday-relayed aggregator):
-  `Senior Analyst I - Trial Analytics, Insights & Planning (TAIP)Hyderabad - TS - INR1599684Posted 10 days ago`
-  → location + req ID + posting date glued on.
-- `UNDP`:
-  `Job TitleTech Lead Analyst, Software Engineering and Data Science (Open to Internal and External applicants)Post levelNPSA-9Apply byApr-29-26AgencyUNDPLocationRio de Janeiro, Brazil`
-  → labeled-form layout where every field name (`Job Title`, `Post level`,
-  `Apply by`, `Agency`, `Location`) got concatenated into the title.
-- `UnitedHealth Group`:
-  `Senior Data Scientist - GenAI, LLMs,NLP, Pyspark, Python, SQL2354308|Chennai, Tamil Nadu`
-  → req ID `2354308` and location glued on after `SQL`.
-- `Jobgether`, `Moniepoint Group`, `Parexel`, `PulsePoint`, `Mercor (Poland)`,
-  `Revolut` show similar patterns (location + employment-type + comp).
+1. **Make Scan ATS async with polling.** Highest-leverage UX fix —
+   eliminates the multi-minute synchronous wait. Mirror `batch_scoring`
+   exactly (session row, background thread, polling endpoint, terminal
+   done-fragment). The visible-progress card from commit 7 already exists;
+   wire `hx-trigger="every Xs"` polling to a status endpoint that returns
+   the same card with updated counts.
+2. **Heal existing careers_crawl bleed.** Either delete rows where
+   `LENGTH(title) > 140 AND sources LIKE '%careers_crawl%'`, or null the
+   title and let enrichment re-fill from source. Probably wrap in an m059
+   migration for atomicity + audit trail.
+3. **Audit dashboard-refresh wiring.** Find the lost listener (or confirm
+   it never existed) and either restore the auto-refresh pattern or
+   replace the misleading comments with documentation of what actually
+   triggers the partials' refresh.
 
-**Why my Strategy-1 heading fix doesn't help these**: these pages don't put
-the title in a heading tag at all — they use `<span>` or `<div>` with CSS
-typography styling. The heading-tag preference only helps sources that
-emit semantic markup (Blue State, Greenhouse-wrapped pages).
-
-**Right fix**: detect at extraction time that the candidate "title" is
-actually a glued metadata blob — e.g. reject titles longer than ~140 chars,
-or those containing dollar signs / `Posted N days ago` / `Apply by` /
-`AgencyUNDP`-style labeled-form fragments. Better still: skip aggregator
-domains for the `careers_crawl` tier entirely (LinkedIn aggregator, Jobgether,
-"Confidential" listings, etc. should not be crawled as if they were
-first-party careers pages).
-
-Existing rows: ~30+ visible in the DB query
-`SELECT title FROM jobs WHERE LENGTH(title) > 120 AND sources LIKE '%careers_crawl%'`.
-
-## Preexisting `_CITY_SUFFIX_RE` over-strip on dash-separated brand names
-
-`_title_filters._CITY_SUFFIX_RE` matches any `[-–—|·•]\s*TitleCase(\sTitleCase)*`
-suffix and strips it. This over-strips legitimate brand names that appear
-after a dash, like `MSI - Marvell Semiconductor` → `MSI`.
-
-**Why it's preexisting**: this regex predates the May 27 audit. It was
-designed for stripping `Data Scientist - San Francisco` style location
-suffixes, but it's structurally indistinguishable from
-`MSI - Marvell Semiconductor` (both are "TitleCase words after a dash at
-end of string"). The pattern needs either (a) a curated location-name
-allowlist, or (b) reliance on the dash being preceded by a true job-title
-word boundary rather than at any position.
-
-**Why I didn't fix it in the May 27 pass**: out of scope for the
-user-reported bugs (Workday legal-entity prefix + Blue State title
-concatenation), and the right fix likely requires reorganizing the title
-extraction strategy rather than patching the regex.
-
-## Duplicate company rows after prefix-strip migration
-
-The May 27 migration cleaned `companies.name_raw` for 38 rows and refreshed
-`companies.name` for 43 rows. 12 rows hit a name collision (their new
-normalized name was already in use by another row) and were left untouched
-to avoid creating ambiguity in `upsert_company`. Pairs (kept-orphan ↔ canonical):
-
-| Orphan id | Orphan name             | Canonical id | Canonical name           |
-|-----------|-------------------------|--------------|--------------------------|
-| 1245      | `1 vizient`             | 1315         | `vizient`                |
-| 1398      | `558 evernorth sales operations` | 1531 | `evernorth sales operations` |
-| 1466      | `21`                    | 2584         | `tech`                   |
-| 1488      | `200 protiviti`         | 1532         | `protiviti`              |
-| 1857      | `veeva systems`         | 1695         | `veeva systems`          |
-| 2120      | `1000 micron`           | 955          | `micron`                 |
-| 2384      | `judi health`           | 695          | `judi health`            |
-| 2799      | `100 salesforce`        | 211          | `salesforce`             |
-| 3102      | `101 bloom energy`      | 2345         | `bloom energy`           |
-| 3317      | `500 wp`                | 1537         | `wp`                     |
-| 3374      | `100000 motorola`       | 3701         | `motorola`               |
-| 3442      | `00100 leidos`          | 1088         | `leidos`                 |
-
-The `veeva systems ↔ veeva systems` and `judi health ↔ judi health` pairs are
-true duplicates from different ingestion paths, unrelated to the prefix-strip.
-
-**Right fix**: a one-shot consolidation that re-points `jobs.company_id`,
-`company_scan_log.company_id`, and any other FK references from orphan to
-canonical, then deletes the orphan rows. The `companies` table doesn't
-enforce uniqueness on `name`, so leaving the orphans in place is safe but
-slightly noisy in the companies UI.
-
-## "Confidential" listings should probably be filtered out at parse time
-
-Several rows have `company = "Confidential"`. These come from aggregator
-sources where the actual employer name isn't disclosed in the listing.
-They're effectively useless: scoring can't use the company signal, the user
-can't research the employer, and the ATS-scan history-cohort gate can't fire
-for them. Flagging here because they currently consume scoring spend and
-pollute filter dropdowns.
-
-**Right fix**: reject `Confidential` (case-insensitive, exact match) at the
-parser boundary, similar to how `classify_company_name` rejects empty /
-non-alpha / overlong names.
+The session goal — turn over the entire FOLLOWUPS triage list — is
+complete. The remaining items here are net-new findings or genuinely
+deferred work, not unfinished work from the original list.
