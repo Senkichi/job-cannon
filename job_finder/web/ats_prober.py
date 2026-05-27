@@ -236,8 +236,14 @@ def probe_single_company(
                         logger.info("probe_single_company: %s -> hit (workday)", company_name)
                         return {"status": "hit", "jobs_found": 0}
                     else:
+                        # B4: Workday probe returns False when tenant/board
+                        # combination yields no postings — symptomatically the
+                        # same as 404 (slug doesn't resolve to a Workday board).
                         conn.execute(
-                            "UPDATE companies SET ats_probe_status = 'miss' WHERE id = ?",
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'platform_slug_404'
+                               WHERE id = ?""",
                             (company_id,),
                         )
                         conn.commit()
@@ -246,7 +252,14 @@ def probe_single_company(
                     _handle_scan_error(conn, company_id, company_name, str(e), now)
                     return {"status": "error", "detail": str(e)}
             else:
-                return {"status": "miss", "detail": f"unknown platform: {platform}"}
+                # B4: platform value is set but not one we know how to probe —
+                # ATS catalog drift (probably the company's platform was
+                # removed from the supported set after being tagged).
+                return {
+                    "status": "miss",
+                    "detail": f"unknown platform: {platform}",
+                    "miss_reason": "unknown_platform",
+                }
 
             # Let Timeout/ConnectionError propagate — caught below as transient
             resp = requests.get(url, timeout=_PROBE_TIMEOUT)
@@ -269,8 +282,12 @@ def probe_single_company(
                 logger.info("probe_single_company: %s -> hit (%d jobs)", company_name, jobs_count)
                 return {"status": "hit", "jobs_found": jobs_count}
             elif resp.status_code in _PERMANENT_MISS_CODES:
+                # B4: 404/410 -> tenant not found on this platform.
                 conn.execute(
-                    "UPDATE companies SET ats_probe_status = 'miss' WHERE id = ?",
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'platform_slug_404'
+                       WHERE id = ?""",
                     (company_id,),
                 )
                 conn.commit()
@@ -280,9 +297,14 @@ def probe_single_company(
                 _handle_scan_error(conn, company_id, company_name, detail, now)
                 return {"status": "error", "detail": detail}
             else:
-                # Other non-200 — treat as permanent miss
+                # Other non-200 (403, 401, etc.) — treat as permanent miss.
+                # B4: distinct reason so audits can tell 404 (slug doesn't exist)
+                # apart from 403/blocked (slug exists but probe blocked).
                 conn.execute(
-                    "UPDATE companies SET ats_probe_status = 'miss' WHERE id = ?",
+                    """UPDATE companies
+                       SET ats_probe_status = 'miss',
+                           miss_reason = 'platform_slug_blocked'
+                       WHERE id = ?""",
                     (company_id,),
                 )
                 conn.commit()

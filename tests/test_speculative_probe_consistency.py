@@ -949,3 +949,133 @@ class TestCareersUrlFastPath:
             result = probe_ats_slugs(migrated_db_path, config={})
 
         assert result["misses"] == 1
+
+
+# ---------------------------------------------------------------------------
+# B4 -- categorical miss_reason on speculative-probe failures
+# ---------------------------------------------------------------------------
+
+
+class TestSpeculativeMissCategorization:
+    """probe_ats_slugs now writes a categorical miss_reason for every miss it
+    creates. Audit B4: 2563/2568 legacy miss rows have NULL miss_reason,
+    blocking diagnostic and rescue passes. The new categories are:
+      - 'blocked_brand'          (already in use pre-B4)
+      - 'speculative_exhausted'  (no probe returned True for any slug)
+      - 'speculative_rejected'   (probe hit but consistency gate rejected it)
+    Legacy NULL rows are not retroactively backfilled -- they stay NULL until
+    the company is re-probed."""
+
+    def test_speculative_exhausted_when_all_probes_return_false(
+        self, migrated_db_path
+    ):
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(conn, name="ObscureSmallCo")
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch("job_finder.web.ats_prober._probe_lever", return_value=False),
+            patch("job_finder.web.ats_prober._probe_greenhouse", return_value=False),
+            patch("job_finder.web.ats_prober._probe_ashby", return_value=False),
+            patch("job_finder.web.ats_prober._probe_jazzhr", return_value=False),
+            patch("job_finder.web.ats_prober._probe_pinpoint", return_value=False),
+            patch("job_finder.web.ats_prober._probe_teamtailor", return_value=False),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_probe_status, miss_reason FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "miss"
+        assert row["miss_reason"] == "speculative_exhausted"
+
+    def test_speculative_rejected_when_consistency_gate_blocks_all_hits(
+        self, migrated_db_path
+    ):
+        """careers_url positively identifies platform X, but speculative
+        probes hit platform Y (collision). The consistency gate rejects all
+        Y-hits, and no other platform yields a hit. miss_reason should be
+        'speculative_rejected' (not 'speculative_exhausted')."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(
+            conn,
+            name="MyCompany",
+            careers_url="https://jobs.lever.co/some-other-mycompany",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch(
+                "job_finder.web.ats_scanner._probe._probe_lever",
+                return_value=False,
+            ),
+            patch(
+                "job_finder.web.ats_scanner._probe._PROBES",
+                new=_build_probes({"pinpoint": True}),
+            ),
+            patch(
+                "job_finder.web.ats_detection.careers_url_is_live",
+                return_value=True,
+            ),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_probe_status, miss_reason FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "miss"
+        assert row["miss_reason"] == "speculative_rejected"
+
+    def test_blocked_brand_reason_is_unchanged(self, migrated_db_path):
+        """Pre-B4 'blocked_brand' miss_reason is preserved."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(conn, name="Walmart")
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=True,
+            ),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT miss_reason FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["miss_reason"] == "blocked_brand"

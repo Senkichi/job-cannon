@@ -282,12 +282,18 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             candidates = derive_slug_candidates(company_name)
             hit_platform = None
             hit_slug = None
+            # B4: track whether the speculative loop rejected ANY hit via
+            # the consistency gate, so misses can be categorized into
+            # `speculative_rejected` (had a hit but it was blocked) vs
+            # `speculative_exhausted` (no probe even returned True).
+            any_hit_consistency_rejected = False
 
             for slug in candidates:
                 for platform, probe in _PROBES:
                     if not probe(slug):
                         continue
                     if not probe_hit_consistent_or_dead_url(platform, careers_url):
+                        any_hit_consistency_rejected = True
                         logger.info(
                             "probe_ats_slugs: rejected %s/%s for company %s — "
                             "careers_url %s infers a different platform and is live",
@@ -317,13 +323,23 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                 )
                 summary["hits"] += 1
             else:
+                # B4: categorical miss_reason so the next audit can tell
+                # speculative-exhausted misses apart from gate-rejected ones.
+                # Legacy NULL miss_reason rows (pre-B4) are not retroactively
+                # backfilled — they stay NULL until the company is re-probed.
+                miss_reason = (
+                    "speculative_rejected"
+                    if any_hit_consistency_rejected
+                    else "speculative_exhausted"
+                )
                 conn.execute(
                     """UPDATE companies
                        SET ats_probe_status = 'miss',
+                           miss_reason = ?,
                            ats_probe_attempted_at = ?,
                            updated_at = ?
                        WHERE id = ?""",
-                    (now, now, company_id),
+                    (miss_reason, now, now, company_id),
                 )
                 summary["misses"] += 1
 
