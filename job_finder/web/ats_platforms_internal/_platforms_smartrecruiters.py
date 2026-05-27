@@ -1,0 +1,106 @@
+"""SmartRecruiters platform scanner (registry form).
+
+GET-paginated Posting API. Per-job description requires a secondary
+GET; ``_fetch_smartrecruiters_description`` lives in ``ats_platforms.py``
+because ``tests/test_smartrecruiters_scanner.py`` imports it directly.
+This module calls it via lazy import to avoid a circular dependency.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+
+import requests
+
+from job_finder.web.ats_platforms_internal._registry import PlatformScanner
+from job_finder.web.ats_prober import _PROBE_TIMEOUT
+
+logger = logging.getLogger(__name__)
+
+_PAGE_SIZE = 100
+_MAX_RESULTS = 500
+_DETAIL_FETCH_SLEEP_S = 0.1
+
+
+def _fetch_postings(slug: str) -> list[dict]:
+    """GET + paginate over SmartRecruiters /v1/companies/{slug}/postings."""
+    base_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+    offset = 0
+    out: list[dict] = []
+    total_fetched = 0
+
+    while offset < _MAX_RESULTS:
+        try:
+            resp = requests.get(
+                base_url,
+                params={"offset": offset, "limit": _PAGE_SIZE},
+                headers={"Accept": "application/json"},
+                timeout=_PROBE_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning("scan_smartrecruiters('%s') request failed: %s", slug, exc)
+            break
+
+        if resp.status_code != 200:
+            logger.debug("scan_smartrecruiters('%s') returned HTTP %d", slug, resp.status_code)
+            break
+
+        try:
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("scan_smartrecruiters('%s') JSON parse error: %s", slug, exc)
+            break
+
+        total_found = data.get("totalFound", 0)
+        postings = data.get("content", [])
+        if not postings:
+            break
+
+        out.extend(postings)
+        total_fetched += len(postings)
+        offset += _PAGE_SIZE
+
+        if total_fetched >= total_found:
+            break
+
+    return out
+
+
+def _posting_to_job(posting: dict, slug: str) -> dict:
+    from job_finder.web.ats_platforms import _fetch_smartrecruiters_description
+
+    loc = posting.get("location", {})
+    if isinstance(loc, dict):
+        parts = [loc.get("city", ""), loc.get("region", ""), loc.get("country", "")]
+        location = ", ".join(p for p in parts if p)
+    else:
+        location = ""
+
+    posting_id = posting.get("id", "")
+    source_url = f"https://jobs.smartrecruiters.com/{slug}/{posting_id}" if posting_id else ""
+
+    description = _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
+
+    # Polite pacing between per-job detail fetches.
+    time.sleep(_DETAIL_FETCH_SLEEP_S)
+
+    return {
+        "title": posting.get("name", ""),
+        "company_source": "SmartRecruiters",
+        "location": location,
+        "description": description,
+        "source_url": source_url,
+        "salary_min": None,
+        "salary_max": None,
+        "comp_json": None,
+    }
+
+
+SCANNER = PlatformScanner(
+    name="smartrecruiters",
+    company_source="SmartRecruiters",
+    fetch_postings=_fetch_postings,
+    title_of=lambda posting: posting.get("name", ""),
+    posting_to_job=_posting_to_job,
+)
