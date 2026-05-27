@@ -380,18 +380,35 @@ class TestDispatcherWiring:
         for platform in ("workable", "jobvite", "paylocity", "rippling"):
             assert platform in _PLATFORM_SCANNERS, f"{platform} missing from _PLATFORM_SCANNERS"
 
-    def test_all_round6_platforms_in_fastpath_set(self):
+    def test_round6_platforms_except_jobvite_in_fastpath_set(self):
+        """Workable / Paylocity / Rippling are URL-fast-path eligible.
+
+        Jobvite is intentionally excluded — see the jobvite-exclusion test
+        below and the comment on _URL_FASTPATH_PLATFORMS in _probe.py.
+        """
         from job_finder.web.ats_scanner._probe import _URL_FASTPATH_PLATFORMS
 
-        for platform in ("workable", "jobvite", "paylocity", "rippling"):
+        for platform in ("workable", "paylocity", "rippling"):
             assert platform in _URL_FASTPATH_PLATFORMS
+
+    def test_jobvite_excluded_from_fastpath_set(self):
+        """Load-bearing invariant: jobvite must not be in the URL fast-path.
+
+        Promoting a jobvite tenant to `ats_probe_status='hit'` would exclude
+        it from careers_crawler (which filters `!= 'hit'`), removing the only
+        viable data path for these JS-app careers sites. The detection regex
+        still recognizes the URL pattern — the gate enforces that the
+        recognized platform is NOT auto-promoted.
+        """
+        from job_finder.web.ats_scanner._probe import _URL_FASTPATH_PLATFORMS
+
+        assert "jobvite" not in _URL_FASTPATH_PLATFORMS
 
     def test_verify_fastpath_live_dispatches_to_each_probe(self):
         from job_finder.web.ats_scanner._probe import _verify_fastpath_live
 
         for platform, probe_target in (
             ("workable", "job_finder.web.ats_scanner._probe._probe_workable"),
-            ("jobvite", "job_finder.web.ats_scanner._probe._probe_jobvite"),
             ("paylocity", "job_finder.web.ats_scanner._probe._probe_paylocity"),
             ("rippling", "job_finder.web.ats_scanner._probe._probe_rippling"),
         ):
@@ -399,6 +416,15 @@ class TestDispatcherWiring:
                 assert _verify_fastpath_live(platform, "any") is True
             with patch(probe_target, return_value=False):
                 assert _verify_fastpath_live(platform, "any") is False
+
+    def test_verify_fastpath_live_returns_false_for_jobvite(self):
+        """Even though jobvite is a known platform, _verify_fastpath_live
+        must return False (not raise) so the fast-path quietly skips it.
+        The companion gate (membership in _URL_FASTPATH_PLATFORMS) means
+        this fn is never even called for jobvite in practice — defensive."""
+        from job_finder.web.ats_scanner._probe import _verify_fastpath_live
+
+        assert _verify_fastpath_live("jobvite", "any-slug") is False
 
     def test_reconcile_verify_live_supports_round6_platforms(self):
         from job_finder.web.ats_identity_reconcile import _verify_live

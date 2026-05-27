@@ -21,7 +21,6 @@ from job_finder.web.ats_prober import (
     _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
-    _probe_jobvite,
     _probe_lever,
     _probe_paylocity,
     _probe_personio,
@@ -88,6 +87,19 @@ assert _FP_PRONE_PLATFORMS.isdisjoint({name for name, _ in _PROBES}), (
 # URL-evidence is strictly stronger than {slug}={name} speculation, so the
 # fast-path is allowed to assign FP-prone platforms even though the
 # speculative ladder cannot.
+#
+# **jobvite is intentionally NOT in this set** even though the URL regex
+# detects it. Jobvite-hosted career sites (jobs.jobvite.com/{slug}) are
+# client-side JS apps with no public unauthenticated API; the scanner is a
+# stub that returns []. If we promoted these companies to
+# ats_probe_status='hit', they'd be excluded from the careers_crawler
+# (which filters `ats_probe_status != 'hit'` in __init__.py:226) — the only
+# data path that COULD extract their jobs (via the Playwright tier). Leaving
+# jobvite out of the fast-path keeps them at status='miss' so careers_crawler
+# remains their eligibility owner. Companion: ats_identity_reconcile's
+# reconcile path is similarly evidence-gated, and the stub scanner stays
+# registered defensively so any pre-existing jobvite-tagged row is a no-op
+# rather than an "unknown platform" error.
 _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
     {
         "lever",
@@ -102,9 +114,8 @@ _URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
         "personio",
         "recruitee",
         "breezy",
-        # Round 6 -- audit B2-roadmap additions:
+        # Round 6 -- audit B2-roadmap additions (jobvite intentionally excluded; see comment above):
         "workable",
-        "jobvite",
         "paylocity",
         "rippling",
     }
@@ -142,11 +153,10 @@ def _verify_fastpath_live(platform: str, slug: str) -> bool:
         return bool(_probe_recruitee(slug))
     if platform == "breezy":
         return bool(_probe_breezy(slug))
-    # Round 6 -- audit B2-roadmap additions:
+    # Round 6 -- audit B2-roadmap additions (jobvite intentionally excluded
+    # from _URL_FASTPATH_PLATFORMS; see comment near the set definition).
     if platform == "workable":
         return bool(_probe_workable(slug))
-    if platform == "jobvite":
-        return bool(_probe_jobvite(slug))
     if platform == "paylocity":
         return bool(_probe_paylocity(slug))
     if platform == "rippling":
