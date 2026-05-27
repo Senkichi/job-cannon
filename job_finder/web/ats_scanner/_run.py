@@ -21,11 +21,55 @@ from datetime import datetime
 
 from job_finder.db import derive_classification
 from job_finder.secrets import get_secret
-from job_finder.web.ats_platforms import scan_ashby, scan_greenhouse, scan_lever
+from job_finder.web.ats_platforms_internal._platforms_ashby import SCANNER as _ASHBY_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_bamboohr import (
+    SCANNER as _BAMBOOHR_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_breezy import SCANNER as _BREEZY_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_greenhouse import (
+    SCANNER as _GREENHOUSE_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_lever import SCANNER as _LEVER_SCANNER
+from job_finder.web.ats_platforms_internal._platforms_personio import (
+    SCANNER as _PERSONIO_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_pinpoint import (
+    SCANNER as _PINPOINT_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_recruitee import (
+    SCANNER as _RECRUITEE_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_smartrecruiters import (
+    SCANNER as _SMARTRECRUITERS_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_teamtailor import (
+    SCANNER as _TEAMTAILOR_SCANNER,
+)
+from job_finder.web.ats_platforms_internal._platforms_workday import SCANNER as _WORKDAY_SCANNER
+from job_finder.web.ats_platforms_internal._registry import PlatformScanner, run_platform_scan
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.description_formatter import strip_html_to_text
+
+# Platform key -> PlatformScanner registry. Adding a new platform = add an
+# entry here + a new _platforms_X.py module; the dispatch in
+# _scan_one_company_via_ats_api never changes.
+_PLATFORM_SCANNERS: dict[str, PlatformScanner] = {
+    "lever": _LEVER_SCANNER,
+    "greenhouse": _GREENHOUSE_SCANNER,
+    "ashby": _ASHBY_SCANNER,
+    "workday": _WORKDAY_SCANNER,
+    "smartrecruiters": _SMARTRECRUITERS_SCANNER,
+    "recruitee": _RECRUITEE_SCANNER,
+    "breezy": _BREEZY_SCANNER,
+    "jazzhr": _JAZZHR_SCANNER,
+    "pinpoint": _PINPOINT_SCANNER,
+    "personio": _PERSONIO_SCANNER,
+    "bamboohr": _BAMBOOHR_SCANNER,
+    "teamtailor": _TEAMTAILOR_SCANNER,
+}
 
 # Scoring orchestrator functions for ATS-discovered job scoring (ImportError guard).
 # Uses the centralized orchestrator instead of pipeline_runner's private functions,
@@ -262,51 +306,12 @@ def _scan_one_company_via_ats_api(
     logger.info("ATS scan: scanning %s (%s/%s)", company_name, platform, slug)
 
     try:
-        if platform == "lever":
-            job_dicts = scan_lever(slug, target_titles, title_exclusions)
-        elif platform == "greenhouse":
-            job_dicts = scan_greenhouse(slug, target_titles, title_exclusions)
-        elif platform == "ashby":
-            job_dicts = scan_ashby(slug, target_titles, title_exclusions)
-        elif platform == "workday":
-            from job_finder.web.ats_platforms import scan_workday
-
-            job_dicts = scan_workday(slug, target_titles, title_exclusions)
-        elif platform == "smartrecruiters":
-            from job_finder.web.ats_platforms import scan_smartrecruiters
-
-            job_dicts = scan_smartrecruiters(slug, target_titles, title_exclusions)
-        elif platform == "recruitee":
-            from job_finder.web.ats_platforms import scan_recruitee
-
-            job_dicts = scan_recruitee(slug, target_titles, title_exclusions)
-        elif platform == "breezy":
-            from job_finder.web.ats_platforms import scan_breezy
-
-            job_dicts = scan_breezy(slug, target_titles, title_exclusions)
-        elif platform == "jazzhr":
-            from job_finder.web.ats_platforms import scan_jazzhr
-
-            job_dicts = scan_jazzhr(slug, target_titles, title_exclusions)
-        elif platform == "pinpoint":
-            from job_finder.web.ats_platforms import scan_pinpoint
-
-            job_dicts = scan_pinpoint(slug, target_titles, title_exclusions)
-        elif platform == "personio":
-            from job_finder.web.ats_platforms import scan_personio
-
-            job_dicts = scan_personio(slug, target_titles, title_exclusions)
-        elif platform == "bamboohr":
-            from job_finder.web.ats_platforms import scan_bamboohr
-
-            job_dicts = scan_bamboohr(slug, target_titles, title_exclusions)
-        elif platform == "teamtailor":
-            from job_finder.web.ats_platforms import scan_teamtailor
-
-            job_dicts = scan_teamtailor(slug, target_titles, title_exclusions)
-        else:
+        scanner = _PLATFORM_SCANNERS.get(platform)
+        if scanner is None:
             logger.warning("Unknown ATS platform '%s' for company '%s'", platform, company_name)
             job_dicts = []
+        else:
+            job_dicts = run_platform_scan(scanner, slug, target_titles, title_exclusions)
 
         company_jobs_found = len(job_dicts)
         summary["jobs_discovered"] += company_jobs_found
