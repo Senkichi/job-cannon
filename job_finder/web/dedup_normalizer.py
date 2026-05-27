@@ -141,17 +141,20 @@ _STATUS_PRECEDENCE = {
 def normalize_company(company: str) -> str:
     """Normalize a company name for dedup key generation.
 
-    Strips common legal entity suffixes and lowercases. Handles variants like
-    "Google LLC", "Intuit, Inc.", "Acme Corp." all normalizing to their
-    bare name.
+    Strips Workday/aggregator legal-entity code prefixes (e.g. "HC1316 ",
+    "1144 ", "USA016 "), then strips common legal entity suffixes and
+    lowercases. Handles variants like "Google LLC", "Intuit, Inc.", "Acme
+    Corp." all normalizing to their bare name.
 
     Args:
         company: Raw company name string.
 
     Returns:
-        Lowercased, suffix-stripped company name.
+        Lowercased, prefix- and suffix-stripped company name.
     """
-    normalized = company.strip().lower()
+    from job_finder.normalizers import strip_legal_entity_prefix
+
+    normalized = strip_legal_entity_prefix(company).strip().lower()
     # Strip suffixes repeatedly (e.g., "Acme Corp. Inc." -> "acme")
     prev = None
     while normalized != prev:

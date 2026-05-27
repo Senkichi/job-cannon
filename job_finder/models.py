@@ -32,6 +32,13 @@ class Job:
             raise ValueError("Job title cannot be empty")
         if not self.company.strip():
             raise ValueError("Job company cannot be empty")
+        # Strip Workday-style legal-entity code prefix from the display value
+        # ("HC1316 GE Precision Healthcare LLC" -> "GE Precision Healthcare LLC").
+        # Dedup also strips this, but doing it here keeps the persisted
+        # job.company display field clean from the source.
+        from job_finder.normalizers import strip_legal_entity_prefix
+
+        self.company = strip_legal_entity_prefix(self.company)
 
     # Dedup key
     @staticmethod

@@ -76,6 +76,81 @@ _TITLE_ABBREVS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Legal-entity code prefix stripping
+#
+# Workday and aggregator feeds (DataForSEO crawling Workday tenants) often
+# return the legal entity name with a leading internal cost-center / business-
+# unit code: e.g. "HC1316 GE Precision Healthcare LLC", "1144 IHS GLOBAL INC",
+# "200 Protiviti Inc.", "USA016 Refinitiv US LLC". The prefix is meaningless
+# to the user and pollutes display, dedup keys, and history-cohort matching.
+#
+# The regex is intentionally narrow: it only fires when (a) the leading token
+# matches a "code-shaped" pattern, AND (b) the remainder contains a recognized
+# legal-entity suffix word (Inc/LLC/Corp/Co/etc.). The combined gate is what
+# keeps it safe against legitimate brand names like "A10 Networks, Inc"
+# (single leading alpha), "Point2 Technology Inc." (digits after alpha), or
+# "21 Tech" (no legal-entity suffix). Without the alpha-prefix branch this
+# overlaps with _LEADING_NUMERIC_JUNK_RE; the branches together cover both
+# pure-digit ("1144 ") and alpha-digit ("HC1316 ", "USA016 ") legal codes.
+# ---------------------------------------------------------------------------
+
+_LEGAL_ENTITY_PREFIX_RE = re.compile(
+    r"""
+    ^
+    (?:
+        \d{2,6}             # pure-digit code (091, 1144, 7505, 00100, 09516)
+        |
+        [A-Z]{2,3}\d{2,5}   # alpha-prefix + digit-suffix (HC1316, USA016, LE10, KPG99)
+    )
+    \s+
+    (?=[A-Za-z])            # followed by a letter (not another digit, not punctuation)
+    """,
+    re.VERBOSE,
+)
+
+_LEGAL_ENTITY_SUFFIX_RE = re.compile(
+    r"\b(?:Inc|Incorporated|LLC|L\.?\s?L\.?\s?C|Corp|Corporation|Ltd|Limited|Co|Company|S\.A\.|GmbH)\b\.?",
+    re.IGNORECASE,
+)
+
+
+def strip_legal_entity_prefix(company: str) -> str:
+    """Strip a leading legal-entity code prefix from a company name.
+
+    Only fires when both (a) the leading token matches a code-shaped pattern
+    AND (b) the remainder contains a legal-entity suffix word. The second
+    gate protects legitimate brands like "A10 Networks, Inc" (only one
+    leading alpha char), "Point2 Technology Inc." (digits after alpha not
+    before), and "21 Tech" (no legal-entity suffix in the name).
+
+    Guards against degenerate cases where the prefix turns out to BE the
+    brand name itself (e.g. "KPG99 INC" → stripping would leave only "INC"):
+    when the cleaned residue contains nothing beyond the entity suffix, the
+    original name is returned unchanged.
+
+    Args:
+        company: Raw company name (any casing).
+
+    Returns:
+        Cleaned company name with prefix removed, or the original name
+        unchanged if no prefix was detected or the strip would leave only
+        a bare legal-entity suffix.
+    """
+    if not company:
+        return company
+    s = company.strip()
+    if not (_LEGAL_ENTITY_PREFIX_RE.match(s) and _LEGAL_ENTITY_SUFFIX_RE.search(s)):
+        return s
+    cleaned = _LEGAL_ENTITY_PREFIX_RE.sub("", s, count=1).strip()
+    if not cleaned:
+        return s
+    residue = _LEGAL_ENTITY_SUFFIX_RE.sub("", cleaned).strip(" ,.-")
+    if not residue:
+        return s
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
 # Title level suffix stripping
 # Strip "(IC5)", "L5", "Level 3", "- Level III" etc. at end of title.
 # ---------------------------------------------------------------------------
@@ -127,14 +202,19 @@ def normalize_company(company: str) -> str:
     normalized = _HTML_TAG_RE.sub("", normalized)
     # 3. Collapse repeated whitespace
     normalized = " ".join(normalized.split())
-    # 4. Strip leading numeric prefix junk only when remainder is non-empty
+    # 4. Strip Workday-style legal-entity code prefix (e.g. "HC1316 ",
+    #    "USA016 ") — the alpha-digit branch _LEADING_NUMERIC_JUNK_RE
+    #    doesn't reach. The pure-digit case is handled both here and by
+    #    _LEADING_NUMERIC_JUNK_RE; either ordering is correct.
+    normalized = strip_legal_entity_prefix(normalized)
+    # 5. Strip leading numeric prefix junk only when remainder is non-empty
     #    e.g. "1. Acme Corp" -> "Acme Corp", but "100" stays "100"
     m = _LEADING_NUMERIC_JUNK_RE.match(normalized)
     if m and normalized[m.end() :].strip():
         normalized = normalized[m.end() :]
-    # 5. Strip and lowercase (original behavior)
+    # 6. Strip and lowercase (original behavior)
     normalized = normalized.strip().lower()
-    # 6. Strip legal suffixes repeatedly (e.g. "Acme Corp. Inc." -> "acme")
+    # 7. Strip legal suffixes repeatedly (e.g. "Acme Corp. Inc." -> "acme")
     prev = None
     while normalized != prev:
         prev = normalized
