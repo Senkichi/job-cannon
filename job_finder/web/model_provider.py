@@ -435,6 +435,11 @@ def _sanitized_result(
     ``dataclasses.replace`` so future fields are picked up automatically.
     """
     if provider_name == "anthropic" or not isinstance(result.data, dict):
+        # Anthropic guard is vestigial post-F2 (commit c8e698d): the adapter
+        # now produces clean dicts identical to ClaudeCodeCLIProvider's
+        # output, so the sanitize pass would be a no-op. Kept short-circuit
+        # to skip the dict copy in _sanitize_output. See
+        # .planning/specs/2026-05-26-PLAN.md "Optional next-session work".
         return result
     sanitized = _sanitize_output(result.data, schema)
     if sanitized is result.data:
