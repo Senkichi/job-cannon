@@ -506,9 +506,7 @@ def _make_adapter(
                 "Anthropic CLI not configured "
                 "(ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY missing)"
             )
-        return AnthropicProvider(
-            conn=conn, config=config, job_id=job_id, purpose=purpose
-        )
+        return AnthropicProvider()
     if provider_name == "gemini":
         from job_finder.web.providers.gemini_provider import GeminiProvider
 

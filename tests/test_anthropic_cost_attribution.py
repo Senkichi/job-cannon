@@ -76,7 +76,7 @@ def test_cascade_anthropic_writes_single_row_with_anthropic_provider(migrated_co
         "usage": {"input_tokens": 150, "output_tokens": 40},
     }
 
-    adapter = AnthropicProvider(conn=migrated_conn, config={})
+    adapter = AnthropicProvider()
     with patch(
         "job_finder.web.providers.anthropic_provider._run_oneshot",
         return_value=envelope,

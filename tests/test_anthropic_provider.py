@@ -12,8 +12,7 @@ those behaviors live in ``test_model_provider.py`` and
 ``test_anthropic_cost_attribution.py``.
 """
 
-import sqlite3
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -26,13 +25,8 @@ from job_finder.web.providers.anthropic_provider import AnthropicProvider
 
 
 @pytest.fixture
-def mock_conn():
-    return MagicMock(spec=sqlite3.Connection)
-
-
-@pytest.fixture
-def provider(mock_conn):
-    return AnthropicProvider(conn=mock_conn, config={})
+def provider():
+    return AnthropicProvider()
 
 
 # ---------------------------------------------------------------------------
@@ -259,3 +253,21 @@ def test_call_propagates_timeout_error(provider):
             system="System",
             messages=[{"role": "user", "content": "Hi"}],
         )
+
+
+# ---------------------------------------------------------------------------
+# Constructor signature guard (U4)
+# ---------------------------------------------------------------------------
+
+
+def test_anthropic_provider_init_takes_no_args():
+    """U4 contract: AnthropicProvider() has no constructor params after F2.
+
+    Reintroducing conn/config/job_id/purpose without code that uses them
+    would re-create the dead-arg surface U4 cleaned up.
+    """
+    import inspect
+
+    sig = inspect.signature(AnthropicProvider.__init__)
+    params = [p for p in sig.parameters if p != "self"]
+    assert params == [], f"Unexpected constructor params: {params}"

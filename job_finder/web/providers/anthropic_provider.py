@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 
 from job_finder.web.claude_client import _run_oneshot
 from job_finder.web.model_provider import BaseProvider, ModelResult
@@ -39,30 +38,15 @@ class AnthropicProvider(BaseProvider):
     to ``json.loads(envelope["result"])``; freeform requests get the raw
     result wrapped as ``{"text": ...}`` when it isn't already a dict.
 
-    ``conn`` / ``job_id`` / ``purpose`` are accepted for ``_make_adapter``
-    signature symmetry but are no longer used here — the cascade layer
-    owns cost recording.
-
-    Args:
-        conn: Open SQLite connection (unused after F2; kept for the
-            ``_make_adapter`` calling convention).
-        config: Application config dict (unused after F2; kept for the
-            calling convention).
-        job_id: Job dedup_key for cost attribution (unused after F2).
-        purpose: Feature attribution label (unused after F2).
+    F2 (commit c8e698d) collapsed the historical double-layer; U4 dropped
+    the vestigial constructor parameters (conn / config / job_id / purpose)
+    that F2 had kept for "symmetry". If a future change re-introduces cost
+    recording into the adapter, the parameters come back together with the
+    code that uses them — symmetry is not load-bearing in the cascade
+    today (every other adapter takes a different kwarg shape already).
     """
 
-    def __init__(
-        self,
-        conn: sqlite3.Connection,
-        config: dict,
-        job_id: str | None = None,
-        purpose: str = "",
-    ) -> None:
-        # All four args retained for _make_adapter symmetry — the cascade
-        # constructs every adapter with the same kwargs and would have to
-        # gain Anthropic-specific branching otherwise.
-        del conn, config, job_id, purpose
+    def __init__(self) -> None:
         self._timeout_default = 120.0
 
     def call(
