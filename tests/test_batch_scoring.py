@@ -42,14 +42,21 @@ def _insert_session(conn, status="running", session_type="scoring", total=0):
 
 
 def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
-    """Insert a job with classification IS NULL (unscored by v3 pipeline)."""
+    """Insert a job with classification IS NULL (unscored by v3 pipeline).
+
+    Now also populates jd_full with a placeholder body so the row passes
+    count_scorable() — which requires non-empty jd_full because the v3 unified
+    scorer skips rows without a JD. Tests that need an empty jd_full should
+    explicitly UPDATE the row after insert.
+    """
     from job_finder.json_utils import utc_now_iso
 
     now = utc_now_iso()
     conn.execute(
-        "INSERT OR IGNORE INTO jobs (dedup_key, title, company, location, first_seen, last_seen) "
-        "VALUES (?, ?, ?, 'Remote', ?, ?)",
-        (dedup_key, title, company, now, now),
+        "INSERT OR IGNORE INTO jobs "
+        "(dedup_key, title, company, location, jd_full, first_seen, last_seen) "
+        "VALUES (?, ?, ?, 'Remote', ?, ?, ?)",
+        (dedup_key, title, company, "Placeholder JD body for test scorable predicate.", now, now),
     )
     conn.commit()
 
@@ -172,7 +179,14 @@ class TestDeferredCounters:
     """BATCH-05: counters accumulated in memory, flushed periodically and before _finish_session."""
 
     def test_counter_deferred(self):
-        """Unified bg: 2 scored + 1 None → session row has scored=2, skipped=1 at end."""
+        """Unified bg: 2 ok + 1 None → session row has scored=2, skipped=1 at end.
+
+        The worker now branches on ``result.status == "ok"`` (not on result-is-not-None)
+        because score_and_persist_job returns a ScoringResult envelope for both
+        ok/skipped/error and only the "ok" path writes classification. Counting any
+        non-None envelope as "scored" inflated the counter with rows that were
+        silently no-op'd, hiding the desync from the dashboard.
+        """
         from job_finder.web.blueprints.batch_scoring import _run_batch_bg
 
         path, conn = _make_db()
@@ -187,8 +201,13 @@ class TestDeferredCounters:
                 total=3,
             )
 
-            # score_and_persist_job: return non-None, non-None, None (last job skipped)
-            side_effects = [MagicMock(), MagicMock(), None]
+            # score_and_persist_job: ok, ok, None (last job skipped by scorer_fn).
+            # The first two are envelopes with status="ok" — those count as scored.
+            ok_envelope_a = MagicMock()
+            ok_envelope_a.status = "ok"
+            ok_envelope_b = MagicMock()
+            ok_envelope_b.status = "ok"
+            side_effects = [ok_envelope_a, ok_envelope_b, None]
             score_mock = MagicMock(side_effect=side_effects)
 
             with (
@@ -203,6 +222,60 @@ class TestDeferredCounters:
             assert session["status"] == "done"
             assert session["scored"] == 2, f"Expected scored=2, got {session['scored']}"
             assert session["skipped"] == 1, f"Expected skipped=1, got {session['skipped']}"
+
+        finally:
+            conn.close()
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_skipped_envelopes_do_not_count_as_scored(self):
+        """Regression: a ScoringResult with status='skipped' must NOT count as scored.
+
+        Before the fix, the worker used ``if result is not None`` which
+        incremented scored_count for the non-None skipped/error envelopes that
+        score_and_persist_job returns when the scorer short-circuits. The
+        symptom: dashboard showed "N scored" but count_scorable still found N
+        unscored jobs on the next refresh because classification was never
+        actually persisted.
+        """
+        from job_finder.web.blueprints.batch_scoring import _run_batch_bg
+
+        path, conn = _make_db()
+        try:
+            _insert_unscored_job(conn, "job-skip-1")
+            _insert_unscored_job(conn, "job-skip-2")
+            session_id = _insert_session(
+                conn,
+                status="running",
+                session_type="scoring",
+                total=2,
+            )
+
+            # Both calls return a non-None envelope with status="skipped" —
+            # the exact shape score_and_persist_job emits when score_job
+            # short-circuits on empty jd_full.
+            skipped_env_a = MagicMock()
+            skipped_env_a.status = "skipped"
+            skipped_env_b = MagicMock()
+            skipped_env_b.status = "skipped"
+            score_mock = MagicMock(side_effect=[skipped_env_a, skipped_env_b])
+
+            with (
+                patch(_SCORE_JOB_PATCH, score_mock),
+                patch(_LOAD_PROFILE_PATCH, return_value={}),
+                patch(_SHOULD_EXCLUDE_PATCH, return_value=(False, "")),
+                patch("job_finder.web.activity_tracker.log_activity"),
+            ):
+                _run_batch_bg(path, session_id, _MOCK_CONFIG)
+
+            session = _get_session(conn, session_id)
+            assert session["status"] == "done"
+            assert session["scored"] == 0, (
+                f"Skipped envelopes should not count as scored; got scored={session['scored']}"
+            )
+            assert session["skipped"] == 2, (
+                f"Both skipped envelopes should count as skipped; got skipped={session['skipped']}"
+            )
 
         finally:
             conn.close()

@@ -273,7 +273,13 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                         config,
                         candidate_context=candidate_context,
                     )
-                    if result is not None:
+                    # score_and_persist_job returns a ScoringResult envelope for
+                    # ok/skipped/error and only writes classification on "ok".
+                    # Counting non-None as "scored" inflated scored_count with
+                    # rows that were silently no-op'd (e.g. missing jd_full), so
+                    # the dashboard showed "N scored" while count_scorable still
+                    # found those N rows on the next refresh.
+                    if result is not None and getattr(result, "status", None) == "ok":
                         scored_count += 1
                     else:
                         skipped_count += 1

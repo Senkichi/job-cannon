@@ -6,7 +6,7 @@ salary floor checks with 15% tolerance, case-insensitivity, and empty configs.
 
 import pytest
 
-from job_finder.web.exclusion_filter import should_exclude
+from job_finder.web.exclusion_filter import count_scorable, should_exclude
 
 
 class TestExclusionFilter:
@@ -201,3 +201,66 @@ class TestExclusionFilter:
             job, {"title_keywords": [], "companies": []}, config=config
         )
         assert excluded is True
+
+
+class TestCountScorable:
+    """Tests for count_scorable() — must match what the unified scorer can process.
+
+    Regression guard for the Score-Now-counter-desync bug: count_scorable was
+    counting jobs with classification IS NULL even if jd_full was missing. The
+    v3 unified scorer (job_scorer.score_job) returns status='skipped' on empty
+    jd_full and never writes classification, so those rows stayed unscored after
+    batch completion — making the dashboard count never decrease.
+    """
+
+    def _insert_job(self, conn, dedup_key: str, **fields):
+        """Insert a minimal job row. Defaults yield a scorable row."""
+        defaults = {
+            "title": "Data Scientist",
+            "company": "Acme",
+            "location": "Remote",
+            "source_urls": f"https://example.com/{dedup_key}",
+            "classification": None,
+            "jd_full": "A meaningful job description body that the scorer would consume.",
+            "pipeline_status": "discovered",
+            "sources": "test",
+            "first_seen": "2026-01-01T00:00:00Z",
+            "last_seen": "2026-01-01T00:00:00Z",
+        }
+        defaults.update(fields)
+        cols = ", ".join(["dedup_key"] + list(defaults.keys()))
+        placeholders = ", ".join(["?"] * (1 + len(defaults)))
+        conn.execute(
+            f"INSERT INTO jobs ({cols}) VALUES ({placeholders})",
+            [dedup_key] + list(defaults.values()),
+        )
+        conn.commit()
+
+    def test_counts_unscored_with_jd_full(self, migrated_db):
+        _, conn = migrated_db
+        self._insert_job(conn, "job-1")
+        self._insert_job(conn, "job-2")
+        assert count_scorable(conn, {}) == 2
+
+    def test_excludes_rows_without_jd_full(self, migrated_db):
+        """Regression: rows with jd_full=NULL must not be counted as scorable —
+        the v3 scorer would skip them and classification would stay NULL."""
+        _, conn = migrated_db
+        self._insert_job(conn, "job-1")  # scorable
+        self._insert_job(conn, "job-2", jd_full=None)  # not scorable
+        self._insert_job(conn, "job-3", jd_full="")  # not scorable (empty string)
+        self._insert_job(conn, "job-4", jd_full="   ")  # not scorable (whitespace-only)
+        assert count_scorable(conn, {}) == 1
+
+    def test_excludes_already_classified(self, migrated_db):
+        _, conn = migrated_db
+        self._insert_job(conn, "job-1")
+        self._insert_job(conn, "job-2", classification="good")
+        assert count_scorable(conn, {}) == 1
+
+    def test_excludes_dismissed_and_archived(self, migrated_db):
+        _, conn = migrated_db
+        self._insert_job(conn, "job-1")
+        self._insert_job(conn, "job-2", pipeline_status="dismissed")
+        self._insert_job(conn, "job-3", pipeline_status="archived")
+        assert count_scorable(conn, {}) == 1

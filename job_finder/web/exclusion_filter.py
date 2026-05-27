@@ -82,6 +82,13 @@ def count_scorable(conn, config: dict) -> int:
     populates `classification` on every row it processes, so unclassified rows
     are the correct "unscored" set.
 
+    Also requires non-empty ``jd_full`` because the v3 unified scorer skips
+    rows without a job description (job_scorer.score_job returns
+    status="skipped" on empty jd_full and never persists classification).
+    Without this filter, the dashboard "Score N unscored jobs" button would
+    advertise rows that the worker silently no-ops, producing the symptom
+    where the count never decreases after clicking.
+
     Replicates the three exclusion checks from should_exclude() in SQL so the
     count matches what the batch scorer will actually attempt to score:
     1. Title keyword exclusions (case-insensitive substring)
@@ -91,6 +98,8 @@ def count_scorable(conn, config: dict) -> int:
     try:
         conditions = [
             "classification IS NULL",
+            "jd_full IS NOT NULL",
+            "TRIM(jd_full) != ''",
             "pipeline_status NOT IN ('dismissed', 'archived')",
         ]
         params: list = []
