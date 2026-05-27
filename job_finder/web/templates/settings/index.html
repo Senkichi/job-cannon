@@ -277,7 +277,7 @@
                 <label class="block text-xs font-medium text-slate-400 mb-1">User-Agent Email</label>
                 <input type="email" name="portal_search_usajobs_user_agent_email"
                        value=""
-                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('usajobs', {}).get('user_agent_email') %}(saved — type to replace){% else %}you@example.com{% endif %}"
+                       placeholder="{% if secret_set and secret_set.get('sources.portal_search.usajobs.user_agent_email') %}(saved — type to replace){% else %}you@example.com{% endif %}"
                        autocomplete="off"
                        class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none">
               </div>
@@ -285,7 +285,7 @@
                 <label class="block text-xs font-medium text-slate-400 mb-1">Authorization Key</label>
                 <input type="password" name="portal_search_usajobs_authorization_key"
                        value=""
-                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('usajobs', {}).get('authorization_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       placeholder="{% if secret_set and secret_set.get('sources.portal_search.usajobs.authorization_key') %}(saved — type to replace){% else %}(not set){% endif %}"
                        autocomplete="off"
                        class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
               </div>
@@ -311,7 +311,7 @@
                 <label class="block text-xs font-medium text-slate-400 mb-1">App ID</label>
                 <input type="password" name="portal_search_adzuna_app_id"
                        value=""
-                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('app_id') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       placeholder="{% if secret_set and secret_set.get('sources.portal_search.adzuna.app_id') %}(saved — type to replace){% else %}(not set){% endif %}"
                        autocomplete="off"
                        class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
               </div>
@@ -319,7 +319,7 @@
                 <label class="block text-xs font-medium text-slate-400 mb-1">App Key</label>
                 <input type="password" name="portal_search_adzuna_app_key"
                        value=""
-                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('adzuna', {}).get('app_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       placeholder="{% if secret_set and secret_set.get('sources.portal_search.adzuna.app_key') %}(saved — type to replace){% else %}(not set){% endif %}"
                        autocomplete="off"
                        class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
               </div>
@@ -353,7 +353,7 @@
                 <label class="block text-xs font-medium text-slate-400 mb-1">API Key</label>
                 <input type="password" name="portal_search_jooble_api_key"
                        value=""
-                       placeholder="{% if config.get('sources', {}).get('portal_search', {}).get('jooble', {}).get('api_key') %}(saved — type to replace){% else %}(not set){% endif %}"
+                       placeholder="{% if secret_set and secret_set.get('sources.portal_search.jooble.api_key') %}(saved — type to replace){% else %}(not set){% endif %}"
                        autocomplete="off"
                        class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-violet-500 focus:outline-none font-mono">
               </div>

@@ -71,6 +71,13 @@ def index():
     # instead of leaking the plaintext value to the HTML. Only checks env +
     # keyring — a plaintext-only value would still pass the read, but showing
     # "(set)" would mislead the user into thinking the migration ran.
+    #
+    # The portal_search.* entries cover the Stage 7.1 USAJobs/Adzuna/Jooble
+    # credentials. They were previously omitted, which meant the settings UI
+    # placeholder check (template uses `config.get(...).get('app_id')`)
+    # always showed "(not set)" after a save — because the save flow moves
+    # those values to the keyring and writes an empty string back to
+    # config.yaml. Users hit "save" repeatedly thinking it was broken.
     secret_set = {
         name: jf_secrets.get_secret(name) is not None
         for name in (
@@ -81,6 +88,11 @@ def index():
             "sources.google_cse.api_key",
             "sources.google_cse.cse_id",
             "sources.jsearch.rapidapi_key",
+            "sources.portal_search.usajobs.user_agent_email",
+            "sources.portal_search.usajobs.authorization_key",
+            "sources.portal_search.adzuna.app_id",
+            "sources.portal_search.adzuna.app_key",
+            "sources.portal_search.jooble.api_key",
         )
     }
 
