@@ -34,7 +34,7 @@ _VALID_VIEWS = ("usage", "cost")
 @costs_bp.route("/", strict_slashes=False)
 def index():
     """API Activity page — Usage (default) or Cost via ?view=cost."""
-    conn = get_db(current_app.config["DB_PATH"])
+    conn = get_db()
 
     view = request.args.get("view", "usage")
     if view not in _VALID_VIEWS:

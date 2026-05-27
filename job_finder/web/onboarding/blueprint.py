@@ -61,7 +61,7 @@ _NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset({"claude_code_cli", "gemi
 # --- Helpers ---
 
 def _db():
-    return get_db(current_app.config["DB_PATH"])
+    return get_db()
 
 
 def _wizard():

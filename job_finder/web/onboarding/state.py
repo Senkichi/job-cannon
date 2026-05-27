@@ -22,7 +22,7 @@ import sqlite3
 from pathlib import Path
 
 import yaml
-from flask import current_app, g, redirect, request, url_for
+from flask import g, redirect, request, url_for
 from flask import Response  # re-export of werkzeug.wrappers.Response; more idiomatic in blueprint code
 
 from job_finder.web import user_data_dirs
@@ -172,7 +172,7 @@ def gate_onboarding() -> Response | None:
     if path in _WHITELIST_EXACT or any(path.startswith(p) for p in _WHITELIST_PREFIXES):
         return None
 
-    db = get_db(current_app.config["DB_PATH"])
+    db = get_db()
     row = db.execute("SELECT onboarding_complete FROM onboarding_state WHERE id = 1").fetchone()
 
     if row is None:
