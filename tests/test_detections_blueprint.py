@@ -222,8 +222,12 @@ class TestDismissAction:
         ).fetchone()
         assert after_row["pipeline_status"] == original_status
 
-    def test_dismiss_response_is_empty(self, client_with_db):
-        """Dismiss returns an empty response body so HTMX removes the card."""
+    def test_dismiss_response_carries_oob_header_only(self, client_with_db):
+        """Dismiss returns an OOB swap for the pipeline-review header and nothing
+        else. HTMX strips the OOB element from the response before applying the
+        primary swap, so the card target gets empty content (removed) AND the
+        dashboard badge gets refreshed to the new count in the same request.
+        """
         client, db_path, conn = client_with_db
         job_id = "betterhelp|data scientist|san jose ca"
         detection_id = _insert_pending_detection(conn, job_id, "rejection")
@@ -231,7 +235,12 @@ class TestDismissAction:
         response = client.post(f"/detections/{detection_id}/dismiss")
 
         assert response.status_code == 200
-        assert response.data == b""
+        # The OOB header is the only payload — no extra primary content that
+        # would leak into the card target.
+        body = response.data.decode("utf-8")
+        assert 'id="pipeline-review-header"' in body
+        assert 'hx-swap-oob="true"' in body
+        assert "Pipeline Review" in body
 
     def test_dismiss_missing_detection_returns_404(self, client_with_db):
         """POST /detections/9999/dismiss returns 404 when detection does not exist."""
@@ -240,6 +249,33 @@ class TestDismissAction:
         response = client.post("/detections/9999/dismiss")
 
         assert response.status_code == 404
+
+    def test_dismiss_oob_badge_reflects_decremented_count(self, client_with_db):
+        """Regression: the OOB header must report the new (decremented) count.
+
+        Symptom before fix: dashboard badge said "3" even after dismissing one
+        of three detections, until a full page reload. The OOB swap fixes the
+        badge in the same request that fades the card out.
+        """
+        client, db_path, conn = client_with_db
+        d1 = _insert_pending_detection(
+            conn, "betterhelp|data scientist|san jose ca", "rejection"
+        )
+        _insert_pending_detection(
+            conn, "stripe|senior data scientist|remote", "rejection"
+        )
+        _insert_pending_detection(
+            conn, "google|staff data scientist|remote", "interview"
+        )
+        # Before any action: 3 pending.
+        response = client.post(f"/detections/{d1}/dismiss")
+        assert response.status_code == 200
+        body = response.data.decode("utf-8")
+        # The badge span only renders for pending_count > 0; with 2 pending
+        # after dismiss, we should see the count rendered explicitly.
+        assert ">\n      2\n    </span>" in body or ">2<" in body, (
+            f"Expected count 2 in OOB header; got: {body[:400]}"
+        )
 
 
 # ---------------------------------------------------------------------------

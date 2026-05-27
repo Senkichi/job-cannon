@@ -265,14 +265,7 @@
 
   <!-- ── Pipeline Review Queue ── -->
   <section aria-label="Pipeline review queue">
-    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
-      Pipeline Review
-      {% if pending_count > 0 %}
-        <span class="ml-2 bg-amber-600 text-white text-xs rounded-full px-2 py-0.5">
-          {{ pending_count }}
-        </span>
-      {% endif %}
-    </h2>
+    {% include "dashboard/_pipeline_review_header.html" %}
     <div id="review-queue-container">
       {% include "dashboard/_review_queue.html" %}
     </div>

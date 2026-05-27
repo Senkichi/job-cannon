@@ -1,0 +1,20 @@
+{# Pipeline Review section header — h2 + badge.
+
+   Lives in its own partial so detection confirm/dismiss routes can OOB-swap
+   the up-to-date count back to the page after they've resolved a detection.
+
+   Required context:
+     - pending_count (int)
+     - oob (bool, default false) — when true, emits hx-swap-oob so HTMX
+       replaces the existing #pipeline-review-header element in place.
+#}
+<h2 id="pipeline-review-header"
+    {% if oob %}hx-swap-oob="true"{% endif %}
+    class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">
+  Pipeline Review
+  {% if pending_count > 0 %}
+    <span class="ml-2 bg-amber-600 text-white text-xs rounded-full px-2 py-0.5">
+      {{ pending_count }}
+    </span>
+  {% endif %}
+</h2>

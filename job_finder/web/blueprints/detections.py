@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, render_template
 
-from job_finder.db import resolve_detection, update_pipeline_status
+from job_finder.db import get_dashboard_stats, resolve_detection, update_pipeline_status
 from job_finder.web.db_helpers import get_db
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,28 @@ _DETECTION_TYPE_TO_STATUS = {
     "interview": "phone_screen",
     "confirmation": "applied",
 }
+
+
+def _render_pipeline_review_header_oob(conn) -> str:
+    """Render the pipeline-review h2 + badge as an OOB swap so the dashboard
+    counter stays in sync after a confirm/dismiss action.
+
+    Without this, the badge in the page header keeps showing the pre-action
+    count even after the card fades out — the badge is rendered once on full
+    page load and the HTMX swap that removes the card doesn't touch it.
+    """
+    try:
+        stats = get_dashboard_stats(conn)
+        pending_count = stats.get("pending_detections", 0)
+    except Exception:
+        # If the count query fails, skip the OOB update rather than break the
+        # primary card swap. The badge will be stale until the next page load.
+        return ""
+    return render_template(
+        "dashboard/_pipeline_review_header.html",
+        pending_count=pending_count,
+        oob=True,
+    )
 
 
 @detections_bp.route("/<int:detection_id>/confirm", methods=["POST"], strict_slashes=False)
@@ -74,12 +96,13 @@ def confirm(detection_id: int):
         job_id,
     )
 
-    return render_template(
+    primary = render_template(
         "dashboard/_detection_confirmed.html",
         detection_id=detection_id,
         company=company,
         new_status=new_status,
     )
+    return primary + _render_pipeline_review_header_oob(conn)
 
 
 @detections_bp.route("/<int:detection_id>/dismiss", methods=["POST"], strict_slashes=False)
@@ -106,4 +129,6 @@ def dismiss(detection_id: int):
         logger.error("Failed to dismiss detection %d: %s", detection_id, e)
 
     logger.info("Detection %d dismissed", detection_id)
-    return "", 200
+    # Empty primary swap removes the card; OOB header re-renders the badge
+    # with the decremented count so the dashboard counter doesn't lie.
+    return _render_pipeline_review_header_oob(conn), 200
