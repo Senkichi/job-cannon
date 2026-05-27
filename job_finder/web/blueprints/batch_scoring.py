@@ -26,24 +26,6 @@ batch_scoring_bp = Blueprint("batch_scoring", __name__, url_prefix="/dashboard")
 _SESSION_TYPE_SCORING = "scoring"
 
 
-def _render_scoring_done(
-    scored: int = 0,
-    skipped: int = 0,
-    status: str = "done",
-    message: str | None = None,
-    error_msg: str | None = None,
-):
-    """Render the batch-score done fragment (terminal state)."""
-    return render_template(
-        "dashboard/_batch_score_done.html",
-        scored=scored,
-        skipped=skipped,
-        status=status,
-        message=message,
-        error_msg=error_msg,
-    )
-
-
 def _start_batch_session():
     """Shared core for POST /batch-score/start."""
     db_path = current_app.config["DB_PATH"]
