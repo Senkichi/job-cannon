@@ -729,3 +729,125 @@ print("CHILD_ACQUIRED" if ok else "CHILD_FAILED", flush=True)
         mock_app.config = {"DB_PATH": db_path}
         acquired = _acquire_scheduler_pidfile(mock_app)
         assert acquired is True, "OS should have released lock when child exited"
+
+
+# ---------------------------------------------------------------------------
+# Scheduled-sync metadata: per-portal counts must reach the activity feed.
+# Closes drift item #3 from the 2026-05-27 round-4 handoff — before the fix,
+# only the cron/admin-triggered path (action='scheduled_sync') silently
+# dropped portal_<name>_fetched keys, leaving the dashboard unable to show
+# USAJobs/Adzuna/Jooble counts.
+# ---------------------------------------------------------------------------
+
+
+class TestScheduledSyncPortalMetadata:
+    """run_pipeline closure copies portal_<name>_fetched keys into log_activity metadata."""
+
+    def _minimal_app(self, db_path: str):
+        """Hand-rolled app mock — the file-level _make_app helper has a broken
+        ``app.config.get = lambda`` assignment that only fires with testing=False
+        (no other test exercises that path). Avoiding it by building exactly the
+        surface ``run_pipeline`` touches: ``app.app_context()`` + ``app.config``
+        as a real dict for ``get_config_snapshot``.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            yield None
+
+        app = MagicMock()
+        app.app_context = _ctx
+        app.config = {"DB_PATH": db_path, "JF_CONFIG": {}}
+        return app
+
+    def _capture_run_pipeline(self, app):
+        """Register ingestion against a mock scheduler and return the captured closure."""
+        from job_finder.web.scheduler._jobs import register_ingestion
+
+        mock_scheduler = MagicMock()
+        captured: dict = {}
+
+        def _capture_add_job(func, **kwargs):
+            if kwargs.get("id") == "ingestion_poll":
+                captured["fn"] = func
+
+        mock_scheduler.add_job.side_effect = _capture_add_job
+        register_ingestion(mock_scheduler, app)
+        assert "fn" in captured, "register_ingestion did not add an ingestion_poll job"
+        return captured["fn"]
+
+    def test_per_portal_keys_appear_in_scheduled_sync_metadata(self):
+        app = self._minimal_app(":memory:")
+        run_pipeline = self._capture_run_pipeline(app)
+
+        synthetic_summary = {
+            "jobs_new": 10,
+            "gmail_fetched": 5,
+            "serpapi_fetched": 0,
+            "thordata_fetched": 0,
+            "dataforseo_fetched": 0,
+            "portal_search_fetched": 5,
+            "portal_usajobs_fetched": 2,
+            "portal_adzuna_fetched": 3,
+            "portal_jooble_fetched": 0,  # explicit zero — fetcher ran but yielded none
+        }
+
+        captured_metadata: dict = {}
+
+        def _capture_log_activity(db_path, action, metadata=None, **kwargs):
+            captured_metadata.update(metadata or {})
+
+        with patch(
+            "job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary
+        ), patch(
+            "job_finder.web.activity_tracker.log_activity",
+            side_effect=_capture_log_activity,
+        ):
+            run_pipeline()
+
+        # Per-portal keys must propagate so the dashboard can show them.
+        assert captured_metadata["portal_search_fetched"] == 5
+        assert captured_metadata["portal_usajobs_fetched"] == 2
+        assert captured_metadata["portal_adzuna_fetched"] == 3
+        # Explicit zero values are preserved (scoop loop does not filter on truthiness).
+        assert captured_metadata["portal_jooble_fetched"] == 0
+        # Status + jobs_new still present (regression guard for the rest of the dict).
+        assert captured_metadata["status"] == "success"
+        assert captured_metadata["jobs_new"] == 10
+
+    def test_no_portal_keys_when_summary_has_none(self):
+        """No portal_*_fetched keys → metadata only has the aggregate (0)."""
+        app = self._minimal_app(":memory:")
+        run_pipeline = self._capture_run_pipeline(app)
+
+        synthetic_summary = {
+            "jobs_new": 0,
+            "gmail_fetched": 0,
+            "serpapi_fetched": 0,
+            "thordata_fetched": 0,
+            "dataforseo_fetched": 0,
+            "portal_search_fetched": 0,
+        }
+
+        captured_metadata: dict = {}
+
+        def _capture_log_activity(db_path, action, metadata=None, **kwargs):
+            captured_metadata.update(metadata or {})
+
+        with patch(
+            "job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary
+        ), patch(
+            "job_finder.web.activity_tracker.log_activity",
+            side_effect=_capture_log_activity,
+        ):
+            run_pipeline()
+
+        portal_keys = [
+            k
+            for k in captured_metadata
+            if k.startswith("portal_") and k.endswith("_fetched")
+        ]
+        # Only the aggregate — no per-portal noise.
+        assert portal_keys == ["portal_search_fetched"]
+        assert captured_metadata["portal_search_fetched"] == 0

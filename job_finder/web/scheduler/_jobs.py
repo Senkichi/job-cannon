@@ -60,19 +60,28 @@ def register_ingestion(scheduler, app) -> None:
                     summary.get("thordata_fetched", 0),
                     summary.get("dataforseo_fetched", 0),
                 )
-                log_activity(
-                    db_path,
-                    ACTION_SCHEDULED_SYNC,
-                    metadata={
-                        "jobs_new": summary.get("jobs_new", 0),
-                        "gmail_fetched": summary.get("gmail_fetched", 0),
-                        "serpapi_fetched": summary.get("serpapi_fetched", 0),
-                        "thordata_fetched": summary.get("thordata_fetched", 0),
-                        "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
-                        "duration_seconds": round(_time.time() - t0, 2),
-                        "status": "success",
-                    },
-                )
+                metadata = {
+                    "jobs_new": summary.get("jobs_new", 0),
+                    "gmail_fetched": summary.get("gmail_fetched", 0),
+                    "serpapi_fetched": summary.get("serpapi_fetched", 0),
+                    "thordata_fetched": summary.get("thordata_fetched", 0),
+                    "dataforseo_fetched": summary.get("dataforseo_fetched", 0),
+                    "portal_search_fetched": summary.get("portal_search_fetched", 0),
+                    "duration_seconds": round(_time.time() - t0, 2),
+                    "status": "success",
+                }
+                # Per-portal counts (portal_<name>_fetched keys) — match the
+                # action='sync' schema so the dashboard's Recent Activity can
+                # surface USAJobs/Adzuna/Jooble/etc. for both manual + scheduled
+                # paths. Zero-yield portals are absent from summary by design.
+                for k, v in summary.items():
+                    if (
+                        k.startswith("portal_")
+                        and k.endswith("_fetched")
+                        and k != "portal_search_fetched"
+                    ):
+                        metadata[k] = v
+                log_activity(db_path, ACTION_SCHEDULED_SYNC, metadata=metadata)
             except Exception as e:
                 logger.error("Scheduled ingestion failed: %s", e)
                 log_activity(
