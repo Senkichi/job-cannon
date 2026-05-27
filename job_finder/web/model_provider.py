@@ -566,7 +566,20 @@ def _maybe_record_cost(
         conn: Open SQLite connection.
         job_id: Job dedup_key for cost attribution (nullable).
         purpose: Feature attribution label.
+
+    Raises:
+        ValueError: If ``result.provider`` is empty. U6 guard — scoring_costs
+            DEFAULT for the provider column ('anthropic', m018) is in
+            FREE_PROVIDERS post-F2, so an INSERT that omits provider would
+            silently land in a row that is filtered out of every cost rollup.
+            Loud failure beats silent loss.
     """
+    if not result.provider:
+        raise ValueError(
+            f"_maybe_record_cost: ModelResult.provider must be non-empty "
+            f"(job_id={job_id}, purpose={purpose}, model={result.model})"
+        )
+
     if result.provider in _FREE_PROVIDERS:
         cost_usd = 0.0
     else:

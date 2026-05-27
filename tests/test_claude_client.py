@@ -51,6 +51,18 @@ def test_record_cost_claude_cli_records_zero(migrated_db):
     assert cost == 0.0
 
 
+def test_record_cost_rejects_empty_provider(migrated_db):
+    """U6 guard: record_cost raises on provider='' to prevent default-leak rows.
+
+    scoring_costs.provider has DEFAULT 'anthropic' (m018), and 'anthropic' is
+    in FREE_PROVIDERS post-F2 — so an INSERT that fails to pass a provider
+    name would silently disappear from cost rollups.
+    """
+    _, conn = migrated_db
+    with pytest.raises(ValueError, match="provider must be"):
+        record_cost(conn, "j1", "purpose", "model", 1, 1, provider="")
+
+
 # ---------------------------------------------------------------------------
 # Tests: get_monthly_provider_breakdown
 # ---------------------------------------------------------------------------

@@ -171,7 +171,18 @@ def record_cost(
 
     Returns:
         Computed cost in USD (0.0 for free/subscription providers).
+
+    Raises:
+        ValueError: If ``provider`` is empty. U6 (.planning/specs/
+            2026-05-27-polish-review-followups-plan.md) — scoring_costs.provider
+            has DEFAULT 'anthropic' (m018) which is in FREE_PROVIDERS post-F2,
+            so an INSERT that lands the default value silently disappears from
+            cost rollups. A writer passing provider='' would trip the same
+            trap. Loud failure beats silent loss.
     """
+    if not provider:
+        raise ValueError("record_cost: provider must be a non-empty string")
+
     cost_usd = (
         0.0 if provider in FREE_PROVIDERS else compute_cost(model, input_tokens, output_tokens)
     )

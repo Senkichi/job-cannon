@@ -1361,3 +1361,35 @@ def test_call_model_skips_budget_for_free_providers(provider_name, model_name, t
         call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# U6 guard: _maybe_record_cost rejects empty provider
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_record_cost_rejects_empty_provider(tmp_path):
+    """U6 guard: _maybe_record_cost raises on ModelResult.provider='' to
+    prevent default-leak rows in scoring_costs.
+
+    scoring_costs.provider has DEFAULT 'anthropic' (m018), which is in
+    FREE_PROVIDERS post-F2 — so an INSERT that fails to set provider
+    would silently disappear from cost rollups.
+    """
+    from job_finder.web.model_provider import _maybe_record_cost
+
+    conn = _migrated_conn(tmp_path)
+    try:
+        bad_result = ModelResult(
+            data={"x": 1},
+            cost_usd=0.0,
+            input_tokens=10,
+            output_tokens=5,
+            model="some-model",
+            provider="",  # ← the trap
+            schema_valid=True,
+        )
+        with pytest.raises(ValueError, match="provider must be"):
+            _maybe_record_cost(bad_result, conn, "j1", "purpose")
+    finally:
+        conn.close()

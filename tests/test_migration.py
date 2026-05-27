@@ -387,11 +387,12 @@ def test_migration_count_is_thirteen():
     Migration 54: onboarding_state.wizard_data for inter-step wizard state (Phase 42).
     Migration 55: idx_jobs_company_id for orphan-recalibration writer-lock fix.
     Migration 56: clear default-leaked scoring_provider='anthropic' tags (Stage 7.7).
+    Migration 57: retag historical paid Anthropic SDK rows to 'anthropic_sdk' (U6).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 56
+    assert len(MIGRATIONS) == 57
 
 
 class TestMigration27:
@@ -922,8 +923,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 56 entries (through Migration 56: clear scoring_provider default leak)."""
-        assert len(MIGRATIONS) == 56
+        """MIGRATIONS list has 57 entries (through Migration 57: retag historical paid Anthropic SDK rows)."""
+        assert len(MIGRATIONS) == 57
 
 
 class TestMigration40:
@@ -1367,11 +1368,11 @@ class TestMigration52And53:
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
 
-        # Check PRAGMA user_version matches the final migration (55: idx_jobs_company_id).
+        # Check PRAGMA user_version matches the final migration.
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 56, f"Expected PRAGMA user_version=56, got: {version}"
+        assert version == 57, f"Expected PRAGMA user_version=57, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(
@@ -1399,3 +1400,118 @@ class TestMigration52And53:
         assert "schema_valid" in scoring_costs_cols, "schema_valid column missing from scoring_costs"
 
         conn.close()
+
+
+class TestMigration57:
+    """Tests for Migration 57 (retag historical paid Anthropic SDK rows).
+
+    Pre-F2, `scoring_costs.provider='anthropic' AND cost_usd > 0` represented
+    real paid Anthropic SDK spend. F2 (c8e698d) added 'anthropic' to
+    FREE_PROVIDERS, which would have silently dropped those rows from cost
+    rollups. Migration 57 retags them to 'anthropic_sdk' so the rollup
+    queries see them again.
+
+    Tests apply migrations 1..56, seed scoring_costs, then apply m057 — the
+    same pattern as TestMigration51 (heal-pass migration tested against
+    seeded pre-migration state).
+    """
+
+    def _seed_and_apply_m57(self, tmp_path, rows):
+        """Apply migrations 1..56, INSERT each row, then apply m057.
+
+        Returns the live connection so the caller can SELECT and verify.
+        """
+        import os
+        import tempfile
+
+        from job_finder.web.db_migrate import MIGRATIONS, _apply_migration
+        from job_finder.web.migrations import MigrationContext
+
+        fd, path = tempfile.mkstemp(suffix=".db", dir=str(tmp_path))
+        os.close(fd)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        ctx = MigrationContext(conn=conn, db_path=path, user_data_root=str(tmp_path))
+        for m in MIGRATIONS:
+            if m.version == 57:
+                break
+            _apply_migration(ctx, m)
+        for row in rows:
+            conn.execute(
+                "INSERT INTO scoring_costs "
+                "(job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+        conn.commit()
+        mig57 = next(m for m in MIGRATIONS if m.version == 57)
+        _apply_migration(ctx, mig57)
+        return conn, ctx, mig57
+
+    def test_paid_anthropic_rows_retagged_to_anthropic_sdk(self, tmp_path):
+        """Rows with provider='anthropic' AND cost_usd > 0 retag to
+        'anthropic_sdk' so post-F2 FREE_PROVIDERS doesn't hide them."""
+        conn, _ctx, _mig = self._seed_and_apply_m57(
+            tmp_path,
+            rows=[
+                ("j1", "scoring", "claude-sonnet-4-6", 1000, 500, 5.50, "2026-05-19T12:00:00Z", "anthropic"),
+            ],
+        )
+        row = conn.execute(
+            "SELECT provider, cost_usd FROM scoring_costs WHERE job_id = 'j1'"
+        ).fetchone()
+        conn.close()
+        assert row["provider"] == "anthropic_sdk"
+        assert row["cost_usd"] == 5.50
+
+    def test_free_anthropic_rows_not_retagged(self, tmp_path):
+        """Rows with provider='anthropic' AND cost_usd = 0 stay as 'anthropic'
+        — they are post-F2 free CLI rows or default-leaked rows, not paid spend."""
+        conn, _ctx, _mig = self._seed_and_apply_m57(
+            tmp_path,
+            rows=[
+                ("j2", "scoring", "claude-haiku-4-5", 100, 50, 0.0, "2026-05-26T12:00:00Z", "anthropic"),
+            ],
+        )
+        row = conn.execute(
+            "SELECT provider FROM scoring_costs WHERE job_id = 'j2'"
+        ).fetchone()
+        conn.close()
+        assert row["provider"] == "anthropic"
+
+    def test_other_providers_not_affected(self, tmp_path):
+        """Rows with provider != 'anthropic' are untouched regardless of cost."""
+        conn, _ctx, _mig = self._seed_and_apply_m57(
+            tmp_path,
+            rows=[
+                ("j3", "scoring", "gpt-4", 200, 100, 3.20, "2026-05-19T12:00:00Z", "openrouter"),
+                ("j4", "scoring", "qwen2.5:14b", 200, 100, 0.0, "2026-05-19T12:00:00Z", "ollama"),
+            ],
+        )
+        rows = conn.execute(
+            "SELECT job_id, provider FROM scoring_costs WHERE job_id IN ('j3', 'j4') ORDER BY job_id"
+        ).fetchall()
+        conn.close()
+        assert rows[0]["provider"] == "openrouter"
+        assert rows[1]["provider"] == "ollama"
+
+    def test_m057_is_idempotent(self, tmp_path):
+        """Re-applying m057 after retag is a no-op (no rows have provider='anthropic' AND cost_usd>0 anymore)."""
+        from job_finder.web.db_migrate import _apply_migration
+
+        conn, ctx, mig57 = self._seed_and_apply_m57(
+            tmp_path,
+            rows=[
+                ("j5", "scoring", "claude-sonnet-4-6", 1000, 500, 5.50, "2026-05-19T12:00:00Z", "anthropic"),
+            ],
+        )
+        # Roll back user_version so _apply_migration runs m057 again.
+        conn.execute("PRAGMA user_version = 56")
+        conn.commit()
+        _apply_migration(ctx, mig57)
+        row = conn.execute(
+            "SELECT provider FROM scoring_costs WHERE job_id = 'j5'"
+        ).fetchone()
+        conn.close()
+        # Still anthropic_sdk after second apply.
+        assert row["provider"] == "anthropic_sdk"
