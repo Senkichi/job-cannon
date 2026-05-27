@@ -672,8 +672,12 @@ def paste_jd(dedup_key: str):
         config = current_app.config.get("JF_CONFIG", {})
         if cost_gate(conn, config, "scoring"):
             # Refresh job row with jd_full
-            job = get_job(conn, dedup_key)
-            score_and_persist_job(job, conn, config)
+            refreshed = get_job(conn, dedup_key)
+            if refreshed is not None:
+                score_and_persist_job(refreshed, conn, config)
+            else:
+                logger.warning("paste-jd: row vanished mid-request for %s", dedup_key)
+                error = "Job no longer exists. Scoring skipped."
         else:
             logger.info("paste-jd: budget cap reached, scoring skipped for %s", dedup_key)
             error = "Budget cap reached. Scoring skipped."
@@ -687,6 +691,8 @@ def paste_jd(dedup_key: str):
 
     # Return updated expanded row + OOB score cell (updates compact row in-place)
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -790,6 +796,8 @@ def rescore(dedup_key: str):
             pass
 
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     expanded = render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
@@ -855,6 +863,8 @@ def save_jd(dedup_key: str):
         logger.debug("log_activity failed in save_jd", exc_info=True)
 
     ctx = load_job_context(conn, dedup_key)
+    if ctx is None:
+        return "", 404
     return render_template(
         "jobs/_row_expanded.html",
         job=ctx["job"],
