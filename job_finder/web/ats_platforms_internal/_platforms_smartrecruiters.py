@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 _PAGE_SIZE = 100
 _MAX_RESULTS = 500
 _DETAIL_FETCH_SLEEP_S = 0.1
+# Pacing for the LIST endpoint between successive page fetches. Pre-F1
+# (commit b99e1d9) the list-endpoint cadence was incidentally paced by
+# the per-matched-posting detail-fetch sleep in the same per-page loop.
+# See .planning/specs/2026-05-26-polish-review-audit.md (MAJOR — Workday
+# + SmartRecruiters pagination).
+_PAGE_FETCH_SLEEP_S = 0.1
 
 
 def _fetch_postings(slug: str) -> list[dict]:
@@ -31,6 +37,9 @@ def _fetch_postings(slug: str) -> list[dict]:
     total_fetched = 0
 
     while offset < _MAX_RESULTS:
+        if offset > 0:
+            time.sleep(_PAGE_FETCH_SLEEP_S)
+
         try:
             resp = requests.get(
                 base_url,
