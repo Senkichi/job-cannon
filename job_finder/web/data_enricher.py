@@ -519,6 +519,30 @@ def _apply_post_fetch_extraction(
     if not any(_is_empty(f) for f in structured_fields):
         return dict(enriched)
 
+    merged = dict(enriched)
+
+    # Fast path: deterministic regex salary extraction. Runs first so
+    # the common-format JDs ($120K-$150K, "salary range: 120K-150K",
+    # USD 120,000-150,000, etc.) don't burn an LLM call. Only fills
+    # salary_{min,max} both-or-neither — the regex helper guarantees
+    # both-present-or-both-None semantics.
+    from job_finder.web.salary_extractor import extract_salary_from_text
+
+    if _is_empty("salary_min") and _is_empty("salary_max"):
+        regex_min, regex_max = extract_salary_from_text(effective_jd)
+        if regex_min is not None and regex_max is not None:
+            merged["salary_min"] = regex_min
+            merged["salary_max"] = regex_max
+
+    # Recompute is-empty after regex pass — the LLM only needs to run
+    # if there's something it can still help with (location, or salary
+    # the regex couldn't find).
+    def _still_empty(field: str) -> bool:
+        return merged.get(field) is None and not job_row.get(field)
+
+    if not any(_still_empty(f) for f in structured_fields):
+        return merged
+
     parsed = parse_structured_fields(
         jd_full=effective_jd,
         job_row=job_row,
@@ -526,13 +550,12 @@ def _apply_post_fetch_extraction(
         config=config,
     )
     if not parsed:
-        return dict(enriched)
+        return merged
 
-    merged = dict(enriched)
     for field, value in parsed.items():
         if field not in structured_fields:
             continue  # ignore unknown keys; schema already restricts
-        if _is_empty(field):  # only fill empty fields — never overwrite
+        if _still_empty(field):  # only fill empty fields — never overwrite
             merged[field] = value
     return merged
 
