@@ -195,6 +195,18 @@ def run_ingestion(
             except Exception as e:
                 logger.warning("Failed to log DataForSEO run: %s", e)
 
+        if summary.get("portal_search_fetched", 0) > 0 or summary.get("portal_search_errors"):
+            try:
+                log_run(
+                    runner_conn,
+                    "portal_search",
+                    summary["portal_search_fetched"],
+                    jobs_new,
+                    jobs_scored,
+                )
+            except Exception as e:
+                logger.warning("Failed to log portal_search run: %s", e)
+
     # --- AI scoring (runs after DB connection is closed) ---
     # v3.0 unified scoring is the only path (Plan 4 Commit E removed the
     # use_unified_scorer toggle and the legacy two-tier else-branch).

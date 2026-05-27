@@ -1651,6 +1651,55 @@ class TestPerPortalBreakdown:
         # Only portal_search_fetched (the aggregate) — no per-portal keys.
         assert portal_keys == ["portal_search_fetched"]
 
+    def test_portal_search_logged_in_runs_table(self, base_config, migrated_db_path):
+        """pipeline_runner emits a 'portal_search' row in runs when portal jobs fetched.
+
+        Mirrors test_dataforseo_logged_in_runs_table — closes drift item #2 from
+        the 2026-05-27 round-4 handoff. Before the fix, portal_search results
+        never landed in the runs table, leaving `SELECT * FROM runs WHERE
+        source='portal_search'` permanently empty regardless of fetch yield.
+        """
+        import sqlite3
+
+        from job_finder.models import Job
+
+        base_config["db"] = {"path": migrated_db_path}
+        base_config["sources"].update(
+            {
+                "gmail": {"enabled": False},
+                "serpapi": {"enabled": False},
+            }
+        )
+        base_config["profile"] = {"target_titles": ["Staff Engineer"]}
+        base_config["scoring"] = {"min_score_threshold": 0, "weights": {}}
+
+        portal_jobs = [
+            Job(
+                title="Staff Engineer",
+                company=f"PortalCo{i}",
+                location="Remote",
+                source="portal_jobicy",
+                source_url=f"https://example.com/portal-job-{i}",
+            )
+            for i in range(2)
+        ]
+        with patch(
+            "job_finder.sources.portal_search_source.fetch_all_portals",
+            return_value=portal_jobs,
+        ):
+            from job_finder.web.pipeline_runner import run_ingestion
+
+            run_ingestion(migrated_db_path, base_config, score=False)
+
+        conn = sqlite3.connect(migrated_db_path)
+        row = conn.execute(
+            "SELECT source, jobs_fetched FROM runs WHERE source = 'portal_search'"
+        ).fetchone()
+        conn.close()
+
+        assert row is not None, "Expected a 'portal_search' entry in runs table"
+        assert row[1] == 2
+
     def test_log_activity_scoops_dynamic_portal_keys(self):
         """_run_sync_bg's metadata composer picks up any portal_<name>_fetched
         key the fetcher produced, without needing the key enumerated explicitly."""
