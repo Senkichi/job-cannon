@@ -333,7 +333,13 @@ class TestScanRoute:
         assert response.status_code == 200
 
     def test_scan_returns_scan_result_fragment(self, companies_client):
-        """POST /companies/scan renders _scan_result.html (non-empty response)."""
+        """POST /companies/scan returns a non-empty fragment.
+
+        Post-async-refactor this is either ``_scan_ats_progress.html``
+        (when there are scannable companies) or ``_scan_ats_done.html``
+        (empty cohort). Both are valid; this test only asserts the route
+        responded with body content.
+        """
         client, db_path, conn = companies_client
         response = client.post("/companies/scan")
         assert response.status_code == 200

@@ -3,8 +3,8 @@
 
    No hx-trigger — omitting it stops HTMX polling (Phase 4 proven pattern).
 
-   Auto-dismisses after 8s on success (mirrors prior _scan_result.html UX).
-   Lives inside the #scan-result container in companies/index.html. #}
+   Auto-dismisses after 8s on success. Lives inside the #scan-result
+   container in companies/index.html. #}
 <div id="scan-result"
      class="{% if error_msg %}bg-red-900/40 border-red-700{% elif status == 'cancelled' %}bg-amber-900/40 border-amber-700{% else %}bg-emerald-900/40 border-emerald-700{% endif %} border rounded-lg px-4 py-3 flex items-center justify-between">
   <div class="flex items-center gap-3">
@@ -54,8 +54,8 @@
   </button>
 </div>
 
-{# Auto-dismiss success card after 8s (matches prior _scan_result.html behavior).
-   Skip auto-dismiss on error/cancelled so the user has time to read the message. #}
+{# Auto-dismiss success card after 8s. Skip on error/cancelled so the
+   user has time to read the message. #}
 {% if not error_msg and status != 'cancelled' %}
 <script>
   setTimeout(function () {
