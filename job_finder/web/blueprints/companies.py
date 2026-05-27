@@ -120,6 +120,21 @@ def index():
     # Compute health metrics for full page
     health = _compute_health_metrics(conn)
 
+    # Detect any in-flight ATS scan so the polling progress fragment renders
+    # on a fresh page load. Without this, clicking 'Scan ATS' then navigating
+    # away and back hides all scan progress until the next manual click,
+    # which was reported as confusing UX (no indication a scan is running).
+    running_row = _find_running_scan_session(conn)
+    running_scan = (
+        {
+            "session_id": running_row["id"],
+            "total": running_row["total"] or 0,
+            "scanned": running_row["scored"] or 0,
+        }
+        if running_row
+        else None
+    )
+
     return render_template(
         "companies/index.html",
         companies=companies,
@@ -130,6 +145,7 @@ def index():
         has_more=has_more,
         total_count=total_count,
         health=health,
+        running_scan=running_scan,
     )
 
 
@@ -347,6 +363,28 @@ def update_slug(company_id):
 
 
 _SESSION_TYPE_ATS_SCAN = "ats_scan"
+
+
+def _find_running_scan_session(conn):
+    """Return the most recent in-flight ats_scan session row, or None.
+
+    Used by index() so the polling progress fragment auto-mounts when the
+    user navigates back to /companies during a scan. The bg-thread writes
+    terminal status='done'|'error' at end-of-scan, so any row still at
+    status='running' is genuinely in flight (with one edge case: if the
+    Flask process crashed mid-scan, an orphan 'running' row would linger,
+    but the polling endpoint's 30-min timeout handles that naturally —
+    see render_polling_status).
+    """
+    try:
+        return conn.execute(
+            "SELECT id, total, scored FROM batch_score_sessions "
+            "WHERE session_type = ? AND status = 'running' "
+            "ORDER BY id DESC LIMIT 1",
+            (_SESSION_TYPE_ATS_SCAN,),
+        ).fetchone()
+    except Exception:
+        return None
 
 
 def _scannable_count(conn, config: dict) -> int:

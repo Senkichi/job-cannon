@@ -2879,6 +2879,49 @@ class TestAsyncScanFlow:
         assert "connection timeout" in (error_msg or "")
         assert finished_at is not None
 
+    def test_companies_index_shows_polling_fragment_when_scan_running(
+        self, app_with_companies
+    ):
+        """When a status='running' ats_scan session exists, GET /companies/
+        inlines the polling progress fragment so the user sees scan progress
+        immediately after navigating back to the page (no manual re-click)."""
+        import sqlite3
+
+        db_path = app_with_companies.config["DB_PATH"]
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO batch_score_sessions "
+            "(session_type, status, total, scored, started_at) "
+            "VALUES ('ats_scan', 'running', 7, 3, ?)",
+            (datetime.now(UTC).replace(tzinfo=None).isoformat(),),
+        )
+        conn.commit()
+        session_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+
+        client = app_with_companies.test_client()
+        response = client.get("/companies/")
+        assert response.status_code == 200
+        data = response.data.decode()
+        # Inlined progress fragment must include the polling trigger pointing
+        # at this session's status endpoint.
+        assert f"/companies/scan/status/{session_id}" in data
+        assert 'hx-trigger="every 2s"' in data
+        # Live N-of-M count from the session row
+        assert "Scanned 3 of 7" in data
+
+    def test_companies_index_omits_polling_fragment_when_no_running_scan(
+        self, app_with_companies
+    ):
+        """With no running ats_scan session, the page renders an empty
+        #scan-result slot and no polling trigger."""
+        client = app_with_companies.test_client()
+        response = client.get("/companies/")
+        assert response.status_code == 200
+        data = response.data.decode()
+        assert 'id="scan-result"' in data
+        assert 'hx-trigger="every 2s"' not in data
+
 
 # ---------------------------------------------------------------------------
 # Tests for date filter HTMX trigger (UI-01)

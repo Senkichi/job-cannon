@@ -44,8 +44,19 @@
   {# Scan result slot. The Scan ATS button replaces this div with either the
      progress fragment (which polls every 2s) or the terminal done/error
      fragment. Both fragments keep id="scan-result" so subsequent polls
-     swap into the same slot. #}
-  <div id="scan-result"></div>
+     swap into the same slot.
+
+     If a scan is already running when the page loads (e.g. user clicked
+     Scan ATS, navigated away, came back), inline the polling progress
+     fragment so they immediately see "Scanned X of N" instead of an
+     empty card. #}
+  {% if running_scan %}
+    {% with session_id=running_scan.session_id, total=running_scan.total, scanned=running_scan.scanned %}
+      {% include "companies/_scan_ats_progress.html" %}
+    {% endwith %}
+  {% else %}
+    <div id="scan-result"></div>
+  {% endif %}
 
   <!-- Pipeline health metrics -->
   {% if health %}
