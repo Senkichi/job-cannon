@@ -462,7 +462,7 @@ class TestIndexPagination:
         resp = client.get("/companies/", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
-        assert 'hx-trigger="revealed"' in body
+        assert 'hx-trigger="intersect once"' in body
 
     def test_no_sentinel_when_no_more(self, companies_client):
         """With 10 companies (< 50), HTMX request has no infinite-scroll sentinel."""
@@ -481,7 +481,7 @@ class TestIndexPagination:
         resp = client.get("/companies/", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
-        assert 'hx-trigger="revealed"' not in body
+        assert 'hx-trigger="intersect once"' not in body
 
     def test_no_false_positive_sentinel_when_exact_multiple(self, companies_client):
         """Exactly 50 companies produces no sentinel (no phantom next-page request)."""
@@ -500,7 +500,7 @@ class TestIndexPagination:
         resp = client.get("/companies/", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         body = resp.data.decode()
-        assert 'hx-trigger="revealed"' not in body
+        assert 'hx-trigger="intersect once"' not in body
 
     def test_total_count_shows_correct_number(self, companies_client):
         """total_count in the full-page response matches the actual company count."""

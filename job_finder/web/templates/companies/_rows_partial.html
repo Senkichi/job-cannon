@@ -9,8 +9,9 @@
 </div>
 {% endfor %}
 {% if has_more %}
+{# hx-trigger="intersect once" — see _table.html note. #}
 <div hx-get="{{ url_for('companies.index', page=page + 1, search=search or '', ats_platform=ats_platform or '', sort_by=sort_by) }}"
-     hx-trigger="revealed"
+     hx-trigger="intersect once"
      hx-swap="outerHTML"
      class="py-4 text-center text-slate-500 text-sm">
   Loading more...
