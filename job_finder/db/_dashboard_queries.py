@@ -140,11 +140,45 @@ def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
 
 
 def get_distinct_locations(conn: sqlite3.Connection) -> list[str]:
-    """Return distinct non-empty location values for filter dropdown."""
+    """Return normalized, lower-case-deduped location values for the filter
+    dropdown.
+
+    Sources from per-entry ``locations_raw`` (JSON array per job), NOT from
+    the merged ``location`` column. This avoids the pollution where every
+    unique multi-location *combination* (e.g. "Remote, NYC, SF" vs.
+    "NYC, SF, Remote") becomes its own dropdown entry.
+
+    Each ``locations_raw`` entry is run through ``normalize_location``
+    (trim / collapse whitespace / drop placeholders) and the result is
+    deduplicated case-insensitively. Display uses the first-seen casing.
+    """
+    import json
+
+    from job_finder.web.location_normalizer import normalize_location
+
     rows = conn.execute(
-        "SELECT DISTINCT location FROM jobs WHERE location != '' ORDER BY location"
+        "SELECT locations_raw FROM jobs "
+        "WHERE locations_raw IS NOT NULL AND locations_raw != ''"
     ).fetchall()
-    return [row[0] for row in rows]
+
+    by_lower_key: dict[str, str] = {}
+    for (raw,) in rows:
+        try:
+            locs = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(locs, list):
+            continue
+        for loc in locs:
+            if not isinstance(loc, str):
+                continue
+            normalized = normalize_location(loc)
+            if normalized is None:
+                continue
+            key = normalized.lower()
+            by_lower_key.setdefault(key, normalized)
+
+    return sorted(by_lower_key.values(), key=str.lower)
 
 
 def get_recent_activity(conn: sqlite3.Connection, limit: int = 15) -> list[dict]:

@@ -390,11 +390,12 @@ def test_migration_count_is_thirteen():
     Migration 57: retag historical paid Anthropic SDK rows to 'anthropic_sdk' (U6).
     Migration 58: consolidate duplicate company rows (numeric-prefix + exact-name).
     Migration 59: heal careers_crawl title-bleed rows (metadata-blob titles).
+    Migration 60: normalize jobs.location / locations_raw (dedupe case+whitespace, drop placeholders).
     Kept for historical reference; updated to reflect current count.
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 59
+    assert len(MIGRATIONS) == 60
 
 
 class TestMigration27:
@@ -925,8 +926,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 59 entries (through Migration 59: heal careers_crawl title-bleed rows)."""
-        assert len(MIGRATIONS) == 59
+        """MIGRATIONS list has 60 entries (through Migration 60: normalize locations)."""
+        assert len(MIGRATIONS) == 60
 
 
 class TestMigration40:
@@ -1374,7 +1375,7 @@ class TestMigration52And53:
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 59, f"Expected PRAGMA user_version=59, got: {version}"
+        assert version == 60, f"Expected PRAGMA user_version=60, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(

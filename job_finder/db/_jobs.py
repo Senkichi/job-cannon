@@ -99,6 +99,8 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
             urls.append(job.source_url)
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
+        from job_finder.web.location_normalizer import split_multi_locations
+
         existing_locs_raw = existing["locations_raw"]
         try:
             locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
@@ -107,12 +109,23 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         if not isinstance(locs_list, list):
             locs_list = [locs_list] if locs_list else []
 
-        new_loc = job.location or ""
-        if new_loc and new_loc not in locs_list:
-            if re.search(r"\b(remote|hybrid)\b", new_loc, re.IGNORECASE):
-                locs_list.insert(0, new_loc)
+        # Case-insensitive dedup key to avoid case-variant pollution
+        # ("Remote" vs "remote" vs "REMOTE" as separate entries).
+        seen_keys = {loc.lower() for loc in locs_list if loc}
+
+        # Split multi-location parser output on unambiguous separators
+        # (`|`, `;`, ` / `, ` & `, ` or `). Each split entry is normalized.
+        # Parsers that emit a single "City, State" value pass through as
+        # a single entry — plain commas are not split (would mangle pairs).
+        for normalized in split_multi_locations(job.location or ""):
+            key = normalized.lower()
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if re.search(r"\b(remote|hybrid)\b", normalized, re.IGNORECASE):
+                locs_list.insert(0, normalized)
             else:
-                locs_list.append(new_loc)
+                locs_list.append(normalized)
 
         # Build merged location string: ordered, deduplicated
         merged_location = ", ".join(dict.fromkeys(locs_list))
@@ -169,8 +182,16 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
         # Use the email date as first_seen when available (Gmail-sourced jobs).
         # SerpAPI jobs have no email date, so they use the current ingestion time.
         first_seen = job.posted_date.isoformat() if job.posted_date else now
-        # Initialize locations_raw as a JSON array with the initial location
-        initial_locs = [job.location] if job.location else []
+        # Initialize locations_raw as a JSON array. Split on unambiguous
+        # multi-location separators and drop placeholder values
+        # ("Unknown", "TBD", ...) at the ingestion boundary so they never
+        # pollute the filter dropdown.
+        from job_finder.web.location_normalizer import split_multi_locations
+
+        initial_locs = split_multi_locations(job.location or "")
+        # location column mirrors the merged form for backward compat with
+        # the LIKE-against-substring filter in get_filtered_jobs.
+        initial_location_col = ", ".join(initial_locs)
         # Eager promotion: if description is substantial, set jd_full immediately
         # so enrichment always has a quality baseline to beat.
         initial_jd_full = None
@@ -194,7 +215,7 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 job.dedup_key,
                 job.title,
                 job.company,
-                job.location,
+                initial_location_col,
                 json.dumps([job.source]),
                 json.dumps([job.source_url]),
                 job.source_id,
