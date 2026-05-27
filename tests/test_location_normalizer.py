@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from job_finder.web.location_normalizer import (
+    normalize_for_display,
     normalize_location,
     split_multi_locations,
 )
@@ -117,3 +118,94 @@ class TestSplitMultiLocations:
         for entry in once:
             twice.extend(split_multi_locations(entry))
         assert once == twice
+
+
+class TestNormalizeForDisplay:
+    """Display-side normalizer: collapses the many San Jose variants the
+    user reported (annotations / ZIP / country / ALLCAPS / state name)
+    into a single canonical dropdown entry."""
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("San Jose, CA", "San Jose, CA"),
+            # Strip "(+N other)" / "(+N others)" annotation
+            ("San Jose, CA (+1 other)", "San Jose, CA"),
+            ("San Jose, CA (+2 others)", "San Jose, CA"),
+            # Strip ZIP codes
+            ("San Jose, CA 95131", "San Jose, CA"),
+            ("San Jose, CA 95131-1234", "San Jose, CA"),
+            # Strip trailing US country variants
+            ("San Jose, CA, United States", "San Jose, CA"),
+            ("San Jose, CA, USA", "San Jose, CA"),
+            ("San Jose, CA, US", "San Jose, CA"),
+            ("San Jose, CA, us", "San Jose, CA"),
+            # Multi-issue stack
+            ("San Jose, CA, United States (+1 other)", "San Jose, CA"),
+            # ALLCAPS fold + state name -> code
+            ("SAN JOSE, CALIFORNIA", "San Jose, CA"),
+            # State name -> code (preserves mixed case)
+            ("San Jose, California", "San Jose, CA"),
+            ("San Jose, California, United States", "San Jose, CA"),
+            ("San Francisco, California, USA", "San Francisco, CA"),
+            # Multi-word state names
+            ("Albany, New York", "Albany, NY"),
+            ("Raleigh, North Carolina", "Raleigh, NC"),
+        ],
+    )
+    def test_collapses_variants(self, raw, expected):
+        assert normalize_for_display(raw) == expected
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "Remote",
+            "Anywhere",
+            "Worldwide",
+            "London, UK",
+            "Costa Rica",
+            "Toronto, Ontario",
+            "Berlin",
+            # Non-US country segments at the end stay (only US is stripped).
+            "San Jose, Costa Rica",
+        ],
+    )
+    def test_non_us_strings_unchanged(self, raw):
+        assert normalize_for_display(raw) == raw
+
+    def test_state_code_preserved_no_mangle(self):
+        """The notorious .title() bug — 'San Francisco, CA' must NOT
+        become 'San Francisco, Ca'. The function only folds case when the
+        whole input is ALLCAPS."""
+        assert normalize_for_display("San Francisco, CA") == "San Francisco, CA"
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "NYC",
+            "SF",
+            "LA",
+            "USA",
+            "UK",
+        ],
+    )
+    def test_single_token_allcaps_abbreviations_preserved(self, raw):
+        """ALLCAPS abbreviations without commas (NYC, SF, USA, UK)
+        must NOT be title-cased — they should appear in the dropdown
+        exactly as the parser captured them. Only multi-segment ALLCAPS
+        (which always contain a comma) get folded."""
+        assert normalize_for_display(raw) == raw
+
+    def test_empty_returns_none(self):
+        assert normalize_for_display("") is None
+        assert normalize_for_display(None) is None
+
+    def test_zip_only_collapses_to_none(self):
+        """Bare ZIPs with nothing else are useless as a location filter."""
+        assert normalize_for_display("95131") is None
+
+    def test_idempotent(self):
+        """Applying twice produces the same result."""
+        once = normalize_for_display("SAN JOSE, CALIFORNIA, USA (+1 other) 95131")
+        twice = normalize_for_display(once)
+        assert once == twice == "San Jose, CA"

@@ -154,7 +154,7 @@ def get_distinct_locations(conn: sqlite3.Connection) -> list[str]:
     """
     import json
 
-    from job_finder.web.location_normalizer import normalize_location
+    from job_finder.web.location_normalizer import normalize_for_display, normalize_location
 
     rows = conn.execute(
         "SELECT locations_raw FROM jobs "
@@ -172,11 +172,20 @@ def get_distinct_locations(conn: sqlite3.Connection) -> list[str]:
         for loc in locs:
             if not isinstance(loc, str):
                 continue
+            # Two-stage normalization: write-side normalize_location
+            # (whitespace + placeholder drop) then display-side polish
+            # (annotation strip, ZIP strip, trailing-country strip,
+            # ALLCAPS fold, state-name -> 2-letter code). The display
+            # stage is what collapses the user-reported "many San Jose
+            # variants" into a single dropdown entry.
             normalized = normalize_location(loc)
             if normalized is None:
                 continue
-            key = normalized.lower()
-            by_lower_key.setdefault(key, normalized)
+            display = normalize_for_display(normalized)
+            if display is None:
+                continue
+            key = display.lower()
+            by_lower_key.setdefault(key, display)
 
     return sorted(by_lower_key.values(), key=str.lower)
 
