@@ -24,7 +24,7 @@ from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 # when intentionally adding a new migration. tests/test_migration.py:389
 # already asserts the same number; this duplicate is intentional — it gives
 # a clearer failure message and lives next to the other structural tests.
-EXPECTED_MIGRATION_COUNT = 64
+EXPECTED_MIGRATION_COUNT = 65
 
 
 def _migration_version(entry, position_one_indexed):
