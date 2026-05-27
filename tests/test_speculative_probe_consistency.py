@@ -694,3 +694,258 @@ class TestSpeculativeProbeFpExclusion:
                 )
             with patch(probe_target, return_value=False):
                 assert _verify_live(platform, "any-slug") is False
+
+
+# ---------------------------------------------------------------------------
+# B2 -- careers_url hostname fast-path
+# ---------------------------------------------------------------------------
+
+
+class TestCareersUrlFastPath:
+    """When careers_url unambiguously identifies a supported ATS, the probe
+    bypasses speculative slug derivation, verifies via the platform probe,
+    and writes a hit with ats_evidence_trigger='careers_url:...' attribution.
+    Closes audit B2: 6 known regression rows (3 Ashby + 3 SmartRecruiters
+    careers_url hits that the speculative path missed)."""
+
+    def test_ashby_url_fastpath_hits_with_evidence(self, migrated_db_path):
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(
+            conn,
+            name="AcmeWidgets",
+            careers_url="https://jobs.ashbyhq.com/AcmeWidgets",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe._probe_ashby",
+                return_value=True,
+            ),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["probed"] == 1
+        assert result["hits"] == 1
+        assert result["misses"] == 0
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT ats_probe_status, ats_platform, ats_slug,
+                      ats_evidence_trigger, ats_evidence_extractor_version,
+                      ats_evidence_unique_url_count, ats_evidence_job_count
+               FROM companies WHERE id=?""",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "hit"
+        assert row["ats_platform"] == "ashby"
+        assert row["ats_slug"] == "AcmeWidgets"
+        assert row["ats_evidence_trigger"].startswith("careers_url:")
+        assert "jobs.ashbyhq.com/AcmeWidgets" in row["ats_evidence_trigger"]
+        assert row["ats_evidence_extractor_version"]
+        assert row["ats_evidence_unique_url_count"] == 1
+        assert row["ats_evidence_job_count"] == 0
+
+    def test_recruitee_url_fastpath_can_assign_fp_prone_platform(
+        self, migrated_db_path
+    ):
+        """URL evidence beats the speculative-ladder FP-prone exclusion.
+
+        bamboohr/personio/recruitee/breezy are banned from speculative
+        probing (100% FP rate via {slug}={name} collisions). But
+        https://{slug}.recruitee.com IS unambiguous URL evidence -- no
+        name collision. The fast-path must be allowed to assign FP-prone
+        platforms when the URL positively identifies them."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(
+            conn,
+            name="GenuineSmallCo",
+            careers_url="https://genuinesmallco.recruitee.com",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe._probe_recruitee",
+                return_value=True,
+            ),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["hits"] == 1
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_platform, ats_slug, ats_evidence_trigger FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_platform"] == "recruitee"
+        assert row["ats_slug"] == "genuinesmallco"
+        assert row["ats_evidence_trigger"].startswith("careers_url:")
+
+    def test_fastpath_runs_before_brand_blocklist(self, migrated_db_path):
+        """URL evidence overrides the brand blocklist. A famous-brand company
+        with an unambiguous ATS careers_url should land via fast-path, not
+        get short-circuited by the blocklist."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(
+            conn,
+            name="Shopify",
+            careers_url="https://jobs.ashbyhq.com/Shopify",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe._probe_ashby",
+                return_value=True,
+            ),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=True,
+            ),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["hits"] == 1, "fast-path should run before brand blocklist"
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_platform, ats_probe_status FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "hit"
+        assert row["ats_platform"] == "ashby"
+
+    def test_fastpath_verifier_returning_false_falls_through(
+        self, migrated_db_path
+    ):
+        """careers_url points at a supported ATS but the live probe returns
+        False (e.g. tenant deleted). Should NOT write a fast-path hit;
+        should fall through to brand blocklist + speculative ladder."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(
+            conn,
+            name="DeadTenant",
+            careers_url="https://jobs.ashbyhq.com/DeadTenant",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch(
+                "job_finder.web.ats_scanner._probe._probe_ashby",
+                return_value=False,
+            ),
+            patch("job_finder.web.ats_prober._probe_lever", return_value=False),
+            patch("job_finder.web.ats_prober._probe_greenhouse", return_value=False),
+            patch("job_finder.web.ats_prober._probe_jazzhr", return_value=False),
+            patch("job_finder.web.ats_prober._probe_pinpoint", return_value=False),
+            patch("job_finder.web.ats_prober._probe_teamtailor", return_value=False),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1
+        assert result["hits"] == 0
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT ats_probe_status, ats_platform, ats_evidence_trigger
+               FROM companies WHERE id=?""",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "miss"
+        assert row["ats_platform"] is None
+        assert row["ats_evidence_trigger"] is None
+
+    def test_company_without_careers_url_skips_fastpath(self, migrated_db_path):
+        """No careers_url -> fast-path is a no-op; flow continues."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(conn, name="NoUrlCo", careers_url=None)
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch("job_finder.web.ats_prober._probe_lever", return_value=False),
+            patch("job_finder.web.ats_prober._probe_greenhouse", return_value=False),
+            patch("job_finder.web.ats_prober._probe_ashby", return_value=False),
+            patch("job_finder.web.ats_prober._probe_jazzhr", return_value=False),
+            patch("job_finder.web.ats_prober._probe_pinpoint", return_value=False),
+            patch("job_finder.web.ats_prober._probe_teamtailor", return_value=False),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_evidence_trigger FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_evidence_trigger"] is None
+
+    def test_url_without_ats_signature_skips_fastpath(self, migrated_db_path):
+        """careers_url exists but doesn't match any known ATS host pattern
+        -> fast-path is a no-op; falls through to brand blocklist + speculative."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        _insert_pending_company(
+            conn,
+            name="CustomAtsCo",
+            careers_url="https://customatsco.com/careers/",
+        )
+        conn.close()
+
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch("job_finder.web.ats_prober._probe_lever", return_value=False),
+            patch("job_finder.web.ats_prober._probe_greenhouse", return_value=False),
+            patch("job_finder.web.ats_prober._probe_ashby", return_value=False),
+            patch("job_finder.web.ats_prober._probe_jazzhr", return_value=False),
+            patch("job_finder.web.ats_prober._probe_pinpoint", return_value=False),
+            patch("job_finder.web.ats_prober._probe_teamtailor", return_value=False),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["misses"] == 1

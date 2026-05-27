@@ -10,16 +10,24 @@ from collections.abc import Callable
 from datetime import datetime
 
 from job_finder.web.ats_detection import (
+    ATS_EXTRACTOR_VERSION,
     derive_slug_candidates,
+    extract_ats_from_url_best,
     probe_hit_consistent_or_dead_url,
 )
 from job_finder.web.ats_prober import (
     _probe_ashby,
+    _probe_bamboohr,
+    _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
     _probe_lever,
+    _probe_personio,
     _probe_pinpoint,
+    _probe_recruitee,
+    _probe_smartrecruiters,
     _probe_teamtailor,
+    _probe_workday,
 )
 from job_finder.web.brand_blocklist import is_blocked_brand
 from job_finder.web.db_helpers import standalone_connection
@@ -70,6 +78,62 @@ assert _FP_PRONE_PLATFORMS.isdisjoint({name for name, _ in _PROBES}), (
     "_FP_PRONE_PLATFORMS; only the evidence-based reconcile path may "
     "promote to these platforms"
 )
+
+# B2 fast-path verified platforms. Covers every platform that
+# extract_ats_from_url_best can identify, including the FP-prone ones.
+# URL-evidence is strictly stronger than {slug}={name} speculation, so the
+# fast-path is allowed to assign FP-prone platforms even though the
+# speculative ladder cannot.
+_URL_FASTPATH_PLATFORMS: frozenset[str] = frozenset(
+    {
+        "lever",
+        "greenhouse",
+        "ashby",
+        "workday",
+        "smartrecruiters",
+        "pinpoint",
+        "jazzhr",
+        "teamtailor",
+        "bamboohr",
+        "personio",
+        "recruitee",
+        "breezy",
+    }
+)
+
+
+def _verify_fastpath_live(platform: str, slug: str) -> bool:
+    """Resolve+call the platform probe by name at call time (not lookup time).
+
+    Mirrors ats_identity_reconcile._verify_live's dispatch shape. Using by-name
+    if/elif lets test patches of module-level _probe_X functions take effect
+    -- a dict literal captures references at import time and bypasses patches.
+    """
+    if platform == "lever":
+        return bool(_probe_lever(slug))
+    if platform == "greenhouse":
+        return bool(_probe_greenhouse(slug))
+    if platform == "ashby":
+        return bool(_probe_ashby(slug))
+    if platform == "workday":
+        return bool(_probe_workday(slug))
+    if platform == "smartrecruiters":
+        return bool(_probe_smartrecruiters(slug))
+    if platform == "pinpoint":
+        return bool(_probe_pinpoint(slug))
+    if platform == "jazzhr":
+        return bool(_probe_jazzhr(slug))
+    if platform == "teamtailor":
+        return bool(_probe_teamtailor(slug))
+    if platform == "bamboohr":
+        return bool(_probe_bamboohr(slug))
+    if platform == "personio":
+        return bool(_probe_personio(slug))
+    if platform == "recruitee":
+        return bool(_probe_recruitee(slug))
+    if platform == "breezy":
+        return bool(_probe_breezy(slug))
+    return False
 
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
@@ -123,6 +187,70 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             company_name = company["name_raw"]
             careers_url = company["careers_url"]
             now = datetime.now().isoformat()
+
+            # B2 — careers_url hostname fast-path. If careers_url unambiguously
+            # identifies an ATS (e.g. https://jobs.ashbyhq.com/{slug},
+            # https://{slug}.recruitee.com), skip the speculative ladder and
+            # write the hit with URL-evidence attribution. Runs BEFORE the
+            # brand blocklist because URL evidence is strictly stronger than
+            # name-collision concerns — a famous brand whose own careers page
+            # points at an ATS we support is not a collision case.
+            #
+            # Evidence is recorded via the same ats_evidence_* columns used
+            # by the reconcile path, so URL-evidence hits are distinguishable
+            # from speculative hits and protected by the same B1 reset filter
+            # (status='hit' AND evidence IS NULL → reset). Future audits can
+            # tell the three provenance classes apart by ats_evidence_trigger:
+            #   - 'careers_url:...'           → B2 fast-path (this branch)
+            #   - 'scheduled_promote' (etc.)  → reconcile_company_ats path
+            #   - NULL                        → legacy speculative-probe hit
+            inferred = (
+                extract_ats_from_url_best(careers_url) if careers_url else None
+            )
+            if inferred is not None:
+                fp_platform, fp_slug, _specificity = inferred
+                if (
+                    fp_platform in _URL_FASTPATH_PLATFORMS
+                    and _verify_fastpath_live(fp_platform, fp_slug)
+                ):
+                    trigger = f"careers_url:{careers_url}"[:240]
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_platform = ?,
+                               ats_slug = ?,
+                               ats_probe_status = 'hit',
+                               ats_probe_attempted_at = ?,
+                               ats_evidence_trigger = ?,
+                               ats_evidence_extractor_version = ?,
+                               ats_evidence_unique_url_count = ?,
+                               ats_evidence_job_count = ?,
+                               ats_evidence_reconciled_at = ?,
+                               updated_at = ?
+                           WHERE id = ?""",
+                        (
+                            fp_platform,
+                            fp_slug,
+                            now,
+                            trigger,
+                            ATS_EXTRACTOR_VERSION,
+                            1,
+                            0,
+                            now,
+                            now,
+                            company_id,
+                        ),
+                    )
+                    conn.commit()
+                    logger.info(
+                        "probe_ats_slugs: %s (id=%d) -> hit %s/%s via careers_url fast-path",
+                        company_name,
+                        company_id,
+                        fp_platform,
+                        fp_slug,
+                    )
+                    summary["hits"] += 1
+                    summary["probed"] += 1
+                    continue
 
             # F8 — brand blocklist gate. Famous-brand names (Shopify, Walmart,
             # Canva, ...) produce a high-rate collision with small companies
