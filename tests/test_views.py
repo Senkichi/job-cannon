@@ -353,6 +353,38 @@ class TestJobBoardRoutes:
         assert "Acme Corp" not in data
         assert "Data Scientist" not in data
 
+    def test_jobs_collapse_emits_hx_trigger_after_settle_for_scroll(self, jobs_client):
+        """The collapse route emits HX-Trigger-After-Settle: {"job-collapsed":
+        {"dedup_key": "..."}} so the index page's global listener can
+        smooth-scroll back to the compact row regardless of which collapse
+        path the user clicked (compact-row toggle or bottom Collapse button).
+        """
+        import json
+
+        response = jobs_client.get(
+            "/jobs/acme%7Cdata-scientist%7Cremote/collapse",
+            headers={"HX-Request": "true"},
+        )
+        assert response.status_code == 200
+        trigger = response.headers.get("HX-Trigger-After-Settle")
+        assert trigger is not None, "collapse must emit HX-Trigger-After-Settle"
+        payload = json.loads(trigger)
+        assert "job-collapsed" in payload
+        assert payload["job-collapsed"]["dedup_key"] == "acme|data-scientist|remote"
+
+    def test_jobs_table_compact_rows_have_dedup_key_data_attr(self, jobs_client):
+        """Compact rows expose data-dedup-key so the global job-collapsed
+        listener can find the row to scroll to."""
+        response = jobs_client.get("/jobs/table", headers={"HX-Request": "true"})
+        assert response.status_code == 200
+        data = response.data.decode()
+        # The dedup_key may be URL-decoded in HTML attribute (Jinja2 escapes
+        # the pipe as &#124;) — accept either form.
+        assert (
+            'data-dedup-key="acme|data-scientist|remote"' in data
+            or 'data-dedup-key="acme&#124;data-scientist&#124;remote"' in data
+        ), "compact row must carry data-dedup-key for collapse scroll-back"
+
     def test_jobs_collapse_returns_404_for_unknown_key(self, jobs_client):
         """GET /jobs/<unknown>/collapse returns 404."""
         response = jobs_client.get(

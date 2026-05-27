@@ -448,5 +448,20 @@ function restoreFilters() {
 
 document.getElementById('filter-form').addEventListener('change', saveFilters);
 document.addEventListener('DOMContentLoaded', restoreFilters);
+
+// Smooth-scroll back to a compact row when its expanded view collapses.
+// The collapse route emits HX-Trigger-After-Settle: {"job-collapsed":
+// {"dedup_key": "..."}}; this listener finds the compact row by its
+// data-dedup-key attribute and scrolls it into view. Works uniformly
+// for both collapse paths (clicking the compact row to toggle, OR
+// clicking the bottom Collapse button inside the expanded row).
+document.body.addEventListener('job-collapsed', function (evt) {
+  var key = evt.detail && evt.detail.dedup_key;
+  if (!key) return;
+  var compactRow = document.querySelector('[data-dedup-key="' + CSS.escape(key) + '"]');
+  if (!compactRow) return;
+  compactRow.dataset.expanded = 'false';
+  compactRow.scrollIntoView({behavior: 'smooth', block: 'start'});
+});
 </script>
 {% endblock %}

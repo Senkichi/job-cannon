@@ -345,11 +345,15 @@
 
       <!-- Bottom collapse button (reachable without scrolling up) -->
       <div class="flex justify-end border-t border-slate-700 pt-2">
+        {# Smooth-scroll-back behavior is delivered via the HX-Trigger-After-
+           Settle ('job-collapsed') header from the collapse route + a global
+           listener in jobs/index.html. That handles both this button click
+           AND clicking the compact row again (collapse path #2), uniformly.
+           No inline JS needed here. #}
         <button type="button"
                 hx-get="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
                 hx-target="closest tr"
                 hx-swap="outerHTML"
-                hx-on::after-request="var cr = this.closest('tr').previousElementSibling; cr.dataset.expanded = 'false'; setTimeout(function(){ cr.scrollIntoView({behavior: 'smooth', block: 'start'}); cr.classList.remove('highlight-flash'); void cr.offsetWidth; cr.classList.add('highlight-flash'); }, 100);"
                 hx-disable-elt="this"
                 class="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs rounded transition-colors disabled:opacity-50">
           Collapse

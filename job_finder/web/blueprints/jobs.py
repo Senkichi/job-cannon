@@ -521,7 +521,17 @@ def expand(dedup_key: str):
 
 @jobs_bp.route("/<path:dedup_key>/collapse", strict_slashes=False)
 def collapse(dedup_key: str):
-    """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state."""
+    """HTMX partial -- returns hidden placeholder <tr> to restore pre-expansion DOM state.
+
+    Emits HX-Trigger-After-Settle with the dedup_key so the index page's
+    global listener can smooth-scroll back to the compact row regardless
+    of which collapse path the user took (compact-row click or bottom
+    Collapse button). The previous inline hx-on::after-request approach
+    relied on `this.closest('tr').previousElementSibling` which is
+    fragile once the expanded row is swapped out — moving the scroll to
+    an HX-Trigger-After-Settle event from the response side makes the
+    behavior bulletproof.
+    """
     if not request.headers.get("HX-Request"):
         return redirect(url_for("jobs.index"))
     conn = get_db()
@@ -529,10 +539,18 @@ def collapse(dedup_key: str):
     if job is None:
         return "", 404
 
-    return render_template(
-        "jobs/_row_collapse_response.html",
-        job=job,
+    import json as _json
+
+    response = make_response(
+        render_template(
+            "jobs/_row_collapse_response.html",
+            job=job,
+        )
     )
+    response.headers["HX-Trigger-After-Settle"] = _json.dumps(
+        {"job-collapsed": {"dedup_key": dedup_key}}
+    )
+    return response
 
 
 @jobs_bp.route("/<path:dedup_key>/status", methods=["POST"], strict_slashes=False)

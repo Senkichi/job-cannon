@@ -15,6 +15,7 @@
 {% set posted = job.posted_date if job.posted_date else job.first_seen %}
 
 <tr class="border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors {% if job.is_stale %}opacity-50{% endif %}"
+    data-dedup-key="{{ job.dedup_key }}"
     data-expand-url="{{ url_for('jobs.expand', dedup_key=job.dedup_key) }}"
     data-collapse-url="{{ url_for('jobs.collapse', dedup_key=job.dedup_key) }}"
     hx-push-url="false"
@@ -32,12 +33,11 @@
               row.scrollIntoView({behavior: 'smooth', block: 'start'});
             }
           }, 100);
-        } else {
-          setTimeout(function() {
-            compactRow.scrollIntoView({behavior: 'smooth', block: 'start'});
-            compactRow.classList.remove('highlight-flash'); void compactRow.offsetWidth; compactRow.classList.add('highlight-flash');
-          }, 100);
         }
+        // Collapse-side scroll-back is handled by the global 'job-collapsed'
+        // listener in jobs/index.html, fired by the collapse route's
+        // HX-Trigger-After-Settle header. Keeps both compact-row-click and
+        // bottom-Collapse-button paths bulletproof and uniform.
       });
     ">
   {% with oob=false %}{% include "jobs/_score_cell.html" %}{% endwith %}
