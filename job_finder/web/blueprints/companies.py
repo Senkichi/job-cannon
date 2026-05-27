@@ -559,8 +559,9 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
         try:
             with standalone_connection(db_path) as tick_conn:
                 tick_conn.execute(
-                    "UPDATE batch_score_sessions SET scored=?, total=? WHERE id=?",
-                    (scanned, total, session_id),
+                    "UPDATE batch_score_sessions "
+                    "SET scored=?, total=?, last_tick_at=? WHERE id=?",
+                    (scanned, total, utc_now_iso(), session_id),
                 )
                 tick_conn.commit()
         except Exception:

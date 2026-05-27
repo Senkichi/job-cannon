@@ -217,17 +217,30 @@ def render_polling_status(
         return render_template(cfg.done_template, **cfg.not_found_ctx)
 
     status = session["status"]
-    timeout_msg = f"Session timed out (>{cfg.timeout_minutes} min)"
+    timeout_msg = f"No progress in >{cfg.timeout_minutes} min"
 
-    if status not in _POLLING_TERMINAL_STATES and session["started_at"]:
+    # Heartbeat-based staleness: a session is "alive" iff it has ticked
+    # recently. The bg thread (companies.py:_tick / batch_scoring.py) writes
+    # last_tick_at on every progress flush. COALESCE falls back to started_at
+    # for pre-m065 rows or any row that hasn't ticked yet -- preserves the
+    # legacy "elapsed since start" semantics in that edge case so a session
+    # that crashes before its first tick still trips the timeout. Once any
+    # tick has landed, only tick freshness matters; a multi-hour ATS scan
+    # that ticks every ~8s stays alive indefinitely.
+    heartbeat_iso = (
+        session["last_tick_at"]
+        if "last_tick_at" in session.keys() and session["last_tick_at"]
+        else session["started_at"]
+    )
+    if status not in _POLLING_TERMINAL_STATES and heartbeat_iso:
         try:
-            started = datetime.fromisoformat(session["started_at"])
+            heartbeat = datetime.fromisoformat(heartbeat_iso)
             elapsed_min = (
-                datetime.now(UTC).replace(tzinfo=None) - started
+                datetime.now(UTC).replace(tzinfo=None) - heartbeat
             ).total_seconds() / 60
             if elapsed_min > cfg.timeout_minutes:
                 logger.warning(
-                    "%s session %s timed out after %.1f minutes",
+                    "%s session %s stale: no tick for %.1f minutes",
                     cfg.session_label,
                     session_id,
                     elapsed_min,

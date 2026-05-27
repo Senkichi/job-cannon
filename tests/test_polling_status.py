@@ -45,7 +45,8 @@ def db_path():
             skipped INTEGER NOT NULL DEFAULT 0,
             started_at TEXT NOT NULL,
             finished_at TEXT DEFAULT NULL,
-            error_msg TEXT DEFAULT NULL
+            error_msg TEXT DEFAULT NULL,
+            last_tick_at TEXT DEFAULT NULL
         );
         """
     )
@@ -204,7 +205,7 @@ class TestRenderPollingStatus:
         assert "DONE status=error" in out
         # ``>`` is HTML-escaped by Jinja autoescape in the rendered template.
         # The DB row (asserted below) holds the unescaped form.
-        assert "Session timed out (&gt;30 min)" in out
+        assert "No progress in &gt;30 min" in out
 
         # DB row was actually flipped, with the unescaped timeout message.
         conn = sqlite3.connect(db_path)
@@ -214,7 +215,7 @@ class TestRenderPollingStatus:
         ).fetchone()
         conn.close()
         assert row["status"] == "error"
-        assert row["error_msg"] == "Session timed out (>30 min)"
+        assert row["error_msg"] == "No progress in >30 min"
 
     def test_timeout_respects_custom_timeout_minutes(self, app, db_path):
         """timeout_minutes=10 fires at 15 minutes elapsed; 30-default-aware tests stay clean."""
@@ -223,7 +224,7 @@ class TestRenderPollingStatus:
         with app.test_request_context():
             out = render_polling_status(db_path, sid, _cfg(timeout_minutes=10))
         assert "DONE status=error" in out
-        assert "Session timed out (&gt;10 min)" in out
+        assert "No progress in &gt;10 min" in out
 
     def test_running_under_timeout_renders_progress(self, app, db_path):
         """Started 5 minutes ago — well under the 30-min timeout."""
@@ -271,4 +272,85 @@ class TestRenderPollingStatus:
         with app.test_request_context():
             out = render_polling_status(db_path, sid, _cfg())
         # Status is still 'running' → progress fragment (timeout branch silently dropped).
+        assert "PROGRESS" in out
+
+
+class TestHeartbeatStaleness:
+    """m065 last_tick_at heartbeat semantics: stale = no tick recently,
+    not "started long ago." Lets long-but-healthy scans (the 161-min worst-
+    case ATS scan) keep their UI session even when wallclock exceeds the
+    timeout, while still tripping on a hung bg-thread that stopped ticking.
+    """
+
+    def test_recent_tick_keeps_session_alive_despite_old_started_at(
+        self, app, db_path
+    ):
+        """A scan that started 2 hours ago but ticked 5 seconds ago is healthy.
+
+        This is the failure mode the m065 fix targets: the legitimate ATS scan
+        case where started_at >> 30 min but the bg thread is still working.
+        """
+        old_start = (datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None).isoformat()
+        recent_tick = (datetime.now(UTC) - timedelta(seconds=5)).replace(tzinfo=None).isoformat()
+        sid = _insert(
+            db_path,
+            "running",
+            old_start,
+            total=1000,
+            scored=400,
+            last_tick_at=recent_tick,
+        )
+        with app.test_request_context():
+            out = render_polling_status(db_path, sid, _cfg(timeout_minutes=30))
+        # Healthy heartbeat → progress fragment, NOT timeout.
+        assert "PROGRESS" in out
+        assert "DONE status=error" not in out
+
+        # DB row must NOT have been flipped to error.
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT status FROM batch_score_sessions WHERE id=?", (sid,)
+        ).fetchone()
+        conn.close()
+        assert row[0] == "running"
+
+    def test_stale_tick_trips_timeout(self, app, db_path):
+        """Recent started_at + stale tick = hung session, must flip to error.
+
+        Catches a bg thread that started normally then deadlocked / crashed
+        between ticks. The wallclock-start-only check wouldn't catch this.
+        """
+        recent_start = (datetime.now(UTC) - timedelta(minutes=10)).replace(tzinfo=None).isoformat()
+        stale_tick = (datetime.now(UTC) - timedelta(minutes=45)).replace(tzinfo=None).isoformat()
+        sid = _insert(
+            db_path,
+            "running",
+            recent_start,
+            total=100,
+            scored=20,
+            last_tick_at=stale_tick,
+        )
+        with app.test_request_context():
+            out = render_polling_status(db_path, sid, _cfg(timeout_minutes=30))
+        assert "DONE status=error" in out
+        assert "No progress in &gt;30 min" in out
+
+    def test_null_last_tick_at_falls_back_to_started_at(self, app, db_path):
+        """Sessions with no tick yet (just-created or pre-m065 rows) use
+        started_at via COALESCE. Preserves backward compatibility."""
+        old_start = (datetime.now(UTC) - timedelta(minutes=45)).replace(tzinfo=None).isoformat()
+        # last_tick_at intentionally omitted → NULL in DB.
+        sid = _insert(db_path, "running", old_start, total=5, scored=1)
+        with app.test_request_context():
+            out = render_polling_status(db_path, sid, _cfg(timeout_minutes=30))
+        # Still flips to error using started_at fallback.
+        assert "DONE status=error" in out
+        assert "No progress in &gt;30 min" in out
+
+    def test_recent_started_no_tick_yet_renders_progress(self, app, db_path):
+        """Session just started, hasn't ticked yet — healthy, progress fragment."""
+        recent = (datetime.now(UTC) - timedelta(seconds=10)).replace(tzinfo=None).isoformat()
+        sid = _insert(db_path, "running", recent, total=10, scored=0)
+        with app.test_request_context():
+            out = render_polling_status(db_path, sid, _cfg(timeout_minutes=30))
         assert "PROGRESS" in out

@@ -295,15 +295,17 @@ def _run_batch_bg(db_path: str, session_id: int, config: dict) -> None:
                 processed = scored_count + skipped_count
                 if processed % 5 == 0:
                     conn.execute(
-                        "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                        (scored_count, skipped_count, session_id),
+                        "UPDATE batch_score_sessions "
+                        "SET scored = ?, skipped = ?, last_tick_at = ? WHERE id = ?",
+                        (scored_count, skipped_count, utc_now_iso(), session_id),
                     )
                     conn.commit()
 
             # Final flush before finishing
             conn.execute(
-                "UPDATE batch_score_sessions SET scored = ?, skipped = ? WHERE id = ?",
-                (scored_count, skipped_count, session_id),
+                "UPDATE batch_score_sessions "
+                "SET scored = ?, skipped = ?, last_tick_at = ? WHERE id = ?",
+                (scored_count, skipped_count, utc_now_iso(), session_id),
             )
             conn.commit()
 
