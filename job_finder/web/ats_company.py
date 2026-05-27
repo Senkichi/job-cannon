@@ -35,6 +35,11 @@ _GARBAGE_PATTERNS = [
     re.compile(r"Edit alert\s", re.IGNORECASE),  # LinkedIn email alert artifacts
 ]
 
+# Placeholder strings that some aggregators emit when the real employer name is
+# withheld. Treated as hard rejects (compared against normalize_company output,
+# which lowercases and strips legal suffixes).
+_PLACEHOLDER_NAMES = frozenset({"confidential"})
+
 
 @dataclass(frozen=True)
 class CompanyNameDecision:
@@ -108,6 +113,14 @@ def classify_company_name(
     if not _HAS_ALPHA_RE.search(cleaned):
         return CompanyNameDecision(
             cleaned_name=None, action="reject", reason="no_alpha_characters"
+        )
+
+    # Hard reject: aggregator placeholder strings (e.g. "Confidential" used when
+    # the real employer name is withheld). Cannot be overridden by config —
+    # these are meaningless for scoring and research.
+    if cleaned in _PLACEHOLDER_NAMES:
+        return CompanyNameDecision(
+            cleaned_name=None, action="reject", reason="placeholder_name"
         )
 
     # Hard reject: URLs, HTML tags, email alert artifacts
