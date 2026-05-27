@@ -357,6 +357,9 @@ def test_call_model_fallback_to_anthropic(tmp_path):
     [
         ("gemini", "gemini-2.0-flash"),
         ("ollama", "llama3"),
+        # Polish-review F2 (2026-05-26) moved anthropic into FREE_PROVIDERS
+        # — the cascade dispatch uses the subscription-funded `claude -p` CLI.
+        ("anthropic", "claude-haiku-4-5"),
     ],
 )
 def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tmp_path):
@@ -380,13 +383,16 @@ def test_call_model_skips_budget_for_free_provider(provider_name, model_name, tm
     mock_cost_gate.assert_not_called()
 
 
-def test_call_model_checks_budget_for_anthropic(tmp_path):
-    """call_model calls cost_gate when provider is anthropic.
-    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+def test_call_model_checks_budget_for_paid_provider(tmp_path):
+    """call_model calls cost_gate when provider is paid (not in FREE_PROVIDERS).
+
+    Polish-review F2 (2026-05-26) moved anthropic into FREE_PROVIDERS, so the
+    representative paid provider here is cerebras (in the production fallback
+    chain; has a default score model unlike openrouter, which is config-only).
     """
     from job_finder.web.model_provider import call_model
 
-    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
+    config = {"providers": {"primary": "cerebras", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     with (
@@ -395,7 +401,7 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
         patch("job_finder.web.model_provider.record_cost"),
     ):
         mock_adapter = MagicMock()
-        mock_adapter.call.return_value = _make_result(provider="anthropic")
+        mock_adapter.call.return_value = _make_result(provider="cerebras")
         mock_make_adapter.return_value = mock_adapter
 
         call_model(
@@ -406,15 +412,18 @@ def test_call_model_checks_budget_for_anthropic(tmp_path):
 
 
 def test_call_model_raises_cascade_exhausted_when_budget_blocks_only_provider(tmp_path):
-    """Single-provider Anthropic cascade with budget gate closed exhausts the
+    """Single-provider paid-provider cascade with budget gate closed exhausts the
     chain and raises ProviderCascadeExhaustedError.
     (Phase 40 hotfix 2026-05-17 Fix 4b: the back-compat path that raised
     BudgetExceededError directly was removed. The cascade skips over-budget
     providers — the canonical 'no provider' signal is exhaustion.)
+
+    Polish-review F2 (2026-05-26) — uses cerebras because anthropic moved
+    into FREE_PROVIDERS and never trips the budget gate any more.
     """
     from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
-    config = {"providers": {"primary": "anthropic", "fallback_chain": []}}
+    config = {"providers": {"primary": "cerebras", "fallback_chain": []}}
     conn = _migrated_conn(tmp_path)
 
     with patch("job_finder.web.model_provider.cost_gate", return_value=False):
@@ -423,8 +432,15 @@ def test_call_model_raises_cascade_exhausted_when_budget_blocks_only_provider(tm
 
 
 def test_call_model_no_record_cost_for_anthropic(tmp_path):
-    """call_model does NOT call record_cost for anthropic provider (avoids double-recording).
-    (Phase 40 hotfix 2026-05-17: explicit providers.primary required.)
+    """call_model does NOT call the ``record_cost`` helper for anthropic results.
+
+    Polish-review F2 (2026-05-26) — pre-F2, ``record_cost`` was skipped to
+    avoid double-recording (AnthropicProvider went through call_claude
+    which recorded internally). Post-F2 the adapter no longer touches
+    call_claude; ``_maybe_record_cost`` writes the single cost row via a
+    direct ``conn.execute(INSERT ...)`` rather than calling ``record_cost``.
+    Either way, the public ``record_cost`` function should never be invoked
+    from this cascade path.
     """
     from job_finder.web.model_provider import call_model
 

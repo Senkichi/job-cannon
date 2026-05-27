@@ -543,10 +543,20 @@ def _maybe_record_cost(
     job_id: str | None,
     purpose: str,
 ) -> None:
-    """Record cost for non-Anthropic providers.
+    """Record cost for the result of a cascade provider call.
 
-    AnthropicProvider delegates to call_claude() which records cost internally.
-    Calling record_cost() again for Anthropic would double-count (Pitfall 1).
+    Polish-review F2 (2026-05-26) removed the historical
+    ``if result.provider == "anthropic": return`` early-exit. Before F2,
+    ``AnthropicProvider`` routed through ``call_claude``, which itself
+    called ``record_cost`` with ``provider="claude_cli"``; this function
+    skipped to avoid double-recording. Post-F2 the adapter goes directly
+    to ``_run_oneshot`` and the cost row is written here with
+    ``provider="anthropic"`` — single source of truth.
+
+    Free providers (including ``"anthropic"`` after F2 — the CLI dispatch
+    is subscription-funded) record cost as $0 instead of calling
+    ``compute_cost``, which doesn't recognize their model names and would
+    fall back to the most-expensive Claude pricing as a safety default.
 
     Args:
         result: ModelResult from a provider adapter call.
@@ -554,11 +564,6 @@ def _maybe_record_cost(
         job_id: Job dedup_key for cost attribution (nullable).
         purpose: Feature attribution label.
     """
-    if result.provider == "anthropic":
-        return  # call_claude() already recorded it
-    # Free providers: record cost as $0 instead of calling compute_cost()
-    # which doesn't recognize their model names and falls back to the
-    # most-expensive Claude pricing as a safety default.
     if result.provider in _FREE_PROVIDERS:
         cost_usd = 0.0
     else:

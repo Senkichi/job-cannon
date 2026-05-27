@@ -66,7 +66,12 @@ class TestGetMonthlyProviderBreakdown:
         assert result == []
 
     def test_groups_by_provider(self, migrated_db):
-        """After inserting 3 rows from two paid providers, returns 2 dicts ordered by spend DESC."""
+        """After inserting 3 rows from two paid providers, returns 2 dicts ordered by spend DESC.
+
+        Uses ``openrouter`` and ``cerebras`` as paid markers since
+        polish-review F2 (2026-05-26) moved ``anthropic`` into
+        ``FREE_PROVIDERS`` (CLI-subscription transport).
+        """
         _, conn = migrated_db
         now = datetime.now(UTC)
         ts = now.strftime("%Y-%m-%dT12:00:00Z")
@@ -74,9 +79,9 @@ class TestGetMonthlyProviderBreakdown:
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                ("j1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.01, ts, "anthropic"),
-                ("j2", "sonnet_eval", "claude-sonnet-4-6", 200, 100, 0.05, ts, "anthropic"),
-                ("j3", "judge", "openrouter-model", 150, 75, 0.02, ts, "openrouter"),
+                ("j1", "haiku_score", "openrouter/m", 100, 50, 0.01, ts, "openrouter"),
+                ("j2", "sonnet_eval", "openrouter/m", 200, 100, 0.05, ts, "openrouter"),
+                ("j3", "judge", "llama-3.1-70b", 150, 75, 0.02, ts, "cerebras"),
             ],
         )
         conn.commit()
@@ -84,33 +89,39 @@ class TestGetMonthlyProviderBreakdown:
 
         result = get_monthly_provider_breakdown(conn)
         assert len(result) == 2
-        assert result[0]["provider"] == "anthropic"  # higher spend first
+        assert result[0]["provider"] == "openrouter"  # higher spend first
         assert result[0]["calls"] == 2
         assert result[0]["spend"] == pytest.approx(0.06)
-        assert result[1]["provider"] == "openrouter"
+        assert result[1]["provider"] == "cerebras"
         assert result[1]["calls"] == 1
         assert result[1]["spend"] == pytest.approx(0.02)
 
     def test_excludes_free_providers(self, migrated_db):
-        """Free/subscription providers must not appear — symmetric with cost_gate semantics."""
+        """Free/subscription providers must not appear — symmetric with cost_gate semantics.
+
+        F2 (2026-05-26) added ``anthropic`` to ``FREE_PROVIDERS``; this
+        test now asserts that anthropic is excluded too.
+        """
         _, conn = migrated_db
         ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
         conn.executemany(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                ("j1", "p", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j1", "p", "openrouter/m", 1, 1, 0.10, ts, "openrouter"),
                 ("j2", "p", "x", 1, 1, 0.00, ts, "ollama"),
                 ("j3", "p", "x", 1, 1, 0.00, ts, "claude_cli"),
                 ("j4", "p", "x", 1, 1, 0.00, ts, "gemini"),
                 ("j5", "p", "x", 1, 1, 0.00, ts, "claude_code_cli"),
+                # F2 — anthropic is now free too and must be excluded.
+                ("j6", "p", "x", 1, 1, 0.00, ts, "anthropic"),
             ],
         )
         conn.commit()
         from job_finder.web.claude_client import get_monthly_provider_breakdown
 
         result = get_monthly_provider_breakdown(conn)
-        assert {r["provider"] for r in result} == {"anthropic"}
+        assert {r["provider"] for r in result} == {"openrouter"}
 
     def test_dict_keys(self, migrated_db):
         """Each dict has keys 'provider', 'calls', 'spend' with correct types."""
@@ -120,7 +131,7 @@ class TestGetMonthlyProviderBreakdown:
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("j1", "haiku_score", "m", 100, 50, 0.01, ts, "anthropic"),
+            ("j1", "haiku_score", "openrouter/m", 100, 50, 0.01, ts, "openrouter"),
         )
         conn.commit()
         from job_finder.web.claude_client import get_monthly_provider_breakdown

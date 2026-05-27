@@ -1,37 +1,55 @@
-"""Anthropic provider adapter.
+"""Anthropic provider adapter — thin wrapper over the Claude CLI.
 
-Wraps the existing call_claude() function as a thin facade implementing
-BaseProvider.  All budget gating, cost recording, and token extraction
-are handled internally by call_claude() — this adapter does NOT call
-cost_gate() or record_cost() directly.
+Polish-review F2 (2026-05-26) collapsed the historical double-validation
+/ double-retry / double-cost-recording layering. AnthropicProvider now
+talks directly to ``claude_client._run_oneshot`` (the same transport
+``ClaudeCodeCLIProvider`` uses) and lets the cascade layer
+(``model_provider._maybe_record_cost`` / ``call_model``) handle cost
+recording, budget gating, schema validation, and the schema-failure
+retry. Provider attribution flips from ``"claude_cli"`` to
+``"anthropic"``; ``"anthropic"`` is added to ``FREE_PROVIDERS`` so the
+budget gate continues to treat the CLI-subscription transport as $0
+(per CLAUDE.md M-2).
 
-Phase 25 deliverable — part of the multi-provider routing system.
+``call_claude`` remains in ``claude_client`` as a back-compat shim for
+the small set of legacy direct callers (ai_career_navigator,
+careers_scraper, description_reformatter); the cascade no longer routes
+through it.
+
+Phase 25 introduced the adapter; F2 (2026-05-26) slimmed it.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 
-from job_finder.web.claude_client import call_claude
+from job_finder.web.claude_client import _run_oneshot
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
 logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider(BaseProvider):
-    """Provider adapter that delegates to call_claude().
+    """BaseProvider adapter that shells out to ``claude -p`` via _run_oneshot.
 
-    Routes Anthropic dispatch through the ``claude -p`` CLI subprocess via
-    ``call_claude`` so it can participate in the generic provider dispatch
-    interface. Token counts are not re-exposed (call_claude records them
-    internally to scoring_costs).
+    Mirrors ``ClaudeCodeCLIProvider``'s envelope-parsing exactly: prefer
+    the CLI's native ``structured_output`` for schema requests, fall back
+    to ``json.loads(envelope["result"])``; freeform requests get the raw
+    result wrapped as ``{"text": ...}`` when it isn't already a dict.
+
+    ``conn`` / ``job_id`` / ``purpose`` are accepted for ``_make_adapter``
+    signature symmetry but are no longer used here — the cascade layer
+    owns cost recording.
 
     Args:
-        conn: Open SQLite connection for cost recording.
-        config: Application config dict.
-        job_id: Job dedup_key for cost attribution (nullable).
-        purpose: Feature attribution label for cost rows.
+        conn: Open SQLite connection (unused after F2; kept for the
+            ``_make_adapter`` calling convention).
+        config: Application config dict (unused after F2; kept for the
+            calling convention).
+        job_id: Job dedup_key for cost attribution (unused after F2).
+        purpose: Feature attribution label (unused after F2).
     """
 
     def __init__(
@@ -41,10 +59,11 @@ class AnthropicProvider(BaseProvider):
         job_id: str | None = None,
         purpose: str = "",
     ) -> None:
-        self._conn = conn
-        self._config = config
-        self._job_id = job_id
-        self._purpose = purpose
+        # All four args retained for _make_adapter symmetry — the cascade
+        # constructs every adapter with the same kwargs and would have to
+        # gain Anthropic-specific branching otherwise.
+        del conn, config, job_id, purpose
+        self._timeout_default = 120.0
 
     def call(
         self,
@@ -55,47 +74,77 @@ class AnthropicProvider(BaseProvider):
         max_tokens: int = 1024,
         timeout: float | None = None,
     ) -> ModelResult:
-        """Delegate to call_claude() and return a ModelResult.
+        """Run a single Anthropic CLI dispatch and return a ModelResult.
 
-        Budget gating, cost recording, and schema enforcement via tool-choice
-        are all handled inside call_claude().  BudgetExceededError propagates
-        unchanged — callers must decide how to handle it.
+        Schema validation, retry, and cost recording all live in the
+        cascade layer (``call_model`` / ``_maybe_record_cost``);
+        ``schema_valid=True`` here is the "no error" telemetry value
+        (matches ``ClaudeCodeCLIProvider``).
 
         Args:
-            model: Full model identifier, e.g. "claude-haiku-4-5".
+            model: Full model identifier, e.g. ``"claude-haiku-4-5"``.
             system: System prompt string.
-            messages: List of message dicts [{role, content}].
+            messages: List of message dicts ``[{role, content}]``. Only
+                ``messages[-1]["content"]`` is forwarded — Phase 39 simplified
+                multi-turn handling out of the CLI dispatch path.
             output_schema: JSON schema dict for structured output (or None).
-            max_tokens: Maximum output tokens. Defaults to 1024.
-            timeout: Request timeout in seconds.
+            max_tokens: Maximum output tokens. Currently unused — the CLI
+                does not expose a max-tokens knob; kept for signature
+                consistency with the rest of the cascade.
+            timeout: Subprocess timeout in seconds. Defaults to 120.
 
         Returns:
-            ModelResult with provider="anthropic", schema_valid reflecting actual validation outcome.
-            input_tokens and output_tokens are 0 — call_claude records
-            them internally to scoring_costs.
+            ModelResult with ``provider="anthropic"`` and real token counts
+            from ``envelope["usage"]``.
 
         Raises:
-            BudgetExceededError: Propagated from call_claude() when budget cap hit.
-            RuntimeError: Propagated from call_claude() on API errors.
+            BudgetExceededError: Propagated from ``_run_oneshot`` when the
+                CLI reports credit-exhaustion.
+            RuntimeError: Propagated from ``_run_oneshot`` on non-zero exit
+                code or CLI-reported error.
+            TimeoutError: Propagated from ``_run_oneshot`` on subprocess
+                timeout.
+            ValueError: When ``messages`` is empty.
         """
-        data, cost_usd, schema_valid = call_claude(
+        del max_tokens  # CLI has no max-tokens knob; accepted for symmetry
+        if not messages:
+            raise ValueError("messages list must contain at least one message")
+        user_message = messages[-1].get("content", "")
+
+        envelope = _run_oneshot(
             model=model,
             system=system,
-            messages=messages,
-            output_schema=output_schema,
-            conn=self._conn,
-            job_id=self._job_id,
-            purpose=self._purpose,
-            config=self._config,
-            max_tokens=max_tokens,
-            timeout=timeout,
+            user_message=user_message,
+            json_schema=output_schema,
+            timeout=timeout or self._timeout_default,
         )
+
+        # Parse identically to ClaudeCodeCLIProvider for symmetry.
+        if output_schema is not None:
+            structured = envelope.get("structured_output")
+            if structured is not None and isinstance(structured, dict):
+                data: dict = structured
+            else:
+                data = json.loads(envelope["result"])
+        else:
+            raw = envelope.get("result", "")
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                data = parsed if isinstance(parsed, dict) else {"text": str(raw).strip()}
+            except (json.JSONDecodeError, TypeError):
+                data = {"text": str(raw).strip()}
+
+        usage = envelope.get("usage") or {}
         return ModelResult(
             data=data,
-            cost_usd=cost_usd,
-            input_tokens=0,  # call_claude records internally; not re-exposed
-            output_tokens=0,
+            # Cost is computed by _maybe_record_cost; for anthropic
+            # (now in FREE_PROVIDERS) that resolves to 0.0 regardless of
+            # what we return here. Keep this 0.0 so ModelResult.cost_usd
+            # matches the row that lands in scoring_costs.
+            cost_usd=0.0,
+            input_tokens=int(usage.get("input_tokens", 0) or 0),
+            output_tokens=int(usage.get("output_tokens", 0) or 0),
             model=model,
             provider="anthropic",
-            schema_valid=schema_valid,  # Use actual validation outcome from call_claude
+            schema_valid=True,
         )

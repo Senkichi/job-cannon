@@ -58,10 +58,20 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # to record $0 for these providers.
 # - "claude_cli" = legacy call_claude() internal path (kept for backward compat).
 # - "claude_code_cli" / "gemini_cli" / "local_bundled" = Phase 39 new providers.
+# - "anthropic" = polish-review F2 (2026-05-26). The cascade-routed
+#   AnthropicProvider now dispatches via `claude -p` CLI (per CLAUDE.md M-2,
+#   2026-05-20), which is subscription-funded. Pre-F2 these calls landed in
+#   scoring_costs with provider="claude_cli" via call_claude's internal
+#   record_cost (so the budget gate already excluded them); post-F2 the
+#   single cost row is written by _maybe_record_cost with
+#   provider="anthropic" — that name must therefore join FREE_PROVIDERS to
+#   preserve the existing budget-gate semantics. If future work re-introduces
+#   per-token SDK billing, remove this entry and gate on a transport flag.
 FREE_PROVIDERS: frozenset[str] = frozenset(
     {
         "gemini",
         "ollama",
+        "anthropic",         # F2 — CLI subscription transport, $0 per call
         "claude_cli",        # existing — internal call_claude() path
         "claude_code_cli",   # NEW — ClaudeCodeCLIProvider (Plan 02)
         "gemini_cli",        # NEW — GeminiCLIProvider (Plan 03)

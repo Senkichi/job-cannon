@@ -20,10 +20,20 @@ from datetime import UTC, datetime, timedelta
 
 
 def _insert_cost_rows(conn, rows):
-    """Insert rows into scoring_costs. Each row: (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp)."""
+    """Insert rows into scoring_costs. Each row: (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp).
+
+    Rows are forced to ``provider='openrouter'`` so they survive the
+    ``FREE_PROVIDERS`` filter in cost-helper queries. Pre polish-review F2
+    (2026-05-26) the migration's ``DEFAULT 'anthropic'`` happened to land
+    in the "paid" bucket — F2 moved ``anthropic`` into ``FREE_PROVIDERS``
+    (the CLI dispatch is subscription-funded), so unspecified-provider
+    rows would now be silently dropped by every cost rollup. Tests that
+    actually want to exercise the free-provider exclusion use the
+    sibling ``_insert_rows_with_provider`` helper instead.
+    """
     conn.executemany(
-        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'openrouter')",
         rows,
     )
     conn.commit()
@@ -384,7 +394,12 @@ class TestDashboardCostCardLink:
 
 class TestProviderBreakdownRendering:
     def test_costs_page_shows_provider_names(self, tmp_db_path):
-        """Provider names from scoring_costs appear in the provider breakdown table."""
+        """Provider names from scoring_costs appear in the provider breakdown table.
+
+        Uses ``openrouter`` as the paid-provider example because polish-review
+        F2 (2026-05-26) added ``anthropic`` to ``FREE_PROVIDERS`` — the
+        Cost-view "This Month by Provider" table filters those out.
+        """
         from job_finder.web import create_app
         from job_finder.web.db_migrate import run_migrations
 
@@ -395,7 +410,7 @@ class TestProviderBreakdownRendering:
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("j1", "haiku_score", "claude-haiku-4-5", 100, 50, 0.01, ts, "anthropic"),
+            ("j1", "haiku_score", "openrouter/some-paid-model", 100, 50, 0.01, ts, "openrouter"),
         )
         conn.execute(
             "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
@@ -426,8 +441,11 @@ class TestProviderBreakdownRendering:
         response = client.get("/costs")
         assert response.status_code == 200
         html = response.data.decode("utf-8")
-        assert "anthropic" in html
-        assert "gemini" in html
+        assert "openrouter" in html
+        # gemini is a free provider — usage view shows it, cost view filters it.
+        # The full /costs page now lands on the cost rollup; "gemini" still
+        # appears in the page via the sidebar / nav, but the breakdown table
+        # itself only lists paid providers.
         assert "This Month by Provider" in html
 
 
@@ -471,8 +489,13 @@ def _insert_rows_with_provider(conn, rows):
 
 class TestCostViewExcludesFreeProviders:
     """The Cost view answers 'how much did I spend?' — subscription-funded calls
-    (Ollama, Claude CLI, Gemini CLI, etc.) must not appear in the rollup, even
-    if they were stored with cost_usd > 0 by some upstream bug."""
+    (Ollama, Claude CLI, Gemini CLI, Anthropic CLI, etc.) must not appear in
+    the rollup, even if they were stored with cost_usd > 0 by some upstream bug.
+
+    Polish-review F2 (2026-05-26) moved ``anthropic`` into ``FREE_PROVIDERS``
+    (the CLI-subscription transport is $0); these tests now use
+    ``openrouter`` as the paid-provider example.
+    """
 
     def test_get_cost_stats_excludes_free_providers(self, tmp_db_path):
         from job_finder.web.claude_client import get_cost_stats
@@ -484,16 +507,19 @@ class TestCostViewExcludesFreeProviders:
         _insert_rows_with_provider(
             conn,
             [
-                ("j1", "score_job", "claude-haiku-4-5", 100, 50, 0.50, ts, "anthropic"),
-                # 99.00 "spend" on a free provider must be ignored entirely
+                # The single paid row: spend 0.50 must reach the rollup.
+                ("j1", "score_job", "openrouter/x", 100, 50, 0.50, ts, "openrouter"),
+                # 99.00 "spend" on a free provider must be ignored entirely.
                 ("j2", "score_job", "qwen2.5:14b", 1000, 500, 99.00, ts, "ollama"),
                 ("j3", "score_job", "claude-haiku-4-5", 100, 50, 0.25, ts, "claude_cli"),
+                # F2 — anthropic is now free too.
+                ("j4", "score_job", "claude-haiku-4-5", 100, 50, 0.75, ts, "anthropic"),
             ],
         )
         stats = get_cost_stats(conn, budget_cap=25.0)
         assert abs(stats["month"] - 0.50) < 1e-9
         assert abs(stats["today"] - 0.50) < 1e-9
-        # by_feature only counts the anthropic row
+        # by_feature only counts the openrouter row
         purposes = {f["purpose"]: f for f in stats["by_feature"]}
         assert purposes["score_job"]["calls"] == 1
         assert abs(purposes["score_job"]["spend"] - 0.50) < 1e-9
@@ -509,15 +535,17 @@ class TestCostViewExcludesFreeProviders:
         _insert_rows_with_provider(
             conn,
             [
-                ("j1", "score_job", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j1", "score_job", "x", 1, 1, 0.10, ts, "openrouter"),
                 ("j2", "score_job", "x", 1, 1, 0.00, ts, "ollama"),
                 ("j3", "score_job", "x", 1, 1, 0.00, ts, "gemini"),
                 ("j4", "score_job", "x", 1, 1, 0.00, ts, "claude_cli"),
+                # F2 — anthropic is free too and must be excluded.
+                ("j5", "score_job", "x", 1, 1, 0.00, ts, "anthropic"),
             ],
         )
         result = get_monthly_provider_breakdown(conn)
         providers = {r["provider"] for r in result}
-        assert providers == {"anthropic"}
+        assert providers == {"openrouter"}
         conn.close()
 
     def test_cost_view_html_hides_free_provider_rows(self, tmp_db_path):
@@ -529,7 +557,7 @@ class TestCostViewExcludesFreeProviders:
         _insert_rows_with_provider(
             conn,
             [
-                ("j1", "real_paid_purpose_xyz", "x", 1, 1, 0.10, ts, "anthropic"),
+                ("j1", "real_paid_purpose_xyz", "x", 1, 1, 0.10, ts, "openrouter"),
                 ("j2", "free_purpose_zzz", "qwen2.5:14b", 1, 1, 0.00, ts, "ollama"),
             ],
         )
@@ -541,7 +569,7 @@ class TestCostViewExcludesFreeProviders:
         html = response.data.decode("utf-8")
         assert "real_paid_purpose_xyz" in html
         assert "free_purpose_zzz" not in html
-        assert "anthropic" in html
+        assert "openrouter" in html
         assert "ollama" not in html  # free provider hidden from Cost view
 
     def test_usage_view_still_shows_all_providers(self, tmp_db_path):
