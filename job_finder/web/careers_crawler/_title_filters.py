@@ -189,7 +189,33 @@ def _clean_title(tag, raw_text: str) -> str:
     # separator-based location patterns first, then the no-separator
     # trailing-uppercase run, then leading logo letters last.
     cleaned = _LOCATION_SUFFIX_RE.sub("", raw_text)
-    cleaned = _CITY_SUFFIX_RE.sub("", cleaned)
+    cleaned = _strip_city_suffix_guarded(cleaned)
     cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)
     cleaned = _strip_leading_logo_letters(cleaned)
     return cleaned.strip() or raw_text
+
+
+def _strip_city_suffix_guarded(text: str) -> str:
+    """Apply _CITY_SUFFIX_RE only when the text BEFORE the dash looks like a
+    real job title — short + ALLCAPS prefixes are almost always brand
+    abbreviations, not job titles, and stripping the brand off them is a
+    silent data-loss bug.
+
+    Concrete case that motivated this guard: 'MSI - Marvell Semiconductor'
+    has the same trailing-TitleCase-after-dash shape as
+    'Senior Engineer - San Francisco', but the suffix is a brand name, not a
+    location. Heuristic: a legitimate job-title prefix is at least 5 chars
+    long AND contains at least one lowercase letter (so 'MSI', 'IBM', 'AWS'
+    are skipped). Tradeoff: we leak some bare-city suffixes through when the
+    preceding title is short — but those titles are still informative, where
+    'MSI' alone has zero brand signal.
+
+    See FOLLOWUPS.md 2026-05-27 audit ("_CITY_SUFFIX_RE over-strip").
+    """
+    match = _CITY_SUFFIX_RE.search(text)
+    if not match:
+        return text
+    before = text[: match.start()].strip()
+    if len(before) >= 5 and any(c.islower() for c in before):
+        return before
+    return text

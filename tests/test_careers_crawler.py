@@ -406,6 +406,22 @@ class TestCleanTitle:
         tag = self._make_tag('<a href="/j"><div>Lead Designer</div><div>New York, NY</div></a>')
         assert _clean_title(tag, "Lead DesignerNew York, NY") == "Lead Designer"
 
+    def test_short_allcaps_prefix_not_overstripped_as_city(self):
+        """Regression: 'MSI - Marvell Semiconductor' was collapsing to 'MSI'
+        because _CITY_SUFFIX_RE matches any dash-separated TitleCase suffix.
+        With the new guard, brand-name suffixes after short ALLCAPS prefixes
+        are preserved.
+        """
+        tag = self._make_tag('<a href="/j">MSI - Marvell Semiconductor</a>')
+        assert _clean_title(tag, "MSI - Marvell Semiconductor") == "MSI - Marvell Semiconductor"
+
+    def test_city_suffix_with_state_still_strips_after_long_title(self):
+        """Sanity: legitimate location stripping still works when the title
+        prefix is plausibly job-title-shaped."""
+        tag = self._make_tag('<a href="/j">Senior Engineer - San Francisco, CA</a>')
+        # raw_text supplied so we hit the regex strategy
+        assert _clean_title(tag, "Senior Engineer - San Francisco, CA") == "Senior Engineer"
+
 
 # ---------------------------------------------------------------------------
 # _is_metadata_blob — careers_crawl title-bleed guard
