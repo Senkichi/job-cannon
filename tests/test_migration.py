@@ -392,7 +392,7 @@ def test_migration_count_is_thirteen():
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 57
+    assert len(MIGRATIONS) == 58
 
 
 class TestMigration27:
@@ -924,7 +924,7 @@ class TestMigration18:
 
     def test_migrations_count_is_19(self):
         """MIGRATIONS list has 57 entries (through Migration 57: retag historical paid Anthropic SDK rows)."""
-        assert len(MIGRATIONS) == 57
+        assert len(MIGRATIONS) == 58
 
 
 class TestMigration40:
@@ -1372,7 +1372,7 @@ class TestMigration52And53:
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 57, f"Expected PRAGMA user_version=57, got: {version}"
+        assert version == 58, f"Expected PRAGMA user_version=58, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(
