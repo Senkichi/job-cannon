@@ -111,6 +111,22 @@ def index():
     # Compute health metrics for full page
     health = _compute_health_metrics(conn)
 
+    # Rough scannable-cohort count + ETA for the in-flight progress card.
+    # Upper bound: counts all hit companies with scan_enabled, ignoring the
+    # high-score-history gate applied inside run_ats_scan — that gate's
+    # threshold lives in config and varies, so the simple count keeps the
+    # template independent of scanner internals. The ~4s-per-company ETA is
+    # a heuristic, not a measurement; the actual scan can be faster or much
+    # slower depending on ATS response times.
+    try:
+        scannable_count = conn.execute(
+            "SELECT COUNT(*) FROM companies "
+            "WHERE ats_probe_status = 'hit' AND scan_enabled = 1"
+        ).fetchone()[0]
+    except Exception:
+        scannable_count = 0
+    scan_eta_seconds = max(5, scannable_count * 4)
+
     return render_template(
         "companies/index.html",
         companies=companies,
@@ -121,6 +137,8 @@ def index():
         has_more=has_more,
         total_count=total_count,
         health=health,
+        scannable_count=scannable_count,
+        scan_eta_seconds=scan_eta_seconds,
     )
 
 
