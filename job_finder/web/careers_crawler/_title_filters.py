@@ -83,6 +83,69 @@ def _strip_leading_logo_letters(s: str) -> str:
     return _LEADING_LOGO_LETTERS_RE.sub("", s, count=1)
 
 
+# Heuristic guards for detecting that a "title" is actually a glued metadata
+# blob (description + location + posting date + req ID concatenated together).
+# These come up on aggregator-style careers pages where the underlying HTML
+# lays out fields as adjacent inline siblings — get_text(strip=True) merges
+# them all without separators. See FOLLOWUPS.md 2026-05-27 audit.
+
+# Maximum plausible job title length in characters. Real titles top out around
+# 110 chars even with senior/staff/principal modifiers + parenthesized scopes.
+# Beyond 140 the candidate is almost certainly a metadata blob.
+_MAX_TITLE_LEN = 140
+
+# Phrase markers that only appear in description/metadata text — never in a
+# real title. Case-insensitive substring match.
+_METADATA_PHRASE_MARKERS = (
+    "posted ",  # "Posted 10 days ago"
+    "apply by",  # "Apply byApr-29-26"
+    "agency",  # "AgencyUNDP" (labeled-form aggregator)
+    "post level",  # UNDP-style label
+    "job title",  # UNDP-style label glued in
+    "more accessible",  # "Innovation and Automation" body text
+    "description ",  # Generic description leader
+    "required:",  # Glued-in body text
+    "responsibilities",  # Glued-in body text
+)
+
+# Currency symbol indicates compensation got concatenated into the title.
+_HAS_DOLLAR_RE = re.compile(r"\$\s*\d")
+
+# Req-ID-followed-by-pipe pattern: "SQL2354308|Chennai, Tamil Nadu" —
+# digits run followed by a pipe and TitleCase text.
+_REQ_ID_PIPE_RE = re.compile(r"\d{4,}\s*\|\s*[A-Z]")
+
+
+def _is_metadata_blob(title: str) -> bool:
+    """Detect titles that are actually concatenated metadata/description text.
+
+    Used by careers_crawl extraction to skip aggregator pages where the
+    surrounding markup glues the title together with location, req ID,
+    posting date, and description preview without separator whitespace.
+    Those rows produce titles like "Senior Data Scientist - GenAI...
+    SQL2354308|Chennai, Tamil Nadu" or "Job TitleTech Lead AnalystPost
+    levelNPSA-9Apply byApr-29-26AgencyUNDP..." that are useless for
+    scoring or display.
+
+    Conservative: prefers false negatives (let some glued blobs through)
+    over false positives (drop a legitimate long title). Run this AFTER
+    _clean_title has stripped suffixes and logo letters — short legitimate
+    titles will never trip it.
+    """
+    if not title:
+        return False
+    if len(title) > _MAX_TITLE_LEN:
+        return True
+    lowered = title.lower()
+    if any(marker in lowered for marker in _METADATA_PHRASE_MARKERS):
+        return True
+    if _HAS_DOLLAR_RE.search(title):
+        return True
+    if _REQ_ID_PIPE_RE.search(title):
+        return True
+    return False
+
+
 def _clean_title(tag, raw_text: str) -> str:
     """Extract clean job title from a link tag, stripping appended location.
 

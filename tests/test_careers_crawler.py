@@ -408,6 +408,70 @@ class TestCleanTitle:
 
 
 # ---------------------------------------------------------------------------
+# _is_metadata_blob — careers_crawl title-bleed guard
+# ---------------------------------------------------------------------------
+
+
+class TestIsMetadataBlob:
+    """Tests for the predicate that detects glued-metadata 'title' rows from
+    aggregator careers pages. See FOLLOWUPS.md 2026-05-27 audit for the
+    real-world examples these patterns are calibrated against.
+    """
+
+    def _import(self):
+        from job_finder.web.careers_crawler._title_filters import _is_metadata_blob
+
+        return _is_metadata_blob
+
+    def test_clean_title_not_a_blob(self):
+        assert self._import()("Senior Data Scientist") is False
+
+    def test_long_clean_title_within_threshold(self):
+        # 120 chars of plausible title content — at boundary, should pass.
+        title = "Senior Staff Data Scientist - Generative AI and Large Language Models (Hybrid - SF / NYC)"
+        assert len(title) < 140
+        assert self._import()(title) is False
+
+    def test_empty_string_not_a_blob(self):
+        assert self._import()("") is False
+
+    def test_overlong_title_rejected(self):
+        # 200+ char blob — the UNDP-style label-glued example.
+        title = (
+            "Job TitleTech Lead Analyst, Software Engineering and Data Science (Open "
+            "to Internal and External applicants)Post levelNPSA-9Apply byApr-29-26"
+        )
+        assert len(title) > 140
+        assert self._import()(title) is True
+
+    def test_posted_n_days_ago_marker_rejected(self):
+        title = "Senior Analyst I - Trial Analytics Posted 10 days ago"
+        assert self._import()(title) is True
+
+    def test_apply_by_marker_rejected(self):
+        title = "Tech Lead AnalystApply byApr-29-26"
+        assert self._import()(title) is True
+
+    def test_dollar_sign_indicates_comp_glued_in(self):
+        title = "Senior Data Engineer $150,000-$220,000"
+        assert self._import()(title) is True
+
+    def test_req_id_pipe_pattern_rejected(self):
+        title = "Senior Data Scientist - GenAI SQL2354308|Chennai, Tamil Nadu"
+        assert self._import()(title) is True
+
+    def test_agency_marker_rejected(self):
+        # UNDP-style "AgencyUNDP" concatenation.
+        title = "Tech Lead AnalystAgencyUNDPLocationRio de Janeiro"
+        assert self._import()(title) is True
+
+    def test_description_word_in_title_rejected(self):
+        # "EHApplication Development Lead AnalystEvernorth Health Servicesmore..."
+        title = "Application Development Lead Analyst Description The Senior Vice President"
+        assert self._import()(title) is True
+
+
+# ---------------------------------------------------------------------------
 # _try_static_extract
 # ---------------------------------------------------------------------------
 

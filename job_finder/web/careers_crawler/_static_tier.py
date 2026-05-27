@@ -26,7 +26,11 @@ from bs4 import BeautifulSoup
 
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.ats_platforms import _title_matches
-from job_finder.web.careers_crawler._title_filters import _NAV_PATH_PREFIXES, _clean_title
+from job_finder.web.careers_crawler._title_filters import (
+    _NAV_PATH_PREFIXES,
+    _clean_title,
+    _is_metadata_blob,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,12 @@ def _extract_jobs_from_soup(
 
         # Clean title and apply keyword filter
         title = _clean_title(tag, raw_text)
+        # Reject obvious metadata blobs (titles that are actually concatenated
+        # description+location+req-ID text from aggregator-style pages). These
+        # would otherwise leak through with junk titles that pollute the UI
+        # and waste scoring spend. See FOLLOWUPS.md 2026-05-27 audit.
+        if _is_metadata_blob(title):
+            continue
         if not _title_matches(title, target_titles, exclusions):
             continue
 
