@@ -442,17 +442,36 @@ class TestSpeculativeProbeLoopWiring:
         assert callable(ats_prober._probe_bamboohr)
         assert callable(ats_prober._probe_teamtailor)
 
-    def test_speculative_loop_imports_new_probes(self):
-        """ats_scanner._probe imports every Stage-4 probe symbol at module load."""
+    def test_speculative_loop_imports_surviving_stage4_probes(self):
+        """ats_scanner._probe imports only the surviving Stage-4 probes.
+
+        Per 2026-05-27 audit B1a fix: bamboohr/personio/recruitee/breezy were
+        removed from the speculative ladder due to a 100% FP rate (the
+        speculative path can no longer assign these platforms; only the
+        evidence-based reconcile path can). Their probe functions still live
+        in ats_prober and are reachable via ats_identity_reconcile._verify_live.
+        """
         from job_finder.web.ats_scanner import _probe as ats_scanner_probe
 
-        assert callable(ats_scanner_probe._probe_recruitee)
-        assert callable(ats_scanner_probe._probe_breezy)
+        # Surviving Stage-4 probes that the speculative ladder still consults.
         assert callable(ats_scanner_probe._probe_jazzhr)
         assert callable(ats_scanner_probe._probe_pinpoint)
-        assert callable(ats_scanner_probe._probe_personio)
-        assert callable(ats_scanner_probe._probe_bamboohr)
         assert callable(ats_scanner_probe._probe_teamtailor)
+
+        # Excluded probes must NOT be re-exported from this module — the
+        # absence is what enforces the speculative-ladder exclusion at the
+        # import level (so a future patch can't accidentally re-add them
+        # to _PROBES without first re-adding the import).
+        for excluded in (
+            "_probe_recruitee",
+            "_probe_breezy",
+            "_probe_personio",
+            "_probe_bamboohr",
+        ):
+            assert not hasattr(ats_scanner_probe, excluded), (
+                f"{excluded} must not be imported into ats_scanner._probe — "
+                f"see _FP_PRONE_PLATFORMS in that module for rationale."
+            )
 
 
 # ===========================================================================

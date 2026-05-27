@@ -16,9 +16,16 @@ from job_finder.web.ats_company import classify_company_name
 from job_finder.web.ats_detection import ATS_EXTRACTOR_VERSION, aggregate_ats_candidates_from_job_bundles
 from job_finder.web.ats_prober import (
     _probe_ashby,
+    _probe_bamboohr,
+    _probe_breezy,
     _probe_greenhouse,
+    _probe_jazzhr,
     _probe_lever,
+    _probe_personio,
+    _probe_pinpoint,
+    _probe_recruitee,
     _probe_smartrecruiters,
+    _probe_teamtailor,
     _probe_workday,
 )
 from job_finder.web.enrichment_sources import parse_source_urls
@@ -70,6 +77,26 @@ def _verify_live(platform: str, slug: str) -> bool:
         return bool(_probe_workday(slug))
     if platform == "smartrecruiters":
         return bool(_probe_smartrecruiters(slug))
+    # FP-prone platforms (bamboohr/personio/recruitee/breezy) — the speculative
+    # ladder excludes them per 2026-05-27 audit, but the reconcile path may
+    # still promote them when there is corroborating job-URL evidence and the
+    # live probe succeeds. pinpoint/jazzhr/teamtailor are also covered here
+    # for completeness so any of the 7 URL-detectable Stage-4 platforms can
+    # be verified.
+    if platform == "bamboohr":
+        return bool(_probe_bamboohr(slug))
+    if platform == "personio":
+        return bool(_probe_personio(slug))
+    if platform == "recruitee":
+        return bool(_probe_recruitee(slug))
+    if platform == "breezy":
+        return bool(_probe_breezy(slug))
+    if platform == "pinpoint":
+        return bool(_probe_pinpoint(slug))
+    if platform == "jazzhr":
+        return bool(_probe_jazzhr(slug))
+    if platform == "teamtailor":
+        return bool(_probe_teamtailor(slug))
     return False
 
 

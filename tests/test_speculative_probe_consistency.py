@@ -590,3 +590,107 @@ class TestMigrationScenario:
         conn.close()
         assert row["ats_probe_status"] == "miss"
         assert row["ats_platform"] is None
+
+
+# ---------------------------------------------------------------------------
+# B1a — FP-prone platform exclusion (2026-05-27 audit corollary)
+# ---------------------------------------------------------------------------
+
+
+class TestSpeculativeProbeFpExclusion:
+    """The 2026-05-27 ATS coverage audit (v2) found that the speculative probe
+    had a 100% false-positive rate for bamboohr / personio / recruitee /
+    breezy in the live corpus -- every hit came back with NULL evidence and
+    matched a famous-brand name. The fix excludes these 4 platforms from the
+    speculative `_PROBES` ladder so they can only be set via the
+    evidence-based reconcile path. These tests lock that invariant."""
+
+    def test_fp_prone_set_is_disjoint_from_probes_ladder(self):
+        """Module-level invariant: speculative ladder excludes FP-prone."""
+        from job_finder.web.ats_scanner._probe import _FP_PRONE_PLATFORMS, _PROBES
+
+        speculative_names = {name for name, _ in _PROBES}
+        overlap = speculative_names & _FP_PRONE_PLATFORMS
+        assert overlap == set(), (
+            f"speculative _PROBES ladder must exclude all FP-prone platforms, "
+            f"but found {overlap}. See _probe.py header comment for rationale."
+        )
+
+    def test_fp_prone_set_matches_the_audit_finding(self):
+        """The 4 platforms named in the audit are exactly the FP-prone set."""
+        from job_finder.web.ats_scanner._probe import _FP_PRONE_PLATFORMS
+
+        assert _FP_PRONE_PLATFORMS == frozenset(
+            {"bamboohr", "personio", "recruitee", "breezy"}
+        )
+
+    def test_shipped_probes_ladder_does_not_consult_fp_prone_platforms(
+        self, migrated_db_path
+    ):
+        """End-to-end: running probe_ats_slugs with the SHIPPED _PROBES list
+        on a pending famous-brand row produces miss (no FP) because none of
+        the speculative-ladder platforms will hit, and the FP-prone ones
+        are simply not consulted."""
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        company_id = _insert_pending_company(conn, name="Amazon")
+        conn.close()
+
+        # Force every surviving probe to return False so we can isolate the
+        # behavior of the ladder ITSELF. If bamboohr/personio/recruitee/breezy
+        # were still consulted, this test could not assume those would also
+        # return False -- but since they are removed from _PROBES entirely,
+        # only the surviving 6 probes can ever fire.
+        with (
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+            patch(
+                "job_finder.web.ats_scanner._probe.is_blocked_brand",
+                return_value=False,
+            ),
+            patch("job_finder.web.ats_prober._probe_lever", return_value=False),
+            patch("job_finder.web.ats_prober._probe_greenhouse", return_value=False),
+            patch("job_finder.web.ats_prober._probe_ashby", return_value=False),
+            patch("job_finder.web.ats_prober._probe_jazzhr", return_value=False),
+            patch("job_finder.web.ats_prober._probe_pinpoint", return_value=False),
+            patch("job_finder.web.ats_prober._probe_teamtailor", return_value=False),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["probed"] == 1
+        assert result["hits"] == 0
+        assert result["misses"] == 1
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT ats_probe_status, ats_platform FROM companies WHERE id=?",
+            (company_id,),
+        ).fetchone()
+        conn.close()
+        assert row["ats_probe_status"] == "miss"
+        assert row["ats_platform"] is None
+
+    def test_reconcile_path_can_still_verify_fp_prone_platforms(self):
+        """`_verify_live` must support the FP-prone platforms so the
+        evidence-based reconcile path can still promote them when there is
+        corroborating job-URL evidence. Otherwise removing them from the
+        speculative ladder would orphan the entire platform."""
+        from job_finder.web.ats_identity_reconcile import _verify_live
+
+        for platform, probe_target in (
+            ("bamboohr", "job_finder.web.ats_identity_reconcile._probe_bamboohr"),
+            ("personio", "job_finder.web.ats_identity_reconcile._probe_personio"),
+            ("recruitee", "job_finder.web.ats_identity_reconcile._probe_recruitee"),
+            ("breezy", "job_finder.web.ats_identity_reconcile._probe_breezy"),
+            ("pinpoint", "job_finder.web.ats_identity_reconcile._probe_pinpoint"),
+            ("jazzhr", "job_finder.web.ats_identity_reconcile._probe_jazzhr"),
+            ("teamtailor", "job_finder.web.ats_identity_reconcile._probe_teamtailor"),
+        ):
+            with patch(probe_target, return_value=True):
+                assert _verify_live(platform, "any-slug") is True, (
+                    f"_verify_live({platform!r}, ...) must delegate to its probe"
+                )
+            with patch(probe_target, return_value=False):
+                assert _verify_live(platform, "any-slug") is False

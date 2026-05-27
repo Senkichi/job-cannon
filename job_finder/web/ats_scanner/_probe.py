@@ -15,14 +15,10 @@ from job_finder.web.ats_detection import (
 )
 from job_finder.web.ats_prober import (
     _probe_ashby,
-    _probe_bamboohr,
-    _probe_breezy,
     _probe_greenhouse,
     _probe_jazzhr,
     _probe_lever,
-    _probe_personio,
     _probe_pinpoint,
-    _probe_recruitee,
     _probe_teamtailor,
 )
 from job_finder.web.brand_blocklist import is_blocked_brand
@@ -30,23 +26,50 @@ from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
 
+# Platforms excluded from the speculative ladder due to a 100% false-positive
+# rate empirically observed in the 2026-05-27 ATS coverage audit. Each of these
+# four platforms had every single speculative-probe hit (18 + 6 + 8 + 8 = 40
+# rows) come back with `ats_evidence_trigger IS NULL` — i.e. no corroborating
+# job-URL evidence. Famous-brand names (Microsoft, Amazon, Meta, YouTube,
+# Accenture, EY, Leidos, IQVIA, ...) collide with real SMB tenants that
+# registered the same {slug}={normalized_name} on these platforms, and the
+# probe returns a true 200 for the wrong company. F8 brand_blocklist catches
+# some but not all of the cohort.
+#
+# These platforms can still be PROMOTED via the evidence-based reconcile path
+# (job_finder/web/ats_identity_reconcile.reconcile_company_ats), which requires
+# corroborating job-URL evidence before writing `hit`. The per-platform probe
+# functions remain available and are used by reconcile's _verify_live step.
+#
+# This was the corollary of the v2 audit at .planning/ATS-COVERAGE-AUDIT-2026-05-27.md.
+_FP_PRONE_PLATFORMS: frozenset[str] = frozenset(
+    {"bamboohr", "personio", "recruitee", "breezy"}
+)
+
 # (platform, probe_fn) pairs. Ordering matches the historical ladder:
 # original three (Lever / Greenhouse / Ashby) first because they have the
-# longest track record; Stage 4 additions follow, with the Pinpoint/
-# Teamtailor/Personio/BambooHR block ordered fastest-JSON-first so cheap
-# probes short-circuit before the XML and HTML variants pay their cost.
+# longest track record; surviving Stage 4 additions follow, with the
+# Pinpoint/Teamtailor/JazzHR block ordered fastest-JSON-first so cheap
+# probes short-circuit before slower variants pay their cost.
+#
+# bamboohr / personio / recruitee / breezy are deliberately excluded —
+# see _FP_PRONE_PLATFORMS above for the 100% FP rate finding.
 _PROBES: list[tuple[str, Callable[[str], bool]]] = [
     ("lever", _probe_lever),
     ("greenhouse", _probe_greenhouse),
     ("ashby", _probe_ashby),
-    ("recruitee", _probe_recruitee),
-    ("breezy", _probe_breezy),
     ("jazzhr", _probe_jazzhr),
     ("pinpoint", _probe_pinpoint),
     ("teamtailor", _probe_teamtailor),
-    ("personio", _probe_personio),
-    ("bamboohr", _probe_bamboohr),
 ]
+
+# Invariant: speculative ladder must not include any FP-prone platform.
+# Tests assert this stays true under future edits.
+assert _FP_PRONE_PLATFORMS.isdisjoint({name for name, _ in _PROBES}), (
+    "speculative _PROBES ladder must not include any platform in "
+    "_FP_PRONE_PLATFORMS; only the evidence-based reconcile path may "
+    "promote to these platforms"
+)
 
 
 def probe_ats_slugs(db_path: str, config: dict) -> dict:
