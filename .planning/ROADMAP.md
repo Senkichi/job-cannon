@@ -139,7 +139,7 @@ Full track details archived in `.planning/milestones/v4.0-ROADMAP.md`. Note: v4.
 - [ ] **Phase 40: Workload Tiers + Cascade Rewire + Canary** — `quick`/`score`/`triage` replace `low`/`mid`/`high` + triage gate + single `config.yaml` rewire (absorbs audit Case A/B) + 1-week production canary
 - [x] **Phase 41: Strangerify Data Sources** — IMAP source default + parser verification + PDF/DOCX resume parser (completed 2026-05-21)
 - [x] **Phase 42: Onboarding Wizard** — 7-step Flask blueprint + system check + IMAP smoke test + templates (completed 2026-05-21)
-- [ ] **Phase 43: Update Check, Legal, Strangerify Exit Gate** — GitHub Releases banner + AGPL/PRIVACY/AUP/SECURITY + fresh-clone stranger validation
+- [~] **Phase 43: Update Check, Legal, Strangerify Exit Gate** — GitHub Releases banner + AGPL/PRIVACY/AUP/SECURITY + fresh-clone stranger validation (43-01 + 43-02 shipped; 43-03 ready, awaiting stranger attestation)
 - [x] **Phase 44: PyPI Release Pipeline & Install Docs** — PyPI name + trusted publishing + `release.yml` + `INSTALL.md` + README rewrite (completed 2026-05-28; impl shipped 2026-05-21 in `7ff3221`; pipeline GA-ready, publish gated on manual checklist)
 - [ ] **Phase 45: Cross-Platform pipx Validation & Exit Gate** — Win/macOS/Linux `pipx install job-cannon` validation + ≥5-strangers exit gate
 
@@ -366,7 +366,7 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | 40. Workload Tiers + Cascade Rewire + Canary | v5.0 | 4/4 artifacts | Partial: core shipped; triage/canary deferred | 2026-05-21 |
 | 41. Strangerify Data Sources | v5.0 | 4/4 | Complete    | 2026-05-21 |
 | 42. Onboarding Wizard | v5.0 | 6/6 | Complete    | 2026-05-21 |
-| 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 0/5 | Not started | - |
+| 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 2/3 | Partial: 43-01 + 43-02 shipped; 43-03 ready, awaiting stranger attestation | 2026-05-28 |
 | 44. PyPI Release Pipeline & Install Docs | v5.0 | 7/7 | Complete    | 2026-05-28 |
 | 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 0/? | Not started | - |
 
