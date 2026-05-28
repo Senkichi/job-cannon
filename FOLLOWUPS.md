@@ -179,7 +179,8 @@ print('total:', c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0])
 
 4. **AI-nav recipes for in-house custom ATS** (Apple, Tesla, Oracle
    Recruiting Cloud, AMD, NVIDIA, ByteDance, Deloitte, Genentech,
-   Citi, Kaiser Permanente). Tier-4 crawler. Likely own session.
+   Citi, Kaiser Permanente). Tier-4 crawler. **Scheduled as the focus
+   of the next session** — see "Next session's contract" below.
 
 5. **Manual company aliases UI** (round-3 deferred).
 
@@ -262,23 +263,59 @@ Rounds 3-12 quirks still apply. Additions from round 13:
 
 ## Next session's contract
 
-Minimum (~10 min): pick **Path A or Path B** for the pyright IDE-noise
-question (item #11 in Open/advisory). Either rename the test params
-to leading-underscore (Path A, ~50 LOC) or set
-`reportUnusedParameter = "none"` in `[tool.pyright]` (Path B, 1 LOC).
-This unblocks any future test-side pyright cleanup work.
+**Primary focus: AI-nav recipes for in-house custom ATS** (audit-track
+item #4 above). Tier-4 crawler work. The ten target companies are
+Apple, Tesla, Oracle Recruiting Cloud, AMD, NVIDIA, ByteDance,
+Deloitte, Genentech, Citi, Kaiser Permanente — all of which run
+custom (non-standard-ATS) careers sites and currently fall through
+the static/playwright tiers to the AI-navigator tier without a
+working recipe.
 
-Small-stretch (~30 min): boot Flask, run the manual browser smoke for
-Commit D (round 12's lingering item #1) and the Workable scan
-verification (item #4 / #2 here). Both are visual / DB-state checks,
-no code change required unless something turns up.
+Suggested approach:
 
-Bigger stretch: Phase F Jobvite per-tenant work (#3). Likely the
-biggest single commit of any future session — start with capcom and
-neogenomics, verify with `POST /admin/jobs/careers_crawl/run-now`.
+- Start by reading `job_finder/web/careers_crawler/_ai_nav_tier.py`
+  + `job_finder/web/ai_career_navigator.py` (the latter is the
+  Tier-4 implementation kept from removed Phase 5 — see CLAUDE.md
+  "Phase 5 (Intelligence): Removed" note). Confirm the recipe-cache
+  table state (existing 16 cached recipes, ~10 active companies).
+- For each target, pull the careers page once with the crawler in
+  verbose mode and capture what the AI-nav tier sees. Identify
+  whether the page is JS-rendered (Apple, Tesla, NVIDIA likely),
+  whether it has an XHR/JSON endpoint (Oracle Recruiting Cloud
+  almost certainly does), or whether it's a server-rendered
+  custom listing (Deloitte / Genentech / Citi / Kaiser are
+  plausibly in this bucket).
+- Recipe form: each tenant gets a `careers_nav_recipe` JSON entry
+  (DOM selectors + optional API endpoint hint) — same shape used
+  by Phase F Jobvite item below. Order recipes by failure rate
+  (which companies users are actually waiting on results for).
+- Verify with `POST /admin/jobs/careers_crawl/run-now` per company.
+  Each working recipe is one atomic commit.
 
-Aspirational: tackle either the AI-nav recipes (#4) or the manual
-company aliases UI (#5).
+Reasonable scope: 3-5 recipes shipped (the easiest of the ten),
+not all 10. The remaining can be a follow-up. Apple + Tesla are
+the highest-value but likely the hardest (heavy JS, anti-bot).
+Oracle Recruiting Cloud is the highest-value mid-difficulty
+(used by many companies beyond just Oracle itself).
+
+Pre-flight before starting (~10 min total):
+
+1. Pick **Path A or Path B** for the pyright IDE-noise question
+   (item #11 in Open/advisory). One line either way; settles
+   whether future test-side pyright noise is actionable.
+2. Boot Flask once, run the manual browser smoke for Commit D
+   (round 12's lingering item #1) and the Workable scan check
+   (item #4 / #2 here). Both are quick visual / DB-state checks.
+   Flask must be up for the AI-nav recipe work anyway.
+
+Holding pattern (deferred from this session forward unless the
+AI-nav work finishes early):
+
+- Phase F Jobvite per-tenant work (#3). Same shape as AI-nav
+  recipes (custom-tenant overrides), so the work is parallel —
+  could be batched in the same session if AI-nav goes faster
+  than expected.
+- Manual company aliases UI (#5).
 
 ## Open questions
 
