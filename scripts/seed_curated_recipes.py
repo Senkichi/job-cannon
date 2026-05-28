@@ -201,6 +201,31 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # NeoGenomics (id=2108) — jobvite tenant + viewall listing + ?q=<keyword>.
+    # ``jobs.jobvite.com/neogenomics/jobs/viewall`` returns ~76 unique
+    # /job/<id> links; recon confirmed ``?q=analyst`` narrows to 4
+    # server-rendered results, so the filter is genuinely server-side
+    # (input[name="q"] verified 2026-05-28). NeoGenomics has the largest
+    # active jobvite footprint of the Phase F set.
+    (
+        2108,
+        "neogenomics",
+        "https://jobs.jobvite.com/neogenomics",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/neogenomics/jobs/viewall",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 
