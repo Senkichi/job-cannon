@@ -27,9 +27,9 @@ from bs4 import BeautifulSoup
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 from job_finder.web.ats_platforms import _title_matches
 from job_finder.web.careers_crawler._title_filters import (
-    _NAV_PATH_PREFIXES,
     _clean_title,
     _is_metadata_blob,
+    _is_nav_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,8 +100,9 @@ def _extract_jobs_from_soup(
         absolute_url = urljoin(base_url, href)
         parsed = urlparse(absolute_url)
 
-        # Filter out navigation links
-        if any(parsed.path.lower().startswith(prefix) for prefix in _NAV_PATH_PREFIXES):
+        # Filter out navigation links (with /search subpath allowance — see
+        # `_is_nav_path` docstring and FOLLOWUPS round-15 Gap #3).
+        if _is_nav_path(parsed.path):
             continue
 
         # Deduplicate by URL

@@ -32,6 +32,37 @@ _NAV_PATH_PREFIXES = (
     "/events",
 )
 
+# Prefixes that map to "search form / search results" pages. We keep the bare
+# path filtered (the form itself is nav), but allow `<prefix>/<segment>` shapes
+# through — some ATS sites (e.g. ByteDance, `joinbytedance.com/search/<id>`)
+# encode job-detail URLs under the same path, and over-aggressive prefix
+# filtering eats every tile on the listing page.
+_NAV_PREFIXES_WITH_SUBPATH_JOBS = ("/search",)
+
+
+def _is_nav_path(path: str) -> bool:
+    """Return True if `path` is a known navigation link (not a job listing).
+
+    Most prefixes in `_NAV_PATH_PREFIXES` are matched as plain prefixes — any
+    sub-path under `/about`, `/blog`, etc. is nav. The prefixes listed in
+    `_NAV_PREFIXES_WITH_SUBPATH_JOBS` are filtered only when the path IS the
+    prefix (optionally with a trailing slash); deeper paths under them are
+    treated as job-detail URLs and let through.
+
+    See FOLLOWUPS round-15 Gap #3 (ByteDance `/search/<id>` tiles).
+    """
+    path_lower = path.lower()
+    for prefix in _NAV_PATH_PREFIXES:
+        if not path_lower.startswith(prefix):
+            continue
+        if prefix in _NAV_PREFIXES_WITH_SUBPATH_JOBS:
+            rest = path_lower[len(prefix) :].strip("/")
+            if rest:
+                # `/search/<id>` — job detail, not nav.
+                continue
+        return True
+    return False
+
 # Regex to strip trailing location text from concatenated title+location
 _LOCATION_SUFFIX_RE = re.compile(
     r"\s*[-–—|·•]\s*(?:Remote|Hybrid|On-?site|Anywhere|Multiple|Worldwide).*$",
