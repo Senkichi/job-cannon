@@ -472,12 +472,19 @@ def discover_navigation_recipe(
         page.goto(careers_url, timeout=15000, wait_until="networkidle")
         page.wait_for_timeout(2000)
 
-        # Execute steps best-effort — don't abort on first failure
+        # Execute steps best-effort — don't abort on first failure.
+        # Use the same broad keyword strategy here as replay_navigation_recipe
+        # uses at runtime — otherwise validation fills the search box with
+        # the user's most specific target title (e.g. "Lead Product Analyst"),
+        # which routinely returns zero matches on a destination job-search
+        # page even when the recipe is correct. The recipe would then be
+        # discarded as "0 jobs" despite working at replay time with the
+        # broader term ("analyst"). Keep them in lockstep.
         steps_executed = 0
         for step in steps:
             resolved_step = step
             if "value" in step and "{keyword}" in step.get("value", ""):
-                kw = target_titles[0] if target_titles else "software engineer"
+                kw = _derive_search_term(target_titles)
                 resolved_step = {**step, "value": step["value"].replace("{keyword}", kw)}
 
             if _execute_step(page, resolved_step):
