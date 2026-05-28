@@ -445,3 +445,128 @@ def test_dedupe_workplace_distinguishes() -> None:
         ),
     ]
     assert len(dedupe_locations(locations)) == 2
+
+
+# ─── SPEC Q3: jd_full body hashtag fallback ──────────────────────────
+
+
+def test_jd_full_li_remote_promotes_unspecified() -> None:
+    """``#LI-Remote`` in JD body promotes an UNSPECIFIED location's workplace."""
+    locations = parse_locations(
+        "Toronto, ON",
+        jd_full="About the role: senior engineer. #LI-Remote tag at bottom.",
+    )
+    assert len(locations) == 1
+    assert locations[0].city == "Toronto"
+    assert locations[0].country_code == "CA"
+    assert locations[0].workplace_type == "REMOTE"
+
+
+def test_jd_full_li_hybrid_promotes_unspecified() -> None:
+    """``#LI-Hybrid`` promotes UNSPECIFIED → HYBRID."""
+    locations = parse_locations(
+        "London, UK",
+        jd_full="Description. #LI-Hybrid",
+    )
+    assert len(locations) == 1
+    assert locations[0].country_code == "GB"
+    assert locations[0].workplace_type == "HYBRID"
+
+
+def test_jd_full_li_onsite_promotes_unspecified() -> None:
+    """``#LI-Onsite`` promotes UNSPECIFIED → ONSITE."""
+    locations = parse_locations(
+        "Berlin, Germany",
+        jd_full="Body content. #LI-Onsite",
+    )
+    assert len(locations) == 1
+    assert locations[0].country_code == "DE"
+    assert locations[0].workplace_type == "ONSITE"
+
+
+def test_raw_workplace_token_wins_over_body_tag() -> None:
+    """An explicit token in ``raw`` outranks any body-tag signal.
+
+    Precedence: per-segment token > trailing-slash promotion > body tag.
+    """
+    locations = parse_locations(
+        "Remote, US",
+        jd_full="#LI-Hybrid scattered in body should NOT override REMOTE.",
+    )
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "REMOTE"
+
+
+def test_jd_full_none_no_promotion() -> None:
+    """``jd_full=None`` leaves UNSPECIFIED entries untouched."""
+    locations = parse_locations("Toronto, ON")
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "UNSPECIFIED"
+
+
+def test_jd_full_no_tag_no_promotion() -> None:
+    """Generic prose without LI-hashtags does NOT promote workplace_type.
+
+    The bare word ``remote`` in body prose (e.g. "remote possibility")
+    is a known false-positive surface; only the ``#LI-*`` forms are
+    matched.
+    """
+    locations = parse_locations(
+        "Paris, France",
+        jd_full=(
+            "We have a remote possibility for hybrid working. Generic prose "
+            "with bare workplace words should NOT change the workplace_type."
+        ),
+    )
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "UNSPECIFIED"
+
+
+def test_jd_full_precedence_remote_over_hybrid() -> None:
+    """Body containing both ``#LI-Remote`` and ``#LI-Hybrid`` resolves REMOTE."""
+    locations = parse_locations(
+        "Sydney, Australia",
+        jd_full="#LI-Hybrid earlier, #LI-Remote later. REMOTE wins.",
+    )
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "REMOTE"
+
+
+def test_jd_full_promotes_all_unspecified_entries() -> None:
+    """Multi-location: every UNSPECIFIED entry gets promoted, resolved keep theirs."""
+    locations = parse_locations(
+        "New York, NY; San Francisco, CA",
+        jd_full="#LI-Hybrid",
+    )
+    assert len(locations) == 2
+    assert all(loc.workplace_type == "HYBRID" for loc in locations)
+
+
+def test_jd_full_empty_raw_returns_empty() -> None:
+    """Body tag alone (no raw location) → still ``[]``.
+
+    Per SPEC Q3, the body tag is a workplace_type fallback for *known*
+    locations — it does NOT create entries out of thin air.
+    """
+    assert parse_locations(None, jd_full="#LI-Remote") == []
+    assert parse_locations("", jd_full="#LI-Remote") == []
+
+
+def test_jd_full_with_hash_li_space_form() -> None:
+    """``#LI Remote`` (space variant) also detected — matches raw-token forms."""
+    locations = parse_locations(
+        "Paris, France",
+        jd_full="#LI Remote variation",
+    )
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "REMOTE"
+
+
+def test_jd_full_does_not_match_in_middle_of_word() -> None:
+    """``#LI-Remoteness`` should NOT trigger — ``\\b`` after Remote required."""
+    locations = parse_locations(
+        "Paris, France",
+        jd_full="#LI-Remoteness is not a real tag",
+    )
+    assert len(locations) == 1
+    assert locations[0].workplace_type == "UNSPECIFIED"

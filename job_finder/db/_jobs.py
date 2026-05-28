@@ -98,7 +98,16 @@ def upsert_job(
     if locations_structured is None:
         from job_finder.web.location_parser import parse_locations
 
-        locations_structured = parse_locations(job.location or None)
+        # SPEC Q3: pass job.description as jd_full so the parser can use
+        # ``#LI-Remote`` / ``#LI-Hybrid`` / ``#LI-Onsite`` body hashtags as
+        # a workplace_type fallback when the location string is silent.
+        # job.description IS the pre-enrichment jd_full for ATS-API and
+        # email-parser sources; the m067 backfill will re-parse with the
+        # post-enrichment jd_full where available.
+        locations_structured = parse_locations(
+            job.location or None,
+            jd_full=job.description,
+        )
     locations_json = _locations_to_json(locations_structured) if locations_structured else None
     workplace_type_col = locations_structured[0].workplace_type if locations_structured else None
     primary_country_code = locations_structured[0].country_code if locations_structured else None

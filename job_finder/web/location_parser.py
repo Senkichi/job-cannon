@@ -79,6 +79,15 @@ _ONSITE_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# JD-body LinkedIn workplace tags (SPEC Q3). Only the high-signal hashtag
+# forms — bare ``remote`` / ``hybrid`` / ``onsite`` in JD prose are too
+# false-positive-prone ("remote possibility", "hybrid model") to use as a
+# workplace_type signal. The hashtag forms are LinkedIn-specific and
+# almost never appear in body prose for any other reason.
+_LI_REMOTE_BODY_RE = re.compile(r"#LI[\-\s]?Remote\b", re.IGNORECASE)
+_LI_HYBRID_BODY_RE = re.compile(r"#LI[\-\s]?Hybrid\b", re.IGNORECASE)
+_LI_ONSITE_BODY_RE = re.compile(r"#LI[\-\s]?Onsite\b", re.IGNORECASE)
+
 # ─── Country aliasing ────────────────────────────────────────────────
 #
 # pycountry's alpha_2 lookup for "UK" maps to Uganda (UG), which is the
@@ -359,6 +368,25 @@ def _lookup_city(
 # ─── Workplace-type detection ────────────────────────────────────────
 
 
+def _detect_workplace_from_body(jd_full: str | None) -> WorkplaceType:
+    """Scan a JD body for LinkedIn workplace hashtags.
+
+    Precedence matches ``_detect_workplace_type``: REMOTE > HYBRID > ONSITE.
+    Returns UNSPECIFIED when no tag is found or input is empty. Only the
+    ``#LI-Remote`` / ``#LI-Hybrid`` / ``#LI-Onsite`` forms are matched —
+    bare workplace tokens in JD prose are too false-positive-prone.
+    """
+    if not jd_full:
+        return "UNSPECIFIED"
+    if _LI_REMOTE_BODY_RE.search(jd_full):
+        return "REMOTE"
+    if _LI_HYBRID_BODY_RE.search(jd_full):
+        return "HYBRID"
+    if _LI_ONSITE_BODY_RE.search(jd_full):
+        return "ONSITE"
+    return "UNSPECIFIED"
+
+
 def _detect_workplace_type(text: str) -> tuple[WorkplaceType, str]:
     """Return ``(workplace_type, text_with_token_stripped)``.
 
@@ -548,6 +576,8 @@ def _parse_one(raw: str) -> JobLocation | None:
 
 def parse_locations(
     raw: str | list[str] | None,
+    *,
+    jd_full: str | None = None,
 ) -> list[JobLocation]:
     """Parse a location string (or pre-split list) into ``list[JobLocation]``.
 
@@ -563,6 +593,14 @@ def parse_locations(
         normalizer is reused for splitting & placeholder pruning.
       - Output is deduped by ``(country_code, region_code, city,
         workplace_type)`` preserving first-seen order.
+
+    ``jd_full`` (SPEC Q3): when provided, scan the JD body for
+    ``#LI-Remote`` / ``#LI-Hybrid`` / ``#LI-Onsite`` hashtags as a
+    last-resort workplace_type signal. Promotes UNSPECIFIED entries
+    only — per-segment tokens in ``raw`` and trailing-slash promotion
+    both take precedence. Empty/missing ``raw`` still returns ``[]``
+    (the body tag is enrichment for known locations, not a location
+    source on its own).
 
     Never raises. On failure, emits ``unresolved=True`` entries with the
     raw input preserved so callers can still display something useful.
@@ -641,4 +679,31 @@ def parse_locations(
             )
         logger.debug("parse_locations: %r → %r", segment, parsed)
         out.append(parsed)
+
+    # SPEC Q3: JD-body LinkedIn hashtag fallback. Applies ONLY to entries
+    # whose workplace_type is still UNSPECIFIED after raw-token detection
+    # and trailing-slash promotion — both of those signals come from the
+    # location string itself and outrank the body-tag fallback.
+    if out and jd_full:
+        body_workplace = _detect_workplace_from_body(jd_full)
+        if body_workplace != "UNSPECIFIED":
+            promoted: list[JobLocation] = []
+            for loc in out:
+                if loc.workplace_type == "UNSPECIFIED":
+                    promoted.append(
+                        JobLocation(
+                            city=loc.city,
+                            region=loc.region,
+                            region_code=loc.region_code,
+                            country=loc.country,
+                            country_code=loc.country_code,
+                            workplace_type=body_workplace,
+                            raw=loc.raw,
+                            unresolved=loc.unresolved,
+                        )
+                    )
+                else:
+                    promoted.append(loc)
+            out = promoted
+
     return dedupe_locations(out)
