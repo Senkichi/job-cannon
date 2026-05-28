@@ -1,0 +1,62 @@
+name: Install Attestation
+description: Report a pipx install of job-cannon — successful or not. Helps close the PYPI-09 gate (see .planning/v5.0/PYPI-GATE-attestations.md).
+title: "[Attestation] <OS> install on <YYYY-MM-DD>"
+labels: ["attestation", "install-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying job-cannon. This form takes ~30 seconds. We do NOT need screenshots and please do NOT paste anything from your job results (those are personal). One-line notes are perfect.
+
+  - type: input
+    id: name
+    attributes:
+      label: Name or pseudonym
+      description: How would you like to be credited? Leave blank for anonymous.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - "Windows 11"
+        - "macOS Sonoma (14.x)"
+        - "macOS Sequoia (15.x)"
+        - "macOS 26.x"
+        - "Ubuntu 22.04 LTS"
+        - "Ubuntu 24.04 LTS"
+        - "Other Linux (please specify in notes)"
+    validations:
+      required: true
+
+  - type: input
+    id: install-date
+    attributes:
+      label: Install date (YYYY-MM-DD)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - "Completed wizard, saw scored jobs"
+        - "Completed wizard, no scored jobs yet (no inbox matches)"
+        - "Wizard failed (please describe in notes)"
+        - "pipx install failed (please describe in notes)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes or blockers (optional)
+      description: |
+        Any rough edges, errors, or suggestions. Please do NOT include
+        personal data from your job results. Tracebacks and error messages
+        are welcome.
+    validations:
+      required: false
