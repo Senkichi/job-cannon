@@ -55,6 +55,29 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # NVIDIA (id=310) — query-param search.
+    # jobs.nvidia.com/careers?query=<keyword> is the canonical results URL.
+    # Verified via Playwright recon: the input#position-query-search field
+    # submits to ?query=<term>&sort_by=relevance.
+    (
+        310,
+        "nvidia",
+        "https://www.nvidia.com/en-us/about-nvidia/careers/",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.nvidia.com/careers",
+                    "query_param": "query",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
     # Kaiser Permanente (id=567) — path-segment search.
     # kaiserpermanentejobs.org/search-jobs/<keyword> returns a job list page
     # with 15+ /job/<city>/<slug>/<id> links. Verified that direct extraction
