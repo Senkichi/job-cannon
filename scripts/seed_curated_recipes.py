@@ -103,6 +103,29 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # ByteDance (id=1519) — query-param search.
+    # joinbytedance.com/search?keyword=<term> is the canonical results URL.
+    # Verified via Playwright recon: navigating to /search loads a results
+    # page where keyword= is one of several filter query params.
+    (
+        1519,
+        "bytedance",
+        "https://joinbytedance.com/",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://joinbytedance.com/search",
+                    "query_param": "keyword",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
     # Kaiser Permanente (id=567) — path-segment search.
     # kaiserpermanentejobs.org/search-jobs/<keyword> returns a job list page
     # with 15+ /job/<city>/<slug>/<id> links. Verified that direct extraction
