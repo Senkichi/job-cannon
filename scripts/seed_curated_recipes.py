@@ -78,6 +78,31 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # Oracle (id=1447) — query-param search via Oracle Recruiting Cloud.
+    # careers.oracle.com/en/sites/jobsearch/jobs accepts ?keyword=<term>.
+    # Verified via Playwright recon: input#keyword on the jobs page submits
+    # to ?keyword=<term>&location=United+States&locationId=...&mode=location.
+    # We use the simpler ?keyword=<term> form to avoid baking in a stale
+    # locationId; Oracle's results page filters server-side from there.
+    (
+        1447,
+        "oracle",
+        "https://www.oracle.com/careers/",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://careers.oracle.com/en/sites/jobsearch/jobs",
+                    "query_param": "keyword",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
     # Kaiser Permanente (id=567) — path-segment search.
     # kaiserpermanentejobs.org/search-jobs/<keyword> returns a job list page
     # with 15+ /job/<city>/<slug>/<id> links. Verified that direct extraction
