@@ -483,6 +483,37 @@ class TestExtractJobsFromSoup:
         )
         assert len(jobs) == 1
 
+    def test_allows_search_subpath_job_detail_urls(self):
+        """FOLLOWUPS round-15 Gap #3 — ByteDance regression.
+
+        joinbytedance.com renders job tiles as `<a href="/search/<numeric-id>">`
+        anchors after Playwright JS render. The blanket `/search` nav-prefix
+        filter previously rejected every tile on the listing page, so the
+        recipe yielded 0 jobs despite landing on the correct page. The fix
+        is to let `/search/<segment>` paths through while still filtering the
+        bare `/search` form path.
+        """
+        html = """
+        <html><body>
+        <a href="https://joinbytedance.com/search/7629664336835791109">
+          <div>
+            <span>APAC Collections Analyst (Global Revenue BP and Credit Control)</span>
+          </div>
+        </a>
+        <a href="/search">Search jobs</a>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup,
+            "https://joinbytedance.com",
+            ["analyst"],
+            [],
+        )
+        assert len(jobs) == 1
+        assert "Analyst" in jobs[0]["title"]
+        assert "/search/7629664336835791109" in jobs[0]["url"]
+
 
 # ---------------------------------------------------------------------------
 # _clean_title
