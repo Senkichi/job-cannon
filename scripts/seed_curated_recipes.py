@@ -152,6 +152,111 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # American Specialty Health (id=905) — jobvite tenant + ?q=<keyword>.
+    # Phase F (FOLLOWUPS round 15 -> round 16). Jobvite's hosted career sites
+    # accept ``?q=<keyword>`` as the keyword filter on their alljobs list
+    # pages (input[name="q"] verified via Playwright recon 2026-05-28).
+    # ``jobs.jobvite.com/ashcompanies/jobs/alljobs`` returns ~15 unique
+    # /job/<id> links; ``?q=<term>`` narrows server-side.
+    (
+        905,
+        "american-specialty-health",
+        "https://jobs.jobvite.com/ashcompanies",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/ashcompanies/jobs/alljobs",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
+    # Capcom (id=672) — small jobvite tenant; tenant root is the canonical
+    # listing. ``jobs.jobvite.com/capcomusa`` shows the (typically tiny)
+    # live list of postings, and ``?q=<term>`` narrows server-side just
+    # like the other jobvite tenants. ``/jobs/alljobs`` redirects to a
+    # 301-error variant for this tenant, so we anchor at the root path.
+    (
+        672,
+        "capcom",
+        "https://jobs.jobvite.com/capcomusa",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/capcomusa",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
+    # NeoGenomics (id=2108) — jobvite tenant + viewall listing + ?q=<keyword>.
+    # ``jobs.jobvite.com/neogenomics/jobs/viewall`` returns ~76 unique
+    # /job/<id> links; recon confirmed ``?q=analyst`` narrows to 4
+    # server-rendered results, so the filter is genuinely server-side
+    # (input[name="q"] verified 2026-05-28). NeoGenomics has the largest
+    # active jobvite footprint of the Phase F set.
+    (
+        2108,
+        "neogenomics",
+        "https://jobs.jobvite.com/neogenomics",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/neogenomics/jobs/viewall",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
+    # Victaulic (id=382) — migrated off jobvite to Workday during 2025.
+    # The legacy jobvite URL on file (``jobs.jobvite.com/victaulic/jobs/alljobs``)
+    # 302s to ``careers.victaulic.com``, a marketing WordPress site whose
+    # "All Careers" / "Search for jobs" CTAs all point at
+    # ``victaulic.wd1.myworkdayjobs.com``. The canonical Workday endpoint
+    # serves ~20 tiles with ``data-automation-id="jobTitle"`` and accepts
+    # ``?q=<keyword>`` for server-side filtering (verified 2026-05-28:
+    # ``?q=engineer`` returns 20 engineer-titled tiles, all extractable).
+    # Follow-up data fix (FOLLOWUPS round 16): also flip
+    # ``ats_platform='workday'`` + ``careers_url='https://victaulic.wd1.myworkdayjobs.com/en-US/victaulic_careers'``
+    # so the native Workday scanner picks this company up and the AI-nav
+    # tier becomes the redundant fallback rather than the primary path.
+    (
+        382,
+        "victaulic",
+        "https://jobs.jobvite.com/victaulic/jobs/alljobs",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://victaulic.wd1.myworkdayjobs.com/en-US/victaulic_careers",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 

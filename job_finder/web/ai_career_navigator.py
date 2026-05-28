@@ -279,7 +279,13 @@ def _execute_step(page, step: dict) -> bool:
         if action == "goto":
             url = step.get("url", "")
             if url:
-                page.goto(url, timeout=15000, wait_until="networkidle")
+                # ``domcontentloaded`` over ``networkidle`` so analytics-heavy
+                # SPAs (jobvite's TalentNetwork iframe, embedded chat widgets,
+                # session-keepalive XHRs) don't blow the 15s deadline before
+                # the DOM is ready to extract from. The fixed 2s settle wait
+                # below covers any client-side render that would otherwise
+                # benefit from a true idle gate.
+                page.goto(url, timeout=15000, wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
             else:
                 return False
@@ -302,7 +308,9 @@ def _execute_step(page, step: dict) -> bool:
             params = dict(parse_qsl(parsed.query, keep_blank_values=True))
             params[query_param] = value
             new_url = urlunparse(parsed._replace(query=urlencode(params)))
-            page.goto(new_url, timeout=15000, wait_until="networkidle")
+            # See goto rationale above — same fix for the same SPA-polling
+            # failure mode (jobvite hosted-careers tenants in particular).
+            page.goto(new_url, timeout=15000, wait_until="domcontentloaded")
             page.wait_for_timeout(2000)
 
         elif action == "click":
