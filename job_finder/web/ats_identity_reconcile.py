@@ -274,6 +274,42 @@ def reconcile_company_ats(
             slug[:48],
         )
         return {**base_meta, "outcome": "shadow_would_promote"}
+
+    # Collision guard: refuse to promote when another company already owns
+    # this (platform, slug). The pair must be 1:1 — without this check an
+    # ATS scan picks an arbitrary winner and creates jobs under the wrong
+    # company name (e.g., a Vaia URL slug "experimentation-jobs" got
+    # promoted onto a record holding the name "Experimentation Jobs", which
+    # then mis-tagged 4 Headway Greenhouse jobs under the wrong company).
+    # The right answer is to leave the pair owned by the existing company
+    # and let downstream cleanup decide whether to merge or rename the
+    # current one. Surfacing a `slug_collision` outcome makes the conflict
+    # visible in the promote summary rather than silently corrupting data.
+    existing = conn.execute(
+        """SELECT id, name_raw
+             FROM companies
+            WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
+        (platform, slug, company_id),
+    ).fetchone()
+    if existing is not None:
+        existing_id = existing[0] if not isinstance(existing, dict) else existing["id"]
+        existing_name = existing[1] if not isinstance(existing, dict) else existing["name_raw"]
+        logger.warning(
+            "ats_identity slug_collision company_id=%d would-promote=%s/%s "
+            "but already owned by company_id=%d (%r)",
+            company_id,
+            platform,
+            slug[:48],
+            existing_id,
+            existing_name,
+        )
+        return {
+            **base_meta,
+            "outcome": "slug_collision",
+            "existing_owner_id": existing_id,
+            "existing_owner_name": existing_name,
+        }
+
     conn.execute(
         """UPDATE companies
                SET ats_platform = ?,
@@ -330,6 +366,7 @@ def promote_ats_scheduler_batch(db_path: str, config: dict) -> dict[str, int]:
         "skipped_already_hit": 0,
         "no_ats_candidates": 0,
         "abstain_conflict": 0,
+        "slug_collision": 0,
         "verify_failed": 0,
         "skipped_scan_disabled": 0,
         "skipped_company_rejected": 0,

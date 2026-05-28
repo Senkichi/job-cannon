@@ -138,3 +138,51 @@ class TestReconcileCompanyAts:
         res = reconcile_company_ats(conn, cid, reason="test", config={})
         conn.close()
         assert res["outcome"] == "skipped_already_hit"
+
+    @patch("job_finder.web.ats_identity_reconcile._verify_live")
+    def test_refuses_promotion_on_slug_collision(self, mock_verify, seeded_pending_company):
+        """A second company can't be promoted onto a slug already owned by another.
+
+        Without this guard, an aggregator name like "Experimentation Jobs"
+        could silently take over a real company's ATS slug — the ats_scan
+        would then attribute the real company's jobs to the aggregator
+        (see the 2026-05-28 Headway / Experimentation Jobs investigation).
+        """
+        from job_finder.web.ats_identity_reconcile import reconcile_company_ats
+
+        mock_verify.return_value = True
+        path, cid = seeded_pending_company
+        now = datetime.now().isoformat()
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        # Pre-existing owner of (greenhouse, acmecorp)
+        conn.execute(
+            """INSERT INTO companies
+                  (name, name_raw, ats_platform, ats_slug,
+                   ats_probe_status, scan_enabled, created_at, updated_at)
+                VALUES ('Acme Corp Inc', 'Acme Corp Inc', 'greenhouse', 'acmecorp',
+                        'hit', 1, ?, ?)""",
+            (now, now),
+        )
+        owner_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.commit()
+
+        res = reconcile_company_ats(
+            conn,
+            cid,
+            reason="test",
+            config={"ats": {"identity_reconcile": {"enabled": True, "shadow": False}}},
+        )
+
+        # Aggregator-style row refused; loser company still untouched.
+        assert res["outcome"] == "slug_collision"
+        assert res["existing_owner_id"] == owner_id
+        row = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone())
+        assert row["ats_platform"] is None
+        assert row["ats_slug"] is None
+        # The legit owner still owns the slug
+        owner_row = dict(
+            conn.execute("SELECT * FROM companies WHERE id = ?", (owner_id,)).fetchone()
+        )
+        assert owner_row["ats_slug"] == "acmecorp"
+        conn.close()
