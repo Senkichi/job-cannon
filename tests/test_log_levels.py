@@ -183,16 +183,20 @@ class TestJobsBlueprintLogLevels:
 
         source = inspect.getsource(jobs_module)
         lines = source.splitlines()
-        for i, line in enumerate(lines):
+        for line in lines:
             if "paste-jd: budget cap reached" in line.lower():
-                context = "\n".join(lines[max(0, i - 3) : i + 1])
-                assert "logger.warning" not in context, (
+                # Scope to the matched line only — the log call and message
+                # are on the same line by project convention. A wider context
+                # window was catching the neighboring `logger.warning("paste-jd:
+                # row vanished mid-request ...")` statement and asserting
+                # against a different call.
+                assert "logger.warning" not in line, (
                     f"jobs.py 'paste-jd: budget cap reached' must not use logger.warning.\n"
-                    f"Context:\n{context}"
+                    f"Line:\n{line}"
                 )
-                assert "logger.info" in context, (
+                assert "logger.info" in line, (
                     f"jobs.py 'paste-jd: budget cap reached' must use logger.info.\n"
-                    f"Context:\n{context}"
+                    f"Line:\n{line}"
                 )
 
     def test_rescore_budget_cap_logs_at_info(self, caplog):
@@ -203,16 +207,18 @@ class TestJobsBlueprintLogLevels:
 
         source = inspect.getsource(jobs_module)
         lines = source.splitlines()
-        for i, line in enumerate(lines):
+        for line in lines:
             if "rescore: budget cap reached" in line.lower():
-                context = "\n".join(lines[max(0, i - 3) : i + 1])
-                assert "logger.warning" not in context, (
+                # Scope to the matched line only — see paste-jd test above
+                # for why the wider window was wrong. Tightened symmetrically
+                # to prevent a future neighboring-warning collision here too.
+                assert "logger.warning" not in line, (
                     f"jobs.py 'rescore: budget cap reached' must not use logger.warning.\n"
-                    f"Context:\n{context}"
+                    f"Line:\n{line}"
                 )
-                assert "logger.info" in context, (
+                assert "logger.info" in line, (
                     f"jobs.py 'rescore: budget cap reached' must use logger.info.\n"
-                    f"Context:\n{context}"
+                    f"Line:\n{line}"
                 )
 
 
