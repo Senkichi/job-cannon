@@ -55,6 +55,32 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # Kaiser Permanente (id=567) — path-segment search.
+    # kaiserpermanentejobs.org/search-jobs/<keyword> returns a job list page
+    # with 15+ /job/<city>/<slug>/<id> links. Verified that direct extraction
+    # finds the links; current 0-yield against user's title profile is a
+    # title-filter intersection (Kaiser's analyst roles are "Financial",
+    # "Clinical", "FP&A", "Accounting" — none of which match the user's
+    # specific phrasings like "Senior Business Analyst" or "Lead Data
+    # Analyst"). Recipe is correct; matching ramps with future Kaiser
+    # postings of user-profile-shaped roles.
+    (
+        567,
+        "kaiser",
+        "https://www.kaiserpermanentejobs.org/",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto",
+                    "url": "https://www.kaiserpermanentejobs.org/search-jobs/{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 
