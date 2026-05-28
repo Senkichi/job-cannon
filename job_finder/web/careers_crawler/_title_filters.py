@@ -68,6 +68,23 @@ _NOSEP_TRAIL_LOC_RE = re.compile(
     re.VERBOSE,
 )
 
+# Workday-style req ID glued to the end of the title with no separator:
+# "Senior Technical Data Analyst - Operations E2E Data Intelligent Systems
+# JR2018470US, CA, Santa Clara" — title runs into "JR2018470" (req ID) then
+# straight into "US, CA, Santa Clara" (location). The req-id is the anchor:
+# 2+ ALLCAPS letters followed by digits, preceded by a lowercase letter or
+# closing paren (so we don't false-match an internal token like "E2E" which
+# is preceded by whitespace). Strips from the req-id to end-of-string,
+# absorbing any trailing location text that came glued on with it.
+#
+# The lookbehind plus `[A-Z]{2,}\d+` requirement keeps the false-positive
+# rate low: bare ALLCAPS runs (state codes) are already handled by
+# _NOSEP_TRAIL_LOC_RE, and natural title tokens like "E2E" / "AI" / "iOS"
+# either have whitespace before them or lack the digit suffix.
+#
+# See FOLLOWUPS round 15 Gap #1 (NVIDIA Workday concatenation).
+_REQID_PREFIX_RE = re.compile(r"(?<=[a-z\)])[A-Z]{2,}\d+.*$")
+
 # Leading "logo placeholder" letters: 1-2 ALLCAPS letters glued to the start
 # of the real title with no separator, where the next character starts a
 # Capital+lowercase word. Catches aggregator garbage like "CSenior Vice
@@ -186,10 +203,13 @@ def _clean_title(tag, raw_text: str) -> str:
             return _strip_leading_logo_letters(first_text)
 
     # Strategy 3: regex strip on the raw text. Order matters — strip
-    # separator-based location patterns first, then the no-separator
-    # trailing-uppercase run, then leading logo letters last.
+    # separator-based location patterns first, then the Workday-style
+    # req-id glob (which also absorbs trailing location text that came
+    # glued on with the req-id), then the no-separator trailing-
+    # uppercase run, then leading logo letters last.
     cleaned = _LOCATION_SUFFIX_RE.sub("", raw_text)
     cleaned = _strip_city_suffix_guarded(cleaned)
+    cleaned = _REQID_PREFIX_RE.sub("", cleaned)
     cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)
     cleaned = _strip_leading_logo_letters(cleaned)
     return cleaned.strip() or raw_text

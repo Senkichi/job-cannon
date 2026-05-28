@@ -425,6 +425,43 @@ class TestCleanTitle:
         # raw_text supplied so we hit the regex strategy
         assert _clean_title(tag, "Senior Engineer - San Francisco, CA") == "Senior Engineer"
 
+    def test_clean_title_strips_jr_prefixed_workday_id(self):
+        """NVIDIA-style Workday req-id (JR-prefix + digits) glued to title
+        with location suffix appended.
+
+        Captured input from FOLLOWUPS round 15 (Gap #1): NVIDIA's careers
+        page concatenates `title + reqID + location` without separators.
+        The existing `_NOSEP_TRAIL_LOC_RE` only handles trailing ALLCAPS
+        location codes — req-id digits between the title and location
+        codes prevent any of the existing patterns from matching.
+        """
+        raw = (
+            "Senior Technical Data Analyst - Operations E2E Data "
+            "Intelligent SystemsJR2018470US, CA, Santa Clara"
+        )
+        tag = self._make_tag(f'<a href="/j">{raw}</a>')
+        expected = (
+            "Senior Technical Data Analyst - Operations E2E Data "
+            "Intelligent Systems"
+        )
+        assert _clean_title(tag, raw) == expected
+
+    def test_clean_title_strips_bare_jr_prefixed_req_id(self):
+        """Same Workday pattern, but with no location codes after the
+        req-id digits — the strip should still reach the right boundary."""
+        raw = "Staff Software EngineerJR1985432"
+        tag = self._make_tag(f'<a href="/j">{raw}</a>')
+        assert _clean_title(tag, raw) == "Staff Software Engineer"
+
+    def test_clean_title_does_not_strip_inner_alphanumeric_token(self):
+        """Guard: the JR-prefix pattern must require lowercase-before
+        context. Inline tokens like 'E2E' inside a title are preceded by
+        whitespace, not lowercase, so they must not trigger a strip.
+        """
+        raw = "Operations E2E Data Lead"
+        tag = self._make_tag(f'<a href="/j">{raw}</a>')
+        assert _clean_title(tag, raw) == "Operations E2E Data Lead"
+
 
 # ---------------------------------------------------------------------------
 # _is_metadata_blob — careers_crawl title-bleed guard
