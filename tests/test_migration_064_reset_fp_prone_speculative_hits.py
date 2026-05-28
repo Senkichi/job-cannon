@@ -323,9 +323,14 @@ class TestIdempotency:
 # ---------------------------------------------------------------------------
 
 
-def test_run_migrations_brings_db_to_version_64(tmp_path):
+def test_run_migrations_brings_db_to_version_at_least_64(tmp_path):
+    """m064 ran; later migrations may have bumped the version further.
+
+    Originally asserted ``== 64`` which broke as soon as m065 shipped.
+    Pattern: assert ``>= NN`` so the invariant survives future migrations.
+    """
     db_path = str(tmp_path / "test.db")
     run_migrations(db_path)
     with sqlite3.connect(db_path) as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 64
+    assert version >= 64

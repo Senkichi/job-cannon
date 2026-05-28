@@ -99,7 +99,10 @@ def tmp_db_path():
             scoring_provider TEXT,
             expiry_status TEXT,
             eval_blocks TEXT,
-            job_archetype TEXT
+            job_archetype TEXT,
+            locations_structured TEXT,
+            workplace_type TEXT,
+            primary_country_code TEXT
         );
         CREATE TABLE runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

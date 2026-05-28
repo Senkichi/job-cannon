@@ -500,7 +500,11 @@ def _upsert_one_ats_api_job(
         )
         from job_finder.db import upsert_job
 
-        is_new = upsert_job(scan_conn, job)
+        is_new = upsert_job(
+            scan_conn,
+            job,
+            locations_structured=job_dict.get("locations_structured"),
+        )
 
         # Promote ATS description to jd_full (DQ-03)
         # Strip HTML to prevent CSS soup from inflating AI scores

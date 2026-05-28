@@ -17,6 +17,12 @@ from job_finder.web.ats_platforms_internal._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.location_canonical import (
+    JobLocation,
+    WorkplaceType,
+    dedupe_locations,
+    normalize_workplace_type,
+)
 
 
 def _fetch_postings(slug: str) -> list[dict]:
@@ -31,6 +37,76 @@ def _fetch_postings(slug: str) -> list[dict]:
         return []
     jobs = data.get("jobs", [])
     return jobs if isinstance(jobs, list) else []
+
+
+def _address_to_loc(addr: dict | None, workplace_type: WorkplaceType, fallback_raw: str) -> JobLocation | None:
+    """Map an Ashby address (``postalAddress.*`` shape) to a JobLocation.
+
+    Returns None when the address has no usable fields and the caller has
+    no fallback raw string. The caller's ``workplace_type`` is the
+    structured posting-level signal — applied uniformly to primary +
+    secondary entries per SPEC §Layer-1.
+    """
+    if not isinstance(addr, dict):
+        if fallback_raw:
+            return JobLocation.unresolved_from_raw(fallback_raw, workplace_type=workplace_type)
+        return None
+    postal = addr.get("postalAddress") if isinstance(addr.get("postalAddress"), dict) else addr
+    if not isinstance(postal, dict):
+        postal = {}
+    city = (postal.get("addressLocality") or "").strip() or None
+    region = (postal.get("addressRegion") or "").strip() or None
+    country = (postal.get("addressCountry") or "").strip() or None
+    raw = ", ".join(p for p in [postal.get("addressLocality"), postal.get("addressRegion"), postal.get("addressCountry")] if p) or fallback_raw
+    if not any((city, region, country)):
+        if not raw:
+            return None
+        return JobLocation.unresolved_from_raw(raw, workplace_type=workplace_type)
+    # Two-letter addressCountry → ISO 3166-1 alpha-2 (defensive uppercase).
+    country_code = country.upper() if (country and len(country) == 2) else None
+    return JobLocation(
+        city=city,
+        region=region,
+        region_code=None,  # Ashby does not emit ISO 3166-2; parser/backfill resolves.
+        country=country if country and len(country) != 2 else None,
+        country_code=country_code,
+        workplace_type=workplace_type,
+        raw=raw,
+        unresolved=False,
+    )
+
+
+def _to_canonical(posting: dict) -> list[JobLocation]:
+    """Layer-1 mapping for Ashby posting → list[JobLocation].
+
+    Sources: ``address.postalAddress.{addressLocality, addressRegion,
+    addressCountry}`` (primary), ``secondaryLocations[].address.postalAddress``
+    (multi-loc), ``workplaceType`` enum (PascalCase). Falls back to the flat
+    ``location`` string + ``isRemote`` bool when the structured address is
+    absent — matches existing scanner behavior so legacy postings don't
+    regress to empty.
+    """
+    wt = normalize_workplace_type(posting.get("workplaceType"))
+    if wt == "UNSPECIFIED" and posting.get("isRemote"):
+        wt = "REMOTE"
+    out: list[JobLocation] = []
+    primary = _address_to_loc(
+        posting.get("address"),
+        wt,
+        fallback_raw=(posting.get("location") or "").strip(),
+    )
+    if primary is not None:
+        out.append(primary)
+    for sec in posting.get("secondaryLocations") or []:
+        if not isinstance(sec, dict):
+            continue
+        loc = _address_to_loc(sec.get("address"), wt, fallback_raw="")
+        if loc is not None:
+            out.append(loc)
+    # Fallback path: pure-remote posting with no structured address.
+    if not out and wt == "REMOTE":
+        out.append(JobLocation.unresolved_from_raw(posting.get("location") or "Remote", workplace_type="REMOTE"))
+    return dedupe_locations(out)
 
 
 def _posting_to_job(posting: dict, _slug: str) -> dict:
@@ -57,6 +133,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "title": posting.get("title", ""),
         "company_source": "Ashby",
         "location": location,
+        "locations_structured": _to_canonical(posting),
         "description": description,
         "source_url": posting.get("jobUrl") or "",
         "salary_min": salary_min,

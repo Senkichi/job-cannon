@@ -15,6 +15,7 @@ import requests
 
 from job_finder.web.ats_platforms_internal._registry import PlatformScanner
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
+from job_finder.web.location_canonical import JobLocation
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,40 @@ def _fetch_postings(slug: str) -> list[dict]:
     return out
 
 
+def _to_canonical(posting: dict) -> list[JobLocation]:
+    """Layer-1 mapping for SmartRecruiters posting → list[JobLocation].
+
+    SmartRecruiters returns ``location.{city, region, regionCode, country,
+    countryCode, remote}``. ``remote: true`` is the workplace_type signal.
+    Single location per posting (no multi-location array on the v1 list
+    endpoint).
+    """
+    loc = posting.get("location")
+    if not isinstance(loc, dict):
+        return []
+    city = (loc.get("city") or "").strip() or None
+    region = (loc.get("region") or "").strip() or None
+    region_code = (loc.get("regionCode") or "").strip().upper() or None
+    country = (loc.get("country") or "").strip() or None
+    country_code = (loc.get("countryCode") or "").strip().upper() or None
+    workplace_type = "REMOTE" if loc.get("remote") else "UNSPECIFIED"
+    if not any((city, region, region_code, country, country_code)) and workplace_type == "UNSPECIFIED":
+        return []
+    raw = ", ".join(p for p in [loc.get("city"), loc.get("region"), loc.get("country")] if p)
+    return [
+        JobLocation(
+            city=city,
+            region=region,
+            region_code=region_code,
+            country=country,
+            country_code=country_code,
+            workplace_type=workplace_type,
+            raw=raw,
+            unresolved=False,
+        )
+    ]
+
+
 def _posting_to_job(posting: dict, slug: str) -> dict:
     from job_finder.web.ats_platforms import _fetch_smartrecruiters_description
 
@@ -98,6 +133,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "title": posting.get("name", ""),
         "company_source": "SmartRecruiters",
         "location": location,
+        "locations_structured": _to_canonical(posting),
         "description": description,
         "source_url": source_url,
         "salary_min": None,

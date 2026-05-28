@@ -17,6 +17,7 @@ import sqlite3
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.models import Job
+from job_finder.web.location_canonical import JobLocation, to_json as _locations_to_json
 
 from ._persistence import update_pipeline_status
 
@@ -75,13 +76,32 @@ def merge_description(existing: str | None, new: str | None) -> str | None:
     return f"{existing}\n\n---\n\n{new}"
 
 
-def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
+def upsert_job(
+    conn: sqlite3.Connection,
+    job: Job,
+    *,
+    locations_structured: list[JobLocation] | None = None,
+) -> bool:
     """Insert or update a job. Returns True if new, False if existing.
 
     Merges sources, locations (Remote/Hybrid first), and descriptions
     (keep longer; append divergent content with separator). Keeps first_seen
     from the original row. Initializes locations_raw as JSON array.
+
+    When ``locations_structured`` is provided, the scanner emitted Layer-1
+    canonical data — used verbatim. When ``None``, parse_locations
+    (Layer 2) derives it from ``job.location``. Both branches write the
+    three m066 columns: ``locations_structured`` (JSON list[JobLocation]),
+    ``workplace_type`` and ``primary_country_code`` (denormalized from
+    ``locations_structured[0]`` per SPEC §Schema).
     """
+    if locations_structured is None:
+        from job_finder.web.location_parser import parse_locations
+
+        locations_structured = parse_locations(job.location or None)
+    locations_json = _locations_to_json(locations_structured) if locations_structured else None
+    workplace_type_col = locations_structured[0].workplace_type if locations_structured else None
+    primary_country_code = locations_structured[0].country_code if locations_structured else None
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
         (job.dedup_key,),
@@ -149,7 +169,10 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 salary_max = COALESCE(?, salary_max),
                 description = ?,
                 locations_raw = ?,
-                location = ?{jd_full_clause}
+                location = ?,
+                locations_structured = ?,
+                workplace_type = ?,
+                primary_country_code = ?{jd_full_clause}
             WHERE dedup_key = ?""",
             (
                 json.dumps(sources),
@@ -162,6 +185,9 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 merged_description,
                 json.dumps(locs_list),
                 merged_location,
+                locations_json,
+                workplace_type_col,
+                primary_country_code,
                 *jd_full_value,
                 job.dedup_key,
             ),
@@ -209,8 +235,9 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 (dedup_key, title, company, location, sources, source_urls,
                  source_id, salary_min, salary_max, description,
                  first_seen, last_seen, score, score_breakdown, locations_raw,
-                 jd_full, scoring_provider)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 jd_full, scoring_provider,
+                 locations_structured, workplace_type, primary_country_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.dedup_key,
                 job.title,
@@ -229,6 +256,9 @@ def upsert_job(conn: sqlite3.Connection, job: Job) -> bool:
                 json.dumps(initial_locs),
                 initial_jd_full,
                 None,
+                locations_json,
+                workplace_type_col,
+                primary_country_code,
             ),
         )
         conn.commit()

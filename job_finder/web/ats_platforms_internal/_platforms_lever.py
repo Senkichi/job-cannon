@@ -8,6 +8,10 @@ from job_finder.web.ats_platforms_internal._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.location_canonical import (
+    JobLocation,
+    normalize_workplace_type,
+)
 
 
 def _fetch_postings(slug: str) -> list[dict]:
@@ -17,6 +21,39 @@ def _fetch_postings(slug: str) -> list[dict]:
         slug=slug,
     )
     return data if isinstance(data, list) else []
+
+
+def _to_canonical(posting: dict) -> list[JobLocation]:
+    """Layer-1 mapping for Lever posting → list[JobLocation].
+
+    The only structured field Lever emits is the top-level ``workplaceType``
+    enum (kebab-case: ``unspecified``/``on-site``/``remote``/``hybrid``).
+    Location strings (``categories.location`` + ``categories.allLocations[]``)
+    are freeform, so each entry is emitted as ``unresolved=True`` with the
+    trustworthy ``workplace_type`` already filled in. The m067 backfill
+    re-parses ``raw`` through Layer 2 to populate city/region/country.
+    """
+    wt = normalize_workplace_type(posting.get("workplaceType"))
+    categories = posting.get("categories") or {}
+    raw_locations: list[str] = []
+    all_locations = categories.get("allLocations")
+    if isinstance(all_locations, list):
+        raw_locations.extend(str(s).strip() for s in all_locations if isinstance(s, str) and s.strip())
+    primary = categories.get("location")
+    if isinstance(primary, str) and primary.strip() and primary.strip() not in raw_locations:
+        raw_locations.append(primary.strip())
+    if not raw_locations and wt == "REMOTE":
+        # Pure-remote posting with no location string — synthesize one entry.
+        return [JobLocation.unresolved_from_raw("Remote", workplace_type="REMOTE")]
+    # Dedup by raw string — every entry is unresolved=True so the canonical
+    # (country_code, region_code, city, workplace_type) dedup tuple is
+    # identical for every entry and would collapse "Berlin" into "Stockholm".
+    # Backfill (m067) re-keys them via Layer 2; pre-backfill, raw uniqueness
+    # is the only safe signal.
+    return [
+        JobLocation.unresolved_from_raw(raw, workplace_type=wt)
+        for raw in dict.fromkeys(raw_locations)
+    ]
 
 
 def _posting_to_job(posting: dict, slug: str) -> dict:
@@ -32,6 +69,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "title": posting.get("text", ""),
         "company_source": "Lever",
         "location": location,
+        "locations_structured": _to_canonical(posting),
         "description": posting.get("descriptionPlain") or "",
         "source_url": posting.get("hostedUrl") or "",
         "salary_min": salary_min,

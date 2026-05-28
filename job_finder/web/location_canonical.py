@@ -117,6 +117,29 @@ def dedupe_locations(locations: list[JobLocation]) -> list[JobLocation]:
     return out
 
 
+_WORKPLACE_TYPE_ALIASES: dict[str, WorkplaceType] = {
+    "ONSITE": "ONSITE",
+    "ON-SITE": "ONSITE",
+    "ON_SITE": "ONSITE",
+    "ON SITE": "ONSITE",
+    "REMOTE": "REMOTE",
+    "HYBRID": "HYBRID",
+    "UNSPECIFIED": "UNSPECIFIED",
+}
+
+
+def normalize_workplace_type(value: str | None) -> WorkplaceType:
+    """Canonicalize a vendor-emitted workplace-type string to the SPEC enum.
+
+    Handles Ashby (PascalCase), Lever (kebab-case), Rippling (unspecified
+    casing) in one helper. Unknown / empty values fall back to
+    ``"UNSPECIFIED"`` — the parser layer can still override later.
+    """
+    if not value:
+        return "UNSPECIFIED"
+    return _WORKPLACE_TYPE_ALIASES.get(str(value).strip().upper(), "UNSPECIFIED")
+
+
 def to_json(locations: list[JobLocation]) -> str:
     """Serialize a list of locations to a JSON string for ``locations_structured``.
 

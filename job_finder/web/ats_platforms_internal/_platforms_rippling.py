@@ -28,6 +28,11 @@ from job_finder.web.ats_platforms_internal._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.location_canonical import (
+    JobLocation,
+    dedupe_locations,
+    normalize_workplace_type,
+)
 
 
 def _fetch_postings(slug: str) -> list[dict]:
@@ -57,6 +62,53 @@ def _fetch_postings(slug: str) -> list[dict]:
         if page > 20:
             break
     return items
+
+
+def _to_canonical(item: dict) -> list[JobLocation]:
+    """Layer-1 mapping for Rippling item → list[JobLocation].
+
+    Rippling emits ``locations[].{name, city, state, country, workplaceType}``
+    — workplace_type is per-location, not posting-level. ``stateCode`` /
+    ``countryCode`` may be present; fall back to extracting from full names
+    only when the 2-letter shape is obvious (defensive ISO-alpha-2 heuristic).
+    """
+    locs = item.get("locations")
+    if not isinstance(locs, list):
+        return []
+    out: list[JobLocation] = []
+    for loc in locs:
+        if not isinstance(loc, dict):
+            continue
+        wt = normalize_workplace_type(loc.get("workplaceType"))
+        city = (loc.get("city") or "").strip() or None
+        state = (loc.get("state") or "").strip() or None
+        state_code_raw = (loc.get("stateCode") or "").strip().upper()
+        state_code = state_code_raw or (state.upper() if state and len(state) == 2 else None)
+        country = (loc.get("country") or "").strip() or None
+        country_code_raw = (loc.get("countryCode") or "").strip().upper()
+        country_code = country_code_raw or (country.upper() if country and len(country) == 2 else None)
+        # Don't double-store: if state/country was actually a 2-letter code,
+        # leave the long name None.
+        region = state if state and len(state) != 2 else None
+        country_name = country if country and len(country) != 2 else None
+        raw = (loc.get("name") or "").strip() or ", ".join(p for p in [city, state, country] if p)
+        if not any((city, region, state_code, country_name, country_code)) and wt == "UNSPECIFIED":
+            if raw:
+                out.append(JobLocation.unresolved_from_raw(raw, workplace_type="UNSPECIFIED"))
+            continue
+        out.append(
+            JobLocation(
+                city=city,
+                region=region,
+                region_code=state_code,
+                country=country_name,
+                country_code=country_code,
+                workplace_type=wt,
+                raw=raw,
+                unresolved=False,
+            )
+        )
+    return dedupe_locations(out)
 
 
 def _location_string(item: dict) -> str:
@@ -93,6 +145,7 @@ def _posting_to_job(item: dict, slug: str) -> dict:
         "title": item.get("name") or "",
         "company_source": "Rippling",
         "location": _location_string(item),
+        "locations_structured": _to_canonical(item),
         "description": "",  # list endpoint omits description; enrichment fills jd_full
         "source_url": source_url,
         "salary_min": None,
