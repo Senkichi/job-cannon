@@ -1,0 +1,133 @@
+# .github/workflows/install-validate.yml
+#
+# Standalone cross-OS pipx-install smoke. Manually triggered (workflow_dispatch)
+# to validate that `pipx install <wheel>` succeeds on Ubuntu / macOS / Windows
+# against the current source tree, before cutting a release tag.
+#
+# Phase 45-03 (PYPI-04 / PYPI-05 / PYPI-06):
+#   - Builds the wheel once on Ubuntu (`build` job, uploads `dist` artifact)
+#   - Downloads the same artifact on three OS runners and runs a pipx-install
+#     smoke (`--help` + `import job_finder`) — D-10: same artifact through
+#     every smoke runner; broken wheel never lands undetected
+#   - Additionally runs `[local-ai]` smoke on windows-latest only (D-07 /
+#     CONTEXT line 44: skip mac+linux to avoid slow source-build of
+#     llama-cpp-python on runners without pre-built wheels)
+#
+# This workflow does NOT publish anything. It is intentionally separate from
+# publish.yml / publish-testpypi.yml so packaging regressions can be caught
+# without a tag-triggered run. Cross-OS smoke gating of the actual publish
+# is enforced inside publish.yml / publish-testpypi.yml via `needs:` on the
+# same matrix jobs (see those workflows).
+
+name: Install Validate (cross-OS pipx smoke)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Build sdist + wheel (single producer) ────────────────────
+  build:
+    name: Build (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Validate metadata + long-description rendering
+        run: uvx twine check --strict dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ── Smoke (cross-platform pipx install) ──────────────────────
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    needs: [build]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # PowerShell does NOT glob-expand args to external commands [VERIFIED:
+      # PowerShell#3931]. Resolve the wheel path via Python — works identically
+      # on all three runners (D-10 / RESEARCH Pattern 3).
+      - name: Resolve wheel path
+        shell: bash
+        run: |
+          WHEEL=$(python -c "import glob,sys; m=glob.glob('dist/job_cannon-*.whl'); print(m[0]) if m else sys.exit('no wheel matched dist/job_cannon-*.whl')")
+          echo "WHEEL=$WHEEL" >> $GITHUB_ENV
+
+      - name: Install pipx
+        shell: bash
+        run: python -m pip install --user pipx
+
+      - name: pipx install base
+        shell: bash
+        run: pipx install "$WHEEL"
+
+      - name: Verify console script
+        shell: bash
+        run: job-cannon --help
+
+      - name: Verify package import
+        shell: bash
+        run: python -c "import job_finder"
+
+  # ── Smoke [local-ai] on Windows only (D-07; re-uses Phase 39 SC4) ──
+  smoke-local-ai-windows:
+    name: Smoke [local-ai] (windows-latest)
+    needs: [build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Resolve wheel path
+        shell: bash
+        run: |
+          WHEEL=$(python -c "import glob,sys; m=glob.glob('dist/job_cannon-*.whl'); print(m[0]) if m else sys.exit('no wheel matched dist/job_cannon-*.whl')")
+          echo "WHEEL=$WHEEL" >> $GITHUB_ENV
+
+      - name: Install pipx
+        shell: bash
+        run: python -m pip install --user pipx
+
+      - name: pipx install [local-ai]
+        shell: bash
+        run: pipx install "${WHEEL}[local-ai]"
+
+      - name: Verify console script
+        shell: bash
+        run: job-cannon --help
+
+      - name: Verify llama_cpp importable
+        shell: bash
+        run: python -c "import llama_cpp; print(llama_cpp.__version__)"
