@@ -75,7 +75,11 @@ logger = logging.getLogger("probe_ai_nav")
 # recipe too long, recipe produced 0 jobs, etc.) — they are at DEBUG.
 logging.getLogger("job_finder.web.ai_career_navigator").setLevel(logging.DEBUG)
 
-# 9 targets (Citi dropped — already works via playwright)
+# 9 baseline targets (Citi dropped — already works via playwright) plus
+# the Phase F jobvite tenants seeded by scripts/seed_curated_recipes.py
+# (American Specialty Health, Capcom, NeoGenomics, Victaulic — The
+# Institutes intentionally omitted; its jobvite slug 302s to
+# ``?invalid=1`` and needs a separate data fix).
 TARGETS = [
     (109, "Genentech", "https://careers.gene.com/us/en"),
     (134, "Apple", "https://www.apple.com/careers/us/"),
@@ -86,6 +90,10 @@ TARGETS = [
     (567, "Kaiser Permanente", "https://www.kaiserpermanentejobs.org/"),
     (1447, "Oracle", "https://www.oracle.com/careers/"),
     (1519, "ByteDance", "https://joinbytedance.com/"),
+    (905, "American Specialty Health", "https://jobs.jobvite.com/ashcompanies"),
+    (672, "Capcom", "https://jobs.jobvite.com/capcomusa"),
+    (2108, "NeoGenomics", "https://jobs.jobvite.com/neogenomics"),
+    (382, "Victaulic", "https://jobs.jobvite.com/victaulic/jobs/alljobs"),
 ]
 
 # Optional restriction via env var: PROBE_ONLY="genentech,apple"
