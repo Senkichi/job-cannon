@@ -152,6 +152,31 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # American Specialty Health (id=905) — jobvite tenant + ?q=<keyword>.
+    # Phase F (FOLLOWUPS round 15 -> round 16). Jobvite's hosted career sites
+    # accept ``?q=<keyword>`` as the keyword filter on their alljobs list
+    # pages (input[name="q"] verified via Playwright recon 2026-05-28).
+    # ``jobs.jobvite.com/ashcompanies/jobs/alljobs`` returns ~15 unique
+    # /job/<id> links; ``?q=<term>`` narrows server-side.
+    (
+        905,
+        "american-specialty-health",
+        "https://jobs.jobvite.com/ashcompanies",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/ashcompanies/jobs/alljobs",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 
