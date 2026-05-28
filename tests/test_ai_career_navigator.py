@@ -180,6 +180,74 @@ class TestExecuteStep:
         result = _execute_step(page, {"action": "click", "role": "button", "name": "X"})
         assert result is False
 
+    def test_goto_with_query_builds_url(self):
+        page = MagicMock()
+        result = _execute_step(
+            page,
+            {
+                "action": "goto_with_query",
+                "url": "https://jobs.example.com/search",
+                "query_param": "q",
+                "value": "analyst",
+            },
+        )
+        assert result is True
+        page.goto.assert_called_once()
+        called_url = page.goto.call_args[0][0]
+        assert called_url == "https://jobs.example.com/search?q=analyst"
+
+    def test_goto_with_query_preserves_existing_query(self):
+        page = MagicMock()
+        result = _execute_step(
+            page,
+            {
+                "action": "goto_with_query",
+                "url": "https://example.com/jobs?location=us&sort=date",
+                "query_param": "keyword",
+                "value": "engineer",
+            },
+        )
+        assert result is True
+        called_url = page.goto.call_args[0][0]
+        # All three params present; the new one is merged in
+        assert "location=us" in called_url
+        assert "sort=date" in called_url
+        assert "keyword=engineer" in called_url
+
+    def test_goto_with_query_overwrites_same_named_param(self):
+        page = MagicMock()
+        result = _execute_step(
+            page,
+            {
+                "action": "goto_with_query",
+                "url": "https://example.com/search?q=old",
+                "query_param": "q",
+                "value": "new",
+            },
+        )
+        assert result is True
+        called_url = page.goto.call_args[0][0]
+        assert called_url == "https://example.com/search?q=new"
+        assert "q=old" not in called_url
+
+    def test_goto_with_query_missing_url_returns_false(self):
+        page = MagicMock()
+        result = _execute_step(
+            page,
+            {"action": "goto_with_query", "query_param": "q", "value": "x"},
+        )
+        assert result is False
+        page.goto.assert_not_called()
+
+    def test_goto_with_query_missing_query_param_returns_false(self):
+        page = MagicMock()
+        result = _execute_step(
+            page,
+            {"action": "goto_with_query", "url": "https://example.com", "value": "x"},
+        )
+        assert result is False
+        page.goto.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Tests: replay_navigation_recipe
@@ -244,6 +312,40 @@ class TestReplayNavigationRecipe:
         filled_value = fill_calls[0][0][0]
         # _derive_search_term(["machine learning"]) -> "machine" (single core word)
         assert filled_value == "machine"
+
+    def test_replay_substitutes_keyword_in_goto_with_query(self):
+        page = MagicMock()
+        page.url = "https://example.com/jobs/search"
+        page.content.return_value = "<html><body></body></html>"
+        recipe = {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://example.com/jobs/search",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        }
+
+        replay_navigation_recipe(
+            page,
+            recipe,
+            target_titles=["data analyst"],
+            exclusions=[],
+        )
+
+        # _derive_search_term(["data analyst"]) -> "data" or "analyst" (most common, tied here -> "data" by first-seen)
+        # Either is acceptable; the assertion is that the placeholder was substituted.
+        page.goto.assert_called_once()
+        called_url = page.goto.call_args[0][0]
+        assert "{keyword}" not in called_url
+        assert "q=" in called_url
+        # Value should be the broad term, not the full multi-word title
+        assert "data%20analyst" not in called_url and "data+analyst" not in called_url
 
     def test_replay_empty_steps_just_extracts(self):
         recipe = {

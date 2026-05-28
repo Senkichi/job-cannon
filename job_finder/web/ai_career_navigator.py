@@ -215,6 +215,27 @@ def _execute_step(page, step: dict) -> bool:
             else:
                 return False
 
+        elif action == "goto_with_query":
+            # URL-param search: navigate to a base URL with a query-string
+            # parameter set to the search keyword. Used when a careers site
+            # exposes its search via URL (e.g. /search?q=analyst) rather
+            # than a form input. The {keyword} placeholder in `value` is
+            # substituted upstream in replay/discovery — by the time we
+            # see it here, it's already a literal search term.
+            url = step.get("url", "")
+            query_param = step.get("query_param", "")
+            value = step.get("value", "")
+            if not (url and query_param):
+                return False
+            from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+            parsed = urlparse(url)
+            params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            params[query_param] = value
+            new_url = urlunparse(parsed._replace(query=urlencode(params)))
+            page.goto(new_url, timeout=15000, wait_until="networkidle")
+            page.wait_for_timeout(2000)
+
         elif action == "click":
             role = step.get("role", "button")
             name = step.get("name", "")
@@ -290,6 +311,11 @@ The recipe is a JSON object with:
 
 Action types:
 - {"action": "goto", "url": "<full URL>"} — navigate to a different page (e.g. the "Job Search" link)
+- {"action": "goto_with_query", "url": "<base URL>", "query_param": "<param name>", "value": "{keyword}"}
+  Navigate to a URL with a search query string appended. Use when the site exposes job search via URL params (e.g. /search?q=analyst, /jobs?keyword=analyst).
+  Examples:
+    {"action": "goto_with_query", "url": "https://jobs.example.com/search", "query_param": "q", "value": "{keyword}"}
+    {"action": "goto_with_query", "url": "https://example.com/careers/search-jobs", "query_param": "search", "value": "{keyword}"}
 - {"action": "type", "role": "textbox", "name": "<accessible name>", "value": "{keyword}"}
   The {keyword} placeholder will be replaced with actual search terms at runtime.
 - {"action": "click", "role": "<role>", "name": "<accessible name>"}
@@ -303,6 +329,7 @@ Rules:
 - Use EXACT role and name values from the accessibility snapshot
 - Keep recipes short (1-6 steps)
 - IMPORTANT: Many career pages are LANDING pages, not job search pages. Look for a "Job Search", "View Jobs", "Open Positions", "Search Jobs", or similar link. If you find one, use a "goto" step to navigate there first, then search/extract on that page.
+- PREFER goto_with_query when a search-by-URL pattern is obvious (e.g. the landing page has a "Search jobs" link/button that points to a /search or /jobs endpoint). URL-param search is more reliable than form-filling because no accessible-name guessing is needed. Common query param names: q, keyword, keywords, search, query, search_keywords.
 - If the page already shows individual job listings, return empty steps
 - If you cannot determine how to navigate to job listings, return null"""
 
@@ -386,6 +413,7 @@ def discover_navigation_recipe(
                                 "value": {"type": "string"},
                                 "key": {"type": "string"},
                                 "seconds": {"type": "number"},
+                                "query_param": {"type": "string"},
                             },
                             "required": ["action"],
                         },
