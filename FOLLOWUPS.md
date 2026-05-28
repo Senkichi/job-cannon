@@ -1,350 +1,359 @@
-# FOLLOWUPS — 2026-05-27 round 13 (cleanup bundle: #12 corrected and landed; #11 + #4 re-framed)
+# FOLLOWUPS — 2026-05-28 round 14 (AI-nav recipe work: empirical probe + one real fix; 5 distinct failure modes documented)
 
 ## Project goal (briefly restated)
 
 Job Cannon is a single-user, local-only Flask command center for job
-search. Round 12 closed the location-parsing SPEC end-to-end (Q3 +
-Q1 + Commit D + Commit E / m067 backfill, 11,908/12,383 historic
-rows backfilled). Round 13 (this session) picked up the smallest
-remaining item in the round-12 cleanup bundle — **#12, the paste-jd
-budget-cap log-level test** — but on verification found the
-handoff's diagnosis wrong, fixed the actual bug (a too-wide
-context window in the test, not a stray `logger.warning` in
-source), and re-framed the other two cleanup items (#11, #4) which
-turned out not to be actionable in the form round 12 proposed.
+search. Round 14 picked up the round-13 next-session contract —
+"AI-nav recipes for the 10 in-house custom ATS companies" — but on
+verification reframed the work substantially:
+
+- The 10-target list **shrinks to 9** (Citi already produces 41
+  `careers_crawl`-sourced jobs via the playwright tier — confirmed by
+  direct query on `jobs WHERE sources LIKE '%careers_crawl%'`. Drop it).
+- "Writing recipes" isn't the work shape. The system **auto-discovers**
+  recipes via the quick-tier model (Ollama qwen2.5:14b by default) when
+  AI-nav is invoked. The real questions are: (a) is AI-nav being invoked
+  at all for these companies, and (b) when it is, why doesn't discovery
+  yield a usable recipe?
+- An empirical probe answered (b): **0 of 9 targets produce a usable
+  recipe today**. The 5 distinct failure modes the probe surfaced are
+  documented below.
 
 ## What this session shipped
 
-One commit:
+Two commits, pushed to `origin/main`:
 
-- **`a9f80dd`** — `fix(tests): tighten log-level context window for paste-jd / rescore tests`
+- **`9c41d3c`** — `test: scripts/probe_ai_nav.py — AI-nav recipe
+  discovery probe for 9 custom-ATS targets`. New standalone Playwright
+  probe (no Flask, no DB writes). Per target reports: page reachable?
+  accessibility-snapshot length + preview? raw Ollama recipe output?
+  validation extraction count? Monkey-patches `_take_snapshot` and
+  `call_model` to capture diagnostic state.
 
-### What round 12's handoff got wrong, and what was actually true
+- **`7e783c6`** — `fix(ai-nav): align discovery validation keyword
+  with replay's _derive_search_term`. One-line fix in
+  `ai_career_navigator.py:484` — discovery's validation block was
+  filling `{keyword}` placeholders with `target_titles[0]` (the user's
+  most specific title like "Lead Product Analyst") while the replay
+  path used the broad `_derive_search_term(target_titles)` ("analyst").
+  Same recipe, two keyword strategies, opposite outcomes. Tests:
+  22/22 in `test_ai_career_navigator.py` pass; 73/73 in the broader
+  ai_career_navigator + careers_crawler suites pass.
 
-Round 12 carried this prescription for cleanup-bundle item #12:
+## What the round-13 handoff got wrong, and what was actually true
 
-> Find the offending `logger.warning("paste-jd: budget cap reached ...")`
-> in `blueprints/jobs.py`, change to `logger.info`. Un-deselect the test.
+Round 13 carried this prescription for the next session:
+
+> Primary focus: AI-nav recipes for in-house custom ATS — Apple,
+> Tesla, Oracle Recruiting Cloud, AMD, NVIDIA, ByteDance, Deloitte,
+> Genentech, Citi, Kaiser Permanente — all of which run custom
+> (non-standard-ATS) careers sites and currently fall through the
+> static/playwright tiers to the AI-navigator tier without a working
+> recipe.
 
 Reality at session start:
 
-- `blueprints/jobs.py:708` already read
-  `logger.info("paste-jd: budget cap reached, scoring skipped for %s", dedup_key)`.
-  Some prior session had already flipped the call; the handoff was stale.
-- The test wasn't deselected — it just failed when run.
-- The failure mode was `assert "logger.warning" not in context` where
-  `context = "\n".join(lines[max(0, i - 3) : i + 1])`. The 4-line
-  context window scooped up a *neighboring* statement at line 705 —
-  `logger.warning("paste-jd: row vanished mid-request for %s", dedup_key)`
-  — which is a different call entirely.
-- Sibling test `test_rescore_budget_cap_logs_at_info` passed only because
-  nothing within its window happened to be `logger.warning`. Same vulnerability,
-  no collision today.
+- **10 → 9 targets.** Citi already produces 41 `careers_crawl`-sourced
+  jobs via the playwright tier (jobs.citi.com is well-structured for
+  the playwright extractor). It does NOT need AI-nav. Verified via
+  `SELECT COUNT(*) FROM jobs WHERE company_id = 1890 AND sources LIKE '%careers_crawl%'`.
+- **9/10 other targets have ZERO careers_crawl-sourced jobs.** Their
+  `jobs_found_total` values on the companies table (Apple 93, Tesla 22,
+  Deloitte 84, Genentech 35, Kaiser 27, NVIDIA 29, Oracle 8, AMD 4,
+  ByteDance 1) are **misleading** — that column is set in
+  `_persistence.py:74-76` as
+  `jobs_found_total = (SELECT COUNT(*) FROM jobs WHERE company_id = ?)`,
+  i.e. total jobs across all sources, NOT jobs produced by careers_crawl.
+  The DB-visible jobs for those 9 all came from Glassdoor / DataForSEO /
+  LinkedIn / SerpAPI / Adzuna / portal_adzuna — not the careers crawler.
+- **"They fall through tiers 1-3 to the AI-navigator tier" is
+  unverifiable from the DB.** The orchestrator
+  (`careers_crawler/__init__.py:498-513`) gates AI-nav with
+  `if not jobs and ai_nav_enabled`. The `careers_crawl_tier` column
+  defaults to `"static"` at line 379 and is only overwritten when a
+  tier returns jobs — meaning `tier="static"` could mean (a) static
+  succeeded, (b) all tiers failed including AI-nav, or (c) AI-nav
+  never ran because an earlier tier returned non-empty.
 
-### The actual fix
+## The empirical probe and what it found
 
-`tests/test_log_levels.py` — both `test_paste_jd_budget_cap_logs_at_info`
-and `test_rescore_budget_cap_logs_at_info` rewritten:
+`scripts/probe_ai_nav.py` runs `discover_navigation_recipe()` against
+each target in isolation. Initial run (pre-fix): 0/9 produce a usable
+recipe. Post-fix run: same 0/9 outcome — the bug fix is real but
+addresses an orthogonal failure mode to what's blocking these 9.
 
-- `for i, line in enumerate(lines)` → `for line in lines`
-- `context = "\n".join(lines[max(0, i - 3) : i + 1])` removed
-- Assertions now scope to `line` only (single-line check)
-- Both assertions kept: `logger.warning not in line` + `logger.info in line`
-  — the latter is the loud-failure guard if a future refactor splits
-  the call across multiple lines
-- Block comments document the why (neighboring-warning collision) so
-  the next session doesn't widen the window again
+**5 distinct failure modes** observed across the 9 targets:
 
-Result: 10/10 tests pass in `tests/test_log_levels.py`. Other 3 tests
-in the file using the same wider-window pattern (`zero_job_email`,
-`promoted_to_unreachable`, `blocked_wipe`) were **left alone**. Their
-neighbors are clean today; touching them would be scope creep. If
-they ever collide with a refactor, apply the same line-scoped pattern.
+| Failure mode | Targets | Diagnostic signal |
+|---|---|---|
+| Bot detection | Tesla | snapshot_len=202; content = "Access Denied / Reference #18.194e4317...". Akamai Edge blocks Playwright. |
+| SPA didn't render in pre-discovery 2.5s wait | AMD | snapshot too short (< 50 chars), `discover_navigation_recipe` returns None before reaching Ollama. |
+| Ollama hallucinates form selectors | Genentech, Oracle (when emitting keyword steps) | Recipe has e.g. `{"action":"type","role":"textbox","name":"Search Jobs"}` but no such accessible name exists on the destination page; `Locator.fill: Timeout 5000ms`. |
+| goto-only recipes whose destination needs a search keyword | Apple → /search, ByteDance → /search, Kaiser → /clinical-careers, plausibly NVIDIA, Deloitte | Recipe is `[{"action":"goto","url":"..."}]` with no keyword step. Validation extraction returns 0 because the destination page lists jobs but none match `target_titles` exactly. |
+| Validation timeout on `networkidle` | Oracle | `Page.goto: Timeout 15000ms exceeded` on the recipe's first goto. Oracle Recruiting Cloud is heavy. |
+
+Notes:
+
+- Ollama IS producing plausible recipes — they're just wrong in
+  specific ways. The qwen2.5:14b output is not the bottleneck; the
+  bottleneck is the recipe vocabulary, the validation harness, and
+  per-site quirks.
+- The validation-keyword bug fix (`7e783c6`) doesn't change yield for
+  any of the 9 — none of them had a recipe whose `{keyword}` step
+  successfully executed under the old code path. The fix matters for
+  *future* companies whose recipe has a working type step.
 
 ## How to verify (this session's work)
 
 ```powershell
-# 10/10 pass:
-.venv/Scripts/python.exe -m pytest tests/test_log_levels.py -v
-# Expected: 10 passed in <1s
+# 22/22 ai_career_navigator + 73/73 broader careers crawler tests pass:
+.venv/Scripts/python.exe -m pytest tests/test_ai_career_navigator.py tests/test_careers_crawler.py
+# Expected: 73 passed
 
-# Confirm the call is still logger.info at the right line:
+# Confirm the fix is at the right line:
 .venv/Scripts/python.exe -c "
 import inspect
-from job_finder.web.blueprints import jobs
-src = inspect.getsource(jobs)
-print([l for l in src.splitlines() if 'paste-jd: budget cap reached' in l])
+from job_finder.web import ai_career_navigator
+src = inspect.getsource(ai_career_navigator.discover_navigation_recipe)
+print([l for l in src.splitlines() if '_derive_search_term' in l])
 "
-# Expected: ['            logger.info(\"paste-jd: budget cap reached, scoring skipped for %s\", dedup_key)']
+# Expected: at least one line containing 'kw = _derive_search_term(target_titles)'
 
-# Sanity-check live DB state hasn't drifted (still post-m067):
-.venv/Scripts/python.exe -c "
-import sqlite3
-c = sqlite3.connect('jobs.db', timeout=5)
-print('user_version:', c.execute('PRAGMA user_version').fetchone()[0])
-print('backfilled:', c.execute('SELECT COUNT(*) FROM jobs WHERE locations_structured IS NOT NULL').fetchone()[0])
-print('total:', c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0])
-"
-# Expected: user_version=67, 11908/12383
+# Re-run the probe (slow — ~3-5 min, requires Ollama up):
+.venv/Scripts/python.exe scripts/probe_ai_nav.py
+# Expected: 0/9 succeed; summary table prints raw model outputs
+
+# Only one target at a time:
+$env:PROBE_ONLY="genentech"; .venv/Scripts/python.exe scripts/probe_ai_nav.py
 ```
 
-## What I tried / considered but didn't do
+## What I tried but didn't ship
 
-- **Apply the same line-scoping fix to the other three context-window
-  tests in `test_log_levels.py`** (`test_zero_job_email_routed_to_activity_feed_logs_at_debug`,
-  `test_promoted_to_unreachable_logs_at_info`, `test_blocked_wipe_logs_at_debug`).
-  Considered; rejected as out of scope. None of them are failing today,
-  and the round-12 handoff cleanup bundle was explicitly about #12 only.
-  Pattern is now documented in the in-test comments — next session can
-  bulk-apply if a regression surfaces.
+- **Hand-curating recipes for any of the 9.** Considered after the
+  probe revealed 0/9, but stopped to surface findings to the user
+  before committing to a path that goes against the "discover once,
+  replay forever" architecture. The user picked the validation-keyword
+  fix first; hand-curation remains an option for next session.
 
-- **Item #11 (Pyright unused-args cleanup)**. The handoff said this was
-  a mechanical sweep of `path` / `tmp_db_path` / `_ctx` / `mock_score`
-  / `_i` to `_path` etc. across `tests/test_migration.py`,
-  `tests/test_careers_crawler.py`, `tests/test_ats_scanner.py`,
-  `tests/test_scheduler.py`. **The project's `[tool.pyright]` config in
-  `pyproject.toml:269-270` excludes `**/tests`** — so `pyright` (CLI,
-  with project config) reports 0 errors / 0 warnings on those files.
-  `mypy` likewise reports clean.
-  - I observed the diagnostics actually come from the IDE pyright LSP
-    (Cursor/VS Code language server), which appears to scan tests
-    despite the exclude — likely because the LSP opens files individually
-    rather than walking config-controlled roots. Visible during my
-    edits as `<new-diagnostics>` warnings.
-  - **Either** the IDE LSP config needs to honor the exclude, **or**
-    test parameters need leading-underscore renames if the project
-    wants the IDE clean. Both are reasonable; neither was decidable
-    without confirming user intent.
-  - **Re-classified #11 from "carry forward" to "open / advisory"** —
-    see below.
+- **Boot Flask and POST `/admin/jobs/careers_crawl/run-now`.** Flask
+  was off; the batch endpoint iterates **all** 684 static-tier
+  companies, not just the 9 targets. Too noisy for empirical probing.
+  Standalone probe was the cleaner instrument.
 
-- **Item #4 (Workable widget endpoint switch)**. Handoff trigger
-  condition was "if all 4 careers_url-tagged Workable companies return
-  0 jobs, switch endpoint to `apply.workable.com/api/v3/...`". Live
-  DB shows `jobs_found_total` for the 4 (lifemd / the qode / bettersleep
-  / lawnstarter) is **1 / 1 / 1 / 3** — not the zero pattern. So either
-  (a) the trigger condition isn't met, or (b) those counts are from old
-  scans and a fresh scan would show different. Resolution needs Flask
-  running and a manual `POST /admin/jobs/companies_scan/run-now`
-  targeting those four — which Flask was off for at session start, same
-  as round 12. Carried forward unchanged.
+- **Extend the recipe schema for URL-param search patterns.** This is
+  the highest-leverage next step (would help Apple, Oracle, ByteDance,
+  Kaiser, NVIDIA, Deloitte — possibly 6 of the 9), but it's a
+  prompt + schema change, not a one-liner. Out of scope for this
+  session after the validation-keyword fix took priority.
 
-- **Run the full pytest suite.** Ran `tests/test_log_levels.py` only
-  (10/10 pass). Diff is purely in a single test file; risk of breaking
-  unrelated code is essentially zero. Skipped the ~12.5-min full run.
+- **Run the full pytest suite (~12 min).** Ran focused subset of 73
+  tests touching the fix. Risk of cross-cutting regression is low for
+  a one-line keyword-resolution change.
 
-- **Browser-verify Commit D from round 12** (the new Country/Workplace
-  dropdowns + pill renderer). Same Flask-was-off constraint as round
-  12 — carried unchanged. Smoke tests cover the routes; visual rendering
-  is the gap.
+- **Address pre-flight item #1 from round 13 (pyright Path A vs B)**
+  and #2 (Commit D browser smoke + Workable scan). Neither is on the
+  critical path for AI-nav recipe work. Carried forward.
 
 ## What's deferred / remaining
 
 ### CARRY FORWARD (priority order)
 
-1. **Manual browser smoke for Commit D from round 12** when Flask next
-   boots (unchanged from round 12). Quick checklist:
-   - Visit `/jobs`; Country dropdown shows US / IN / GB / CA / ... and
-     Workplace shows REMOTE / HYBRID / ONSITE / UNSPECIFIED.
-   - Filter by country=US → result count narrows to US rows.
-   - Filter by workplace_type=REMOTE → ~1,375 rows visible.
-   - Expand any job → pill row in detail shows "City, Region · CC · WT".
-   - HTMX swap on filter change preserves dropdown state.
-   - Pre-existing `_row.html` location column still readable
-     (canonical or fallback to raw).
+1. **AI-nav recipe work: continue from probe findings.** Pick ONE of
+   the four meaningful directions below, NOT all four. Sequence
+   matters — easier wins first:
 
-2. **#4 Workable widget endpoint verification (re-scoped):**
-   The handoff's "if all return 0 jobs" trigger can't be tested from
-   stale DB counts (1/1/1/3 currently). Steps when Flask is up:
-   - `POST /admin/jobs/companies_scan/run-now` (or just wait for the
-     next scheduled scan).
-   - Re-query `companies.jobs_found_total` for the 4 Workable-tagged
-     rows after the scan: id 71, 951, 1027, 1036.
-   - If all 4 still return 0 (or fewer than 1 for any that had 1 before),
-     switch endpoint in `_platforms_workable.py` to
-     `apply.workable.com/api/v3/...`.
-   - If the counts stay positive (any of them), leave the platform code
-     alone and de-prioritize.
+   - **1a. Extend recipe vocabulary to include URL-param search**
+     (~6 of 9 targets benefit: Apple, Oracle, ByteDance, Kaiser,
+     NVIDIA, Deloitte). New step type
+     `{"action":"goto_with_query","url":"...","query_param":"search","value":"{keyword}"}`
+     or simpler: extend `goto` to accept `{"url":"...","query":{"search":"{keyword}"}}`.
+     Then amend `_DISCOVERY_SYSTEM` prompt to suggest URL-param
+     patterns when a search box is detected. Highest leverage. ~1 day.
+   - **1b. Longer SPA pre-discovery wait + retry on snapshot < 50**
+     (AMD). Change the `wait_until="domcontentloaded"` + 2s wait to a
+     loop that polls accessibility-tree size for up to 8s. ~2 hours.
+   - **1c. Hand-curate recipes for the 3-5 cleanest targets**
+     (Genentech, Apple, Oracle, NVIDIA, Deloitte — drop Tesla
+     (bot-blocked) and AMD (SPA issue separate). Manually inject
+     `careers_nav_recipe` JSON into the DB, force
+     `careers_crawl_tier = 'ai_replay'` so the `_try_cached_tier`
+     shortcut runs the recipe first. Per-target time: 15-30 min.
+     Bypasses auto-discovery for known-hard cases.
+   - **1d. Bot-detection workaround for Tesla.** Investigate
+     `playwright-stealth` or similar. May not be worth the effort
+     for one company. **Deprioritize.**
 
-3. **Phase F Jobvite per-tenant fix (Item #10 from round 11 / #3 from
-   round 12):** add per-tenant `careers_nav_recipe` overrides or a
-   dedicated jv-job-list scraper for the 5 unhandled jobvite tenants:
-   american-specialty-health, capcom, neogenomics, the-institutes,
-   victaulic. Tier-4 escalation. Likely the biggest single commit; start
-   with capcom and neogenomics (active listings on public sites).
-   Verify with `POST /admin/jobs/careers_crawl/run-now` after each
-   per-tenant change.
+   Recommended sequence: **1a then 1c**. 1b is cheap but only helps
+   AMD. 1d is heavy and only helps Tesla.
 
-### Audit-track follow-ups (carried unchanged from rounds 7-12)
+2. **Pre-flight from round 13 still outstanding:**
+   - **Pyright Path A vs B decision** (advisory item). One line either
+     way. See "Quirks the next session should know" below.
+   - **Manual browser smoke for Commit D from round 12** (Country
+     dropdown / Workplace dropdown / pill renderer in /jobs). Quick
+     visual check, requires Flask up.
+   - **Workable widget endpoint verification** (round-12 item #4).
+     Trigger via `POST /admin/jobs/companies_scan/run-now`, then
+     re-query `jobs_found_total` for ids 71, 951, 1027, 1036. If all
+     return 0 after a fresh scan, switch endpoint in
+     `_platforms_workable.py` to `apply.workable.com/api/v3/...`.
 
-4. **AI-nav recipes for in-house custom ATS** (Apple, Tesla, Oracle
-   Recruiting Cloud, AMD, NVIDIA, ByteDance, Deloitte, Genentech,
-   Citi, Kaiser Permanente). Tier-4 crawler. **Scheduled as the focus
-   of the next session** — see "Next session's contract" below.
+3. **Phase F Jobvite per-tenant fix** (Item #10 from round 11): add
+   per-tenant `careers_nav_recipe` overrides for the 5 unhandled
+   jobvite tenants (american-specialty-health, capcom, neogenomics,
+   the-institutes, victaulic). If 1a (URL-param schema extension)
+   ships, this becomes parallel work in the same vocabulary.
 
-5. **Manual company aliases UI** (round-3 deferred).
+### Audit-track follow-ups (carried unchanged from rounds 7-13)
 
-6. **m063 slug-case-sensitivity edge case**, **salary single-value
+4. **Manual company aliases UI** (round-3 deferred).
+
+5. **m063 slug-case-sensitivity edge case**, **salary single-value
    extraction**, **mid-name punctuation in company dedupe** — all
    carried.
 
-7. **Round-8 carry: does the-institutes slug need manual cleanup?**
-   Their careers_url 302s to `?invalid=1`. Data issue. Flag in the
-   companies UI; this also affects #3 above.
+6. **the-institutes slug needs manual cleanup?** Their careers_url
+   302s to `?invalid=1`. Data issue.
 
 ### Open / advisory items
 
-- **#11 (Pyright unused-args) — re-framed as advisory.** Project
-  `[tool.pyright]` excludes `**/tests`, so CLI `pyright` is silent
-  on test files. The "noise" is IDE-only (LSP scans individual files
-  regardless of exclude). Two reasonable paths:
-  - **Path A (IDE-quiet):** rename test params to leading-underscore
-    in the 4 files round-12 listed. Single mechanical pass. No CLI
-    behavior change.
-  - **Path B (config-honest):** add a pyrightconfig.json or extend
-    `[tool.pyright]` exclude to match IDE LSP scan behavior, or set
-    `reportUnusedParameter = "none"` globally (already set to "none"
-    for `reportUnusedFunction` for similar reasons).
-  - Path B is one line; Path A is ~50 lines. Pick before any next
-    sweep so the work isn't redone.
+- **#11 (Pyright unused-args) — still advisory** (carried unchanged
+  from round 13). Project `[tool.pyright]` excludes `**/tests`, so
+  CLI `pyright` is silent on test files. Path A = rename test params
+  to leading-underscore (~50 LOC); Path B = config tweak (1 line).
+  Pick before any sweep.
 
-- **Lever freeform strings — keep `unresolved=True` forever?** (carried
-  unchanged from round 12.) m067 backfill now covers Lever rows; the
-  parse_locations-inside-_to_canonical idea is lower value. De-prioritized.
+- **`scripts/probe_ai_nav.py` triggers pyright IDE noise** (added by
+  this session, same Path A/B pattern). Specifically: line 49 (the
+  `_orig_call_model` re-assignment in a closure where pyright can't
+  prove non-None). Same disposition as the test-file noise — not on
+  the critical path; ignore or fix per chosen Path.
+
+- **Lever freeform strings** — `unresolved=True` forever path. Carried
+  unchanged.
 
 - **Bare-token workplace detection in jd_full** (Q3 extension, carried
-  from round 12). Hold off until empirical signal justifies the FP risk.
+  from rounds 11-13).
 
-- **Migration count drift on future migrations** (carried). The 3 generic
-  sites in `tests/test_migration.py` (lines 404, 936, 1384) still use
-  exact `== NN`. Next migration will require bumping all three.
+- **Migration count drift on future migrations** (carried). The 3
+  generic sites in `tests/test_migration.py` (lines 404, 936, 1384)
+  still use exact `== NN`. Next migration will require bumping all
+  three.
 
 - **Production country distribution sanity** (carried). Top countries
   after m067: US 8987 (72.6%), IN 352, TH 74, GB 74, CA 65. IN / TH
-  higher than expected for a US-focused search — worth a one-shot spot
-  check that those rows are real postings, not parser mis-anchoring.
-
-- **Pre-existing pyright IDE diagnostics in `test_log_levels.py`** (newly
-  observed this session, not caused by my edits): 5 `caplog` parameters
-  flagged unused (lines 42, 77, 151, 178, 202). Tests use `inspect.getsource`
-  rather than caplog, so the fixture param is dead. Two of those tests
-  *do* have caplog-using siblings (paired pattern). Cleanup is a leading-
-  underscore rename of the unused ones; same Path-A-vs-B decision as #11.
+  higher than expected — worth a one-shot spot check.
 
 ## Quirks the next session should know
 
-Rounds 3-12 quirks still apply. Additions from round 13:
+Rounds 3-13 quirks still apply. Additions from round 14:
 
-- **The handoff's prescription was wrong; the prior session had already
-  half-done the fix.** This is a generic warning, not specific to #12:
-  when verifying a handoff item, always read the actual code rather
-  than trusting that "the prior session left it in state X". The flip
-  to `logger.info` had already happened — only the test diagnosis was
-  carried forward. Phase 2 verification (read the artifacts, not the
-  summary) is what caught this.
+- **`companies.jobs_found_total` is misleadingly named.** Despite
+  living in the careers-crawler-owned persistence module, it's
+  `SELECT COUNT(*) FROM jobs WHERE company_id = ?` — total across
+  every source (aggregators included), not careers_crawl-specific.
+  Future you, if reasoning about "which companies has the careers
+  crawler succeeded at", query
+  `jobs WHERE company_id = X AND sources LIKE '%careers_crawl%'`,
+  not `companies.jobs_found_total`.
 
-- **IDE pyright LSP behavior differs from CLI pyright with project
-  config.** The IDE LSP appears to scan opened test files regardless
-  of `[tool.pyright] exclude = ["**/tests"]`. If a future session
-  considers test-file pyright noise actionable, this asymmetry is the
-  reason — pick Path A or Path B from the "Open / advisory" item #11
-  before any mechanical sweep.
+- **`careers_crawl_tier='static'` ambiguity.** The orchestrator
+  (`__init__.py:379`) initializes `tier_used = "static"` and only
+  overwrites it when a non-static tier returns jobs. When all tiers
+  fail (including AI-nav), the column stays `"static"`. So
+  `tier='static'` could mean "static won", "AI-nav was attempted and
+  failed", or "AI-nav was never reached because an earlier tier
+  returned a non-empty list". Don't infer tier history from the column
+  alone.
 
-- **The line-scoped `logger.<level>` pattern in `test_log_levels.py`
-  assumes the log call and message string are on the same source line.**
-  All five tests using this pattern (now consistent across paste-jd,
-  rescore, and by inspection the older three) rely on this convention.
-  If a future PR reformats a log call to a multi-line `logger.info(\n
-  "...",\n arg\n)`, the test's `logger.info in line` assertion will
-  fail loudly (intended), but the matching may also fall through if
-  the message string moves to a continuation line. Easy fix at that
-  point: regex-walk backward from the matched line to find the
-  containing `logger.X(`. Don't pre-empt now.
+- **AI-nav is gated behind earlier-tier success.** Per
+  `__init__.py:503` — `if not jobs and ai_nav_enabled`. If the static
+  or playwright tier returns any non-empty list, AI-nav doesn't run
+  that crawl cycle. The `_extract_jobs_from_soup` function already
+  applies title-filtering inline (so static won't return random
+  noise), but if a single JSON-LD JobPosting or one link-text match
+  exists on the careers landing page, AI-nav is skipped — even if
+  the discovered jobs aren't title-matched at the user's level.
+
+- **The probe script's call_model monkey-patch tracks "last URL"**
+  with a simple dict ordering trick. Single-threaded; safe for
+  sequential probing. Don't use for parallel discovery.
+
+- **Tesla is bot-blocked at the network layer** — no recipe will help
+  until that's resolved. Akamai serves Access Denied to vanilla
+  Playwright. Deprioritize unless someone wants to invest in stealth.
+
+- **The line-scoped `logger.<level>` pattern in `test_log_levels.py`**
+  (round 13 quirk) still applies.
 
 ## Next session's contract
 
-**Primary focus: AI-nav recipes for in-house custom ATS** (audit-track
-item #4 above). Tier-4 crawler work. The ten target companies are
-Apple, Tesla, Oracle Recruiting Cloud, AMD, NVIDIA, ByteDance,
-Deloitte, Genentech, Citi, Kaiser Permanente — all of which run
-custom (non-standard-ATS) careers sites and currently fall through
-the static/playwright tiers to the AI-navigator tier without a
-working recipe.
+**Primary focus: pick ONE of items 1a, 1b, or 1c** from the carry-
+forward list above. The most leveraged is **1a (URL-param search
+recipe vocabulary)** — addresses ~6 of the 9 targets. Suggested shape:
 
-Suggested approach:
+1. Read `_DISCOVERY_SYSTEM` in `ai_career_navigator.py:285-307`. The
+   prompt today only lists `goto / type / click / press / wait`
+   actions. Add a step type that handles "navigate to URL with a
+   query-string parameter set to the keyword."
+2. Extend the schema validator (lines 374-401) to accept the new
+   action shape.
+3. Extend `_execute_step` (lines 197-247) to handle it.
+4. Re-run `scripts/probe_ai_nav.py`. Expect Apple → /search?search=analyst,
+   Oracle → /sites/jobsearch/jobs?keyword=analyst, etc., to start
+   yielding non-empty validation extractions.
+5. Each working recipe = one atomic commit; cache the recipe on the
+   company row when the probe confirms yield > 0.
 
-- Start by reading `job_finder/web/careers_crawler/_ai_nav_tier.py`
-  + `job_finder/web/ai_career_navigator.py` (the latter is the
-  Tier-4 implementation kept from removed Phase 5 — see CLAUDE.md
-  "Phase 5 (Intelligence): Removed" note). Confirm the recipe-cache
-  table state (existing 16 cached recipes, ~10 active companies).
-- For each target, pull the careers page once with the crawler in
-  verbose mode and capture what the AI-nav tier sees. Identify
-  whether the page is JS-rendered (Apple, Tesla, NVIDIA likely),
-  whether it has an XHR/JSON endpoint (Oracle Recruiting Cloud
-  almost certainly does), or whether it's a server-rendered
-  custom listing (Deloitte / Genentech / Citi / Kaiser are
-  plausibly in this bucket).
-- Recipe form: each tenant gets a `careers_nav_recipe` JSON entry
-  (DOM selectors + optional API endpoint hint) — same shape used
-  by Phase F Jobvite item below. Order recipes by failure rate
-  (which companies users are actually waiting on results for).
-- Verify with `POST /admin/jobs/careers_crawl/run-now` per company.
-  Each working recipe is one atomic commit.
+If 1a feels too big a session: **fall back to 1c (hand-curation)**
+for Genentech + Apple as the two cleanest cases. Hand-crafted recipes
+are deterministic per-company and bypass discovery entirely.
 
-Reasonable scope: 3-5 recipes shipped (the easiest of the ten),
-not all 10. The remaining can be a follow-up. Apple + Tesla are
-the highest-value but likely the hardest (heavy JS, anti-bot).
-Oracle Recruiting Cloud is the highest-value mid-difficulty
-(used by many companies beyond just Oracle itself).
+Pre-flight before starting (~5 min total):
 
-Pre-flight before starting (~10 min total):
+- Confirm Flask is off (port 5000 vacant) or boot it deliberately —
+  the probe doesn't need it, but `POST /admin/jobs/careers_crawl/run-now`
+  later will. Ollama is typically up (port 11434) from the prior
+  session's scheduler auto-start.
 
-1. Pick **Path A or Path B** for the pyright IDE-noise question
-   (item #11 in Open/advisory). One line either way; settles
-   whether future test-side pyright noise is actionable.
-2. Boot Flask once, run the manual browser smoke for Commit D
-   (round 12's lingering item #1) and the Workable scan check
-   (item #4 / #2 here). Both are quick visual / DB-state checks.
-   Flask must be up for the AI-nav recipe work anyway.
+Holding pattern (deferred from this session forward unless 1a goes
+faster than expected):
 
-Holding pattern (deferred from this session forward unless the
-AI-nav work finishes early):
-
-- Phase F Jobvite per-tenant work (#3). Same shape as AI-nav
-  recipes (custom-tenant overrides), so the work is parallel —
-  could be batched in the same session if AI-nav goes faster
-  than expected.
-- Manual company aliases UI (#5).
+- 1b (SPA wait extension) — cheap, helps only AMD.
+- 1d (Tesla bot workaround) — heavy, helps only Tesla. Skip.
+- Phase F Jobvite per-tenant work (item #3). Same shape as 1a if
+  URL-param vocabulary ships.
 
 ## Open questions
 
-**RESOLVED in round 13 (this session):**
+**RESOLVED in round 14 (this session):**
 
-- ✅ **#12 paste-jd log-level test:** Root cause identified (test's
-  4-line context window catching a neighboring `logger.warning`).
-  Fixed by scoping assertion to matched line. Sibling rescore test
-  tightened defensively. 10/10 pass.
+- ✅ **Validation-keyword bug in `discover_navigation_recipe`:** Fixed.
+  Discovery and replay now use the same `_derive_search_term`
+  strategy. Doesn't help the 9 specific targets today but eliminates
+  a class of false-negative recipe discards going forward.
+- ✅ **The 9 targets — does the architecture even *try* AI-nav for
+  them?** Empirically yes (the probe demonstrates discovery runs).
+  Recipes are produced but discarded at validation. 5 distinct
+  failure modes documented above.
+- ✅ **`jobs_found_total` semantics:** Confirmed it's total jobs per
+  company across all sources, not careers_crawl-specific. Misleadingly
+  named but not a bug — just a documentation gap.
 
-**RE-CLASSIFIED in round 13:**
+**RE-CLASSIFIED in round 14:**
 
-- ⚠️ **#11 Pyright unused-args:** Re-framed from "carry forward" to
-  "open / advisory". CLI pyright (with project config) is silent;
-  noise is IDE-only. Needs a Path A or Path B decision before any
-  sweep.
-
-- ⚠️ **#4 Workable widget endpoint:** Trigger condition (all 4 return
-  0 jobs) not met by stale DB counts. Re-scoped to require Flask scan
-  before any code change.
+- ⚠️ **"AI-nav recipes for 10 in-house custom ATS"** (was round-13
+  next-session contract): The framing's intent is right, but the work
+  shape is different. Auto-discovery is the canonical path; "writing
+  recipes" really means improving the discovery vocabulary, the
+  validation harness, or the pre-discovery setup. 1a (URL-param
+  vocabulary) is the highest-leverage next step.
 
 **STILL OPEN (carried from prior rounds, low-priority):**
 
 - **`uv sync` editable-rebuild conflict with running Flask** (round-9
-  carry). No new deps this round; pyproject.toml unchanged.
-
-- **Bare-token JD body workplace detection** — see round-12 "Open /
-  advisory items" #2. Hold off until empirical signal justifies FP risk.
-
+  carry). No new deps this round.
 - **Manual users of `parse_locations` outside upsert_job** (round-12
-  carry). No known existing callers; worth grep-checking before any
-  future signature change.
+  carry). No known existing callers.
+- **Lever freeform strings — keep `unresolved=True` forever?**
+  (round-12 carry). De-prioritized.
