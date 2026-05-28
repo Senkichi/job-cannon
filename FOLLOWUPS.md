@@ -1,4 +1,4 @@
-# FOLLOWUPS — 2026-05-27 round 11 (location parsing Commit C shipped + items 1-3 cleared)
+# FOLLOWUPS — 2026-05-27 round 11 (Commit C shipped + items 1-3 cleared + next-session scope expanded)
 
 ## Project goal (briefly restated)
 
@@ -364,74 +364,163 @@ Round-3-through-round-10 quirks still apply. Additions from round 11:
   reaffirmed). Migration only runs at Flask startup. Always check
   `PRAGMA user_version` if uncertain about the live DB schema state.
 
-## Next session's contract — Commit D (+ pull #1 first)
+## Next session's contract — expanded scope (D + Q3 + Q1 + E + cleanup + Jobvite)
 
-Scope: Item #1 (Flask restart to pick up Commit C) + Item #2 (Commit D)
-+ Items #4, #11, #12 if time permits.
+User locked in both gates (2026-05-27 session-end Q&A):
+- **SPEC Q1 (Springfield):** Country-anchored fallback, then
+  population-weighted within that country. NOT the round-9 shipped
+  default (`city=None`). The parser needs an update before m067 backfill
+  freezes historic data.
+- **SPEC Q3 (jd_full):** Yes — add `jd_full` param to `parse_locations`
+  as its own commit BEFORE Commit E so backfill benefits.
 
-### Verification before any code
+Ordered scope (do in this sequence — each unblocks the next):
+
+### Phase A: Verification (prerequisite)
 
 1. **Flask restart + verify m066 cols populate on fresh ingests.** See
-   the snippet under CARRY FORWARD #1. Without this, Commit D's
-   dropdowns will be empty since the cols are NULL on every existing
-   row + every row ingested under the round-10 Flask boot.
+   CARRY FORWARD #1. Confirm `locations_structured` non-NULL count
+   climbs on the first post-restart ingest cycle (Layer-1 scanners
+   write directly; Layer-2 sources auto-derive). Without this, Commit
+   D dropdowns are empty.
 
-### The work
+### Phase B: Read-side ship (Commit D)
 
-2. **Commit D — read-side dropdowns + `format_canonical_location` Jinja
-   filter + pill renderer.** See "What's deferred" #2 for the concrete
-   piece list. ~120 LOC + UI smoke tests.
+2. **Commit D — read-side dropdowns + `format_canonical_location`
+   Jinja filter + pill renderer.** ~120 LOC + UI smoke tests.
+   - `job_finder/web/__init__.py` — Jinja filter
+     `format_canonical_location(loc_or_list, *, max_entries=3) -> str`.
+   - `job_finder/web/blueprints/jobs.py` — Country dropdown from
+     `SELECT DISTINCT primary_country_code WHERE primary_country_code
+     IS NOT NULL` + workplace_type dropdown from same shape. Both feed
+     into `get_filtered_jobs` SQL via new optional filter params (use
+     the established `sort_by` Python-allowlist pattern — no
+     parameterized column names in SQLite).
+   - Templates `templates/jobs/_list.html` + `_detail.html` — small
+     bg-indigo pill per location entry; tooltip shows raw on hover.
+   - **Browser-verify per CLAUDE.md** — open `/jobs`, check dropdowns
+     render distinct values, filtering narrows correctly, HTMX swaps
+     preserve dropdown state.
 
-   - **Visual verification per CLAUDE.md.** After committing, open
-     `http://localhost:5000/jobs` in a browser. Check:
-     - Country dropdown shows distinct values
-     - Workplace dropdown shows distinct values
-     - Pills render on job rows + job detail
-     - Filtering by either dropdown narrows the list correctly
-     - HTMX swaps don't break the dropdown state
-   - If browser-test is impossible (no manual driver), use the Flask
-     test client to confirm route returns expected fragments.
+### Phase C: Parser updates (Q3 + Q1 — must ship before E)
 
-3. **(Bonus) Item #4 — Workable widget endpoint shape verification.**
-   Small targeted commit. Run the next ATS scan, check the 4 Workable
-   careers_url-tagged companies. If all 0, switch endpoint to v3 path.
+3. **Commit "parser: jd_full body keyword fallback" (SPEC Q3).** New
+   `parse_locations(raw, *, jd_full=None)` signature. When the
+   detected workplace_type from `raw` is UNSPECIFIED and `jd_full` is
+   provided, scan body for case-insensitive word-boundary
+   `#LI-Remote` / `#LI-Hybrid` / `#LI-Onsite` (and bare `remote` /
+   `hybrid` / `on-site` near top of body — needs care to avoid false
+   positives on generic prose). Wire callers: `upsert_job` passes
+   `job.description` (which is what becomes jd_full pre-enrichment).
+   ~50 LOC + 6-8 tests covering tag detection + non-detection +
+   precedence (raw-token wins over body-tag). Bumps no schema.
 
-4. **(Bonus) Item #11 — Bundle pyright noise cleanup.** A single
-   passing commit renaming unused params to `_path` etc. across
-   test_migration.py + test_careers_crawler.py + test_ats_scanner.py +
-   test_scheduler.py.
+4. **Commit "parser: country-anchored Springfield disambiguation"
+   (SPEC Q1).** Update `parse_locations` city-resolution path: when
+   the gazetteer returns multiple matches AND no region anchor exists
+   AND a country anchor IS present (from surrounding text or default
+   `US` fallback when no other signal), pick the largest by
+   population within that country. Update tests in
+   `test_location_parser.py` for the new Springfield behavior:
+   currently asserts `city=None`; should assert `city='Springfield',
+   region_code='MO', country_code='US'` (or whichever the largest US
+   Springfield gazetteer entry resolves to — verify with a one-shot
+   gazetteer query). ~30 LOC + test updates. Bumps no schema.
+   - **Re-verify the m067 backfill SQL** in Commit E reads job
+     country signals consistently (where do we get the country anchor
+     from? The SPEC says "from surrounding text" — pragmatically, if
+     the location string has no country, default to US since that's
+     the corpus-dominant locale).
 
-5. **(Bonus) Item #12 — Fix `test_paste_jd_budget_cap_logs_at_info`.**
+### Phase D: Backfill ship (Commit E — gated unblocked)
+
+5. **Commit E — Migration m067 backfill.** Re-parse every existing
+   row's `locations_raw` through the updated `parse_locations(raw,
+   jd_full=row.jd_full)`. Write the 3 new columns. Idempotent. ~120
+   LOC + tests. Invariant bumps 66 → 67 at the 4 sites m066 bumped:
+   `tests/test_migration_invariants.py:27`,
+   `tests/test_migration.py:404`, `tests/test_migration.py:935`,
+   `tests/test_migration.py:1384`. Match round-10/11 convention: keep
+   the m067-specific user_version assertion as `== 67` (per-file
+   local convention), but the m066-specific assertion in
+   `test_migration_066_..._at_least_NN.py` style was already set up
+   for forward-compat by round 10.
+   - **GATE B** (one ingest cycle after Commit D) — between #2 and
+     #5, trigger an ingest cycle (`POST /admin/jobs/ingestion_poll/
+     run-now` or `/companies/scan`) and wait for at least 10-20
+     fresh-ingested rows with locations_structured populated before
+     running #5. This is the SPEC's "trust parser on fresh data
+     first" gate.
+
+### Phase E: Cleanup bundle (3 small commits)
+
+6. **Commit #4 — Workable widget v3 endpoint switch.** From the next
+   ATS scan, check the 4 careers_url-tagged Workable companies. If
+   all return 0, switch endpoint to `apply.workable.com/api/v3/...`
+   in `_platforms_workable.py`. Small targeted change.
+
+7. **Commit #11 — Pyright unused-args cleanup bundle.** Rename
+   `path`/`tmp_db_path`/`_ctx`/`mock_score`/`_i` params to `_path`
+   etc. across `tests/test_migration.py` (~20 lines),
+   `tests/test_careers_crawler.py` (10 lines), `tests/test_ats_scanner.py`,
+   `tests/test_scheduler.py`. Single mechanical pass.
+
+8. **Commit #12 — Fix `test_paste_jd_budget_cap_logs_at_info`.**
    Find the offending `logger.warning("paste-jd: budget cap reached
-   ...")` in `blueprints/jobs.py` and change to `logger.info`. Then
-   un-deselect the test.
+   ...")` in `blueprints/jobs.py`, change to `logger.info`. Un-deselect
+   the test.
+
+### Phase F: Jobvite per-tenant fix (Item #10)
+
+9. **Add per-tenant `careers_nav_recipe` overrides or a dedicated
+   jv-job-list scraper** for the 5 unhandled jobvite tenants:
+   american-specialty-health, capcom, neogenomics, the-institutes,
+   victaulic. Tier-4 escalation. Likely the biggest single commit of
+   the session — start with `capcom` and `neogenomics` (both have
+   active job listings on their public sites; failing parse is the
+   bug). Verify with `POST /admin/jobs/careers_crawl/run-now` after
+   each per-tenant change.
 
 ### Session-end success criterion
 
-Minimum: items #1 + #2 (Flask restart + Commit D shipped + browser-
-verified). Stretch: + #3 or #4 or #5. Commit E is explicitly NOT in
-this session's scope — it stays gated by SPEC Q1 + the SPEC's "one
-ingest cycle after D" rule.
+Minimum: phases A + B + C + D (the parser→backfill chain — D-Q3-Q1-E
+together close out the location-parsing SPEC). Stretch: phase E
+cleanup (any subset). Aspirational: phase F Jobvite work. Phase F is
+explicitly OK to spill into a follow-up session if anything in A-D
+blows up time.
 
 ## Open questions
 
-- **SPEC Q1 (Springfield ambiguity)** — still unconfirmed. Round 9
-  shipped `city=None when region missing + multiple matches`. Confirm
-  before Commit E.
+**RESOLVED in round 11 session-end Q&A (user-confirmed):**
 
-- **SPEC Q3 (JD body keyword fallback)** — `parse_locations` does not
-  yet accept a `jd_full` parameter. Should it? If yes, which commit
-  (D for read-side, E for backfill, or its own micro-commit)?
+- ✅ **SPEC Q1 (Springfield):** Country-anchored fallback, then
+  population-weighted within that country. Round-9's `city=None`
+  default is REJECTED — next session must update `parse_locations` to
+  the new behavior BEFORE Commit E backfill freezes historic data. See
+  Phase C #4 in the next-session contract.
+
+- ✅ **SPEC Q3 (JD body keyword fallback):** Yes, ship as its own
+  commit BEFORE Commit E so backfill benefits. New signature
+  `parse_locations(raw, *, jd_full=None)`. See Phase C #3.
+
+**STILL OPEN:**
 
 - **Lever freeform strings — keep `unresolved=True` forever?** Today
   Lever entries depend on m067 backfill to ever resolve. A follow-up
   could call `parse_locations` inside Lever's `_to_canonical` and
   override workplace_type from the structured field — gives quality
   data from day 1 but bends the SPEC §Layer-1 "bypass parser" rule.
-  Worth a brief user check.
+  Worth a brief user check post-Commit E.
 
 - **Round-8 carry: the-institutes slug** still 302s to `?invalid=1`.
-  Data cleanup or scrape-aware fallback?
+  Data cleanup or scrape-aware fallback? May get resolved as part of
+  Phase F (#9 Jobvite per-tenant work).
+
+- **Country anchor default for SPEC Q1 disambiguation.** When a
+  location string has NO country signal at all (e.g. raw input is just
+  `"Springfield"`), which country do we default to before population-
+  weighting? Recommend `US` since it's the corpus-dominant locale.
+  Pragmatic; document in the commit message so the choice is auditable.
 
 - **`uv sync` editable-rebuild conflict with running Flask** (round-9
   carry). No new deps in round 11.
