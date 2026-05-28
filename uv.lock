@@ -475,6 +475,15 @@ wheels = [
 ]
 
 [[package]]
+name = "geonamescache"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/5a/2794a754c6e1f8c2a5699883958e410856f3976e18709a1f9b6f5144e484/geonamescache-2.0.0.tar.gz", hash = "sha256:fa1eed0b5b591b478ad81979081ac15b37aa6a1c00bb02431a570688e5c2ecc9", size = 25565852, upload-time = "2023-07-03T21:40:33.107Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/8a/6555e3c3ed1fcadf229dcfb41b92d51eb0c7623d42290e1d6925ac383b33/geonamescache-2.0.0-py3-none-any.whl", hash = "sha256:24fdaaeaf236f88786dec8c0ab55447f5f7f95ef6c094e79fa9ef74114ea1fe2", size = 26622351, upload-time = "2023-07-03T21:34:43.994Z" },
+]
+
+[[package]]
 name = "google-api-core"
 version = "2.30.3"
 source = { registry = "https://pypi.org/simple" }
@@ -779,6 +788,7 @@ dependencies = [
     { name = "defusedxml" },
     { name = "flask" },
     { name = "ftfy" },
+    { name = "geonamescache" },
     { name = "google-api-python-client" },
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
@@ -790,6 +800,7 @@ dependencies = [
     { name = "platformdirs" },
     { name = "portalocker" },
     { name = "psutil" },
+    { name = "pycountry" },
     { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -826,6 +837,7 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7,<0.8" },
     { name = "flask", specifier = "~=3.1" },
     { name = "ftfy", specifier = ">=6.2,<7" },
+    { name = "geonamescache", specifier = ">=2.0,<3" },
     { name = "google-api-python-client", specifier = "~=2.100" },
     { name = "google-auth-httplib2", specifier = "~=0.2" },
     { name = "google-auth-oauthlib", specifier = "~=1.2" },
@@ -841,6 +853,7 @@ requires-dist = [
     { name = "portalocker", specifier = ">=2.10" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "~=4.6" },
     { name = "psutil", specifier = ">=5.9,<8" },
+    { name = "pycountry", specifier = ">=24.0,<25" },
     { name = "pyright", marker = "extra == 'dev'", specifier = "~=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = "~=7.1" },
@@ -1474,6 +1487,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz", hash = "sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6", size = 307892, upload-time = "2025-03-28T02:41:22.17Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl", hash = "sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a", size = 181259, upload-time = "2025-03-28T02:41:19.028Z" },
+]
+
+[[package]]
+name = "pycountry"
+version = "24.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/57/c389fa68c50590881a75b7883eeb3dc15e9e73a0fdc001cdd45c13290c92/pycountry-24.6.1.tar.gz", hash = "sha256:b61b3faccea67f87d10c1f2b0fc0be714409e8fcdcc1315613174f6466c10221", size = 6043910, upload-time = "2024-06-01T04:12:15.05Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/ec/1fb891d8a2660716aadb2143235481d15ed1cbfe3ad669194690b0604492/pycountry-24.6.1-py3-none-any.whl", hash = "sha256:f1a4fb391cd7214f8eefd39556d740adcc233c778a27f8942c8dca351d6ce06f", size = 6335189, upload-time = "2024-06-01T04:11:49.711Z" },
 ]
 
 [[package]]
