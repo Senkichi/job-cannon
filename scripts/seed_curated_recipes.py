@@ -177,6 +177,30 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # Capcom (id=672) — small jobvite tenant; tenant root is the canonical
+    # listing. ``jobs.jobvite.com/capcomusa`` shows the (typically tiny)
+    # live list of postings, and ``?q=<term>`` narrows server-side just
+    # like the other jobvite tenants. ``/jobs/alljobs`` redirects to a
+    # 301-error variant for this tenant, so we anchor at the root path.
+    (
+        672,
+        "capcom",
+        "https://jobs.jobvite.com/capcomusa",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://jobs.jobvite.com/capcomusa",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 
