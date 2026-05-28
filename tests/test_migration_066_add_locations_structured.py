@@ -76,11 +76,17 @@ class TestMigration066Behavior:
             assert col["notnull"] == 0, f"{col_name} must be nullable"
             assert col["dflt_value"] is None, f"{col_name} must have no default"
 
-    def test_user_version_after_run_is_66(self, tmp_db_path):
+    def test_user_version_after_run_is_at_least_66(self, tmp_db_path):
+        """After a clean migration run, PRAGMA user_version is >= 66.
+
+        Forward-compat: round-10/11 convention. Future migrations don't
+        need to re-edit this assertion. The m066-specific check is the
+        column-add (covered by the cols-present tests above).
+        """
         run_migrations(tmp_db_path)
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             v = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert v == 66
+        assert v >= 66
 
     def test_existing_legacy_columns_untouched(self, tmp_db_path):
         """`location` and `locations_raw` survive the column add unchanged.
@@ -97,19 +103,24 @@ class TestMigration066Behavior:
         assert "location" in cols, "m066 must not drop legacy `location` column"
         assert "locations_raw" in cols, "m066 must not drop legacy `locations_raw` column"
 
-    def test_existing_rows_have_null_new_columns(self, tmp_db_path):
-        """A pre-m066 row gets NULL for all three new columns after the column add.
+    def test_existing_rows_get_backfilled_through_m067(self, tmp_db_path):
+        """A pre-m066 row gets the three new columns populated by m066+m067.
 
-        Simulates an upgrade from a populated pre-m066 DB.
+        Originally asserted the columns stayed NULL after just m066 ran
+        — that guarantee held only between m066 and m067 shipping in the
+        same release set. Now that m067 (backfill) is in the migration
+        chain, a full run re-parses each legacy row's locations_raw and
+        fills the three columns. Verifies the upgrade path end-to-end:
+          - legacy `location` / `locations_raw` preserved (m066 invariant)
+          - structured cols populated from parser output (m067 invariant)
         """
         run_migrations(tmp_db_path)
-        # Reset state to simulate pre-m066: drop the new columns and the
-        # version bump so re-running run_migrations() re-applies m066.
+        # Reset state to simulate pre-m066: drop the new columns and roll
+        # version back so re-running re-applies m066 and m067.
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             conn.execute("ALTER TABLE jobs DROP COLUMN locations_structured")
             conn.execute("ALTER TABLE jobs DROP COLUMN workplace_type")
             conn.execute("ALTER TABLE jobs DROP COLUMN primary_country_code")
-            # Insert a legacy row before the column add re-runs.
             conn.execute(
                 "INSERT INTO jobs (dedup_key, title, company, location, "
                 "locations_raw, first_seen, last_seen) "
@@ -127,11 +138,12 @@ class TestMigration066Behavior:
                 "workplace_type, primary_country_code "
                 "FROM jobs WHERE dedup_key = 'legacy-1'"
             ).fetchone()
-        assert row[0] == "San Francisco, CA"   # legacy location preserved
-        assert row[1] == "San Francisco, CA"   # legacy locations_raw preserved
-        assert row[2] is None, "locations_structured must be NULL on existing rows"
-        assert row[3] is None, "workplace_type must be NULL on existing rows"
-        assert row[4] is None, "primary_country_code must be NULL on existing rows"
+        assert row[0] == "San Francisco, CA"  # legacy location preserved
+        assert row[1] == "San Francisco, CA"  # legacy locations_raw preserved
+        # m067 backfill writes:
+        assert row[2] is not None, "m067 must populate locations_structured"
+        assert row[3] == "UNSPECIFIED"
+        assert row[4] == "US"
 
     def test_new_columns_accept_writes_after_migration(self, tmp_db_path):
         """Schema admits the JSON/string values the parser is destined to write.
@@ -167,7 +179,7 @@ class TestMigration066Behavior:
         assert row[2] == "US"
 
     def test_idempotent_when_columns_already_present(self, tmp_db_path):
-        """Re-running migrations on a DB already at v66 is a no-op.
+        """Re-running migrations on an already-migrated DB is a no-op.
 
         Verifies the `duplicate column name` swallow path in the runner
         does not break re-application — the standard `_apply_migration`
@@ -182,7 +194,7 @@ class TestMigration066Behavior:
                 r[1]
                 for r in conn.execute("PRAGMA table_info(jobs)").fetchall()
             ]
-        assert v == 66
+        assert v >= 66
         # Columns are not duplicated.
         assert cols.count("locations_structured") == 1
         assert cols.count("workplace_type") == 1
@@ -192,14 +204,14 @@ class TestMigration066Behavior:
 class TestMigration066RegistryInvariants:
     """Cross-check that m066 plugs into the auto-discovery pipeline cleanly."""
 
-    def test_migrations_list_now_has_66_entries(self):
-        assert len(MIGRATIONS) == 66
+    def test_migrations_list_has_at_least_66_entries(self):
+        assert len(MIGRATIONS) >= 66
 
-    def test_max_migration_version_is_66(self):
-        assert max(m.version for m in MIGRATIONS) == 66
+    def test_max_migration_version_is_at_least_66(self):
+        assert max(m.version for m in MIGRATIONS) >= 66
 
-    def test_versions_strictly_monotonic_through_66(self):
+    def test_versions_strictly_monotonic_through_at_least_66(self):
         versions = [m.version for m in MIGRATIONS]
         assert versions == sorted(versions), "MIGRATIONS not sorted by version"
         assert len(set(versions)) == len(versions), "Duplicate migration version"
-        assert versions[-1] == 66
+        assert versions[-1] >= 66

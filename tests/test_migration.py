@@ -401,7 +401,7 @@ def test_migration_count_is_thirteen():
     """
     from job_finder.web.db_migrate import MIGRATIONS
 
-    assert len(MIGRATIONS) == 66
+    assert len(MIGRATIONS) == 67
 
 
 class TestMigration27:
@@ -932,8 +932,8 @@ class TestMigration18:
         assert row[0] == "anthropic"
 
     def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 66 entries (through Migration 66: canonical location columns on jobs)."""
-        assert len(MIGRATIONS) == 66
+        """MIGRATIONS list has 67 entries (through Migration 67: backfill locations_structured)."""
+        assert len(MIGRATIONS) == 67
 
 
 class TestMigration40:
@@ -1381,7 +1381,7 @@ class TestMigration52And53:
         # run_migrations() applies all migrations, not just up to 53; this test confirms
         # the onboarding_state table created in 53 survives subsequent migrations.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 66, f"Expected PRAGMA user_version=66, got: {version}"
+        assert version == 67, f"Expected PRAGMA user_version=67, got: {version}"
 
         # Check onboarding_state table exists
         table = conn.execute(
