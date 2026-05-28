@@ -1,218 +1,149 @@
-# FOLLOWUPS — 2026-05-27 round 12 (location SPEC closed end-to-end: Q3 + Q1 + D + E)
+# FOLLOWUPS — 2026-05-27 round 13 (cleanup bundle: #12 corrected and landed; #11 + #4 re-framed)
 
 ## Project goal (briefly restated)
 
 Job Cannon is a single-user, local-only Flask command center for job
-search. Rounds 9-11 shipped the location-parsing SPEC's Commits A
-(parser + canonical shape), B (m066 schema), and C (Layer-1 scanners
-+ upsert_job kwarg). Round 12 (this session) **closed the SPEC** —
-both gated parser refinements (Q3 jd_full body hashtag fallback, Q1
-country-anchored Springfield disambiguation), the read-side surface
-(Commit D dropdowns + Jinja filter + pill renderer), and the m067
-backfill (Commit E) that populates 11,908 of 12,383 historic rows
-with structured location data.
+search. Round 12 closed the location-parsing SPEC end-to-end (Q3 +
+Q1 + Commit D + Commit E / m067 backfill, 11,908/12,383 historic
+rows backfilled). Round 13 (this session) picked up the smallest
+remaining item in the round-12 cleanup bundle — **#12, the paste-jd
+budget-cap log-level test** — but on verification found the
+handoff's diagnosis wrong, fixed the actual bug (a too-wide
+context window in the test, not a stray `logger.warning` in
+source), and re-framed the other two cleanup items (#11, #4) which
+turned out not to be actionable in the form round 12 proposed.
 
 ## What this session shipped
 
-Four commits, in order:
+One commit:
 
-- **`a4c8198`** — `feat(location): parse_locations jd_full body hashtag fallback (SPEC Q3)`
-- **`189942a`** — `feat(location): country-anchored Springfield disambiguation (SPEC Q1)`
-- **`bd3df3f`** — `feat(jobs): country + workplace_type dropdowns + canonical pill renderer (Commit D)`
-- **`d260a70`** — `feat(location): m067 backfill locations_structured for legacy rows (Commit E)`
+- **`a9f80dd`** — `fix(tests): tighten log-level context window for paste-jd / rescore tests`
 
-### Commit Q3 (`a4c8198`) — JD body LinkedIn hashtag fallback
+### What round 12's handoff got wrong, and what was actually true
 
-- `parse_locations(raw, *, jd_full=None)` — new keyword-only param.
-- `_LI_REMOTE_BODY_RE` / `_LI_HYBRID_BODY_RE` / `_LI_ONSITE_BODY_RE`
-  match `#LI-Remote` / `#LI-Hybrid` / `#LI-Onsite` case-insensitive,
-  word-boundary. **Bare `remote` / `hybrid` / `onsite` in body prose
-  are deliberately NOT matched** — false-positive-prone ("remote
-  possibility", "hybrid model").
-- Precedence: per-segment token in raw > trailing-slash promotion >
-  body hashtag. The body tag promotes ONLY UNSPECIFIED entries.
-- Empty/None `raw` returns `[]` even when jd_full has a hashtag — the
-  body tag is a workplace fallback for *known* locations, not a
-  location source on its own.
-- `upsert_job` passes `job.description` as `jd_full` (the
-  pre-enrichment JD).
-- 11 new tests in `test_location_parser.py`.
+Round 12 carried this prescription for cleanup-bundle item #12:
 
-### Commit Q1 (`189942a`) — Country-anchored Springfield disambiguation
+> Find the offending `logger.warning("paste-jd: budget cap reached ...")`
+> in `blueprints/jobs.py`, change to `logger.info`. Un-deselect the test.
 
-- `_lookup_city` no longer bails with `city=None` when there are
-  multiple gazetteer matches without a region anchor. Instead:
-  1. Country anchor in input → highest population in that country.
-     `"Springfield, USA"` → Springfield, MO (pop ~167k).
-  2. No country anchor + ambiguous → default to US (corpus-dominant
-     locale). `"Springfield"` alone → Springfield, MO.
-  3. No country anchor + ambiguous + zero US matches → global
-     population tiebreak (rare).
-- **Trade-off documented in commit:** `"Paris"` alone → Paris, TX
-  (pop 24k), not Paris, FR (pop 2.1M). Callers needing non-US Paris
-  must supply a country anchor (`"Paris, France"` works correctly).
-- Springfield test updated: previously asserted `city=None`, now
-  asserts `Springfield, MO`. 3 new tests cover bare-Springfield
-  default, Paris US-default trade-off, and Paris-with-country anchor.
+Reality at session start:
 
-### Commit D (`bd3df3f`) — Read-side surface for m066 columns
+- `blueprints/jobs.py:708` already read
+  `logger.info("paste-jd: budget cap reached, scoring skipped for %s", dedup_key)`.
+  Some prior session had already flipped the call; the handoff was stale.
+- The test wasn't deselected — it just failed when run.
+- The failure mode was `assert "logger.warning" not in context` where
+  `context = "\n".join(lines[max(0, i - 3) : i + 1])`. The 4-line
+  context window scooped up a *neighboring* statement at line 705 —
+  `logger.warning("paste-jd: row vanished mid-request for %s", dedup_key)`
+  — which is a different call entirely.
+- Sibling test `test_rescore_budget_cap_logs_at_info` passed only because
+  nothing within its window happened to be `logger.warning`. Same vulnerability,
+  no collision today.
 
-- `get_distinct_country_codes(conn)` + `get_distinct_workplace_types(conn)`
-  in `job_finder/db/_queries.py`. NULLs excluded, ORDER BY ASC.
-- `get_filtered_jobs(conn, ..., country=None, workplace_type=None)`
-  — value-bound via `?` placeholders; sanity-checked at the boundary
-  (country = 2-char alphabetic uppercase; workplace_type ∈ the 4-value
-  enum). Garbage input is ignored (returns full set, not zero, not a
-  SQL error).
-- New Jinja filter `format_canonical_location(value, max_entries=3)`
-  in `job_finder/web/__init__.py`. Accepts JSON string from the
-  column / JobLocation / list of either / list of dicts. Renders
-  `City, Region · Country · Workplace`, comma-joined, capped with
-  `+N more` suffix. Falsy/unparseable → empty (caller falls back to
-  the legacy `location` string).
-- `blueprints/jobs.py`: `_get_filter_kwargs` reads `?country=…` +
-  `?workplace_type=…`; `index()` fetches the two distinct lists and
-  passes them to the template.
-- `templates/jobs/index.html`: two new `<select>`s alongside the
-  Location dropdown. The standalone hide_stale checkbox's hx-include
-  list was updated so the new params propagate through HTMX swaps.
-- `templates/jobs/_row.html`: location cell uses the new filter when
-  populated, falls back to `job.location`. `title=` shows raw on hover.
-- `templates/jobs/_row_detail.html`: expanded panel renders one
-  bg-indigo pill per location entry from `locations_structured`
-  (JSON-parsed via the existing `from_json` filter).
-- 19 smoke tests in `tests/test_jobs_location_filters.py`.
+### The actual fix
 
-### Commit E (`d260a70`) — m067 backfill
+`tests/test_log_levels.py` — both `test_paste_jd_budget_cap_logs_at_info`
+and `test_rescore_budget_cap_logs_at_info` rewritten:
 
-- `job_finder/web/migrations/m067_backfill_locations_structured.py`.
-- Pure py-hook migration. Reads `(dedup_key, locations_raw, jd_full,
-  location)`, feeds through `parse_locations(raw, jd_full=jd_full)`,
-  writes `(locations_structured, workplace_type, primary_country_code)`.
-- Falls back to the `location` column when `locations_raw` is missing
-  (legacy rows pre-locations_raw).
-- Idempotent: parser is a fixed point on its own output.
-- **Applied to live `jobs.db`** during this session — see below.
+- `for i, line in enumerate(lines)` → `for line in lines`
+- `context = "\n".join(lines[max(0, i - 3) : i + 1])` removed
+- Assertions now scope to `line` only (single-line check)
+- Both assertions kept: `logger.warning not in line` + `logger.info in line`
+  — the latter is the loud-failure guard if a future refactor splits
+  the call across multiple lines
+- Block comments document the why (neighboring-warning collision) so
+  the next session doesn't widen the window again
+
+Result: 10/10 tests pass in `tests/test_log_levels.py`. Other 3 tests
+in the file using the same wider-window pattern (`zero_job_email`,
+`promoted_to_unreachable`, `blocked_wipe`) were **left alone**. Their
+neighbors are clean today; touching them would be scope creep. If
+they ever collide with a refactor, apply the same line-scoped pattern.
 
 ## How to verify (this session's work)
 
 ```powershell
-# Round-12's combined test surface (110+ tests, ~3s):
-.venv/Scripts/python.exe -m pytest `
-  tests/test_location_parser.py `
-  tests/test_location_parser_scanner_integration.py `
-  tests/test_upsert_job_locations_structured.py `
-  tests/test_jobs_location_filters.py `
-  tests/test_migration_067_backfill_locations_structured.py `
-  tests/test_migration_066_add_locations_structured.py `
-  tests/test_migration_invariants.py `
-  tests/test_migration.py -v
+# 10/10 pass:
+.venv/Scripts/python.exe -m pytest tests/test_log_levels.py -v
+# Expected: 10 passed in <1s
 
-# Live-DB verification (Flask should be OFF or freshly booted):
+# Confirm the call is still logger.info at the right line:
+.venv/Scripts/python.exe -c "
+import inspect
+from job_finder.web.blueprints import jobs
+src = inspect.getsource(jobs)
+print([l for l in src.splitlines() if 'paste-jd: budget cap reached' in l])
+"
+# Expected: ['            logger.info(\"paste-jd: budget cap reached, scoring skipped for %s\", dedup_key)']
+
+# Sanity-check live DB state hasn't drifted (still post-m067):
 .venv/Scripts/python.exe -c "
 import sqlite3
 c = sqlite3.connect('jobs.db', timeout=5)
 print('user_version:', c.execute('PRAGMA user_version').fetchone()[0])
-print('jobs with locations_structured:',
-      c.execute('SELECT COUNT(*) FROM jobs WHERE locations_structured IS NOT NULL').fetchone()[0])
-print('total jobs:', c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0])
-print('country dist:', dict(c.execute(
-  \"SELECT primary_country_code, COUNT(*) FROM jobs WHERE primary_country_code IS NOT NULL GROUP BY primary_country_code ORDER BY 2 DESC LIMIT 10\"
-).fetchall()))
-print('workplace dist:', dict(c.execute(
-  \"SELECT workplace_type, COUNT(*) FROM jobs WHERE workplace_type IS NOT NULL GROUP BY workplace_type\"
-).fetchall()))
+print('backfilled:', c.execute('SELECT COUNT(*) FROM jobs WHERE locations_structured IS NOT NULL').fetchone()[0])
+print('total:', c.execute('SELECT COUNT(*) FROM jobs').fetchone()[0])
 "
-# Live DB after this session (verified): user_version=67, 11908/12383 rows
-# backfilled, US 8987 + IN 352 + TH/GB 74 + CA 65 ...; REMOTE 1375 / HYBRID 243 /
-# ONSITE 45 / UNSPECIFIED 10245.
-
-# UI smoke (Flask must be running):
-# 1. Visit http://localhost:5000/jobs — Country dropdown lists US/IN/GB/CA/...
-# 2. Filter by country=US → row count drops to US-only.
-# 3. Filter by workplace_type=REMOTE → only REMOTE jobs visible.
-# 4. Expand a job row → location pill row in the detail panel shows
-#    "San Francisco, CA · US · Remote" (or similar) in bg-indigo.
-
-# Pyright clean on Round-12-touched files:
-.venv/Scripts/python.exe -m pyright `
-  job_finder/web/location_parser.py `
-  job_finder/web/__init__.py `
-  job_finder/web/blueprints/jobs.py `
-  job_finder/db/_queries.py `
-  job_finder/db/_jobs.py `
-  job_finder/db/__init__.py `
-  job_finder/web/migrations/m067_backfill_locations_structured.py
-# Expected: 0 errors, 0 warnings.
+# Expected: user_version=67, 11908/12383
 ```
-
-### Phase A (Flask restart from round-11's handoff)
-
-The handoff anticipated needing to restart a running Flask (PID 40796)
-to pick up Commit C. **Flask was already off at session start** — the
-process is gone, so Phase A collapsed to "next Flask boot picks up
-everything automatically". User can start with `uv run job-cannon`
-whenever convenient; Commit C is already live in the on-disk code, and
-m067 has already backfilled 96% of historic data.
 
 ## What I tried / considered but didn't do
 
-- **Lever Option B redux** (call `parse_locations` inside Lever's
-  `_to_canonical` and override workplace_type from the structured
-  field). Still rejected — SPEC §Layer-1 says "trust structured ATS
-  data verbatim (no parsing)". Lever's structured signal is workplace_type;
-  freeform location strings stay `unresolved=True` and now go through
-  m067's parser path on backfill. Quality is fine in practice.
+- **Apply the same line-scoping fix to the other three context-window
+  tests in `test_log_levels.py`** (`test_zero_job_email_routed_to_activity_feed_logs_at_debug`,
+  `test_promoted_to_unreachable_logs_at_info`, `test_blocked_wipe_logs_at_debug`).
+  Considered; rejected as out of scope. None of them are failing today,
+  and the round-12 handoff cleanup bundle was explicitly about #12 only.
+  Pattern is now documented in the in-test comments — next session can
+  bulk-apply if a regression surfaces.
 
-- **Render the pill renderer on the compact row** as well, not just
-  the detail panel. Considered, rejected — compact rows are already
-  narrow (15% column width); putting pills there would force truncation
-  or layout reflow. The row uses the `format_canonical_location` filter
-  for a clean text rendering with `title=` for raw on hover. Pills are
-  reserved for the expanded panel where there's room.
+- **Item #11 (Pyright unused-args cleanup)**. The handoff said this was
+  a mechanical sweep of `path` / `tmp_db_path` / `_ctx` / `mock_score`
+  / `_i` to `_path` etc. across `tests/test_migration.py`,
+  `tests/test_careers_crawler.py`, `tests/test_ats_scanner.py`,
+  `tests/test_scheduler.py`. **The project's `[tool.pyright]` config in
+  `pyproject.toml:269-270` excludes `**/tests`** — so `pyright` (CLI,
+  with project config) reports 0 errors / 0 warnings on those files.
+  `mypy` likewise reports clean.
+  - I observed the diagnostics actually come from the IDE pyright LSP
+    (Cursor/VS Code language server), which appears to scan tests
+    despite the exclude — likely because the LSP opens files individually
+    rather than walking config-controlled roots. Visible during my
+    edits as `<new-diagnostics>` warnings.
+  - **Either** the IDE LSP config needs to honor the exclude, **or**
+    test parameters need leading-underscore renames if the project
+    wants the IDE clean. Both are reasonable; neither was decidable
+    without confirming user intent.
+  - **Re-classified #11 from "carry forward" to "open / advisory"** —
+    see below.
 
-- **Bare-token workplace detection** (`#LI-*` plus bare `remote` /
-  `hybrid` / `onsite` near top of body). The handoff parenthetical
-  suggested this; I deliberately did NOT do it. Rationale documented
-  in Q3 commit + parser code: "remote possibility", "hybrid model",
-  "primarily on-site" all appear in JD prose as non-workplace tokens.
-  The `#LI-*` forms are LinkedIn-specific and the false-positive surface
-  is essentially zero. If user requests bare-token coverage later, it
-  can be added as a position-bounded scan (first N chars).
+- **Item #4 (Workable widget endpoint switch)**. Handoff trigger
+  condition was "if all 4 careers_url-tagged Workable companies return
+  0 jobs, switch endpoint to `apply.workable.com/api/v3/...`". Live
+  DB shows `jobs_found_total` for the 4 (lifemd / the qode / bettersleep
+  / lawnstarter) is **1 / 1 / 1 / 3** — not the zero pattern. So either
+  (a) the trigger condition isn't met, or (b) those counts are from old
+  scans and a fresh scan would show different. Resolution needs Flask
+  running and a manual `POST /admin/jobs/companies_scan/run-now`
+  targeting those four — which Flask was off for at session start, same
+  as round 12. Carried forward unchanged.
 
-- **Run the full 12.5-min test suite.** Ran the focused location +
-  migrations + views + ingestion suites (~700 tests total across this
-  session) and verified pyright clean on all touched files. The full
-  suite would re-validate the unchanged tests; expensive vs. signal.
-  If a regression surfaces it'll show up in a focused sweep too.
+- **Run the full pytest suite.** Ran `tests/test_log_levels.py` only
+  (10/10 pass). Diff is purely in a single test file; risk of breaking
+  unrelated code is essentially zero. Skipped the ~12.5-min full run.
 
-- **Browser-verify Commit D in Playwright.** Could not — Flask was off
-  at session start and starting it would have created a background job
-  spinning up schedulers / Ollama / the description reformat backfill.
-  CLAUDE.md says UI work benefits from in-browser verification; this is
-  carried forward as a manual user-action item. The smoke tests verify
-  the routes return 200 with the right markup; visual rendering hasn't
-  been eyeballed.
-
-- **Update the m060 / earlier-migration test files** to convert their
-  brittle `== NN` assertions to forward-compat `>= NN`. Only m066 needed
-  the rename for this session — its 4 assertions broke when m067 landed.
-  Earlier migrations had already been converted or had different test
-  patterns. The blanket conversion is sound work but out of scope; can
-  be a future-session sweep.
-
-- **Run an ATS scan via `POST /companies/scan` to verify Commit C is
-  live in-memory**. Same Flask-is-off issue. The next time Flask boots
-  + runs an ingestion cycle, Layer-1 scanners will start writing
-  `locations_structured` on fresh rows — the m067 backfill already
-  covered the historic 96%.
+- **Browser-verify Commit D from round 12** (the new Country/Workplace
+  dropdowns + pill renderer). Same Flask-was-off constraint as round
+  12 — carried unchanged. Smoke tests cover the routes; visual rendering
+  is the gap.
 
 ## What's deferred / remaining
 
 ### CARRY FORWARD (priority order)
 
-1. **Manual browser smoke** for Commit D when Flask next boots. Quick
-   checklist:
+1. **Manual browser smoke for Commit D from round 12** when Flask next
+   boots (unchanged from round 12). Quick checklist:
    - Visit `/jobs`; Country dropdown shows US / IN / GB / CA / ... and
      Workplace shows REMOTE / HYBRID / ONSITE / UNSPECIFIED.
    - Filter by country=US → result count narrows to US rows.
@@ -222,32 +153,29 @@ m067 has already backfilled 96% of historic data.
    - Pre-existing `_row.html` location column still readable
      (canonical or fallback to raw).
 
-2. **Phase E cleanup bundle from round-11 handoff:**
-   - **#4 Workable widget endpoint shape verification** — check the 4
-     careers_url-tagged Workable companies; if all return 0 jobs, switch
-     endpoint to `apply.workable.com/api/v3/...`. Small targeted commit;
-     touches `_platforms_workable.py` only.
-   - **#11 Pyright unused-args cleanup bundle** — rename
-     `path`/`tmp_db_path`/`_ctx`/`mock_score`/`_i` params to `_path` etc.
-     across `tests/test_migration.py` (~20 lines),
-     `tests/test_careers_crawler.py` (10 lines), `tests/test_ats_scanner.py`,
-     `tests/test_scheduler.py`. Single mechanical pass. Round-12 added
-     a tiny amount of new noise via the m066/m067 tests touching
-     `tmp_db_path`/`_ctx` — bundle with the existing pre-existing noise.
-   - **#12 Fix `test_paste_jd_budget_cap_logs_at_info`** — find the
-     offending `logger.warning("paste-jd: budget cap reached ...")` in
-     `blueprints/jobs.py`, change to `logger.info`. Un-deselect the test.
+2. **#4 Workable widget endpoint verification (re-scoped):**
+   The handoff's "if all return 0 jobs" trigger can't be tested from
+   stale DB counts (1/1/1/3 currently). Steps when Flask is up:
+   - `POST /admin/jobs/companies_scan/run-now` (or just wait for the
+     next scheduled scan).
+   - Re-query `companies.jobs_found_total` for the 4 Workable-tagged
+     rows after the scan: id 71, 951, 1027, 1036.
+   - If all 4 still return 0 (or fewer than 1 for any that had 1 before),
+     switch endpoint in `_platforms_workable.py` to
+     `apply.workable.com/api/v3/...`.
+   - If the counts stay positive (any of them), leave the platform code
+     alone and de-prioritize.
 
-3. **Phase F Jobvite per-tenant fix (Item #10 from round 11):**
-   Add per-tenant `careers_nav_recipe` overrides or a dedicated
-   jv-job-list scraper for the 5 unhandled jobvite tenants:
+3. **Phase F Jobvite per-tenant fix (Item #10 from round 11 / #3 from
+   round 12):** add per-tenant `careers_nav_recipe` overrides or a
+   dedicated jv-job-list scraper for the 5 unhandled jobvite tenants:
    american-specialty-health, capcom, neogenomics, the-institutes,
-   victaulic. Tier-4 escalation. Likely the biggest single commit;
-   start with `capcom` and `neogenomics` (both have active listings on
-   public sites — failing parse is the bug). Verify with
-   `POST /admin/jobs/careers_crawl/run-now` after each per-tenant change.
+   victaulic. Tier-4 escalation. Likely the biggest single commit; start
+   with capcom and neogenomics (active listings on public sites).
+   Verify with `POST /admin/jobs/careers_crawl/run-now` after each
+   per-tenant change.
 
-### Audit-track follow-ups (carried unchanged from rounds 7-11)
+### Audit-track follow-ups (carried unchanged from rounds 7-12)
 
 4. **AI-nav recipes for in-house custom ATS** (Apple, Tesla, Oracle
    Recruiting Cloud, AMD, NVIDIA, ByteDance, Deloitte, Genentech,
@@ -265,130 +193,121 @@ m067 has already backfilled 96% of historic data.
 
 ### Open / advisory items
 
-- **Lever freeform strings — keep `unresolved=True` forever?** As of
-  Commit E, every Lever row's location strings now have at least the
-  m067-backfill parser output written to `locations_structured`
-  alongside the structured workplace_type from the scanner. So Lever
-  is effectively fine end-to-end. The original "carried" Lever
-  follow-up from round 11 (call parse_locations inside `_to_canonical`)
-  is now lower-value — m067 covers the same ground. **De-prioritize.**
+- **#11 (Pyright unused-args) — re-framed as advisory.** Project
+  `[tool.pyright]` excludes `**/tests`, so CLI `pyright` is silent
+  on test files. The "noise" is IDE-only (LSP scans individual files
+  regardless of exclude). Two reasonable paths:
+  - **Path A (IDE-quiet):** rename test params to leading-underscore
+    in the 4 files round-12 listed. Single mechanical pass. No CLI
+    behavior change.
+  - **Path B (config-honest):** add a pyrightconfig.json or extend
+    `[tool.pyright]` exclude to match IDE LSP scan behavior, or set
+    `reportUnusedParameter = "none"` globally (already set to "none"
+    for `reportUnusedFunction` for similar reasons).
+  - Path B is one line; Path A is ~50 lines. Pick before any next
+    sweep so the work isn't redone.
 
-- **Bare-token workplace detection in jd_full** (Q3 extension). The
-  handoff suggested this; I held off. Worth a brief check after a
-  few days of seeing what % of UNSPECIFIED jobs would benefit. If
-  >5% of UNSPECIFIED jobs have detectable workplace in body prose
-  (above the FP floor), worth re-evaluating with a more conservative
-  pattern (e.g., only "Remote" / "Hybrid" / "On-Site" with a leading
-  `^` or post-heading anchor).
+- **Lever freeform strings — keep `unresolved=True` forever?** (carried
+  unchanged from round 12.) m067 backfill now covers Lever rows; the
+  parse_locations-inside-_to_canonical idea is lower value. De-prioritized.
 
-- **Migration count drift on future migrations.** Round-11/12 converted
-  m065 + m066 to `_at_least_NN` style. The 3 generic sites in
-  `tests/test_migration.py` (lines 404, 936, 1384) still use exact
-  `== NN`. The next migration will need to bump all three again. Could
-  be opportunistically converted to `>= NN` next session to stop the
-  treadmill. Bundle with #11 (pyright cleanup).
+- **Bare-token workplace detection in jd_full** (Q3 extension, carried
+  from round 12). Hold off until empirical signal justifies the FP risk.
 
-- **Production country distribution sanity.** Top countries after
-  m067 backfill: US 8987 (72.6%), IN 352, TH 74, GB 74, CA 65. The
-  IN / TH numbers are higher than expected for a US-focused job
-  search — worth a one-shot spot check that those rows are real
-  India/Thailand postings and not parser mis-anchoring. Not blocking;
-  curiosity-grade.
+- **Migration count drift on future migrations** (carried). The 3 generic
+  sites in `tests/test_migration.py` (lines 404, 936, 1384) still use
+  exact `== NN`. Next migration will require bumping all three.
+
+- **Production country distribution sanity** (carried). Top countries
+  after m067: US 8987 (72.6%), IN 352, TH 74, GB 74, CA 65. IN / TH
+  higher than expected for a US-focused search — worth a one-shot spot
+  check that those rows are real postings, not parser mis-anchoring.
+
+- **Pre-existing pyright IDE diagnostics in `test_log_levels.py`** (newly
+  observed this session, not caused by my edits): 5 `caplog` parameters
+  flagged unused (lines 42, 77, 151, 178, 202). Tests use `inspect.getsource`
+  rather than caplog, so the fixture param is dead. Two of those tests
+  *do* have caplog-using siblings (paired pattern). Cleanup is a leading-
+  underscore rename of the unused ones; same Path-A-vs-B decision as #11.
 
 ## Quirks the next session should know
 
-Rounds 3-11 quirks still apply. Additions from round 12:
+Rounds 3-12 quirks still apply. Additions from round 13:
 
-- **m067 reads `jd_full` from the row at backfill time.** That's the
-  enriched JD body when present (post-enrichment), or NULL otherwise.
-  Some rows that were pre-enrichment when m067 first ran will have
-  NULL jd_full → no body-tag promotion happens for them. If those rows
-  get enriched LATER and someone wants the body-tag signal applied,
-  they'd need to re-run m067 (PRAGMA user_version=66 → run_migrations).
-  Not automated — call out if user wants periodic re-backfills.
+- **The handoff's prescription was wrong; the prior session had already
+  half-done the fix.** This is a generic warning, not specific to #12:
+  when verifying a handoff item, always read the actual code rather
+  than trusting that "the prior session left it in state X". The flip
+  to `logger.info` had already happened — only the test diagnosis was
+  carried forward. Phase 2 verification (read the artifacts, not the
+  summary) is what caught this.
 
-- **The `format_canonical_location` filter does a lazy import of
-  `JobLocation` inside the filter body.** This is intentional — avoids
-  a cold-path circular when the filter is registered before
-  `location_canonical`'s dataclass binds. Don't hoist it to module
-  scope.
+- **IDE pyright LSP behavior differs from CLI pyright with project
+  config.** The IDE LSP appears to scan opened test files regardless
+  of `[tool.pyright] exclude = ["**/tests"]`. If a future session
+  considers test-file pyright noise actionable, this asymmetry is the
+  reason — pick Path A or Path B from the "Open / advisory" item #11
+  before any mechanical sweep.
 
-- **`get_filtered_jobs(..., country=…, workplace_type=…)` silently
-  ignores malformed input.** A bogus `?country=USA` (3-letter, not
-  alpha-2) or `?workplace_type=foo` doesn't reduce the result set or
-  raise — it's treated as "no filter applied". This is by design (vs.
-  SQL injection guard via the sort_by allowlist pattern). If users
-  ever want explicit "you gave me garbage" feedback in the UI, the
-  blueprint can pre-validate and `abort(400)`.
-
-- **`_lookup_city` now backfills country from a single global match
-  AS WELL AS picking a US default for ambiguous bare-token input.**
-  These two paths interact: e.g. "Paris" → 2 candidates → US default
-  → Paris, TX. But "Tokyo" → 1 candidate (Tokyo, JP) → backfill
-  country=JP. Single-match cities bypass the US default entirely. If
-  this asymmetry surprises someone, the docstring at line 313 of
-  `location_parser.py` covers it.
-
-- **m066's "rows stay NULL" guarantee no longer holds end-to-end.**
-  m066 itself still only adds nullable columns, but the next
-  migration in line (m067) immediately backfills them. The
-  test_migration_066 test that asserted NULL after migration was
-  updated to assert post-m067 backfill values. The old "transitional
-  state between m066 and m067 shipping" is no longer reachable through
-  normal `run_migrations()`.
-
-- **Population-weighted disambiguation is a property of the gazetteer
-  bundle, not the parser.** If geonamescache pins a new version with
-  different population data, Springfield, MO might be supplanted by
-  Springfield, MA or vice versa. The Springfield tests assert
-  `region_code='MO'` against current geonamescache 2.x. Add a pinned
-  version constraint in `pyproject.toml` if this becomes a flake
-  surface.
+- **The line-scoped `logger.<level>` pattern in `test_log_levels.py`
+  assumes the log call and message string are on the same source line.**
+  All five tests using this pattern (now consistent across paste-jd,
+  rescore, and by inspection the older three) rely on this convention.
+  If a future PR reformats a log call to a multi-line `logger.info(\n
+  "...",\n arg\n)`, the test's `logger.info in line` assertion will
+  fail loudly (intended), but the matching may also fall through if
+  the message string moves to a continuation line. Easy fix at that
+  point: regex-walk backward from the matched line to find the
+  containing `logger.X(`. Don't pre-empt now.
 
 ## Next session's contract
 
-Minimum: pick up the cleanup bundle (#2 above — three small commits:
-Workable endpoint switch, pyright unused-args sweep, paste-jd log level
-fix). Together ~150 LOC, ~1 hour.
+Minimum (~10 min): pick **Path A or Path B** for the pyright IDE-noise
+question (item #11 in Open/advisory). Either rename the test params
+to leading-underscore (Path A, ~50 LOC) or set
+`reportUnusedParameter = "none"` in `[tool.pyright]` (Path B, 1 LOC).
+This unblocks any future test-side pyright cleanup work.
 
-Stretch: Phase F Jobvite per-tenant work (#3). Likely the biggest
-single commit of any future session — start with capcom and
+Small-stretch (~30 min): boot Flask, run the manual browser smoke for
+Commit D (round 12's lingering item #1) and the Workable scan
+verification (item #4 / #2 here). Both are visual / DB-state checks,
+no code change required unless something turns up.
+
+Bigger stretch: Phase F Jobvite per-tenant work (#3). Likely the
+biggest single commit of any future session — start with capcom and
 neogenomics, verify with `POST /admin/jobs/careers_crawl/run-now`.
 
 Aspirational: tackle either the AI-nav recipes (#4) or the manual
 company aliases UI (#5).
 
-**Before doing any of the above:** open `/jobs` in a browser, click
-the new Country + Workplace dropdowns, expand a job to see the pill
-row. Confirm Commit D actually renders correctly. The smoke tests
-cover routing and markup, but visual rendering hasn't been eyeballed.
-
 ## Open questions
 
-**RESOLVED in round 12 (this session):**
+**RESOLVED in round 13 (this session):**
 
-- ✅ **SPEC Q1 (Springfield):** Implemented and tested. Country-anchored
-  with US default for bare-token input. Documented trade-off (Paris
-  alone → Paris, TX) in the commit message.
-- ✅ **SPEC Q3 (JD body keyword fallback):** Implemented and tested.
-  Only `#LI-*` hashtags matched (bare-token detection deferred —
-  explicit decision, not omission).
-- ✅ **Commit D + E gates:** Both shipped after Q3/Q1 — backfill
-  benefits from the refined parser. Live DB verified at 96% backfill
-  coverage.
+- ✅ **#12 paste-jd log-level test:** Root cause identified (test's
+  4-line context window catching a neighboring `logger.warning`).
+  Fixed by scoping assertion to matched line. Sibling rescore test
+  tightened defensively. 10/10 pass.
+
+**RE-CLASSIFIED in round 13:**
+
+- ⚠️ **#11 Pyright unused-args:** Re-framed from "carry forward" to
+  "open / advisory". CLI pyright (with project config) is silent;
+  noise is IDE-only. Needs a Path A or Path B decision before any
+  sweep.
+
+- ⚠️ **#4 Workable widget endpoint:** Trigger condition (all 4 return
+  0 jobs) not met by stale DB counts. Re-scoped to require Flask scan
+  before any code change.
 
 **STILL OPEN (carried from prior rounds, low-priority):**
 
 - **`uv sync` editable-rebuild conflict with running Flask** (round-9
   carry). No new deps this round; pyproject.toml unchanged.
 
-- **Bare-token JD body workplace detection** — see "Open / advisory
-  items" #2 above. Hold off until empirical signal justifies the FP
-  risk.
+- **Bare-token JD body workplace detection** — see round-12 "Open /
+  advisory items" #2. Hold off until empirical signal justifies FP risk.
 
-- **Manual users of `parse_locations` outside upsert_job** — anything
-  that calls it directly today passes positional args only (`raw`).
-  The new `jd_full` is keyword-only by design so positional callers
-  don't accidentally pass a description string into the wrong slot.
-  No known existing callers, but worth grep-checking before any
+- **Manual users of `parse_locations` outside upsert_job** (round-12
+  carry). No known existing callers; worth grep-checking before any
   future signature change.
