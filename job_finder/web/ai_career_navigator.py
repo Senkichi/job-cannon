@@ -190,6 +190,53 @@ def _flatten_a11y_node(node: dict, lines: list, depth: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pre-discovery wait
+# ---------------------------------------------------------------------------
+
+
+def wait_for_snapshot_ready(
+    page,
+    *,
+    timeout_ms: int = 8000,
+    poll_ms: int = 500,
+    min_chars: int = 50,
+) -> int:
+    """Poll the accessibility snapshot until it grows past ``min_chars``.
+
+    SPA careers pages (e.g. AMD's careers-home/jobs) frequently render
+    nothing useful within the first 2s after ``domcontentloaded``, which
+    historically caused ``discover_navigation_recipe`` to bail at its
+    50-char snapshot guard. This helper replaces the fixed-duration wait
+    with a polling loop so slow SPAs get a chance to settle while fast
+    pages still proceed immediately.
+
+    Args:
+        page: Playwright Page instance.
+        timeout_ms: Total budget for polling (default 8s).
+        poll_ms: Interval between checks (default 500ms).
+        min_chars: Snapshot length considered "ready" (default 50, the
+            same threshold ``discover_navigation_recipe`` uses).
+
+    Returns:
+        The final snapshot length observed. Caller can decide whether to
+        proceed (length >= min_chars) or bail.
+    """
+    elapsed = 0
+    snap_len = 0
+    while elapsed < timeout_ms:
+        try:
+            snap = _take_snapshot(page)
+            snap_len = len(snap or "")
+        except Exception:
+            snap_len = 0
+        if snap_len >= min_chars:
+            return snap_len
+        page.wait_for_timeout(poll_ms)
+        elapsed += poll_ms
+    return snap_len
+
+
+# ---------------------------------------------------------------------------
 # Recipe execution
 # ---------------------------------------------------------------------------
 

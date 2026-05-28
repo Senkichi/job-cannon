@@ -43,6 +43,7 @@ def _try_ai_navigation(
             clear_nav_recipe,
             discover_navigation_recipe,
             replay_navigation_recipe,
+            wait_for_snapshot_ready,
         )
     except ImportError:
         return [], "static"
@@ -57,7 +58,11 @@ def _try_ai_navigation(
     try:
         page = browser.new_page()
         page.goto(careers_url, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
+        # Poll the accessibility snapshot for up to 8s so SPA careers pages
+        # (AMD, similar Workday-on-React shells) get a chance to render before
+        # discovery's 50-char snapshot guard rejects them as "too short".
+        # Returns early as soon as the snapshot exceeds the threshold.
+        wait_for_snapshot_ready(page)
 
         # Phase B: Try replaying cached recipe first
         if nav_recipe_raw:
@@ -80,12 +85,12 @@ def _try_ai_navigation(
                 clear_nav_recipe(db_path, company_id)
                 # Re-navigate for fresh discovery
                 page.goto(careers_url, timeout=15000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
+                wait_for_snapshot_ready(page)
             except (json.JSONDecodeError, Exception) as e:
                 logger.debug("ai_nav: recipe parse/replay error: %s", e)
                 clear_nav_recipe(db_path, company_id)
                 page.goto(careers_url, timeout=15000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
+                wait_for_snapshot_ready(page)
 
         # Phase A: Discover new recipe
         recipe = discover_navigation_recipe(page, careers_url, target_titles, config)
@@ -94,7 +99,7 @@ def _try_ai_navigation(
 
             # Re-navigate and replay the freshly discovered recipe
             page.goto(careers_url, timeout=15000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
+            wait_for_snapshot_ready(page)
 
             try:
                 jobs = replay_navigation_recipe(
