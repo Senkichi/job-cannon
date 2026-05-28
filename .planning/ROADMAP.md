@@ -141,7 +141,7 @@ Full track details archived in `.planning/milestones/v4.0-ROADMAP.md`. Note: v4.
 - [x] **Phase 42: Onboarding Wizard** — 7-step Flask blueprint + system check + IMAP smoke test + templates (completed 2026-05-21)
 - [~] **Phase 43: Update Check, Legal, Strangerify Exit Gate** — GitHub Releases banner + AGPL/PRIVACY/AUP/SECURITY + fresh-clone stranger validation (43-01 + 43-02 shipped; 43-03 ready, awaiting stranger attestation)
 - [x] **Phase 44: PyPI Release Pipeline & Install Docs** — PyPI name + trusted publishing + `release.yml` + `INSTALL.md` + README rewrite (completed 2026-05-28; impl shipped 2026-05-21 in `7ff3221`; pipeline GA-ready, publish gated on manual checklist)
-- [ ] **Phase 45: Cross-Platform pipx Validation & Exit Gate** — Win/macOS/Linux `pipx install job-cannon` validation + ≥5-strangers exit gate
+- [~] **Phase 45: Cross-Platform pipx Validation & Exit Gate** — Win/macOS/Linux `pipx install job-cannon` validation + ≥5-strangers exit gate (closeout 2026-05-28; CI smoke matrix + INSTALL.md community sections + install-attestation issue form + PYPI-GATE skeleton + Hyper-V runbook all shipped; gated on author Win/Linux wizard runs (45-04) + 5 stranger attestations (45-05, STRICT D-11) + real PyPI publish)
 
 ### Next Milestone
 
@@ -368,7 +368,7 @@ v5.1+ (post-v5.0): P3 cross-platform installers (Briefcase/PyInstaller, code-sig
 | 42. Onboarding Wizard | v5.0 | 6/6 | Complete    | 2026-05-21 |
 | 43. Update Check, Legal, Strangerify Exit Gate | v5.0 | 2/3 | Partial: 43-01 + 43-02 shipped; 43-03 ready, awaiting stranger attestation | 2026-05-28 |
 | 44. PyPI Release Pipeline & Install Docs | v5.0 | 7/7 | Complete    | 2026-05-28 |
-| 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 0/? | Not started | - |
+| 45. Cross-Platform pipx Validation & Exit Gate | v5.0 | 3/5 plans | Partial: 45-01/02/03 + closeout shipped 2026-05-28; 45-04 (author wizard runs) + 45-05 (5 stranger attestations, STRICT D-11) outstanding | 2026-05-28 |
 
 ## Coverage Validation (v5.0)
 
