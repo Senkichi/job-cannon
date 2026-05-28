@@ -1,42 +1,36 @@
-# .github/workflows/publish-testpypi.yml
+# .github/workflows/install-validate.yml
 #
-# Pre-release-tag-triggered TestPyPI rehearsal pipeline. Mirrors publish.yml
-# but routes to test.pypi.org and skips the GH Release step. Used for the
-# v5.0.0rc1 rehearsal before v5.0.0 GA (D-05).
+# Standalone cross-OS pipx-install smoke. Manually triggered (workflow_dispatch)
+# to validate that `pipx install <wheel>` succeeds on Ubuntu / macOS / Windows
+# against the current source tree, before cutting a release tag.
 #
-# Trigger patterns (PEP 440 canonical pre-release markers):
-#   - v*a*   → alpha (v5.0.0a1, v5.1.0a2)
-#   - v*b*   → beta  (v5.0.0b1)
-#   - v*rc*  → release candidate (v5.0.0rc1)
+# Phase 45-03 (PYPI-04 / PYPI-05 / PYPI-06):
+#   - Builds the wheel once on Ubuntu (`build` job, uploads `dist` artifact)
+#   - Downloads the same artifact on three OS runners and runs a pipx-install
+#     smoke (`--help` + `import job_finder`) — D-10: same artifact through
+#     every smoke runner; broken wheel never lands undetected
+#   - Additionally runs `[local-ai]` smoke on windows-latest only (D-07 /
+#     CONTEXT line 44: skip mac+linux to avoid slow source-build of
+#     llama-cpp-python on runners without pre-built wheels)
 #
-# Trusted publishing: separate registration on test.pypi.org against
-# (owner=Senkichi, repo=job-cannon, workflow=publish-testpypi.yml,
-# environment=testpypi). Same OIDC mechanism as publish.yml.
-#
-# Phase 45-03 restructure (PYPI-04 / PYPI-05 / PYPI-06):
-#   build → smoke matrix (ubuntu/macos/windows) + smoke-local-ai-windows → publish-testpypi
-#   The same `dist` artifact flows through every job (D-10). publish-testpypi
-#   requires ALL smoke jobs; a failure on any OS blocks the TestPyPI upload
-#   (T-45-03-02 mitigation, mirrored to the rehearsal channel).
-#   `id-token: write` stays scoped to the publish-testpypi job only — never
-#   workflow-level (T-45-03-01).
+# This workflow does NOT publish anything. It is intentionally separate from
+# publish.yml / publish-testpypi.yml so packaging regressions can be caught
+# without a tag-triggered run. Cross-OS smoke gating of the actual publish
+# is enforced inside publish.yml / publish-testpypi.yml via `needs:` on the
+# same matrix jobs (see those workflows).
 
-name: Publish to TestPyPI (pre-release rehearsal)
+name: Install Validate (cross-OS pipx smoke)
 
 on:
-  push:
-    tags:
-      - 'v*a*'
-      - 'v*b*'
-      - 'v*rc*'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # ── Build sdist + wheel (single producer; D-10 artifact identity) ────
+  # ── Build sdist + wheel (single producer) ────────────────────
   build:
-    name: Build
+    name: Build (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -76,6 +70,9 @@ jobs:
           name: dist
           path: dist/
 
+      # PowerShell does NOT glob-expand args to external commands [VERIFIED:
+      # PowerShell#3931]. Resolve the wheel path via Python — works identically
+      # on all three runners (D-10 / RESEARCH Pattern 3).
       - name: Resolve wheel path
         shell: bash
         run: |
@@ -98,7 +95,7 @@ jobs:
         shell: bash
         run: python -c "import job_finder"
 
-  # ── Smoke [local-ai] on Windows only (D-07; Phase 39 SC4) ────
+  # ── Smoke [local-ai] on Windows only (D-07; re-uses Phase 39 SC4) ──
   smoke-local-ai-windows:
     name: Smoke [local-ai] (windows-latest)
     needs: [build]
@@ -134,25 +131,3 @@ jobs:
       - name: Verify llama_cpp importable
         shell: bash
         run: python -c "import llama_cpp; print(llama_cpp.__version__)"
-
-  # ── Publish to TestPyPI (OIDC trusted publishing) ────────────
-  publish-testpypi:
-    name: Publish to TestPyPI
-    needs: [smoke, smoke-local-ai-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write    # OIDC for trusted publishing — JOB-SCOPED ONLY
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/job-cannon
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      - name: Publish to TestPyPI (OIDC trusted publishing)
-        uses: pypa/gh-action-pypi-publish@v1.14.0
-        with:
-          repository-url: https://test.pypi.org/legacy/

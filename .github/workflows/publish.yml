@@ -16,6 +16,14 @@
 #
 # D-02: a GitHub Release object is created here, AFTER the PyPI upload
 # succeeds. Release exists iff artifact landed on PyPI.
+#
+# Phase 45-03 restructure (PYPI-04 / PYPI-05 / PYPI-06):
+#   build → guard → smoke matrix (ubuntu/macos/windows) + smoke-local-ai-windows → publish
+#   The same `dist` artifact flows through every job (D-10). `publish` requires
+#   ALL smoke jobs (needs: [smoke, smoke-local-ai-windows]); a failure on any
+#   OS blocks the publish, fulfilling T-45-03-02 mitigation.
+#   `id-token: write` stays scoped to the `publish` job only — never workflow-
+#   level (T-45-03-01).
 
 name: Publish to PyPI
 
@@ -24,25 +32,29 @@ on:
     tags:
       - 'v*'
 
-jobs:
-  publish:
-    name: Build, smoke-test, and publish to PyPI
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-    environment:
-      name: pypi
-      url: https://pypi.org/p/job-cannon
-    steps:
-      - uses: actions/checkout@v6
+permissions:
+  contents: read
 
-      - name: Guard against pre-release tags (route those to publish-testpypi.yml)
+jobs:
+  # ── Guard against pre-release tags (route those to publish-testpypi.yml) ──
+  guard:
+    name: Guard against pre-release tags
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject pre-release tags
         run: |
           if [[ "${GITHUB_REF_NAME}" =~ (a|b|rc)[0-9]+$ ]]; then
             echo "::error::Pre-release tag ${GITHUB_REF_NAME} — handled by publish-testpypi.yml, aborting GA publish."
             exit 1
           fi
+
+  # ── Build sdist + wheel (single producer; D-10 artifact identity) ────
+  build:
+    name: Build
+    needs: [guard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -55,11 +67,110 @@ jobs:
       - name: Validate metadata + long-description rendering
         run: uvx twine check --strict dist/*
 
-      - name: Smoke-test installed entry point
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ── Smoke (cross-platform pipx install) ──────────────────────
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    needs: [build]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # PowerShell does NOT glob-expand args to external commands [VERIFIED:
+      # PowerShell#3931]. Resolve the wheel path via Python — works identically
+      # on all three runners (D-10 / RESEARCH Pattern 3).
+      - name: Resolve wheel path
+        shell: bash
         run: |
-          uv tool install ./dist/*.whl
-          job-cannon --version
-          job-cannon --help
+          WHEEL=$(python -c "import glob,sys; m=glob.glob('dist/job_cannon-*.whl'); print(m[0]) if m else sys.exit('no wheel matched dist/job_cannon-*.whl')")
+          echo "WHEEL=$WHEEL" >> $GITHUB_ENV
+
+      - name: Install pipx
+        shell: bash
+        run: python -m pip install --user pipx
+
+      - name: pipx install base
+        shell: bash
+        run: pipx install "$WHEEL"
+
+      - name: Verify console script
+        shell: bash
+        run: job-cannon --help
+
+      - name: Verify package import
+        shell: bash
+        run: python -c "import job_finder"
+
+  # ── Smoke [local-ai] on Windows only (D-07; Phase 39 SC4) ────
+  smoke-local-ai-windows:
+    name: Smoke [local-ai] (windows-latest)
+    needs: [build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Resolve wheel path
+        shell: bash
+        run: |
+          WHEEL=$(python -c "import glob,sys; m=glob.glob('dist/job_cannon-*.whl'); print(m[0]) if m else sys.exit('no wheel matched dist/job_cannon-*.whl')")
+          echo "WHEEL=$WHEEL" >> $GITHUB_ENV
+
+      - name: Install pipx
+        shell: bash
+        run: python -m pip install --user pipx
+
+      - name: pipx install [local-ai]
+        shell: bash
+        run: pipx install "${WHEEL}[local-ai]"
+
+      - name: Verify console script
+        shell: bash
+        run: job-cannon --help
+
+      - name: Verify llama_cpp importable
+        shell: bash
+        run: python -c "import llama_cpp; print(llama_cpp.__version__)"
+
+  # ── Publish to PyPI (OIDC trusted publishing) ────────────────
+  publish:
+    name: Publish to PyPI
+    needs: [smoke, smoke-local-ai-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # for `gh release create`
+      id-token: write    # OIDC for trusted publishing — JOB-SCOPED ONLY
+    environment:
+      name: pypi
+      url: https://pypi.org/p/job-cannon
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
       - name: Publish to PyPI (OIDC trusted publishing)
         uses: pypa/gh-action-pypi-publish@v1.14.0

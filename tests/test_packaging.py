@@ -79,25 +79,44 @@ def test_workflow_triggers_are_tag_only():
 
 
 def test_publish_runs_smoke_test_before_upload():
-    """publish.yml runs uv build, twine check, and smoke install before publish step."""
+    """publish.yml runs uv build, twine check, and a cross-OS pipx-install smoke
+    matrix that gates the publish job via `needs:`. Phase 45-03 restructure: smoke
+    moved from an in-line step under the publish job into a dedicated `smoke` job
+    (plus `smoke-local-ai-windows` on Windows only). The invariant is preserved:
+    no PyPI upload happens until smoke succeeds on ubuntu/macos/windows.
+    """
     with open(".github/workflows/publish.yml") as f:
         content = f.read()
     assert "uv build" in content
     assert "twine check" in content
-    assert "uv tool install" in content or "pipx install" in content
-    # Smoke test should come before the publish step - check that the smoke test
-    # step appears before the Publish to PyPI step (not just the string anywhere)
+    assert "pipx install" in content
+    # smoke job exists, gates publish
+    assert "smoke:" in content
+    assert "smoke-local-ai-windows:" in content
+    assert "needs: [smoke, smoke-local-ai-windows]" in content
+    # smoke matrix covers all three host OSes
+    assert "ubuntu-latest" in content
+    assert "macos-latest" in content
+    assert "windows-latest" in content
+    # publish step exists and runs the OIDC trusted-publishing action
+    assert "Publish to PyPI (OIDC trusted publishing)" in content
+    # id-token: write must be JOB-scoped, never workflow-root (T-45-03-01).
+    # Walk lines to extract the column-0 `permissions:` block (lines indented
+    # > 0 until the first blank/column-0 line). Regex with (?s) was unsafe
+    # because `.` then spans newlines and `.*` consumes the entire file.
     lines = content.split("\n")
-    smoke_test_line = None
-    publish_line = None
-    for i, line in enumerate(lines):
-        if "Smoke-test installed entry point" in line:
-            smoke_test_line = i
-        if "Publish to PyPI (OIDC trusted publishing)" in line:
-            publish_line = i
-    assert smoke_test_line is not None, "Smoke test step not found"
-    assert publish_line is not None, "Publish step not found"
-    assert smoke_test_line < publish_line, "Smoke test should come before publish step"
+    root_perms_block: list[str] = []
+    in_block = False
+    for line in lines:
+        if line == "permissions:":
+            in_block = True
+            continue
+        if in_block:
+            if not line.strip() or not (line.startswith(" ") or line.startswith("\t")):
+                break
+            root_perms_block.append(line)
+    root_perms = "\n".join(root_perms_block)
+    assert "id-token" not in root_perms, f"id-token must be job-scoped, not workflow-root. Got: {root_perms!r}"
 
 
 def test_release_yml_no_longer_creates_gh_release():
@@ -107,21 +126,34 @@ def test_release_yml_no_longer_creates_gh_release():
     assert "gh release create" not in content
 
 
-def test_install_md_three_sections_in_order():
-    """INSTALL.md has three H2 sections in correct order."""
+def test_install_md_sections_present_in_order():
+    """INSTALL.md sections are present in the expected order: primary pipx →
+    macOS/Linux [local-ai] community-supported notes (Phase 45-03) →
+    Contributors → Native installers. The community-supported sections are
+    flagged \"Not author-validated\" per D-08 and link to the Phase 45 install-
+    attestation issue template at the bottom of the file (D-12 recruitment CTA).
+    """
     with open("INSTALL.md") as f:
         content = f.read()
     lines = content.split("\n")
     h2_lines = [line for line in lines if line.startswith("## ")]
-    assert len(h2_lines) >= 3
-    # Check sections exist in order
-    h2_text = [line.strip("## ") for line in h2_lines]
-    # First section should be about pipx
-    assert "pipx" in h2_text[0].lower() or "install" in h2_text[0].lower()
-    # Second section should be for contributors
-    assert "contributor" in h2_text[1].lower() or "clone" in h2_text[1].lower() or "dev" in h2_text[1].lower()
-    # Third section should mention native installers
-    assert "native" in h2_text[2].lower() or "installer" in h2_text[2].lower()
+    h2_text = [line[3:].strip().lower() for line in h2_lines]
+    # First section is the primary pipx install path
+    assert "pipx" in h2_text[0] or "install" in h2_text[0]
+    # Phase 45-03 community-supported sections present
+    assert any("macos" in t and "local-ai" in t for t in h2_text), h2_text
+    assert any("linux" in t and "local-ai" in t for t in h2_text), h2_text
+    # Contributors section present
+    assert any("contributor" in t for t in h2_text), h2_text
+    # Native installers section present
+    assert any("native" in t or "installer" in t for t in h2_text), h2_text
+    # Both [local-ai] sections appear AFTER the primary pipx section
+    idx_pipx = next(i for i, t in enumerate(h2_text) if "pipx" in t or "install" in t)
+    idx_mac_localai = next(i for i, t in enumerate(h2_text) if "macos" in t and "local-ai" in t)
+    idx_linux_localai = next(i for i, t in enumerate(h2_text) if "linux" in t and "local-ai" in t)
+    idx_contributors = next(i for i, t in enumerate(h2_text) if "contributor" in t)
+    assert idx_pipx < idx_mac_localai < idx_contributors
+    assert idx_pipx < idx_linux_localai < idx_contributors
 
 
 def test_install_md_links_to_setup_not_duplicates():
