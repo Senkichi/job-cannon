@@ -16,6 +16,7 @@ Usage:
 
 import json
 import logging
+import shutil
 import subprocess
 import tempfile
 
@@ -112,8 +113,14 @@ def _classify_batch(companies: list[dict]) -> list[dict]:
     names_str = ", ".join(parts)
     prompt = f"Look up these companies and find their URLs: {names_str}"
 
+    # Windows: npm exposes `claude` as `claude.CMD`. Bare "claude" passed
+    # to subprocess.run (shell=False) cannot be resolved by CreateProcessW,
+    # which does not honor PATHEXT. shutil.which DOES honor PATHEXT and
+    # returns the full .CMD path. POSIX no-op (returns "claude" → bare).
+    claude_bin = shutil.which("claude") or "claude"
+
     cmd = [
-        "claude",
+        claude_bin,
         "-p",
         prompt,
         "--model",

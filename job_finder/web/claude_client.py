@@ -23,6 +23,7 @@ Model pricing (per million tokens) — informational, for cost tracking:
 import json
 import logging
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -665,8 +666,16 @@ def _run_oneshot(
     """
     cli_model = _CLI_MODEL_ALIASES.get(model, model)
 
+    # Windows: npm exposes `claude` as `claude.CMD`. subprocess.run with
+    # shell=False + bare "claude" hits CreateProcessW, which does NOT honor
+    # PATHEXT and so cannot find the shim. shutil.which DOES honor PATHEXT
+    # and returns the full .CMD path, which CreateProcessW accepts. On
+    # POSIX this is a no-op. Falling back to the bare name preserves the
+    # existing FileNotFoundError path when the CLI truly is absent.
+    claude_bin = shutil.which("claude") or "claude"
+
     cmd: list[str] = [
-        "claude",
+        claude_bin,
         "-p",
         "--model",
         cli_model,
