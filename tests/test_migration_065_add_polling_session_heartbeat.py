@@ -62,11 +62,18 @@ class TestMigration065Behavior:
         assert col["notnull"] == 0
         assert col["dflt_value"] is None
 
-    def test_user_version_after_run_is_65(self, tmp_db_path):
+    def test_user_version_after_run_is_at_least_65(self, tmp_db_path):
+        """m065 must have applied; later migrations (m066+) push the version higher.
+
+        The original assertion was `== 65`, which was correct when 65 was the
+        latest migration. Switched to `>= 65` so adding a later migration does
+        not require renaming this test on every bump — the invariant we care
+        about is "m065 ran," not "no migration ever ships after m065."
+        """
         run_migrations(tmp_db_path)
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             v = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert v == 65
+        assert v >= 65
 
     def test_existing_rows_have_null_last_tick_at(self, tmp_db_path):
         """Pre-existing rows survive the column add with NULL last_tick_at."""
