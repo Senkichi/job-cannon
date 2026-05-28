@@ -226,6 +226,37 @@ RECIPES: list[tuple[int, str, str, dict]] = [
             "extraction": {"method": "links_in_page"},
         },
     ),
+    # Victaulic (id=382) — migrated off jobvite to Workday during 2025.
+    # The legacy jobvite URL on file (``jobs.jobvite.com/victaulic/jobs/alljobs``)
+    # 302s to ``careers.victaulic.com``, a marketing WordPress site whose
+    # "All Careers" / "Search for jobs" CTAs all point at
+    # ``victaulic.wd1.myworkdayjobs.com``. The canonical Workday endpoint
+    # serves ~20 tiles with ``data-automation-id="jobTitle"`` and accepts
+    # ``?q=<keyword>`` for server-side filtering (verified 2026-05-28:
+    # ``?q=engineer`` returns 20 engineer-titled tiles, all extractable).
+    # Follow-up data fix (FOLLOWUPS round 16): also flip
+    # ``ats_platform='workday'`` + ``careers_url='https://victaulic.wd1.myworkdayjobs.com/en-US/victaulic_careers'``
+    # so the native Workday scanner picks this company up and the AI-nav
+    # tier becomes the redundant fallback rather than the primary path.
+    (
+        382,
+        "victaulic",
+        "https://jobs.jobvite.com/victaulic/jobs/alljobs",
+        {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "curated": True,
+            "steps": [
+                {
+                    "action": "goto_with_query",
+                    "url": "https://victaulic.wd1.myworkdayjobs.com/en-US/victaulic_careers",
+                    "query_param": "q",
+                    "value": "{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        },
+    ),
 ]
 
 
