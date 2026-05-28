@@ -29,6 +29,7 @@ import logging
 import shutil
 import subprocess
 
+from job_finder.web.claude_client import _resolve_cli_binary
 from job_finder.web.model_provider import BaseProvider, ModelResult
 
 logger = logging.getLogger(__name__)
@@ -46,13 +47,15 @@ class GeminiCLIProvider(BaseProvider):
     """
 
     def __init__(self, config: dict | None = None) -> None:
-        bin_path = shutil.which("gemini")
-        if bin_path is None:
+        if shutil.which("gemini") is None:
             raise RuntimeError(
                 "gemini CLI not found on PATH. "
                 "Install: npm install -g @google/generative-ai-cli"
             )
-        self._bin = bin_path
+        # _resolve_cli_binary unwraps the npm .CMD shim to the real .exe on
+        # Windows so prompt args containing `|` (e.g. JSON schema unions) are
+        # not parsed as cmd.exe pipeline separators. POSIX no-op.
+        self._bin = _resolve_cli_binary("gemini")
 
     def call(
         self,

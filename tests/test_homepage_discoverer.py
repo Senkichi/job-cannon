@@ -156,7 +156,15 @@ class TestDiscoverHomepage:
         assert result == "https://stripe.com"
 
     def test_domain_guess_parked_returns_none_falls_through(self):
-        """DISC-01: 'Acme' (single token), parked domain — falls through to Tier 2/3, no api_key."""
+        """DISC-01: 'Acme' (single token), parked domain — falls through to Tier 2/3, no api_key.
+
+        Tier 3 (``_try_claude_enricher``) is stubbed to return None so the test
+        doesn't depend on the live Claude CLI / WebSearch. Prior to the
+        Windows subprocess fix (``_resolve_cli_binary``) Tier 3 silently
+        returned None due to ``FileNotFoundError`` invoking ``claude.CMD``,
+        so the test passed by accident; once the CLI actually ran, it
+        resolved "Acme" to https://acmeunited.com/ and broke the assertion.
+        """
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://acme.com", 200, "text/html")
@@ -167,6 +175,10 @@ class TestDiscoverHomepage:
         with (
             patch("job_finder.web.homepage_discoverer.requests.head", return_value=head_resp),
             patch("job_finder.web.homepage_discoverer.requests.get", return_value=get_resp),
+            patch(
+                "job_finder.web.homepage_discoverer._try_claude_enricher",
+                return_value=None,
+            ),
         ):
             result = discover_homepage("Acme", None, None, [], api_key=None)
 

@@ -26,6 +26,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from job_finder.web.claude_client import _resolve_cli_binary
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,9 +49,9 @@ _QUOTA_HINTS: tuple[str, ...] = ("quota", "rate limit", "capacity", "429")
 
 
 def _check_claude_code() -> ProviderHandle | None:
-    p = shutil.which("claude")
-    if not p:
+    if not shutil.which("claude"):
         return None
+    p = _resolve_cli_binary("claude")
     try:
         result = subprocess.run(
             [p, "-p", "ping", "--output-format", "json",
@@ -75,9 +77,9 @@ def _check_claude_code() -> ProviderHandle | None:
 
 
 def _check_gemini_cli() -> ProviderHandle | None:
-    p = shutil.which("gemini")
-    if not p:
+    if not shutil.which("gemini"):
         return None
+    p = _resolve_cli_binary("gemini")
     try:
         result = subprocess.run(
             [p, "-p", "ping", "--output-format", "json"],

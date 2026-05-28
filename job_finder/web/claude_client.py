@@ -629,6 +629,56 @@ _CREDIT_PATTERNS: tuple[str, ...] = (
 )
 
 
+def _resolve_cli_binary(name: str) -> str:
+    """Resolve an npm-installed CLI tool to its underlying ``.exe`` on Windows.
+
+    The npm-published shims (``claude.CMD``, ``gemini.CMD``) are batch
+    wrappers around the real ``.exe``. Invoking the ``.CMD`` via
+    ``subprocess.run`` routes through ``cmd.exe``, whose argv parser uses
+    caret-escaping rather than the C-runtime backslash-escape that
+    Python's ``subprocess.list2cmdline`` emits. The mismatch means literal
+    ``|`` characters in argument values (e.g. ``"startup|small|mid|large"``
+    in a ``--system-prompt``) get interpreted as ``cmd.exe`` pipeline
+    separators, breaking the invocation with errors like
+    ``'small' is not recognized as an internal or external command``.
+
+    This helper parses the ``.CMD`` shim to extract the underlying ``.exe``
+    path (the npm pattern is
+    ``"%dp0%\\node_modules\\<pkg>\\bin\\<name>.exe"``) so the subprocess
+    call goes via ``CreateProcessW`` directly and bypasses ``cmd.exe``
+    parsing entirely. On POSIX, or when ``shutil.which`` returns an
+    extension other than ``.cmd``/``.bat``, the resolved path is returned
+    unchanged. If the shim cannot be parsed the original path is returned
+    — a deliberately conservative fallback that preserves existing
+    FileNotFoundError handling rather than masking a missing install.
+
+    Args:
+        name: CLI tool name, e.g. ``"claude"`` or ``"gemini"``.
+
+    Returns:
+        Absolute path safe to pass as ``argv[0]`` to ``subprocess.run``.
+    """
+    import re
+
+    path = shutil.which(name)
+    if path is None:
+        return name
+    if os.name != "nt" or not path.lower().endswith((".cmd", ".bat")):
+        return path
+
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            shim = f.read()
+        match = re.search(r'"%dp0%\\([^"]+\.exe)"', shim, re.IGNORECASE)
+        if match is None:
+            return path
+        rel = match.group(1)
+        exe = os.path.join(os.path.dirname(path), rel)
+        return exe if os.path.exists(exe) else path
+    except OSError:
+        return path
+
+
 # ---------------------------------------------------------------------------
 # CLI oneshot executor
 # ---------------------------------------------------------------------------
@@ -666,16 +716,8 @@ def _run_oneshot(
     """
     cli_model = _CLI_MODEL_ALIASES.get(model, model)
 
-    # Windows: npm exposes `claude` as `claude.CMD`. subprocess.run with
-    # shell=False + bare "claude" hits CreateProcessW, which does NOT honor
-    # PATHEXT and so cannot find the shim. shutil.which DOES honor PATHEXT
-    # and returns the full .CMD path, which CreateProcessW accepts. On
-    # POSIX this is a no-op. Falling back to the bare name preserves the
-    # existing FileNotFoundError path when the CLI truly is absent.
-    claude_bin = shutil.which("claude") or "claude"
-
     cmd: list[str] = [
-        claude_bin,
+        _resolve_cli_binary("claude"),
         "-p",
         "--model",
         cli_model,
