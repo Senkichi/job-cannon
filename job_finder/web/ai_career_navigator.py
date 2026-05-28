@@ -79,6 +79,28 @@ _MAX_RECIPE_STEPS = 8
 _STEP_TIMEOUT_MS = 5000
 _POST_ACTION_WAIT_MS = 1500
 
+# Step fields that can carry a {keyword} placeholder for runtime substitution.
+# url: lets goto / goto_with_query templatize the destination (path-segment
+# search like /search-jobs/{keyword} as well as the URL-param case).
+# value: form-fill text on type / goto_with_query.
+_KEYWORD_PLACEHOLDER_FIELDS = ("value", "url")
+
+
+def _substitute_keyword(step: dict, keyword: str) -> dict:
+    """Return a copy of ``step`` with ``{keyword}`` replaced in templated fields.
+
+    Centralizes the placeholder rule so discovery's validation and replay's
+    execution both agree on which fields can carry ``{keyword}`` — avoids
+    the round-14 class of bug where the two paths used different
+    substitution rules.
+    """
+    out = step
+    for field in _KEYWORD_PLACEHOLDER_FIELDS:
+        val = step.get(field)
+        if isinstance(val, str) and "{keyword}" in val:
+            out = {**out, field: val.replace("{keyword}", keyword)}
+    return out
+
 
 class RecipeStaleError(Exception):
     """Raised when a cached navigation recipe can no longer be replayed."""
@@ -357,7 +379,7 @@ The recipe is a JSON object with:
 - "extraction": object describing how to find job links after navigation
 
 Action types:
-- {"action": "goto", "url": "<full URL>"} — navigate to a different page (e.g. the "Job Search" link)
+- {"action": "goto", "url": "<full URL>"} — navigate to a different page (e.g. the "Job Search" link). The URL may contain a {keyword} placeholder for sites that put the search term in the URL PATH (e.g. /search-jobs/{keyword}, /SearchJobs/{keyword}).
 - {"action": "goto_with_query", "url": "<base URL>", "query_param": "<param name>", "value": "{keyword}"}
   Navigate to a URL with a search query string appended. Use when the site exposes job search via URL params (e.g. /search?q=analyst, /jobs?keyword=analyst).
   Examples:
@@ -554,13 +576,12 @@ def discover_navigation_recipe(
         # which routinely returns zero matches on a destination job-search
         # page even when the recipe is correct. The recipe would then be
         # discarded as "0 jobs" despite working at replay time with the
-        # broader term ("analyst"). Keep them in lockstep.
+        # broader term ("analyst"). Keep them in lockstep via the same
+        # _substitute_keyword helper replay uses.
+        kw = _derive_search_term(target_titles)
         steps_executed = 0
         for step in steps:
-            resolved_step = step
-            if "value" in step and "{keyword}" in step.get("value", ""):
-                kw = _derive_search_term(target_titles)
-                resolved_step = {**step, "value": step["value"].replace("{keyword}", kw)}
+            resolved_step = _substitute_keyword(step, kw)
 
             if _execute_step(page, resolved_step):
                 steps_executed += 1
@@ -645,9 +666,7 @@ def replay_navigation_recipe(
     keyword = _derive_search_term(target_titles)
 
     for step in steps:
-        # Replace {keyword} placeholder
-        if "value" in step and "{keyword}" in step["value"]:
-            step = {**step, "value": step["value"].replace("{keyword}", keyword)}
+        step = _substitute_keyword(step, keyword)
 
         success = _execute_step(page, step)
         if not success:

@@ -1,16 +1,22 @@
-"""Probe AI-nav discovery for the 9 in-house custom ATS target companies.
+"""Probe AI-nav discovery / replay for the 9 in-house custom ATS target companies.
 
-Runs `discover_navigation_recipe` against each target's careers page in
-isolation — no scheduler, no batch crawl, no DB writes to the companies
-table. Reports per-target: page reachable? snapshot length? recipe
-produced? extraction count?
+Two modes:
 
-Use to decide which of the 9 are feasible for AI-nav before any code
-or DB changes. Targets are hardcoded from FOLLOWUPS.md 2026-05-27
-round 13 minus Citi (already works via playwright tier).
+1. Discovery (default): runs `discover_navigation_recipe` against each
+   target's careers page in isolation — no scheduler, no batch crawl,
+   no DB writes. Reports per-target: page reachable? snapshot length?
+   recipe produced? extraction count? Use to identify which targets
+   the model can auto-discover recipes for.
+
+2. Replay-from-DB (PROBE_FROM_DB=1): skips discovery, loads
+   `careers_nav_recipe` from DB for each target's company_id, runs
+   `replay_navigation_recipe` directly. Used to verify hand-curated
+   recipes (round-14 carry-forward item 1c) without booting Flask.
 
 Run:
-    .venv/Scripts/python.exe scripts/probe_ai_nav.py
+    .venv/Scripts/python.exe scripts/probe_ai_nav.py                # discovery
+    $env:PROBE_FROM_DB="1"; .venv/Scripts/python.exe scripts/probe_ai_nav.py  # replay
+    $env:PROBE_ONLY="deloitte"; ...                                 # single target
 """
 
 from __future__ import annotations
@@ -103,6 +109,95 @@ def _load_config() -> dict:
             cfg.setdefault("db_path", str(Path("jobs.db").resolve()))
             return cfg
     raise FileNotFoundError(f"No config.yaml found in {candidates}")
+
+
+def _load_recipe_from_db(db_path: str, company_id: int) -> dict | None:
+    """Read careers_nav_recipe JSON from the companies table."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT careers_nav_recipe FROM companies WHERE id = ?",
+                (company_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row["careers_nav_recipe"]:
+            return None
+        import json as _json
+        return _json.loads(row["careers_nav_recipe"])
+    except Exception as e:
+        print(f"[probe] could not read recipe for company_id={company_id}: {e}")
+        return None
+
+
+def probe_one_replay(
+    browser,
+    target: tuple[int, str, str],
+    target_titles: list[str],
+    exclusions: list[str],
+    db_path: str,
+) -> dict:
+    """Probe a single company via DB-cached recipe replay (skips discovery).
+
+    Used to verify hand-curated recipes. Loads the recipe from the
+    companies.careers_nav_recipe column, runs replay_navigation_recipe.
+    """
+    from job_finder.web.ai_career_navigator import (
+        RecipeStaleError,
+        replay_navigation_recipe,
+        wait_for_snapshot_ready,
+    )
+
+    cid, name, url = target
+    record = {
+        "id": cid,
+        "name": name,
+        "url": url,
+        "page_reachable": False,
+        "snapshot_len": 0,
+        "recipe": None,
+        "recipe_steps": 0,
+        "replay_jobs": 0,
+        "error": None,
+        "mode": "replay_from_db",
+    }
+
+    recipe = _load_recipe_from_db(db_path, cid)
+    if recipe is None:
+        record["error"] = "no recipe in DB"
+        return record
+    record["recipe"] = recipe
+    record["recipe_steps"] = len(recipe.get("steps", []))
+
+    page = None
+    try:
+        page = browser.new_page()
+        try:
+            page.goto(url, timeout=20000, wait_until="domcontentloaded")
+            record["page_reachable"] = True
+            record["snapshot_len"] = wait_for_snapshot_ready(page)
+        except Exception as e:
+            record["error"] = f"navigation: {e}"
+            return record
+
+        try:
+            jobs = replay_navigation_recipe(page, recipe, target_titles, exclusions)
+            record["replay_jobs"] = len(jobs)
+        except RecipeStaleError as e:
+            record["error"] = f"recipe_stale: {e}"
+        except Exception as e:
+            record["error"] = f"replay: {e}"
+    finally:
+        if page is not None:
+            try:
+                page.close()
+            except Exception:
+                pass
+
+    return record
 
 
 def probe_one(browser, target: tuple[int, str, str], target_titles: list[str], exclusions: list[str], config: dict) -> dict:
@@ -202,9 +297,14 @@ def main() -> int:
     exclusions_cfg = profile_cfg.get("exclusions", {})
     exclusions = exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
 
+    from_db = _os.environ.get("PROBE_FROM_DB", "").strip() == "1"
+    db_path = cfg.get("db_path", "jobs.db")
+
     logger.info("Target titles: %s", target_titles)
     logger.info("Title exclusions: %d", len(exclusions))
-    logger.info("Probing %d companies", len(TARGETS))
+    logger.info("Probing %d companies (mode=%s)", len(TARGETS), "replay_from_db" if from_db else "discovery")
+    if from_db:
+        logger.info("DB path: %s", db_path)
 
     records: list[dict] = []
     with sync_playwright() as p:
@@ -212,36 +312,61 @@ def main() -> int:
         try:
             for target in TARGETS:
                 logger.info("--- Probing %s (id=%d) ---", target[1], target[0])
-                rec = probe_one(browser, target, target_titles, exclusions, cfg)
+                if from_db:
+                    rec = probe_one_replay(browser, target, target_titles, exclusions, db_path)
+                    logger.info(
+                        "  reachable=%s  snapshot_len=%d  recipe_steps=%d  replay_jobs=%d  err=%s",
+                        rec["page_reachable"],
+                        rec["snapshot_len"],
+                        rec["recipe_steps"],
+                        rec["replay_jobs"],
+                        rec["error"] or "-",
+                    )
+                else:
+                    rec = probe_one(browser, target, target_titles, exclusions, cfg)
+                    logger.info(
+                        "  reachable=%s  pre_jobs=%d  recipe_steps=%d  replay_jobs=%d  err=%s",
+                        rec["page_reachable"],
+                        rec["pre_jobs"],
+                        rec["recipe_steps"],
+                        rec["replay_jobs"],
+                        rec["error"] or "-",
+                    )
                 records.append(rec)
-                logger.info(
-                    "  reachable=%s  pre_jobs=%d  recipe_steps=%d  replay_jobs=%d  err=%s",
-                    rec["page_reachable"],
-                    rec["pre_jobs"],
-                    rec["recipe_steps"],
-                    rec["replay_jobs"],
-                    rec["error"] or "-",
-                )
         finally:
             browser.close()
 
     # Print final table
     print()
     print("=" * 110)
-    print(f"{'Company':<22}{'reach':<8}{'pre_jobs':<10}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}")
+    if from_db:
+        print(f"{'Company':<22}{'reach':<8}{'snap':<8}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}")
+    else:
+        print(f"{'Company':<22}{'reach':<8}{'pre_jobs':<10}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}")
     print("=" * 110)
     for r in records:
         recipe_str = "yes" if r["recipe"] else "null"
         err = (r["error"] or "")[:38]
-        print(
-            f"{r['name']:<22}"
-            f"{('OK' if r['page_reachable'] else 'NO'):<8}"
-            f"{r['pre_jobs']:<10}"
-            f"{recipe_str:<10}"
-            f"{r['recipe_steps']:<8}"
-            f"{r['replay_jobs']:<10}"
-            f"{err:<40}"
-        )
+        if from_db:
+            print(
+                f"{r['name']:<22}"
+                f"{('OK' if r['page_reachable'] else 'NO'):<8}"
+                f"{r['snapshot_len']:<8}"
+                f"{recipe_str:<10}"
+                f"{r['recipe_steps']:<8}"
+                f"{r['replay_jobs']:<10}"
+                f"{err:<40}"
+            )
+        else:
+            print(
+                f"{r['name']:<22}"
+                f"{('OK' if r['page_reachable'] else 'NO'):<8}"
+                f"{r['pre_jobs']:<10}"
+                f"{recipe_str:<10}"
+                f"{r['recipe_steps']:<8}"
+                f"{r['replay_jobs']:<10}"
+                f"{err:<40}"
+            )
     print("=" * 110)
 
     # Print full recipes for the ones that succeeded

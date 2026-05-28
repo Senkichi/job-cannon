@@ -375,6 +375,37 @@ class TestReplayNavigationRecipe:
         # _derive_search_term(["machine learning"]) -> "machine" (single core word)
         assert filled_value == "machine"
 
+    def test_replay_substitutes_keyword_in_goto_url(self):
+        """Path-segment search: {keyword} placeholder in goto's url field."""
+        page = MagicMock()
+        page.url = "https://example.com/careers"
+        page.content.return_value = "<html><body></body></html>"
+        recipe = {
+            "version": 1,
+            "discovered_at": "2026-05-28T00:00:00",
+            "steps": [
+                {
+                    "action": "goto",
+                    "url": "https://example.com/search-jobs/{keyword}",
+                }
+            ],
+            "extraction": {"method": "links_in_page"},
+        }
+
+        replay_navigation_recipe(
+            page,
+            recipe,
+            target_titles=["data analyst"],
+            exclusions=[],
+        )
+
+        page.goto.assert_called_once()
+        called_url = page.goto.call_args[0][0]
+        assert "{keyword}" not in called_url
+        assert called_url.startswith("https://example.com/search-jobs/")
+        # _derive_search_term(["data analyst"]) returns "data" or "analyst"
+        assert called_url.endswith("data") or called_url.endswith("analyst")
+
     def test_replay_substitutes_keyword_in_goto_with_query(self):
         page = MagicMock()
         page.url = "https://example.com/jobs/search"
