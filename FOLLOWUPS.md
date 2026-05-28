@@ -158,9 +158,9 @@ $env:PROBE_ONLY="genentech"; .venv/Scripts/python.exe scripts/probe_ai_nav.py
 
 ### CARRY FORWARD (priority order)
 
-1. **AI-nav recipe work: continue from probe findings.** Pick ONE of
-   the four meaningful directions below, NOT all four. Sequence
-   matters — easier wins first:
+1. **AI-nav recipe work: continue from probe findings. ALL THREE of
+   1a, 1b, 1c are required for the next session, in sequence.** 1d
+   stays out — heavy investment for single-company yield.
 
    - **1a. Extend recipe vocabulary to include URL-param search**
      (~6 of 9 targets benefit: Apple, Oracle, ByteDance, Kaiser,
@@ -172,19 +172,30 @@ $env:PROBE_ONLY="genentech"; .venv/Scripts/python.exe scripts/probe_ai_nav.py
    - **1b. Longer SPA pre-discovery wait + retry on snapshot < 50**
      (AMD). Change the `wait_until="domcontentloaded"` + 2s wait to a
      loop that polls accessibility-tree size for up to 8s. ~2 hours.
-   - **1c. Hand-curate recipes for the 3-5 cleanest targets**
-     (Genentech, Apple, Oracle, NVIDIA, Deloitte — drop Tesla
-     (bot-blocked) and AMD (SPA issue separate). Manually inject
-     `careers_nav_recipe` JSON into the DB, force
-     `careers_crawl_tier = 'ai_replay'` so the `_try_cached_tier`
-     shortcut runs the recipe first. Per-target time: 15-30 min.
-     Bypasses auto-discovery for known-hard cases.
+     Orthogonal to 1a — different code surface (`_take_snapshot` /
+     pre-discovery wait vs. recipe vocabulary / schema). Ship in
+     same session as 1a; the probe's per-target output isolates
+     which lift came from which fix.
+   - **1c. Hand-curate recipes for the cleanest residual targets**
+     (the ones 1a doesn't lift). After 1a's probe re-run, the
+     residual zero-yield set will plausibly be 2-4 of: Genentech,
+     Oracle (form-selector hallucination), and any others whose
+     destination pages don't match user titles even with URL-param
+     search. Manually inject `careers_nav_recipe` JSON into the DB,
+     force `careers_crawl_tier = 'ai_replay'` so `_try_cached_tier`
+     runs the recipe first. Per-target time: 15-30 min. Bypasses
+     auto-discovery for known-hard cases. **Sequence-critical:** do
+     this AFTER 1a — otherwise you hand-curate recipes for cases
+     1a would have auto-discovered, wasting effort.
    - **1d. Bot-detection workaround for Tesla.** Investigate
-     `playwright-stealth` or similar. May not be worth the effort
-     for one company. **Deprioritize.**
+     `playwright-stealth` or similar. Heavy investment for one
+     company. **Out of scope.**
 
-   Recommended sequence: **1a then 1c**. 1b is cheap but only helps
-   AMD. 1d is heavy and only helps Tesla.
+   Required sequence: **1a + 1b parallel (same commit-isolated work),
+   then 1c on the residual set.** Each working recipe = one atomic
+   commit. Re-run `scripts/probe_ai_nav.py` after 1a+1b to identify
+   the residual targets before starting 1c — don't blindly hand-
+   curate all 9.
 
 2. **Pre-flight from round 13 still outstanding:**
    - **Pyright Path A vs B decision** (advisory item). One line either
@@ -288,9 +299,11 @@ Rounds 3-13 quirks still apply. Additions from round 14:
 
 ## Next session's contract
 
-**Primary focus: pick ONE of items 1a, 1b, or 1c** from the carry-
-forward list above. The most leveraged is **1a (URL-param search
-recipe vocabulary)** — addresses ~6 of the 9 targets. Suggested shape:
+**Required deliverables (all three):**
+
+### 1a. URL-param search recipe vocabulary
+
+Highest leverage — addresses ~6 of 9 targets.
 
 1. Read `_DISCOVERY_SYSTEM` in `ai_career_navigator.py:285-307`. The
    prompt today only lists `goto / type / click / press / wait`
@@ -305,9 +318,52 @@ recipe vocabulary)** — addresses ~6 of the 9 targets. Suggested shape:
 5. Each working recipe = one atomic commit; cache the recipe on the
    company row when the probe confirms yield > 0.
 
-If 1a feels too big a session: **fall back to 1c (hand-curation)**
-for Genentech + Apple as the two cleanest cases. Hand-crafted recipes
-are deterministic per-company and bypass discovery entirely.
+### 1b. Longer SPA pre-discovery wait
+
+Cheap, orthogonal to 1a — different code surface. Helps AMD primarily
+but may incidentally help others whose SPAs don't render in 2.5s.
+
+1. Locate the pre-discovery wait in `_try_ai_navigation` (the
+   `page.goto(careers_url, ...) + page.wait_for_timeout(2000)` call).
+2. Replace with a loop that polls `_take_snapshot(page)` length until
+   it exceeds the 50-char guard, capped at ~8s total.
+3. Re-run the probe; AMD should now produce a non-trivial snapshot
+   and either yield a recipe or fail for a different reason.
+
+### 1c. Hand-curate recipes for the residual targets
+
+**Sequence-critical: do this AFTER 1a+1b have shipped and the probe
+has been re-run.** The residual zero-yield set will be smaller —
+plausibly 2-4 targets, not all 9.
+
+1. For each residual target, hand-write a `careers_nav_recipe` JSON
+   blob: identify the actual search-URL pattern, form selector, or
+   API endpoint via browser inspection.
+2. Inject via direct SQL: `UPDATE companies SET careers_nav_recipe = ?, careers_crawl_tier = 'ai_replay' WHERE id = ?`.
+3. Verify with `POST /admin/jobs/careers_crawl/run-now` (single-run
+   doesn't exist — full batch — but stalest-first ordering should
+   pick up the residual targets quickly; the recipe will execute
+   via `_try_cached_tier`'s `ai_replay` shortcut).
+4. Verify `jobs WHERE company_id = X AND sources LIKE '%careers_crawl%'`
+   count goes from 0 to > 0 for each.
+
+### Carried forward from round 13 (still on the docket)
+
+- **Pyright Path A vs B decision** (advisory). One line either way.
+  See "Quirks the next session should know" below. Item #2 in the
+  carry-forward list.
+- **Manual browser smoke for Commit D from round 12** (Country
+  dropdown / Workplace dropdown / pill renderer in /jobs). Quick
+  visual check, requires Flask up.
+- **Workable widget endpoint verification** (round-12 item #4).
+  Trigger via `POST /admin/jobs/companies_scan/run-now`, then
+  re-query `jobs_found_total` for ids 71, 951, 1027, 1036. If all
+  return 0 after a fresh scan, switch endpoint in
+  `_platforms_workable.py` to `apply.workable.com/api/v3/...`.
+- **Phase F Jobvite per-tenant fix** (Item #10 from round 11) —
+  5 jobvite tenants. If 1a's URL-param vocabulary ships, this
+  becomes parallel work in the same vocabulary; otherwise it
+  remains a separate recipe-injection task.
 
 Pre-flight before starting (~5 min total):
 
@@ -316,13 +372,23 @@ Pre-flight before starting (~5 min total):
   later will. Ollama is typically up (port 11434) from the prior
   session's scheduler auto-start.
 
-Holding pattern (deferred from this session forward unless 1a goes
-faster than expected):
+Holding pattern (explicitly out of scope for next session):
 
-- 1b (SPA wait extension) — cheap, helps only AMD.
-- 1d (Tesla bot workaround) — heavy, helps only Tesla. Skip.
-- Phase F Jobvite per-tenant work (item #3). Same shape as 1a if
-  URL-param vocabulary ships.
+- **1d (Tesla bot workaround)** — heavy investment for one
+  company. Skip until/unless there's stranger-facing pressure.
+- **Audit-track items 4-8** below (manual company aliases UI,
+  m063 slug case sensitivity, salary single-value extraction,
+  punctuation in company dedupe, the-institutes slug cleanup) —
+  pre-existing low-priority backlog; not on the next-session
+  critical path unless explicitly elevated.
+
+**Scope reality check:** the v5.0 milestone (Phases 43-45 +
+Phase 40 canary completion) is the actual release-blocker, not
+AI-nav recipes. The next session's contract above is operational
+quality work, not milestone work. If shipping v5.0 publicly is
+the goal, Phase 43 (Update Check + Legal + Strangerify Exit
+Gate) should preempt this entire AI-nav docket. The 1a/1b/1c
+deliverables are valuable but orthogonal to release.
 
 ## Open questions
 
