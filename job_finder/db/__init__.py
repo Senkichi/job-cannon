@@ -54,7 +54,9 @@ from ._jobs import merge_description as merge_description
 from ._jobs import upsert_job as upsert_job
 
 # Read-only filter queries — sort_by allowlist invariant lives here.
+from ._queries import get_distinct_country_codes as get_distinct_country_codes
 from ._queries import get_distinct_sources as get_distinct_sources
+from ._queries import get_distinct_workplace_types as get_distinct_workplace_types
 from ._queries import get_filtered_jobs as get_filtered_jobs
 
 # Pipeline-detection + dashboard read queries (formerly job_finder/db_pipeline.py

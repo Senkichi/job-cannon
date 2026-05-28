@@ -44,6 +44,27 @@
         <div>
           <h2 class="text-lg font-bold text-slate-100">{{ job.title }}</h2>
           <p class="text-slate-400 mt-1 text-sm">{{ job.company }} &mdash; {{ job.location }}</p>
+          {% set _loc_entries = job.locations_structured | from_json %}
+          {% if _loc_entries %}
+          <div class="flex flex-wrap gap-1 mt-1.5" title="{{ job.locations_raw or '' }}">
+            {% for entry in _loc_entries %}
+              {% set _pill_parts = [] %}
+              {% set _city = entry.get('city') %}
+              {% set _region_code = entry.get('region_code') %}
+              {% set _country_code = entry.get('country_code') %}
+              {% set _wt = entry.get('workplace_type') %}
+              {% if _city and _region_code %}{% set _ = _pill_parts.append(_city ~ ', ' ~ _region_code) %}{% elif _city %}{% set _ = _pill_parts.append(_city) %}{% endif %}
+              {% if _country_code %}{% set _ = _pill_parts.append(_country_code) %}{% endif %}
+              {% if _wt and _wt != 'UNSPECIFIED' %}{% set _ = _pill_parts.append(_wt | title) %}{% endif %}
+              {% if _pill_parts %}
+                <span class="inline-flex items-center px-2 py-0.5 text-xs rounded bg-indigo-900/40 text-indigo-200 border border-indigo-700/50"
+                      title="{{ entry.get('raw') or '' }}">
+                  {{ _pill_parts | join(' · ') }}
+                </span>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
           {% if job.salary_min or job.salary_max %}
           <p class="text-slate-300 mt-1 text-sm">
             Salary:

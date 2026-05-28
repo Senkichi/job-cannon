@@ -45,7 +45,10 @@
     {{ job.title }}{% if job.is_stale %} <span class="text-xs text-amber-500 border border-amber-500/50 rounded px-1">Stale</span>{% endif %}{% if job.job_archetype %} <span class="text-xs text-cyan-400 border border-cyan-500/50 rounded px-1">{{ job.job_archetype | replace('_', ' ') }}</span>{% endif %}
   </td>
   <td class="px-2 py-1.5 text-slate-300 truncate">{{ job.company }}</td>
-  <td class="px-2 py-1.5 text-slate-400 truncate">{{ job.location }}</td>
+  {% set canonical = job.locations_structured | format_canonical_location %}
+  <td class="px-2 py-1.5 text-slate-400 truncate" title="{{ job.location }}">
+    {{ canonical if canonical else job.location }}
+  </td>
   <td class="px-1 py-1.5 text-slate-300 whitespace-nowrap">{{ salary }}</td>
   <td class="px-2 py-1.5 text-slate-500 whitespace-nowrap text-xs overflow-hidden" title="{{ posted }}">{{ posted | relative_date }}</td>
   <td class="px-1 py-1.5" id="status-cell-{{ job.dedup_key | urlencode | replace('%', '') }}">

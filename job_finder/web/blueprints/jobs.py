@@ -20,8 +20,10 @@ from flask import (
 )
 
 from job_finder.db import (
+    get_distinct_country_codes,
     get_distinct_locations,
     get_distinct_sources,
+    get_distinct_workplace_types,
     get_filtered_jobs,
     get_job,
     get_pipeline_events,
@@ -156,6 +158,8 @@ def _get_filter_kwargs() -> dict:
         "freshness": args.get("freshness") or None,
         "date_from": args.get("date_from") or None,
         "date_to": args.get("date_to") or None,
+        "country": args.get("country") or None,
+        "workplace_type": args.get("workplace_type") or None,
         "sort_by": args.get("sort_by", "score"),
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,
@@ -223,6 +227,8 @@ def index():
     jobs = get_filtered_jobs(conn, **filters)
     locations = get_distinct_locations(conn)
     sources = get_distinct_sources(conn)
+    countries = get_distinct_country_codes(conn)
+    workplace_types = get_distinct_workplace_types(conn)
     stale_count = _get_stale_count(conn)
     archived_count = conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE pipeline_status = 'archived'"
@@ -238,6 +244,8 @@ def index():
         pipeline_statuses=PIPELINE_STATUSES,
         locations=locations,
         sources=sources,
+        countries=countries,
+        workplace_types=workplace_types,
         stale_count=stale_count,
         archived_count=archived_count,
         hidden_count=hidden_count,

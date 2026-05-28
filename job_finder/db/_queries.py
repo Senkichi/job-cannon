@@ -38,6 +38,36 @@ def get_distinct_sources(conn: sqlite3.Connection) -> list[str]:
     return sorted(seen)
 
 
+def get_distinct_country_codes(conn: sqlite3.Connection) -> list[str]:
+    """Return distinct ``primary_country_code`` values populated on ``jobs``.
+
+    Sub-second on an indexed nullable column — only rows with a resolved
+    country contribute. Empty until Layer-1 scanners (Commit C) or m067
+    backfill (Commit E) populate the column.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT primary_country_code FROM jobs "
+        "WHERE primary_country_code IS NOT NULL "
+        "ORDER BY primary_country_code"
+    ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
+def get_distinct_workplace_types(conn: sqlite3.Connection) -> list[str]:
+    """Return distinct ``workplace_type`` values populated on ``jobs``.
+
+    Drawn from the m066 denormalized column. Values are the four-element
+    enum REMOTE / HYBRID / ONSITE / UNSPECIFIED. Returns whichever subset
+    actually appears in the live data.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT workplace_type FROM jobs "
+        "WHERE workplace_type IS NOT NULL "
+        "ORDER BY workplace_type"
+    ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
 # ---------------------------------------------------------------------------
 # v3.0 classification-rank ordering (Phase 34 Plan 3 Commit A)
 # ---------------------------------------------------------------------------
@@ -133,6 +163,8 @@ def get_filtered_jobs(
     date_from: str | None = None,
     date_to: str | None = None,
     classification: str | list[str] | None = None,
+    country: str | None = None,
+    workplace_type: str | None = None,
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
@@ -267,6 +299,22 @@ def get_filtered_jobs(
     if date_to:
         conditions.append("first_seen <= ? || ' 23:59:59'")
         params.append(date_to)
+
+    # m066 denormalized columns. Values are SQL-bound (no f-string
+    # interpolation), but sanity-check the shape so a malformed query
+    # string returns no results instead of a SQL execute on garbage:
+    #   - country: ISO 3166-1 alpha-2 (uppercase letters, exactly 2 chars)
+    #   - workplace_type: one of the four-member enum.
+    if country:
+        normalized_cc = country.strip().upper()
+        if len(normalized_cc) == 2 and normalized_cc.isalpha():
+            conditions.append("primary_country_code = ?")
+            params.append(normalized_cc)
+    if workplace_type:
+        normalized_wt = workplace_type.strip().upper()
+        if normalized_wt in {"REMOTE", "HYBRID", "ONSITE", "UNSPECIFIED"}:
+            conditions.append("workplace_type = ?")
+            params.append(normalized_wt)
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"SELECT {JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"

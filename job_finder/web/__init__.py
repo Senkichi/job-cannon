@@ -207,6 +207,80 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
 
     app.jinja_env.filters["format_description"] = format_description_filter
 
+    @app.template_filter("format_canonical_location")
+    def format_canonical_location_filter(value, max_entries: int = 3) -> str:
+        """Render ``locations_structured`` (JSON or list[JobLocation]) as text.
+
+        Accepts:
+          - a JSON string from ``jobs.locations_structured`` (NULL → ``""``)
+          - a single ``JobLocation`` dataclass
+          - a ``list[JobLocation]``
+          - a list of plain dicts (after JSON deserialization)
+
+        Returns a comma-separated string of entries, capped at ``max_entries``;
+        any overflow is summarized as ``+N more``. Each entry is rendered in
+        ``"City, Region · Country · Workplace"`` order, omitting absent
+        fields and the workplace suffix when UNSPECIFIED.
+
+        Falsy / unparseable input → empty string. The caller is expected
+        to fall back to the legacy ``location`` column when this returns
+        empty.
+        """
+        if not value:
+            return ""
+        # Lazy import: avoids a cold-path circular when this module is
+        # imported before location_canonical's dataclass binds.
+        from job_finder.web.location_canonical import JobLocation
+
+        # Coerce input shapes to a list of mapping-like records.
+        records: list = []
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return ""
+            records = parsed if isinstance(parsed, list) else [parsed]
+        elif isinstance(value, JobLocation):
+            records = [value]
+        elif isinstance(value, list):
+            records = value
+        else:
+            return ""
+
+        def _field(rec, key):
+            if isinstance(rec, JobLocation):
+                return getattr(rec, key, None)
+            if isinstance(rec, dict):
+                return rec.get(key)
+            return None
+
+        rendered: list[str] = []
+        for rec in records[:max_entries]:
+            city = _field(rec, "city") or ""
+            region_code = _field(rec, "region_code") or ""
+            country_code = _field(rec, "country_code") or ""
+            workplace_type = _field(rec, "workplace_type") or ""
+
+            head_parts = [p for p in (city, region_code) if p]
+            head = ", ".join(head_parts)
+            tail_parts = []
+            if country_code:
+                tail_parts.append(country_code)
+            if workplace_type and workplace_type != "UNSPECIFIED":
+                tail_parts.append(workplace_type.title())
+
+            pieces = [p for p in (head, *tail_parts) if p]
+            if pieces:
+                rendered.append(" · ".join(pieces))
+
+        if not rendered:
+            return ""
+
+        overflow = len(records) - max_entries
+        if overflow > 0:
+            rendered.append(f"+{overflow} more")
+        return ", ".join(rendered)
+
     # --- Blueprint registration ---
     from job_finder.web.blueprints.admin import admin_bp
     from job_finder.web.blueprints.batch_scoring import batch_scoring_bp
