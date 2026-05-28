@@ -39,6 +39,37 @@ logger = logging.getLogger(__name__)
 _STATIC_TEXT_RATIO = 0.02
 _STATIC_MIN_TEXT_LEN = 500
 
+# Tile-container element names that bound the context-title search when an
+# <a> has empty inner text. Once we hit one of these we stop walking up.
+_TILE_CONTAINER_TAGS = {"li", "article", "section"}
+_MAX_CONTEXT_HOPS = 3
+
+
+def _find_title_via_context(tag) -> str:
+    """Find a title in the DOM context of an empty/short-text <a> tag.
+
+    Oracle-style listings render each tile as an <a> wrapping no visible
+    text — the title lives in a sibling/parent <h*> instead. Walk up at
+    most ``_MAX_CONTEXT_HOPS`` ancestors (or stop early at a tile-like
+    container), searching each ancestor's subtree for a heading.
+
+    Returns the heading text, or "" when no usable title is found.
+    """
+    current = tag
+    for _ in range(_MAX_CONTEXT_HOPS):
+        parent = current.parent
+        if parent is None or parent.name in (None, "body", "html", "[document]"):
+            break
+        heading = parent.find(["h1", "h2", "h3", "h4", "h5", "h6"])
+        if heading is not None:
+            text = heading.get_text(strip=True)
+            if text and len(text) >= 4:
+                return text
+        if parent.name in _TILE_CONTAINER_TAGS:
+            break
+        current = parent
+    return ""
+
 
 def _extract_jobs_from_soup(
     soup: BeautifulSoup,
@@ -93,8 +124,14 @@ def _extract_jobs_from_soup(
             continue
 
         raw_text = tag.get_text(strip=True)
+        # Oracle-style listings: the <a> wrapping a job tile has empty inner
+        # text because the title lives in a sibling <h*>. Look up the DOM
+        # before discarding. See FOLLOWUPS.md round-15 Gap #2.
+        context_title = ""
         if not raw_text or len(raw_text) < 4:
-            continue
+            context_title = _find_title_via_context(tag)
+            if not context_title:
+                continue
 
         # Resolve URL
         absolute_url = urljoin(base_url, href)
@@ -108,8 +145,10 @@ def _extract_jobs_from_soup(
         if absolute_url in seen_urls:
             continue
 
-        # Clean title and apply keyword filter
-        title = _clean_title(tag, raw_text)
+        # Clean title and apply keyword filter. A context-resolved title
+        # already comes from a heading element and skips _clean_title's
+        # suffix-stripping (the heading text is clean by construction).
+        title = context_title or _clean_title(tag, raw_text)
         # Reject obvious metadata blobs (titles that are actually concatenated
         # description+location+req-ID text from aggregator-style pages). These
         # would otherwise leak through with junk titles that pollute the UI

@@ -357,6 +357,112 @@ class TestExtractJobsFromSoup:
         assert len(jobs) == 1
         assert "/jobs/real" in jobs[0]["url"]
 
+    def test_extract_jobs_finds_title_in_sibling_when_link_text_empty(self):
+        """Oracle-style: <a> wraps no visible text; title lives in a sibling <h3>.
+
+        FOLLOWUPS round-15 Gap #2. Without the context-title fallback the
+        extractor would discard these tiles via the length<4 reject point
+        in _extract_jobs_from_soup.
+        """
+        html = """
+        <html><body>
+        <ul>
+          <li>
+            <a href="/sites/jobsearch/job/12345/?keyword=data"></a>
+            <h3>Senior Data Engineer</h3>
+            <span>Santa Clara, CA</span>
+          </li>
+          <li>
+            <a href="/sites/jobsearch/job/67890/?keyword=data"></a>
+            <h3>Principal Data Scientist</h3>
+            <span>Remote</span>
+          </li>
+        </ul>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup,
+            "https://oracle.com",
+            ["data engineer", "data scientist"],
+            [],
+        )
+        titles = sorted(j["title"] for j in jobs)
+        assert titles == ["Principal Data Scientist", "Senior Data Engineer"]
+        assert all("/sites/jobsearch/job/" in j["url"] for j in jobs)
+
+    def test_extract_jobs_context_title_walks_to_article_ancestor(self):
+        """The <a> is one level above the heading's <li>; walk up to <article>."""
+        html = """
+        <html><body>
+        <article>
+          <a href="/jobs/777"><img alt=""></a>
+          <div><h2>Staff Software Engineer</h2></div>
+        </article>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup,
+            "https://example.com",
+            ["software engineer"],
+            [],
+        )
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Staff Software Engineer"
+
+    def test_extract_jobs_context_title_discards_when_no_heading_found(self):
+        """Empty <a> with no heading anywhere in scope → still discarded."""
+        html = """
+        <html><body>
+        <div>
+          <a href="/jobs/nothing"></a>
+          <span>just some text not a heading</span>
+        </div>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup,
+            "https://example.com",
+            [],
+            [],
+        )
+        assert jobs == []
+
+    def test_extract_jobs_context_title_capped_at_three_ancestors(self):
+        """Search doesn't escape to the page header — deeply-nested empty <a>
+        whose only nearby heading is far up the DOM should not pick up the
+        page-level <h1>.
+        """
+        html = """
+        <html><body>
+        <h1>Careers at Example Corp</h1>
+        <main>
+          <section>
+            <div>
+              <div>
+                <div>
+                  <a href="/jobs/leaked"></a>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+        </body></html>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        jobs = _extract_jobs_from_soup(
+            soup,
+            "https://example.com",
+            [],
+            [],
+        )
+        # The h1 should NOT be picked up: <a>'s nearest 3 ancestors are
+        # nested <div>s with no headings; the search caps before reaching
+        # the body/main where the page title lives.
+        assert jobs == []
+
     def test_jsonld_takes_priority_no_duplicates(self):
         """Jobs found via JSON-LD should not be duplicated by link pass."""
         html = """
