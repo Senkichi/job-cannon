@@ -157,17 +157,20 @@ def test_emea_does_not_anchor() -> None:
 # ─── Ambiguous codes ─────────────────────────────────────────────────
 
 
-def test_springfield_ambiguous_no_state_returns_unresolved_city() -> None:
-    """8 Springfields exist in US; with no state, city should be None.
+def test_springfield_ambiguous_no_state_resolves_to_largest_us() -> None:
+    """8 Springfields exist in US; SPEC Q1 picks the largest by population.
 
-    SPEC's open Q1 default: leave city=None when region is missing AND
-    multiple gazetteer matches exist. The country/region anchor still
-    resolves where possible.
+    SPEC Q1 resolution (2026-05-27): country-anchored fallback, then
+    population-weighted within that country. Replaces the prior default
+    (``city=None``) which discarded usable signal.
+
+    Largest US Springfield is Springfield, MO (pop ~167k per geonamescache).
     """
     locations = parse_locations("Springfield, USA")
     assert len(locations) == 1
     assert locations[0].country_code == "US"
-    assert locations[0].city is None  # 8 candidates, ambiguous
+    assert locations[0].city == "Springfield"
+    assert locations[0].region_code == "MO"
 
 
 def test_springfield_with_state_resolves() -> None:
@@ -177,6 +180,43 @@ def test_springfield_with_state_resolves() -> None:
     assert locations[0].country_code == "US"
     assert locations[0].region_code == "IL"
     assert locations[0].city == "Springfield"
+
+
+def test_springfield_bare_no_anchors_us_default(
+) -> None:
+    """SPEC Q1: ``Springfield`` alone (no country signal) → US default.
+
+    User-confirmed (2026-05-27): when the location string carries no
+    country anchor at all, default to US since the corpus is
+    US-dominant. Resolves to the largest US Springfield (Springfield, MO).
+    """
+    locations = parse_locations("Springfield")
+    assert len(locations) == 1
+    assert locations[0].country_code == "US"
+    assert locations[0].city == "Springfield"
+    assert locations[0].region_code == "MO"
+
+
+def test_paris_bare_us_default_resolves_to_paris_tx() -> None:
+    """SPEC Q1: bare ``Paris`` → Paris, TX (US default policy trade-off).
+
+    Documented in the Q1 commit message — the US-default fallback can
+    surprise on globally-famous names with small US namesakes. Mitigation
+    is to supply a country anchor in the input string (``Paris, France``).
+    """
+    locations = parse_locations("Paris")
+    assert len(locations) == 1
+    assert locations[0].country_code == "US"
+    assert locations[0].region_code == "TX"
+    assert locations[0].city == "Paris"
+
+
+def test_paris_with_country_anchor_resolves_to_paris_france() -> None:
+    """When the input names the country, the US default does NOT apply."""
+    locations = parse_locations("Paris, France")
+    assert len(locations) == 1
+    assert locations[0].country_code == "FR"
+    assert locations[0].city == "Paris"
 
 
 def test_ca_as_trailing_state_anchors_us() -> None:

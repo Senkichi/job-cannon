@@ -326,21 +326,29 @@ def _lookup_city(
 ) -> dict[str, Any] | None:
     """Find a city in geonamescache scoped by country (and optionally region).
 
-    Disambiguation rules:
+    Disambiguation rules (SPEC Q1, resolved 2026-05-27 — country-anchored
+    fallback + population-weighted within that country):
       - If ``country_code`` is set, restrict to cities with that countrycode.
+      - If ``country_code`` is None and 2+ global candidates exist, default
+        the country anchor to ``US`` and restrict to US matches. When no US
+        matches exist, fall through to global population-weighted (rare —
+        ``Paris`` alone resolves to Paris, TX under this policy because
+        the corpus is US-dominant; non-US callers must supply a country
+        anchor in the location string).
       - If ``region_code`` is set AND ``country_code == "US"``, also restrict
         to cities with admin1code == region_code (US admin1codes are ISO
         3166-2, so this is reliable). For non-US countries, geonamescache
         admin1code is FIPS/numeric — skip the region filter rather than
         risk a wrong scope.
-      - When multiple matches remain, return the highest-population match
-        (matches what humans usually mean by ambiguous names like "Paris"
-        or "Springfield" with no further context).
-      - When zero matches survive scoping but the country anchor exists,
-        return None (the caller emits unresolved with what's known).
-      - Single match with city ambiguity at the same name (e.g. 8x
-        Springfield in US) WITHOUT a region_code → return None to signal
-        "ambiguous; do not guess." Anchor stays via the existing country.
+      - Always pick the highest-population candidate that survives scoping
+        (matches what humans usually mean by ambiguous names within a
+        country: largest Springfield in US is Springfield, MO).
+      - When zero matches survive scoping, return None.
+
+    Previous behavior (pre-Q1): returned None when 2+ candidates remained
+    without a ``region_code`` scope, leaving ``city=None``. The user
+    explicitly rejected that default at session-end 2026-05-27 because
+    it discarded usable signal — see SPEC Q1 resolution.
     """
     if not token:
         return None
@@ -349,18 +357,18 @@ def _lookup_city(
         return None
     if country_code:
         candidates = [c for c in candidates if c.get("countrycode") == country_code]
+    elif len(candidates) >= 2:
+        # SPEC Q1: no country anchor + ambiguous → default to US.
+        us_only = [c for c in candidates if c.get("countrycode") == "US"]
+        if us_only:
+            candidates = us_only
+        # else: keep global candidates, fall through to population tiebreak.
     if not candidates:
         return None
     if region_code and country_code == "US":
         scoped = [c for c in candidates if c.get("admin1code") == region_code]
         if scoped:
             candidates = scoped
-    # Ambiguity guard: if 2+ cities remain AND no region_code was provided
-    # to scope them, SPEC says leave city=None. Only ties on (country,
-    # region) ambiguity trip this; if region_code IS provided we trust
-    # the scope already restricted us.
-    if len(candidates) >= 2 and not region_code:
-        return None
     candidates.sort(key=lambda c: c.get("population", 0) or 0, reverse=True)
     return candidates[0]
 
