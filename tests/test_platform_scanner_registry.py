@@ -13,12 +13,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from job_finder.web.ats_platforms_internal._registry import (
+from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
     run_platform_scan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,7 +158,7 @@ class TestRunPlatformScan:
 
 
 class TestHttpGetJson:
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_success_returns_parsed_json(self, mock_get):
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {"jobs": [{"id": "1"}]}
@@ -168,33 +167,33 @@ class TestHttpGetJson:
         result = _http_get_json("https://x", log_label="scan_x", slug="foo")
         assert result == {"jobs": [{"id": "1"}]}
 
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_non_200_returns_none(self, mock_get):
         mock_get.return_value = MagicMock(status_code=404)
         assert _http_get_json("https://x", log_label="scan_x", slug="foo") is None
 
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_exception_returns_none(self, mock_get):
         mock_get.side_effect = Exception("connection refused")
         assert _http_get_json("https://x", log_label="scan_x", slug="foo") is None
 
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_json_parse_error_returns_none(self, mock_get):
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.side_effect = ValueError("bad json")
         mock_get.return_value = mock_resp
         assert _http_get_json("https://x", log_label="scan_x", slug="foo") is None
 
-    @patch("job_finder.web.ats_platforms_internal._registry.time.sleep")
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.time.sleep")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_timeout_without_retry_returns_none(self, mock_get, mock_sleep):
         mock_get.side_effect = requests.exceptions.Timeout("read timeout")
         assert _http_get_json("https://x", log_label="scan_x", slug="foo") is None
         assert mock_get.call_count == 1
         mock_sleep.assert_not_called()
 
-    @patch("job_finder.web.ats_platforms_internal._registry.time.sleep")
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.time.sleep")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_timeout_with_retry_retries_once_then_succeeds(self, mock_get, mock_sleep):
         success_resp = MagicMock(status_code=200)
         success_resp.json.return_value = {"ok": True}
@@ -210,8 +209,8 @@ class TestHttpGetJson:
         assert mock_get.call_count == 2
         mock_sleep.assert_called_once_with(2)
 
-    @patch("job_finder.web.ats_platforms_internal._registry.time.sleep")
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.time.sleep")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_timeout_with_retry_gives_up_after_second_attempt(self, mock_get, mock_sleep):
         mock_get.side_effect = [
             requests.exceptions.Timeout("first"),
@@ -227,7 +226,7 @@ class TestHttpGetJson:
         assert mock_get.call_count == 2
         mock_sleep.assert_called_once_with(2)
 
-    @patch("job_finder.web.ats_platforms_internal._registry.requests.get")
+    @patch("job_finder.web.ats_platforms._registry.requests.get")
     def test_params_and_headers_forwarded(self, mock_get):
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = []
@@ -255,31 +254,31 @@ class TestPlatformScannerConstants:
     @pytest.mark.parametrize(
         "module_path,expected_name,expected_company_source",
         [
-            ("job_finder.web.ats_platforms_internal._platforms_lever", "lever", "Lever"),
+            ("job_finder.web.ats_platforms._platforms_lever", "lever", "Lever"),
             (
-                "job_finder.web.ats_platforms_internal._platforms_greenhouse",
+                "job_finder.web.ats_platforms._platforms_greenhouse",
                 "greenhouse",
                 "Greenhouse",
             ),
-            ("job_finder.web.ats_platforms_internal._platforms_ashby", "ashby", "Ashby"),
-            ("job_finder.web.ats_platforms_internal._platforms_workday", "workday", "Workday"),
+            ("job_finder.web.ats_platforms._platforms_ashby", "ashby", "Ashby"),
+            ("job_finder.web.ats_platforms._platforms_workday", "workday", "Workday"),
             (
-                "job_finder.web.ats_platforms_internal._platforms_smartrecruiters",
+                "job_finder.web.ats_platforms._platforms_smartrecruiters",
                 "smartrecruiters",
                 "SmartRecruiters",
             ),
             (
-                "job_finder.web.ats_platforms_internal._platforms_recruitee",
+                "job_finder.web.ats_platforms._platforms_recruitee",
                 "recruitee",
                 "Recruitee",
             ),
-            ("job_finder.web.ats_platforms_internal._platforms_breezy", "breezy", "Breezy"),
-            ("job_finder.web.ats_platforms_internal._platforms_jazzhr", "jazzhr", "JazzHR"),
-            ("job_finder.web.ats_platforms_internal._platforms_pinpoint", "pinpoint", "Pinpoint"),
-            ("job_finder.web.ats_platforms_internal._platforms_personio", "personio", "Personio"),
-            ("job_finder.web.ats_platforms_internal._platforms_bamboohr", "bamboohr", "BambooHR"),
+            ("job_finder.web.ats_platforms._platforms_breezy", "breezy", "Breezy"),
+            ("job_finder.web.ats_platforms._platforms_jazzhr", "jazzhr", "JazzHR"),
+            ("job_finder.web.ats_platforms._platforms_pinpoint", "pinpoint", "Pinpoint"),
+            ("job_finder.web.ats_platforms._platforms_personio", "personio", "Personio"),
+            ("job_finder.web.ats_platforms._platforms_bamboohr", "bamboohr", "BambooHR"),
             (
-                "job_finder.web.ats_platforms_internal._platforms_teamtailor",
+                "job_finder.web.ats_platforms._platforms_teamtailor",
                 "teamtailor",
                 "Teamtailor",
             ),
@@ -291,7 +290,7 @@ class TestPlatformScannerConstants:
         import importlib
 
         mod = importlib.import_module(module_path)
-        scanner = getattr(mod, "SCANNER")
+        scanner = mod.SCANNER
         assert isinstance(scanner, PlatformScanner)
         assert scanner.name == expected_name
         assert scanner.company_source == expected_company_source

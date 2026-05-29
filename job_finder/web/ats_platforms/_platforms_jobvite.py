@@ -31,7 +31,7 @@ per-tenant fingerprint.
 
 from __future__ import annotations
 
-from job_finder.web.ats_platforms_internal._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import PlatformScanner
 
 
 def _fetch_postings(_slug: str) -> list[dict]:

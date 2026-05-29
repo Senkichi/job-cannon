@@ -21,8 +21,8 @@ import logging
 import re
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
-from job_finder.web.ats_platforms_internal import SCANNERS_BY_NAME
-from job_finder.web.ats_platforms_internal._registry import run_platform_scan
+from job_finder.web.ats_platforms import SCANNERS_BY_NAME
+from job_finder.web.ats_platforms._registry import run_platform_scan
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -32,9 +32,9 @@ EXPIRED = "expired"
 LIVE = "live"
 INCONCLUSIVE = "inconclusive"
 
-# Pagination cap used inside scan_workday (ats_platforms.py). If a scan
-# returns this many postings the board is truncated and reconciliation
-# would falsely expire everything past the cap.
+# Pagination cap used inside scan_workday (ats_platforms._platforms_workday).
+# If a scan returns this many postings the board is truncated and
+# reconciliation would falsely expire everything past the cap.
 _WORKDAY_CAP = 200
 
 # Posting-ID extraction patterns. Applied to BOTH sides of the set-diff

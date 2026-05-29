@@ -22,43 +22,43 @@ from datetime import datetime
 
 from job_finder.db import derive_classification
 from job_finder.secrets import get_secret
-from job_finder.web.ats_platforms_internal._platforms_ashby import SCANNER as _ASHBY_SCANNER
-from job_finder.web.ats_platforms_internal._platforms_bamboohr import (
+from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
+from job_finder.web.ats_platforms._platforms_bamboohr import (
     SCANNER as _BAMBOOHR_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_breezy import SCANNER as _BREEZY_SCANNER
-from job_finder.web.ats_platforms_internal._platforms_greenhouse import (
+from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SCANNER
+from job_finder.web.ats_platforms._platforms_greenhouse import (
     SCANNER as _GREENHOUSE_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
-from job_finder.web.ats_platforms_internal._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
-from job_finder.web.ats_platforms_internal._platforms_lever import SCANNER as _LEVER_SCANNER
-from job_finder.web.ats_platforms_internal._platforms_paylocity import (
+from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
+from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
+from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
+from job_finder.web.ats_platforms._platforms_paylocity import (
     SCANNER as _PAYLOCITY_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_personio import (
+from job_finder.web.ats_platforms._platforms_personio import (
     SCANNER as _PERSONIO_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_pinpoint import (
+from job_finder.web.ats_platforms._platforms_pinpoint import (
     SCANNER as _PINPOINT_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_recruitee import (
+from job_finder.web.ats_platforms._platforms_recruitee import (
     SCANNER as _RECRUITEE_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_rippling import (
+from job_finder.web.ats_platforms._platforms_rippling import (
     SCANNER as _RIPPLING_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_smartrecruiters import (
+from job_finder.web.ats_platforms._platforms_smartrecruiters import (
     SCANNER as _SMARTRECRUITERS_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_teamtailor import (
+from job_finder.web.ats_platforms._platforms_teamtailor import (
     SCANNER as _TEAMTAILOR_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_workable import (
+from job_finder.web.ats_platforms._platforms_workable import (
     SCANNER as _WORKABLE_SCANNER,
 )
-from job_finder.web.ats_platforms_internal._platforms_workday import SCANNER as _WORKDAY_SCANNER
-from job_finder.web.ats_platforms_internal._registry import PlatformScanner, run_platform_scan
+from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
+from job_finder.web.ats_platforms._registry import PlatformScanner, run_platform_scan
 from job_finder.web.ats_prober import _handle_scan_error, _is_transient_error
 from job_finder.web.ats_scanner._run_html import _run_html_fallback_scan
 from job_finder.web.db_helpers import standalone_connection

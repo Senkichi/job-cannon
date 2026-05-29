@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Recruitee
 # ---------------------------------------------------------------------------
@@ -357,7 +356,7 @@ class TestScanPersonio:
 </workzag-jobs>
 """
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_personio.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_personio.requests.get")
     def test_returns_matched_jobs_from_de_feed(self, mock_get):
         from job_finder.web.ats_platforms import scan_personio
 
@@ -375,7 +374,7 @@ class TestScanPersonio:
         assert "5+ years" in job["description"]
         assert job["source_url"] == "https://acme.jobs.personio.de/job/42"
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_personio.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_personio.requests.get")
     def test_falls_back_to_com_tld_on_de_404(self, mock_get):
         """If .de returns 404, retry on .com TLD."""
         from job_finder.web.ats_platforms import scan_personio
@@ -389,7 +388,7 @@ class TestScanPersonio:
         assert len(results) == 1
         assert mock_get.call_count == 2
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_personio.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_personio.requests.get")
     def test_returns_empty_when_both_tlds_404(self, mock_get):
         from job_finder.web.ats_platforms import scan_personio
 
@@ -418,7 +417,7 @@ class TestScanBamboohr:
 </body></html>
 """
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_bamboohr.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_bamboohr.requests.get")
     def test_returns_matched_jobs_from_html_widget(self, mock_get):
         from job_finder.web.ats_platforms import scan_bamboohr
 
@@ -437,7 +436,7 @@ class TestScanBamboohr:
         # is filled later by enrichment.
         assert job["description"] == ""
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_bamboohr.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_bamboohr.requests.get")
     def test_protocol_relative_href_gets_https(self, mock_get):
         from job_finder.web.ats_platforms import scan_bamboohr
 
@@ -455,7 +454,7 @@ class TestScanBamboohr:
         results = scan_bamboohr("acme", ["data scientist"], [])
         assert results[0]["source_url"] == "https://other.bamboohr.com/careers/9"
 
-    @patch("job_finder.web.ats_platforms_internal._platforms_bamboohr.requests.get")
+    @patch("job_finder.web.ats_platforms._platforms_bamboohr.requests.get")
     def test_returns_empty_on_http_error(self, mock_get):
         from job_finder.web.ats_platforms import scan_bamboohr
 

@@ -30,7 +30,7 @@ salary strings; we store the raw text in description as a fallback.
 
 from __future__ import annotations
 
-from job_finder.web.ats_platforms_internal._registry import (
+from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )

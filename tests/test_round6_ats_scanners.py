@@ -27,7 +27,6 @@ from job_finder.web.ats_detection import (
     extract_ats_from_url_best,
 )
 
-
 # ---------------------------------------------------------------------------
 # Extractor version bump
 # ---------------------------------------------------------------------------
@@ -212,7 +211,7 @@ class TestProbeRippling:
 
 class TestWorkableScanner:
     def test_fetch_postings_returns_jobs_array(self):
-        from job_finder.web.ats_platforms_internal._platforms_workable import (
+        from job_finder.web.ats_platforms._platforms_workable import (
             _fetch_postings,
         )
 
@@ -229,7 +228,7 @@ class TestWorkableScanner:
             ],
         }
         with patch(
-            "job_finder.web.ats_platforms_internal._registry.requests.get",
+            "job_finder.web.ats_platforms._registry.requests.get",
             return_value=_FakeResp(200, sample),
         ):
             postings = _fetch_postings("acme")
@@ -237,7 +236,7 @@ class TestWorkableScanner:
         assert postings[0]["title"] == "Senior Engineer"
 
     def test_posting_to_job_strips_html_and_falls_back_to_shortcode_url(self):
-        from job_finder.web.ats_platforms_internal._platforms_workable import (
+        from job_finder.web.ats_platforms._platforms_workable import (
             _posting_to_job,
         )
 
@@ -256,7 +255,7 @@ class TestWorkableScanner:
 
 class TestPaylocityScanner:
     def test_fetch_postings_extracts_jobs(self):
-        from job_finder.web.ats_platforms_internal._platforms_paylocity import (
+        from job_finder.web.ats_platforms._platforms_paylocity import (
             _fetch_postings,
         )
 
@@ -268,14 +267,14 @@ class TestPaylocityScanner:
             ],
         }
         with patch(
-            "job_finder.web.ats_platforms_internal._registry.requests.get",
+            "job_finder.web.ats_platforms._registry.requests.get",
             return_value=_FakeResp(200, sample),
         ):
             postings = _fetch_postings("00000000-0000-0000-0000-000000000000")
         assert len(postings) == 1
 
     def test_posting_to_job_stitches_multi_section_description(self):
-        from job_finder.web.ats_platforms_internal._platforms_paylocity import (
+        from job_finder.web.ats_platforms._platforms_paylocity import (
             _posting_to_job,
         )
 
@@ -303,7 +302,7 @@ class TestRipplingScanner:
     def test_fetch_postings_paginates(self):
         """Walks pages until totalPages reached. Two-page sample collapses to
         a flat list of items from both pages."""
-        from job_finder.web.ats_platforms_internal._platforms_rippling import (
+        from job_finder.web.ats_platforms._platforms_rippling import (
             _fetch_postings,
         )
 
@@ -323,14 +322,14 @@ class TestRipplingScanner:
         }
         responses = [_FakeResp(200, page1), _FakeResp(200, page2)]
         with patch(
-            "job_finder.web.ats_platforms_internal._registry.requests.get",
+            "job_finder.web.ats_platforms._registry.requests.get",
             side_effect=responses,
         ):
             postings = _fetch_postings("joinroot")
         assert [p["id"] for p in postings] == ["a", "b"]
 
     def test_posting_to_job_builds_canonical_dict(self):
-        from job_finder.web.ats_platforms_internal._platforms_rippling import (
+        from job_finder.web.ats_platforms._platforms_rippling import (
             _posting_to_job,
         )
 
@@ -353,7 +352,7 @@ class TestRipplingScanner:
 
 class TestJobviteScannerIsStub:
     def test_fetch_postings_always_returns_empty(self):
-        from job_finder.web.ats_platforms_internal._platforms_jobvite import (
+        from job_finder.web.ats_platforms._platforms_jobvite import (
             _fetch_postings,
         )
 

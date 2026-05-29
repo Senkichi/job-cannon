@@ -10,19 +10,18 @@ shape change can't silently regress the structured-location pipeline.
 
 from __future__ import annotations
 
-from job_finder.web.ats_platforms_internal._platforms_ashby import (
+from job_finder.web.ats_platforms._platforms_ashby import (
     _to_canonical as ashby_canon,
 )
-from job_finder.web.ats_platforms_internal._platforms_lever import (
+from job_finder.web.ats_platforms._platforms_lever import (
     _to_canonical as lever_canon,
 )
-from job_finder.web.ats_platforms_internal._platforms_rippling import (
+from job_finder.web.ats_platforms._platforms_rippling import (
     _to_canonical as rippling_canon,
 )
-from job_finder.web.ats_platforms_internal._platforms_smartrecruiters import (
+from job_finder.web.ats_platforms._platforms_smartrecruiters import (
     _to_canonical as smartrecruiters_canon,
 )
-
 
 # ---------- SmartRecruiters ----------
 

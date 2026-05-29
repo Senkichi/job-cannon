@@ -9,7 +9,7 @@ workplace_type, and a job.department.name nested under "job".
 
 from __future__ import annotations
 
-from job_finder.web.ats_platforms_internal._registry import (
+from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )

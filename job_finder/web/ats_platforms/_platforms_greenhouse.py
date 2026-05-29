@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from job_finder.web.ats_platforms_internal._registry import (
+from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )

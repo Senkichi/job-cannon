@@ -8,7 +8,7 @@ short summary); ``jd_full`` enrichment runs later from ``source_url``.
 
 from __future__ import annotations
 
-from job_finder.web.ats_platforms_internal._registry import (
+from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )
