@@ -169,7 +169,7 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_SCHEDULED_STALENESS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
@@ -184,7 +184,7 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_BATCH_SCORE,
             ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_SCHEDULED_STALENESS,
             ACTION_SAVE_JD,
         ]
         # Unique string values
@@ -199,7 +199,7 @@ class TestActionConstants:
             ACTION_RESCORE,
             ACTION_SAVE_JD,
             ACTION_SCHEDULED_ATS_SCAN,
-            ACTION_SCHEDULED_EXPIRY_CHECK,
+            ACTION_SCHEDULED_STALENESS,
             ACTION_SCHEDULED_SYNC,
             ACTION_STATUS_CHANGE,
             ACTION_SYNC,
@@ -213,7 +213,7 @@ class TestActionConstants:
         assert ACTION_RESCORE == "rescore"
         assert ACTION_BATCH_SCORE == "batch_score"
         assert ACTION_SCHEDULED_ATS_SCAN == "scheduled_ats_scan"
-        assert ACTION_SCHEDULED_EXPIRY_CHECK == "scheduled_expiry_check"
+        assert ACTION_SCHEDULED_STALENESS == "scheduled_staleness"
         assert ACTION_SAVE_JD == "save_jd"
 
 

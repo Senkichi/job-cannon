@@ -146,7 +146,7 @@ def _scan_one_company_via_html(
                         salary_max=None,
                         description=scraped_job.get("description", ""),
                     )
-                    is_new = upsert_job(html_conn, job)
+                    is_new = upsert_job(html_conn, job, company_id=miss_company_id)
                     if is_new:
                         summary["jobs_new"] += 1
                         all_new_job_keys.append(job.dedup_key)

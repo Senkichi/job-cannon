@@ -89,10 +89,11 @@ def _search_ddg(query: str, max_results: int = 5) -> list[dict]:
     """Search DuckDuckGo and return results [{title, href, body}].
 
     When DDGS exhausts every engine (google, yandex, yahoo, grokipedia, ...)
-    it returns an empty list without raising. Previously this was invisible
-    to operators — ddgs itself logs engine errors at INFO level from its
-    own logger, buried in noise. We surface the aggregate failure at WARNING
-    so it's greppable as 'DDGS: all engines returned empty'.
+    it returns an empty list without raising. Surface as INFO (greppable as
+    'DDGS: all engines returned empty') — not actionable for the operator
+    and high-volume (60+ per audit week), so WARNING was misleading: the
+    pipeline has its own fallback to DataForSEO / Google CSE and degrades
+    gracefully when DDGS can't help.
     """
     try:
         from ddgs import DDGS
@@ -104,7 +105,7 @@ def _search_ddg(query: str, max_results: int = 5) -> list[dict]:
         return []
 
     if not results:
-        logger.warning("DDGS: all engines returned empty for query '%s'", query[:80])
+        logger.info("DDGS: all engines returned empty for query '%s'", query[:80])
     return results
 
 

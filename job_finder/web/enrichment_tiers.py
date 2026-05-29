@@ -748,9 +748,10 @@ def search_ddg_web(title: str, company: str) -> dict:
             logger.debug("DDG web search failed for '%s': %s", query[:60], exc)
 
         # Empty result without exception = all engines exhausted for this query.
-        # Surface as WARNING for operator visibility (was silent before).
+        # INFO not WARNING — the pipeline degrades gracefully to other search
+        # backends, so this is not actionable for the operator.
         if not results:
-            logger.warning("DDGS: all engines returned empty for query '%s'", query[:80])
+            logger.info("DDGS: all engines returned empty for query '%s'", query[:80])
 
         for r in results:
             href = r.get("href", "")

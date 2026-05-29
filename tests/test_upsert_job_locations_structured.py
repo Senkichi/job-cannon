@@ -141,12 +141,14 @@ def test_layer2_default_parses_job_location(conn: sqlite3.Connection):
 
 
 def test_layer2_empty_location_string_writes_nulls(conn: sqlite3.Connection):
-    """Empty/placeholder input → parse_locations returns []; 3 cols stay NULL."""
+    """Empty/placeholder input → parse_locations returns []; locations_structured
+    + primary_country_code stay NULL but workplace_type defaults to
+    'UNSPECIFIED' (per m072 contract — column must always be populated)."""
     job = _make_job(location="")
     upsert_job(conn, job)
     row = _select_loc_cols(conn, job.dedup_key)
     assert row["locations_structured"] is None
-    assert row["workplace_type"] is None
+    assert row["workplace_type"] == "UNSPECIFIED"
     assert row["primary_country_code"] is None
 
 

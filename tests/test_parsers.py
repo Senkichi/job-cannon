@@ -56,6 +56,35 @@ class TestGlassdoorParser:
         assert parse_glassdoor_alert("") == []
         assert parse_glassdoor_alert("<html></html>") == []
 
+    def test_partial_card_with_title_but_no_company_dropped(self):
+        # Regression: audit on 2026-05-28 found 80 jobs persisted with
+        # company="Unknown" + sources=["glassdoor"]. The parser was hitting
+        # TITLE_CLASS but not COMPANY_CLASS, defaulting to "Unknown" and
+        # building the Job anyway. With the boundary fix, the row must
+        # drop rather than orphan the jobs table.
+        html = """<html><body>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=1&jobListingId=99999">
+  <p class="jobTitle">Some Engineer</p>
+  <p class="jobDetails">Remote</p>
+</a>
+</body></html>"""
+        assert parse_glassdoor_alert(html) == []
+
+    def test_positional_card_with_no_extractable_company_dropped(self):
+        # Same regression for the positional (2026 v1 classless) fallback.
+        # Title exists but every span looks like a rating: parser must
+        # return None, not persist company="Unknown".
+        html = """<html><body>
+<a href="https://www.glassdoor.com/partner/jobListing.htm?pos=2&jobListingId=88888">
+  <table><tbody><tr><td>
+    <span style="font-size:12px"> 4.5 ★</span>
+  </td></tr></tbody></table>
+  <p>Senior Engineer</p>
+  <p>Remote</p>
+</a>
+</body></html>"""
+        assert parse_glassdoor_alert(html) == []
+
 
 # Sample Glassdoor positional HTML (new classless format as of 2026)
 SAMPLE_GLASSDOOR_POSITIONAL_HTML = """

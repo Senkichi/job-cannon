@@ -107,6 +107,7 @@ def upsert_job(
     job: Job,
     *,
     locations_structured: list[JobLocation] | None = None,
+    company_id: int | None = None,
 ) -> bool:
     """Insert or update a job. Returns True if new, False if existing.
 
@@ -120,7 +121,22 @@ def upsert_job(
     three m066 columns: ``locations_structured`` (JSON list[JobLocation]),
     ``workplace_type`` and ``primary_country_code`` (denormalized from
     ``locations_structured[0]`` per SPEC §Schema).
+
+    When ``company_id`` is provided, the caller already resolved the
+    company FK (ATS scanner / careers crawler — both iterate companies
+    rows directly). It's written at INSERT/UPDATE so the row is linked
+    immediately rather than waiting for the daily linkage backfill.
+    Returns False without writing if the normalized company name is in
+    COMPANY_DENYLIST — boundary defense against aggregator names like
+    "Jobgether" / "Mercor" / "RemoteHunter" that have no real ATS
+    presence but appear in source feeds (linkedin, dataforseo, etc.).
     """
+    from job_finder.config import COMPANY_DENYLIST
+    from job_finder.normalizers import normalize_company as _norm_company
+
+    if _norm_company(job.company).lower() in COMPANY_DENYLIST:
+        return False
+
     if locations_structured is None:
         from job_finder.web.location_parser import parse_locations
 
@@ -135,7 +151,12 @@ def upsert_job(
             jd_full=job.description,
         )
     locations_json = _locations_to_json(locations_structured) if locations_structured else None
-    workplace_type_col = locations_structured[0].workplace_type if locations_structured else None
+    # When location parsing fails entirely, every row should still carry the
+    # 'UNSPECIFIED' sentinel rather than NULL so consumers can rely on the
+    # column being populated for filter logic and rollups. UPDATE-branch
+    # coalesces below so 'UNSPECIFIED' from a re-ingestion never downgrades
+    # a real value like 'REMOTE' that an earlier scan extracted.
+    workplace_type_col = locations_structured[0].workplace_type if locations_structured else "UNSPECIFIED"
     primary_country_code = locations_structured[0].country_code if locations_structured else None
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
@@ -207,8 +228,9 @@ def upsert_job(
                 locations_raw = ?,
                 location = ?,
                 locations_structured = ?,
-                workplace_type = ?,
-                primary_country_code = ?{jd_full_clause}
+                workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
+                primary_country_code = COALESCE(?, primary_country_code),
+                company_id = COALESCE(?, company_id){jd_full_clause}
             WHERE dedup_key = ?""",
             (
                 json.dumps(sources),
@@ -224,6 +246,7 @@ def upsert_job(
                 locations_json,
                 workplace_type_col,
                 primary_country_code,
+                company_id,
                 *jd_full_value,
                 job.dedup_key,
             ),
@@ -259,13 +282,18 @@ def upsert_job(
         initial_jd_full = None
         if job.description and len(job.description) > 200:
             initial_jd_full = job.description[:8000]
-        # Explicit scoring_provider=NULL on INSERT to override the migration 20
-        # column DEFAULT 'anthropic'. The DEFAULT pre-dates the multi-provider
-        # cascade; without this override, every new row enters tagged as scored
-        # by anthropic before any scorer has run. The legitimate write path
-        # (persist_job_assessment) sets scoring_provider + scoring_model
-        # atomically via COALESCE, so the discriminator for "real attribution"
-        # is scoring_model IS NOT NULL.
+        # Initial scoring_provider tag. JobScorer (heuristic, fuzzy-match
+        # title + seniority + location + salary range) always runs at the
+        # ingestion boundary and populates job.score before this INSERT,
+        # so tag as 'heuristic' to be explicit about what produced the
+        # `score` column. persist_job_assessment runs LATER on the v3.0
+        # LLM path and overwrites scoring_provider + scoring_model via
+        # COALESCE when the LLM actually scores the row. A row that
+        # survives with scoring_provider='heuristic' is a row the LLM
+        # never reached (sub-threshold, filter dismissed, etc.). The
+        # discriminator for "LLM ran" remains scoring_model IS NOT NULL.
+        # NB: explicit value also overrides migration 20's column DEFAULT
+        # of 'anthropic', which was a legacy artifact pre-cascade.
         norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
         conn.execute(
             """INSERT INTO jobs
@@ -273,8 +301,9 @@ def upsert_job(
                  source_id, salary_min, salary_max, description,
                  first_seen, last_seen, score, score_breakdown, locations_raw,
                  jd_full, scoring_provider,
-                 locations_structured, workplace_type, primary_country_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 locations_structured, workplace_type, primary_country_code,
+                 company_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.dedup_key,
                 job.title,
@@ -292,10 +321,11 @@ def upsert_job(
                 json.dumps(job.score_breakdown),
                 json.dumps(initial_locs),
                 initial_jd_full,
-                None,
+                "heuristic",
                 locations_json,
                 workplace_type_col,
                 primary_country_code,
+                company_id,
             ),
         )
         conn.commit()

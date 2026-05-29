@@ -14,6 +14,17 @@ the holding process terminates — including SIGKILL, Ctrl+C interruption
 mid-shutdown, and Windows force-kill paths. The lock IS the liveness
 signal; the pidfile contents are diagnostic-only.
 
+Operator note: on Windows, the LOCK_EX held by portalocker also blocks
+reads from other processes — ``cat logs/scheduler.pid`` from a separate
+terminal returns Permission denied (errno 13) while the scheduler is
+alive, and the file appears empty to tools that swallow the error
+silently. The file IS populated (5-6 bytes of PID); the read failure is
+the lock working as designed, not a write-path bug. To inspect the PID,
+shut the scheduler down first or use a tool like ``handle.exe`` that
+queries the kernel for lock holders directly. (Pre-launch audit on
+2026-05-28 initially flagged this as an "empty pidfile" bug — confirmed
+non-issue after re-reading via Python which surfaced the EACCES.)
+
 Public-surface contract: ``_acquire_scheduler_pidfile`` is patched by
 ``tests/conftest.py`` via the package attribute path
 ``job_finder.web.scheduler._acquire_scheduler_pidfile``. The package's

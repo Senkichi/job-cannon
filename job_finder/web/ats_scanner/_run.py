@@ -412,7 +412,8 @@ def _scan_one_company_via_ats_api(
         with standalone_connection(db_path) as scan_conn:
             for job_dict in job_dicts:
                 _upsert_one_ats_api_job(
-                    conn, scan_conn, company_name, job_dict, summary, all_new_job_keys
+                    conn, scan_conn, company_name, job_dict, summary, all_new_job_keys,
+                    company_id=company_id,
                 )
 
         # Log company scan
@@ -466,6 +467,8 @@ def _upsert_one_ats_api_job(
     job_dict: dict,
     summary: dict,
     all_new_job_keys: list,
+    *,
+    company_id: int | None = None,
 ) -> None:
     """Upsert a single ATS-API-discovered job; promote jd_full + comp_data_json on first-seen."""
     try:
@@ -504,6 +507,7 @@ def _upsert_one_ats_api_job(
             scan_conn,
             job,
             locations_structured=job_dict.get("locations_structured"),
+            company_id=company_id,
         )
 
         # Promote ATS description to jd_full (DQ-03)
