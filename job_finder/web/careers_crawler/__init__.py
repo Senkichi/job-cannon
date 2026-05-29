@@ -165,24 +165,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
     """
     if config.get("TESTING"):
         logger.debug("crawl_careers_batch: TESTING mode — skipping")
-        return {
-            "companies_crawled": 0,
-            "jobs_found": 0,
-            "jobs_new": 0,
-            "scored": 0,
-            "classified_apply": 0,
-            "classified_consider": 0,
-            "classified_skip": 0,
-            "classified_reject": 0,
-            "playwright_rendered": 0,
-            "interactive": 0,
-            "api_cached": 0,
-            "url_param_hits": 0,
-            "sitemap_hits": 0,
-            "ai_navigated": 0,
-            "ai_replayed": 0,
-            "errors": [],
-        }
+        return _new_summary()
 
     profile_cfg = config.get("profile", {})
     target_titles = profile_cfg.get("target_titles", [])
@@ -191,24 +174,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
         exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
     )
 
-    summary: dict[str, Any] = {
-        "companies_crawled": 0,
-        "jobs_found": 0,
-        "jobs_new": 0,
-        "scored": 0,
-        "classified_apply": 0,
-        "classified_consider": 0,
-        "classified_skip": 0,
-        "classified_reject": 0,
-        "playwright_rendered": 0,
-        "interactive": 0,
-        "api_cached": 0,
-        "url_param_hits": 0,
-        "sitemap_hits": 0,
-        "ai_navigated": 0,
-        "ai_replayed": 0,
-        "errors": [],
-    }
+    summary: dict[str, Any] = _new_summary()
     all_new_job_keys: list[str] = []
 
     # Load all companies that have ever had a high-scoring job
@@ -334,6 +300,16 @@ _SUMMARY_KEYS = [
 ]
 
 
+def _new_summary() -> dict:
+    """Return a zero-filled summary dict matching the careers_crawl schema.
+
+    Single source of truth for summary keys — used by the TESTING-skip
+    return, the top-level orchestrator summary, and the per-worker
+    local_summary.
+    """
+    return {**dict.fromkeys(_SUMMARY_KEYS, 0), "errors": []}
+
+
 def _crawl_companies(
     companies: list,
     db_path: str,
@@ -362,8 +338,7 @@ def _crawl_companies(
 
     # --- Per-worker function (own browser + DB connection) ---
     def _crawl_worker(company_batch: list) -> tuple[dict, list[str]]:
-        local_summary: dict[str, Any] = dict.fromkeys(_SUMMARY_KEYS, 0)
-        local_summary["errors"] = []
+        local_summary: dict[str, Any] = _new_summary()
         local_new_keys: list[str] = []
 
         with sync_playwright() as pw:
