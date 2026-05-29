@@ -96,7 +96,9 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
     workplace_type = "REMOTE" if loc.get("remote") else "UNSPECIFIED"
     if not any((city, region, region_code, country, country_code)) and workplace_type == "UNSPECIFIED":
         return []
-    raw = ", ".join(p for p in [loc.get("city"), loc.get("region"), loc.get("country")] if p)
+    raw = ", ".join(
+        p for p in [loc.get("city"), loc.get("region"), loc.get("country")] if isinstance(p, str) and p
+    )
     return [
         JobLocation(
             city=city,
@@ -117,7 +119,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     loc = posting.get("location", {})
     if isinstance(loc, dict):
         parts = [loc.get("city", ""), loc.get("region", ""), loc.get("country", "")]
-        location = ", ".join(p for p in parts if p)
+        location = ", ".join(p for p in parts if isinstance(p, str) and p)
     else:
         location = ""
 

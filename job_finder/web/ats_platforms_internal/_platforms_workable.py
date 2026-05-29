@@ -50,7 +50,7 @@ def _location_string(job: dict) -> str:
             loc.get("region") or loc.get("state") or "",
             loc.get("country") or loc.get("country_code") or "",
         ]
-        joined = ", ".join(p for p in parts if p)
+        joined = ", ".join(p for p in parts if isinstance(p, str) and p)
         if joined:
             return joined
     parts = [
@@ -58,7 +58,7 @@ def _location_string(job: dict) -> str:
         job.get("region") or job.get("state") or "",
         job.get("country") or job.get("country_code") or "",
     ]
-    return ", ".join(p for p in parts if p)
+    return ", ".join(p for p in parts if isinstance(p, str) and p)
 
 
 def _posting_to_job(job: dict, slug: str) -> dict:

@@ -156,6 +156,33 @@ class TestScanBreezy:
         mock_get.return_value = MagicMock(status_code=404)
         assert scan_breezy("acme", ["data engineer"], []) == []
 
+    @patch("job_finder.web.ats_platforms.requests.get")
+    def test_handles_nested_dict_in_location_field(self, mock_get):
+        # Regression: Maleda Tech returned location.state as a nested dict,
+        # which crashed the scanner with "sequence item N: expected str
+        # instance, dict found" inside the parts join. Scanner must skip
+        # non-string sub-fields instead of crashing.
+        from job_finder.web.ats_platforms import scan_breezy
+
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = [
+            {
+                "name": "Staff Engineer",
+                "location": {
+                    "city": "Austin",
+                    "state": {"name": "Texas", "code": "TX"},  # malformed nested dict
+                    "country": "US",
+                },
+                "url": "https://acme.breezy.hr/p/abc",
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        results = scan_breezy("acme", ["engineer"], [])
+        assert len(results) == 1
+        # Non-string state is dropped; city and country survive.
+        assert results[0]["location"] == "Austin, US"
+
 
 # ---------------------------------------------------------------------------
 # JazzHR

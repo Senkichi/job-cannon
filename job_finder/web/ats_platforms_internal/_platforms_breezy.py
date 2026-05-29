@@ -36,7 +36,7 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
             loc.get("state") or loc.get("region") or "",
             loc.get("country") or "",
         ]
-        location = ", ".join(p for p in parts if p)
+        location = ", ".join(p for p in parts if isinstance(p, str) and p)
         if not location and loc.get("is_remote"):
             location = "Remote"
     else:

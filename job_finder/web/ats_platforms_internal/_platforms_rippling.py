@@ -35,6 +35,15 @@ from job_finder.web.location_canonical import (
 )
 
 
+def _str(value) -> str:
+    """Coerce to stripped str, or empty if value is not a string.
+
+    Guards against ATS responses that nest a dict under fields we expect
+    to be flat strings (observed in Maleda Tech via Breezy).
+    """
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _fetch_postings(slug: str) -> list[dict]:
     """Fetch one page of Rippling postings. Pagination is rare for active
     tenants (typical totalPages is 1-3); we walk pages until exhausted."""
@@ -80,18 +89,18 @@ def _to_canonical(item: dict) -> list[JobLocation]:
         if not isinstance(loc, dict):
             continue
         wt = normalize_workplace_type(loc.get("workplaceType"))
-        city = (loc.get("city") or "").strip() or None
-        state = (loc.get("state") or "").strip() or None
-        state_code_raw = (loc.get("stateCode") or "").strip().upper()
+        city = _str(loc.get("city")) or None
+        state = _str(loc.get("state")) or None
+        state_code_raw = _str(loc.get("stateCode")).upper()
         state_code = state_code_raw or (state.upper() if state and len(state) == 2 else None)
-        country = (loc.get("country") or "").strip() or None
-        country_code_raw = (loc.get("countryCode") or "").strip().upper()
+        country = _str(loc.get("country")) or None
+        country_code_raw = _str(loc.get("countryCode")).upper()
         country_code = country_code_raw or (country.upper() if country and len(country) == 2 else None)
         # Don't double-store: if state/country was actually a 2-letter code,
         # leave the long name None.
         region = state if state and len(state) != 2 else None
         country_name = country if country and len(country) != 2 else None
-        raw = (loc.get("name") or "").strip() or ", ".join(p for p in [city, state, country] if p)
+        raw = _str(loc.get("name")) or ", ".join(p for p in [city, state, country] if p)
         if not any((city, region, state_code, country_name, country_code)) and wt == "UNSPECIFIED":
             if raw:
                 out.append(JobLocation.unresolved_from_raw(raw, workplace_type="UNSPECIFIED"))
@@ -132,7 +141,7 @@ def _location_string(item: dict) -> str:
         first.get("state") or first.get("stateCode") or "",
         first.get("country") or first.get("countryCode") or "",
     ]
-    return ", ".join(p for p in parts if p)
+    return ", ".join(p for p in parts if isinstance(p, str) and p)
 
 
 def _posting_to_job(item: dict, slug: str) -> dict:
