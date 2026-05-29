@@ -131,7 +131,7 @@ def _parse_job_card(link_tag, email_date: datetime | None) -> Job | None:
 
     # Find company name
     company_el = link_tag.find("span", class_=COMPANY_CLASS)
-    company = company_el.get_text(strip=True) if company_el else "Unknown"
+    company = company_el.get_text(strip=True) if company_el else None
 
     # Find job title
     title_el = link_tag.find("p", class_=TITLE_CLASS)
@@ -143,6 +143,13 @@ def _parse_job_card(link_tag, email_date: datetime | None) -> Job | None:
             return _parse_job_card_table_span(link_tag, email_date)
         # Fall back to positional extraction (2026 v1 classless format).
         return _parse_job_card_positional(link_tag, email_date)
+
+    if not company:
+        # Title CSS class hit but company CSS class missed: the email is in
+        # a partial / hybrid Glassdoor format we can't reliably parse. Drop
+        # rather than persist a "Unknown"-company orphan that can never join
+        # to a real companies row.
+        return None
 
     # Find location and salary (both use DETAIL_CLASS)
     detail_els = link_tag.find_all("p", class_=DETAIL_CLASS)
@@ -194,7 +201,7 @@ def _parse_job_card_positional(link_tag, email_date: datetime | None) -> Job | N
     source_id = _extract_listing_id(href)
 
     # --- Company ---
-    company = "Unknown"
+    company = None
     for span in link_tag.find_all("span"):
         direct_text = span.string
         if direct_text is None:
@@ -228,7 +235,7 @@ def _parse_job_card_positional(link_tag, email_date: datetime | None) -> Job | N
         title_idx = i
         break
 
-    if not title:
+    if not title or not company:
         return None
 
     # Among remaining p tags after title: classify location, salary, age
@@ -281,11 +288,12 @@ def _parse_job_card_table_span(link_tag, email_date: datetime | None) -> Job | N
         return None
 
     company_span = link_tag.find("span", class_=_TABLE_COMPANY_CLASS)
-    company = "Unknown"
-    if company_span:
-        raw = company_span.get_text(strip=True)
-        # Strip trailing visual separator Glassdoor appends (e.g. "·-·" or "–")
-        company = re.sub(r"[\u00b7\u2013\u2014\-\s]+$", "", raw).strip() or "Unknown"
+    if not company_span:
+        return None
+    raw = company_span.get_text(strip=True)
+    company = re.sub(r"[·–—\-\s]+$", "", raw).strip()
+    if not company:
+        return None
 
     location_span = link_tag.find("span", class_=_TABLE_LOCATION_CLASS)
     location = location_span.get_text(strip=True) if location_span else "Unknown"
