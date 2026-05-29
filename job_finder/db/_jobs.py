@@ -259,13 +259,18 @@ def upsert_job(
         initial_jd_full = None
         if job.description and len(job.description) > 200:
             initial_jd_full = job.description[:8000]
-        # Explicit scoring_provider=NULL on INSERT to override the migration 20
-        # column DEFAULT 'anthropic'. The DEFAULT pre-dates the multi-provider
-        # cascade; without this override, every new row enters tagged as scored
-        # by anthropic before any scorer has run. The legitimate write path
-        # (persist_job_assessment) sets scoring_provider + scoring_model
-        # atomically via COALESCE, so the discriminator for "real attribution"
-        # is scoring_model IS NOT NULL.
+        # Initial scoring_provider tag. JobScorer (heuristic, fuzzy-match
+        # title + seniority + location + salary range) always runs at the
+        # ingestion boundary and populates job.score before this INSERT,
+        # so tag as 'heuristic' to be explicit about what produced the
+        # `score` column. persist_job_assessment runs LATER on the v3.0
+        # LLM path and overwrites scoring_provider + scoring_model via
+        # COALESCE when the LLM actually scores the row. A row that
+        # survives with scoring_provider='heuristic' is a row the LLM
+        # never reached (sub-threshold, filter dismissed, etc.). The
+        # discriminator for "LLM ran" remains scoring_model IS NOT NULL.
+        # NB: explicit value also overrides migration 20's column DEFAULT
+        # of 'anthropic', which was a legacy artifact pre-cascade.
         norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
         conn.execute(
             """INSERT INTO jobs
@@ -292,7 +297,7 @@ def upsert_job(
                 json.dumps(job.score_breakdown),
                 json.dumps(initial_locs),
                 initial_jd_full,
-                None,
+                "heuristic",
                 locations_json,
                 workplace_type_col,
                 primary_country_code,
