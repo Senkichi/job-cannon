@@ -307,13 +307,28 @@ def _process_one(
     try:
         now = datetime.now().isoformat()
         if hit_platform:
-            conn.execute(
-                """UPDATE companies
-                   SET ats_platform=?, ats_slug=?, ats_probe_status='hit',
-                       ats_probe_attempted_at=?, updated_at=?
-                   WHERE id=?""",
-                (hit_platform, hit_slug, now, now, company_id),
-            )
+            try:
+                conn.execute(
+                    """UPDATE companies
+                       SET ats_platform=?, ats_slug=?, ats_probe_status='hit',
+                           ats_probe_attempted_at=?, updated_at=?
+                       WHERE id=?""",
+                    (hit_platform, hit_slug, now, now, company_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                # m076's UNIQUE(ats_platform, ats_slug) gate. Another
+                # company already owns this pair. Log and continue —
+                # the F4 script is a best-effort reprobe and should not
+                # abort on a single collision.
+                log.warning(
+                    "f4_reprobe_misses: collision %s/%s for id=%s (%s) — "
+                    "skipping. exc=%s",
+                    hit_platform,
+                    hit_slug,
+                    company_id,
+                    company_name,
+                    exc,
+                )
         else:
             conn.execute(
                 """UPDATE companies

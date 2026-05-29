@@ -337,36 +337,70 @@ def probe_single_company(
         for slug_candidate in candidates:
             try:
                 if _probe_lever_with_result(slug_candidate):
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'hit',
-                               ats_platform = 'lever',
-                               ats_slug = ?
-                           WHERE id = ?""",
-                        (slug_candidate, company_id),
-                    )
+                    try:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'hit',
+                                   ats_platform = 'lever',
+                                   ats_slug = ?
+                               WHERE id = ?""",
+                            (slug_candidate, company_id),
+                        )
+                    except sqlite3.IntegrityError as ie:
+                        # m076's UNIQUE(ats_platform, ats_slug) gate. The
+                        # slug we just probed is already owned by another
+                        # company; leave ats_slug at its current value and
+                        # keep walking the candidate list.
+                        logger.warning(
+                            "probe_single_company: collision lever/%s for %s — "
+                            "leaving existing ats_slug. exc=%s",
+                            slug_candidate,
+                            company_name,
+                            ie,
+                        )
+                        continue
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_greenhouse(slug_candidate):
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'hit',
-                               ats_platform = 'greenhouse',
-                               ats_slug = ?
-                           WHERE id = ?""",
-                        (slug_candidate, company_id),
-                    )
+                    try:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'hit',
+                                   ats_platform = 'greenhouse',
+                                   ats_slug = ?
+                               WHERE id = ?""",
+                            (slug_candidate, company_id),
+                        )
+                    except sqlite3.IntegrityError as ie:
+                        logger.warning(
+                            "probe_single_company: collision greenhouse/%s for %s "
+                            "— leaving existing ats_slug. exc=%s",
+                            slug_candidate,
+                            company_name,
+                            ie,
+                        )
+                        continue
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
                 if _probe_ashby(slug_candidate):
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_probe_status = 'hit',
-                               ats_platform = 'ashby',
-                               ats_slug = ?
-                           WHERE id = ?""",
-                        (slug_candidate, company_id),
-                    )
+                    try:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'hit',
+                                   ats_platform = 'ashby',
+                                   ats_slug = ?
+                               WHERE id = ?""",
+                            (slug_candidate, company_id),
+                        )
+                    except sqlite3.IntegrityError as ie:
+                        logger.warning(
+                            "probe_single_company: collision ashby/%s for %s — "
+                            "leaving existing ats_slug. exc=%s",
+                            slug_candidate,
+                            company_name,
+                            ie,
+                        )
+                        continue
                     _reset_retry_state(conn, company_id, now)
                     return {"status": "hit", "jobs_found": 0}
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:

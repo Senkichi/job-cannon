@@ -260,23 +260,38 @@ def upsert_company(
 
             # Only update ATS fields if new status is higher precedence
             if new_rank >= current_rank:
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_platform = COALESCE(?, ats_platform),
-                           ats_slug = COALESCE(?, ats_slug),
-                           ats_probe_status = ?,
-                           homepage_url = COALESCE(?, homepage_url),
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (
+                try:
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_platform = COALESCE(?, ats_platform),
+                               ats_slug = COALESCE(?, ats_slug),
+                               ats_probe_status = ?,
+                               homepage_url = COALESCE(?, homepage_url),
+                               updated_at = ?
+                           WHERE id = ?""",
+                        (
+                            ats_platform,
+                            ats_slug,
+                            ats_probe_status,
+                            homepage_url,
+                            now,
+                            company_id,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    # m076's UNIQUE(ats_platform, ats_slug) gate. Another
+                    # company already owns the pair. Leave the ATS fields
+                    # untouched (NULL or pre-existing) — this is a tight
+                    # upsert loop where re-raising would abort batch
+                    # ingestion. Log for audit.
+                    logger.warning(
+                        "upsert_company: ATS collision for %r on %s/%s — "
+                        "leaving ATS fields untouched. exc=%s",
+                        name,
                         ats_platform,
                         ats_slug,
-                        ats_probe_status,
-                        homepage_url,
-                        now,
-                        company_id,
-                    ),
-                )
+                        exc,
+                    )
             else:
                 # Still update non-ATS fields (homepage, timestamp)
                 conn.execute(

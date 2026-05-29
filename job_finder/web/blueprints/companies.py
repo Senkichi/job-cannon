@@ -15,6 +15,7 @@ Routes:
 
 import json
 import logging
+import sqlite3
 import threading
 from datetime import UTC, datetime
 
@@ -308,16 +309,57 @@ def update_slug(company_id):
     ats_slug = request.form.get("ats_slug", "").strip() or None
 
     now = datetime.now().isoformat()
-    conn.execute(
-        """UPDATE companies
-           SET ats_platform = ?,
-               ats_slug = ?,
-               ats_probe_status = 'pending',
-               updated_at = ?
-           WHERE id = ?""",
-        (ats_platform, ats_slug, now, company_id),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            """UPDATE companies
+               SET ats_platform = ?,
+                   ats_slug = ?,
+                   ats_probe_status = 'pending',
+                   updated_at = ?
+               WHERE id = ?""",
+            (ats_platform, ats_slug, now, company_id),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        # m076's UNIQUE(ats_platform, ats_slug) gate. Another company
+        # already owns this pair. Surface the conflict to the operator
+        # via flash + form re-render — never silently overwrite the
+        # legitimate owner.
+        owner = conn.execute(
+            "SELECT id, name_raw FROM companies "
+            "WHERE ats_platform = ? AND ats_slug = ? AND id != ?",
+            (ats_platform, ats_slug, company_id),
+        ).fetchone()
+        owner_id = owner["id"] if owner else None
+        owner_name = owner["name_raw"] if owner else None
+        logger.warning(
+            "update_slug: admin override blocked for company id=%d on "
+            "%s/%s — already owned by id=%s (%r). exc=%s",
+            company_id,
+            ats_platform,
+            ats_slug,
+            owner_id,
+            owner_name,
+            exc,
+        )
+        flash(
+            f"Cannot set ATS to {ats_platform}/{ats_slug} — already owned "
+            f"by company id={owner_id} ({owner_name!r})",
+            "error",
+        )
+        # Re-render the (unchanged) expanded row so the operator sees the
+        # flash and the current state. Skip the commit — the original
+        # values are preserved.
+        unchanged_company = conn.execute(
+            "SELECT * FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        return render_template(
+            "companies/_row_expanded.html",
+            company=unchanged_company,
+            jobs=[],
+            scan_history=[],
+            research=None,
+        )
 
     # Reload company data
     updated_company = conn.execute(

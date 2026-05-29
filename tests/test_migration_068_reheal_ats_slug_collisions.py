@@ -42,6 +42,11 @@ def migrated_db():
     run_migrations(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # m068 healed (ats_platform, ats_slug) clusters before m076 introduced
+    # the DB-level UNIQUE invariant. These tests seed the clusters by hand
+    # to exercise the healer, so the partial index has to be dropped first.
+    conn.execute("DROP INDEX IF EXISTS idx_companies_ats_pair")
+    conn.commit()
     yield path, conn
     conn.close()
     if os.path.exists(path):

@@ -315,6 +315,46 @@ class TestUpdateSlugRoute:
         response = client.post("/companies/99999/update-slug")
         assert response.status_code == 404
 
+    def test_update_slug_collision_does_not_commit(self, companies_client):
+        """m076: an admin POST that would duplicate (platform, slug) must
+        leave the legitimate owner untouched and flash the conflict.
+
+        Without the IntegrityError handler the SQL would raise and the
+        request would 500; with the handler the response is a 200
+        re-render of the unchanged row and the owner's slug is preserved.
+        """
+        client, db_path, conn = companies_client
+        # Pre-existing legitimate owner of (greenhouse, acme).
+        owner_id = _insert_company(
+            conn,
+            name="Acme Corp",
+            ats_probe_status="hit",
+            ats_platform="greenhouse",
+            ats_slug="acme",
+        )
+        # Loser the admin is about to mis-assign.
+        loser_id = _insert_company(conn, name="Acme Aggregator")
+
+        response = client.post(
+            f"/companies/{loser_id}/update-slug",
+            data={"ats_platform": "greenhouse", "ats_slug": "acme"},
+        )
+        assert response.status_code == 200
+
+        # Owner still owns the pair, loser still has NULL.
+        owner_row = conn.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id = ?",
+            (owner_id,),
+        ).fetchone()
+        loser_row = conn.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id = ?",
+            (loser_id,),
+        ).fetchone()
+        assert owner_row["ats_platform"] == "greenhouse"
+        assert owner_row["ats_slug"] == "acme"
+        assert loser_row["ats_platform"] is None
+        assert loser_row["ats_slug"] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: POST /companies/scan

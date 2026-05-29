@@ -39,6 +39,12 @@ def migrated_db():
     run_migrations(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # m064 reset FP-prone speculative hits in a world before m076 enforced
+    # UNIQUE(ats_platform, ats_slug). Some of these tests seed multiple
+    # rows on the same (platform, slug) — the partial index must be
+    # dropped or the seeds raise IntegrityError.
+    conn.execute("DROP INDEX IF EXISTS idx_companies_ats_pair")
+    conn.commit()
     yield path, conn
     conn.close()
     if os.path.exists(path):

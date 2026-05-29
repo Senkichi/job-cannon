@@ -5,6 +5,7 @@ Re-exported from the package for backward compatibility.
 """
 
 import logging
+import sqlite3
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -242,33 +243,73 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
                     and _verify_fastpath_live(fp_platform, fp_slug)
                 ):
                     trigger = f"careers_url:{careers_url}"[:240]
-                    conn.execute(
-                        """UPDATE companies
-                           SET ats_platform = ?,
-                               ats_slug = ?,
-                               ats_probe_status = 'hit',
-                               ats_probe_attempted_at = ?,
-                               ats_evidence_trigger = ?,
-                               ats_evidence_extractor_version = ?,
-                               ats_evidence_unique_url_count = ?,
-                               ats_evidence_job_count = ?,
-                               ats_evidence_reconciled_at = ?,
-                               updated_at = ?
-                           WHERE id = ?""",
-                        (
+                    try:
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_platform = ?,
+                                   ats_slug = ?,
+                                   ats_probe_status = 'hit',
+                                   ats_probe_attempted_at = ?,
+                                   ats_evidence_trigger = ?,
+                                   ats_evidence_extractor_version = ?,
+                                   ats_evidence_unique_url_count = ?,
+                                   ats_evidence_job_count = ?,
+                                   ats_evidence_reconciled_at = ?,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (
+                                fp_platform,
+                                fp_slug,
+                                now,
+                                trigger,
+                                ATS_EXTRACTOR_VERSION,
+                                1,
+                                0,
+                                now,
+                                now,
+                                company_id,
+                            ),
+                        )
+                        conn.commit()
+                    except sqlite3.IntegrityError as exc:
+                        # m076's UNIQUE(ats_platform, ats_slug) gate. Another
+                        # company already owns (fp_platform, fp_slug); writing
+                        # this row would corrupt the 1:1 invariant. Mark this
+                        # company as a miss with the new sentinel reason so an
+                        # operator can audit the collision cohort later.
+                        owner = conn.execute(
+                            "SELECT id, name_raw FROM companies "
+                            "WHERE ats_platform = ? AND ats_slug = ? "
+                            "AND id != ?",
+                            (fp_platform, fp_slug, company_id),
+                        ).fetchone()
+                        owner_id = owner["id"] if owner else None
+                        owner_name = owner["name_raw"] if owner else None
+                        logger.warning(
+                            "probe_ats_slugs: fast-path collision for %s "
+                            "(id=%d) on %s/%s — already owned by id=%s (%r); "
+                            "marking miss with reason='collision'. exc=%s",
+                            company_name,
+                            company_id,
                             fp_platform,
                             fp_slug,
-                            now,
-                            trigger,
-                            ATS_EXTRACTOR_VERSION,
-                            1,
-                            0,
-                            now,
-                            now,
-                            company_id,
-                        ),
-                    )
-                    conn.commit()
+                            owner_id,
+                            owner_name,
+                            exc,
+                        )
+                        conn.execute(
+                            """UPDATE companies
+                               SET ats_probe_status = 'miss',
+                                   miss_reason = 'collision',
+                                   ats_probe_attempted_at = ?,
+                                   updated_at = ?
+                               WHERE id = ?""",
+                            (now, now, company_id),
+                        )
+                        conn.commit()
+                        summary["misses"] += 1
+                        summary["probed"] += 1
+                        continue
                     logger.info(
                         "probe_ats_slugs: %s (id=%d) -> hit %s/%s via careers_url fast-path",
                         company_name,
@@ -339,17 +380,52 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
 
             # Update company record based on probe result
             if hit_platform:
-                conn.execute(
-                    """UPDATE companies
-                       SET ats_platform = ?,
-                           ats_slug = ?,
-                           ats_probe_status = 'hit',
-                           ats_probe_attempted_at = ?,
-                           updated_at = ?
-                       WHERE id = ?""",
-                    (hit_platform, hit_slug, now, now, company_id),
-                )
-                summary["hits"] += 1
+                try:
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_platform = ?,
+                               ats_slug = ?,
+                               ats_probe_status = 'hit',
+                               ats_probe_attempted_at = ?,
+                               updated_at = ?
+                           WHERE id = ?""",
+                        (hit_platform, hit_slug, now, now, company_id),
+                    )
+                    summary["hits"] += 1
+                except sqlite3.IntegrityError as exc:
+                    # m076's UNIQUE(ats_platform, ats_slug) gate. The
+                    # speculative ladder produced a slug that's already
+                    # owned by another company. Demote to miss with the
+                    # new collision sentinel so the cohort is auditable.
+                    owner = conn.execute(
+                        "SELECT id, name_raw FROM companies "
+                        "WHERE ats_platform = ? AND ats_slug = ? AND id != ?",
+                        (hit_platform, hit_slug, company_id),
+                    ).fetchone()
+                    owner_id = owner["id"] if owner else None
+                    owner_name = owner["name_raw"] if owner else None
+                    logger.warning(
+                        "probe_ats_slugs: speculative collision for %s "
+                        "(id=%d) on %s/%s — already owned by id=%s (%r); "
+                        "marking miss with reason='collision'. exc=%s",
+                        company_name,
+                        company_id,
+                        hit_platform,
+                        hit_slug,
+                        owner_id,
+                        owner_name,
+                        exc,
+                    )
+                    conn.execute(
+                        """UPDATE companies
+                           SET ats_probe_status = 'miss',
+                               miss_reason = 'collision',
+                               ats_probe_attempted_at = ?,
+                               updated_at = ?
+                           WHERE id = ?""",
+                        (now, now, company_id),
+                    )
+                    summary["misses"] += 1
             else:
                 # B4: categorical miss_reason so the next audit can tell
                 # speculative-exhausted misses apart from gate-rejected ones.
