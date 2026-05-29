@@ -8,6 +8,8 @@ continue to work without changes.
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -199,152 +201,139 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         return []
 
 
-def _fetch_imap(config: dict, summary: dict) -> list[Job]:
-    """Fetch jobs from IMAP with server-flag deduplication.
+@dataclass(frozen=True, slots=True)
+class SourceSpec:
+    """Per-source contract for the simple-fetch driver.
 
-    IMAP uses the \\Seen server flag for dedup - no database tracking required.
-    This is the stranger-friendly default (app password, no OAuth).
-
-    Args:
-        config: Full config dict.
-        summary: Mutable summary dict to update.
-
-    Returns:
-        List of Job objects parsed from IMAP.
+    Gmail is NOT a SourceSpec — its email_parse_log dedup pass diverges
+    enough that the explicit shape stays clearer than parameterizing it.
+    DataForSEO is also NOT a SourceSpec — its submit/collect split has
+    no fit with the single-call contract.
     """
-    imap_config = config.get("sources", {}).get("imap", {})
-    if not imap_config.get("enabled", False):
-        logger.debug("IMAP source disabled in config.")
+
+    name: str
+    secret_path: str
+    build_source: Callable[[dict, str], object]
+    require_secret: bool = True
+    require_queries: bool = True
+    extract_jobs: Callable[[object, dict], list[Job]] = field(
+        default=lambda src, source_cfg: src.fetch_jobs(source_cfg.get("queries", []))
+    )
+    validate_config: Callable[[dict], str | None] = field(default=lambda _: None)
+
+
+def _run_simple_source(spec: SourceSpec, config: dict, summary: dict) -> list[Job]:
+    """Fetch from a simple source with the standard enabled/secret/error envelope.
+
+    Mirrors the original inline shape of ``_fetch_serpapi``/``_fetch_thordata``/
+    ``_fetch_imap``: enabled-check → validate_config → secret → queries → build →
+    extract → title-gate → summary update. Errors during build/extract are
+    isolated per-source (caught, appended to ``summary[f"{spec.name}_errors"]``).
+    """
+    source_cfg = config.get("sources", {}).get(spec.name, {})
+    if not source_cfg.get("enabled", False):
+        logger.debug("%s source disabled in config.", spec.name)
         return []
 
-    # Require non-empty credentials
-    email = imap_config.get("email", "")
-    app_password = get_secret("sources.imap.app_password", config=config) or ""
-    if not email or not app_password:
-        logger.warning("IMAP source enabled but credentials missing")
-        summary["imap_errors"].append("IMAP credentials missing")
+    err = spec.validate_config(source_cfg)
+    if err is not None:
+        summary[f"{spec.name}_errors"].append(err)
+        logger.warning(err)
         return []
 
-    host = imap_config.get("host", "imap.gmail.com")
-    port = imap_config.get("port", 993)
-    folder = imap_config.get("folder", "INBOX")
+    secret = ""
+    if spec.require_secret:
+        secret = get_secret(spec.secret_path, config=config) or ""
+        if not secret:
+            msg = f"{spec.name} key not configured"
+            summary[f"{spec.name}_errors"].append(msg)
+            logger.warning(msg)
+            return []
 
-    _ImapSource = ImapSource  # bind to local so Pyright narrows after the None check
-    if _ImapSource is None:
-        logger.warning("ImapSource import failed; skipping IMAP fetch")
-        return []
+    if spec.require_queries:
+        queries = source_cfg.get("queries", [])
+        if not queries:
+            logger.debug("No %s queries configured.", spec.name)
+            return []
+
     try:
-        source = _ImapSource(
-            host=host,
-            port=port,
-            email_address=email,
-            app_password=app_password,
-            folder=folder,
-        )
-        jobs, _ = source.fetch_jobs()
-        jobs = _apply_title_gate(jobs, config, "imap")
-        summary["imap_fetched"] = len(jobs)
-
-        logger.info("IMAP: fetched %d jobs", len(jobs))
+        source = spec.build_source(source_cfg, secret)
+        jobs = spec.extract_jobs(source, source_cfg)
+        jobs = _apply_title_gate(jobs, config, spec.name)
+        summary[f"{spec.name}_fetched"] = len(jobs)
+        logger.info("%s: fetched %d jobs", spec.name, len(jobs))
         return jobs
     except Exception as e:
         error_msg = str(e)
-        summary["imap_errors"].append(error_msg)
-        logger.warning("IMAP ingestion failed: %s", error_msg)
+        summary[f"{spec.name}_errors"].append(error_msg)
+        logger.warning("%s ingestion failed: %s", spec.name, error_msg)
         return []
+
+
+def _build_serpapi_source(source_cfg: dict, secret: str) -> object:
+    from job_finder.sources.serpapi_source import SerpAPISource
+
+    return SerpAPISource(secret, max_pages=source_cfg.get("max_pages", 5))
+
+
+def _build_thordata_source(source_cfg: dict, secret: str) -> object:
+    from job_finder.sources.thordata_source import ThordataSource
+
+    return ThordataSource(secret, max_age_days=source_cfg.get("max_age_days", 3))
+
+
+def _build_imap_source(source_cfg: dict, secret: str) -> object:
+    # ImapSource is None when the optional imap_source module fails to import.
+    # Raising here lets the driver's try/except convert it into the same
+    # empty-list + summary-error envelope as any other build failure.
+    if ImapSource is None:
+        raise RuntimeError("ImapSource import failed; skipping IMAP fetch")
+    return ImapSource(
+        host=source_cfg.get("host", "imap.gmail.com"),
+        port=source_cfg.get("port", 993),
+        email_address=source_cfg.get("email", ""),
+        app_password=secret,
+        folder=source_cfg.get("folder", "INBOX"),
+    )
+
+
+_SERPAPI_SPEC = SourceSpec(
+    name="serpapi",
+    secret_path="sources.serpapi.api_key",  # noqa: S106 — config path, not a secret value
+    build_source=_build_serpapi_source,
+)
+
+_THORDATA_SPEC = SourceSpec(
+    name="thordata",
+    secret_path="sources.thordata.api_key",  # noqa: S106 — config path, not a secret value
+    build_source=_build_thordata_source,
+)
+
+_IMAP_SPEC = SourceSpec(
+    name="imap",
+    secret_path="sources.imap.app_password",  # noqa: S106 — config path, not a secret value
+    build_source=_build_imap_source,
+    require_queries=False,
+    # IMAP's fetch_jobs() returns a (jobs, ids) tuple and takes no queries arg.
+    extract_jobs=lambda src, source_cfg: src.fetch_jobs()[0],
+    # IMAP requires `email` in the config in addition to the app_password
+    # secret; surface a non-silent error if it's missing.
+    validate_config=lambda cfg: (
+        "sources.imap.email is required" if not cfg.get("email") else None
+    ),
+)
 
 
 def _fetch_serpapi(config: dict, summary: dict) -> list[Job]:
-    """Fetch jobs from SerpAPI with error isolation.
-
-    Args:
-        config: Full config dict.
-        summary: Mutable summary dict to update.
-
-    Returns:
-        List of Job objects from SerpAPI.
-    """
-    serpapi_config = config.get("sources", {}).get("serpapi", {})
-    if not serpapi_config.get("enabled", False):
-        logger.debug("SerpAPI source disabled in config.")
-        return []
-
-    api_key = get_secret("sources.serpapi.api_key", config=config) or ""
-    if not api_key:
-        msg = "SerpAPI key not configured"
-        summary["serpapi_errors"].append(msg)
-        logger.warning(msg)
-        return []
-
-    queries = serpapi_config.get("queries", [])
-    if not queries:
-        logger.debug("No SerpAPI queries configured.")
-        return []
-
-    try:
-        from job_finder.sources.serpapi_source import SerpAPISource
-
-        max_pages = serpapi_config.get("max_pages", 5)
-        source = SerpAPISource(api_key, max_pages=max_pages)
-        jobs = source.fetch_jobs(queries)
-        jobs = _apply_title_gate(jobs, config, "serpapi")
-        summary["serpapi_fetched"] = len(jobs)
-
-        logger.info("SerpAPI: fetched %d jobs", len(jobs))
-        return jobs
-
-    except Exception as e:
-        error_msg = str(e)
-        summary["serpapi_errors"].append(error_msg)
-        logger.warning("SerpAPI ingestion failed: %s", error_msg)
-        return []
+    return _run_simple_source(_SERPAPI_SPEC, config, summary)
 
 
 def _fetch_thordata(config: dict, summary: dict) -> list[Job]:
-    """Fetch jobs from Thordata Google Jobs SERP API with error isolation.
+    return _run_simple_source(_THORDATA_SPEC, config, summary)
 
-    Args:
-        config: Full config dict.
-        summary: Mutable summary dict to update.
 
-    Returns:
-        List of Job objects from Thordata.
-    """
-    thordata_config = config.get("sources", {}).get("thordata", {})
-    if not thordata_config.get("enabled", False):
-        logger.debug("Thordata source disabled in config.")
-        return []
-
-    api_key = get_secret("sources.thordata.api_key", config=config) or ""
-    if not api_key:
-        msg = "Thordata API key not configured"
-        summary["thordata_errors"].append(msg)
-        logger.warning(msg)
-        return []
-
-    queries = thordata_config.get("queries", [])
-    if not queries:
-        logger.debug("No Thordata queries configured.")
-        return []
-
-    max_age_days = thordata_config.get("max_age_days", 3)
-
-    try:
-        from job_finder.sources.thordata_source import ThordataSource
-
-        source = ThordataSource(api_key, max_age_days=max_age_days)
-        jobs = source.fetch_jobs(queries)
-        jobs = _apply_title_gate(jobs, config, "thordata")
-        summary["thordata_fetched"] = len(jobs)
-
-        logger.info("Thordata: fetched %d jobs", len(jobs))
-        return jobs
-
-    except Exception as e:
-        error_msg = str(e)
-        summary["thordata_errors"].append(error_msg)
-        logger.warning("Thordata ingestion failed: %s", error_msg)
-        return []
+def _fetch_imap(config: dict, summary: dict) -> list[Job]:
+    return _run_simple_source(_IMAP_SPEC, config, summary)
 
 
 def _fetch_portal_search(
@@ -463,7 +452,7 @@ def _fetch_portal_search(
     profile = config.get("profile") or {}
     gate_target_titles = list(profile.get("target_titles") or [])
     gate_exclusions = list(
-        ((profile.get("exclusions") or {}).get("title_keywords") or [])
+        (profile.get("exclusions") or {}).get("title_keywords") or []
     )
 
     try:

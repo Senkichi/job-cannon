@@ -1855,8 +1855,9 @@ class TestInjectPortalSearchCreds:
 
     def test_keyring_values_injected_when_plaintext_empty(self):
         """Cred fields empty in config (post-keyring-migration) → keyring values fill them."""
-        from job_finder.web.ingestion_runner import _inject_portal_search_creds
         import keyring
+
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
 
         portal_cfg = self._portal_cfg()
         full_cfg = self._full_cfg(portal_cfg)
@@ -1949,8 +1950,9 @@ class TestInjectPortalSearchCreds:
 
     def test_env_var_wins_over_keyring_and_plaintext(self, monkeypatch):
         """get_secret precedence: env > keyring > config-yaml plaintext."""
-        from job_finder.web.ingestion_runner import _inject_portal_search_creds
         import keyring
+
+        from job_finder.web.ingestion_runner import _inject_portal_search_creds
 
         portal_cfg = self._portal_cfg(
             jooble={"enabled": True, "api_key": "PLAINTEXT"},
@@ -2306,6 +2308,27 @@ class TestNonPortalIngestionTitleGate:
 
         assert [j.title for j in jobs] == ["Senior Data Scientist"]
         assert summary["imap_fetched"] == 1
+
+    def test_imap_missing_email_surfaces_error(self, gated_config):
+        """`_fetch_imap`: empty `sources.imap.email` must NOT fail silently.
+
+        Issue #19 risk callout — the registry-driven driver preserves the
+        original inline check that surfaced missing IMAP credentials via
+        ``summary['imap_errors']`` instead of returning `[]` without trace.
+        """
+        from job_finder.web.ingestion_runner import _fetch_imap
+
+        cfg = {**gated_config}
+        cfg["sources"] = {**gated_config["sources"]}
+        cfg["sources"]["imap"] = {
+            **gated_config["sources"]["imap"],
+            "email": "",
+        }
+        summary: dict = {"imap_errors": []}
+        jobs = _fetch_imap(cfg, summary)
+
+        assert jobs == []
+        assert summary["imap_errors"] == ["sources.imap.email is required"]
 
     def test_dataforseo_gate_drops_off_target_when_config_passed(self, gated_config):
         """`_collect_dataforseo_results`: gate fires when config kwarg is provided."""
