@@ -135,7 +135,12 @@ def upsert_job(
             jd_full=job.description,
         )
     locations_json = _locations_to_json(locations_structured) if locations_structured else None
-    workplace_type_col = locations_structured[0].workplace_type if locations_structured else None
+    # When location parsing fails entirely, every row should still carry the
+    # 'UNSPECIFIED' sentinel rather than NULL so consumers can rely on the
+    # column being populated for filter logic and rollups. UPDATE-branch
+    # coalesces below so 'UNSPECIFIED' from a re-ingestion never downgrades
+    # a real value like 'REMOTE' that an earlier scan extracted.
+    workplace_type_col = locations_structured[0].workplace_type if locations_structured else "UNSPECIFIED"
     primary_country_code = locations_structured[0].country_code if locations_structured else None
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
@@ -207,8 +212,8 @@ def upsert_job(
                 locations_raw = ?,
                 location = ?,
                 locations_structured = ?,
-                workplace_type = ?,
-                primary_country_code = ?{jd_full_clause}
+                workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
+                primary_country_code = COALESCE(?, primary_country_code){jd_full_clause}
             WHERE dedup_key = ?""",
             (
                 json.dumps(sources),
