@@ -26,96 +26,6 @@ from job_finder.web.model_provider import BaseProvider, ModelResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
-
-_TYPE_PLACEHOLDERS = {
-    "string": "...",
-    "integer": 0,
-    "number": 0.0,
-    "boolean": True,
-}
-
-# When a field has an enum constraint, use its first value as the example
-# instead of the generic "..." placeholder.  This gives the model a concrete
-# token to imitate, dramatically improving enum adherence.
-
-
-# LEGACY: used only when output_schema is None + format='json' string path.
-# Scheduled for deletion in Phase 34 Plan 4 — v3.0 scoring uses the schema-dict
-# branch which lets llama.cpp GBNF grammar enforce field names at the token
-# level, making this prompt injection redundant.
-def _schema_to_example(schema: dict) -> str:
-    """Build a concrete JSON example from a schema so the model copies field names exactly."""
-
-    def _build(s: dict) -> dict | list | str | int | float | bool:
-        typ = s.get("type", "string")
-        if typ == "object" and "properties" in s:
-            return {k: _build(v) for k, v in s["properties"].items()}
-        if typ == "array":
-            items = s.get("items", {})
-            return [_build(items)]
-        # Use first enum value as example instead of generic placeholder
-        if s.get("enum"):
-            return s["enum"][0]
-        return _TYPE_PLACEHOLDERS.get(typ, "...")
-
-    return json.dumps(_build(schema), indent=2)
-
-
-# LEGACY: used only when output_schema is None + format='json' string path.
-# Scheduled for deletion in Phase 34 Plan 4 — v3.0 scoring uses the schema-dict
-# branch which lets llama.cpp GBNF grammar enforce field names at the token
-# level, making this field-instruction injection redundant.
-def _schema_to_field_instructions(schema: dict, indent: int = 0) -> str:
-    """Convert a JSON schema into explicit field-name instructions.
-
-    Smaller models (qwen2.5:14b etc.) ignore raw JSON schema dumps and invent
-    semantically similar but wrong field names. This function produces a
-    template-style listing that models follow more reliably.
-
-    Example output:
-        {
-          "score": <integer>,        // Overall fit score 0-100
-          "summary": <string>,       // 2-3 sentence evaluation summary
-          "fit_analysis": {          // REQUIRED
-            "strengths": [<string>, ...],   // Candidate strengths for this role
-            ...
-          }
-        }
-    """
-    props = schema.get("properties", {})
-    required = set(schema.get("required", []))
-    lines = []
-    pad = "  " * indent
-
-    for key, spec in props.items():
-        typ = spec.get("type", "any")
-        desc = spec.get("description", "")
-        req = " (REQUIRED)" if key in required else ""
-        comment = f"  // {desc}{req}" if desc else req
-
-        if typ == "object" and "properties" in spec:
-            lines.append(f'{pad}"{key}": {{')
-            lines.append(_schema_to_field_instructions(spec, indent + 1))
-            lines.append(f"{pad}}},{comment}")
-        elif typ == "array":
-            item_type = spec.get("items", {}).get("type", "any")
-            if item_type == "object" and "properties" in spec.get("items", {}):
-                lines.append(f'{pad}"{key}": [')
-                lines.append(f"{pad}  {{")
-                lines.append(_schema_to_field_instructions(spec["items"], indent + 2))
-                lines.append(f"{pad}  }}, ...")
-                lines.append(f"{pad}],{comment}")
-            else:
-                lines.append(f'{pad}"{key}": [<{item_type}>, ...],{comment}')
-        elif "enum" in spec:
-            enum_str = " | ".join(f'"{v}"' for v in spec["enum"])
-            lines.append(f'{pad}"{key}": one of [{enum_str}],{comment}')
-        else:
-            lines.append(f'{pad}"{key}": <{typ}>,{comment}')
-
-    return "\n".join(lines)
-
-
 _DEFAULT_TIMEOUT = 300.0
 _HEALTH_CHECK_TIMEOUT = 2.0
 
@@ -216,18 +126,12 @@ class OllamaProvider(BaseProvider):
         effective_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
 
         # Format handling — v3.0 schema-dict path vs legacy 'json' string path.
-        format_param: dict | str
-        if isinstance(output_schema, dict):
-            # v3.0 path: forward schema dict unchanged. llama.cpp GBNF grammar
-            # enforces field names at the token level — system prompt stays clean.
-            format_param = output_schema
-            system_with_schema = system
-        else:
-            # Legacy path: format='json' string tells Ollama to produce valid
-            # JSON shape only. If the caller also needs field-name guidance,
-            # it must live in their own system prompt (or upgrade to schema-dict).
-            format_param = "json"
-            system_with_schema = system
+        # v3.0: forward schema dict unchanged. llama.cpp GBNF grammar enforces
+        # field names at the token level — system prompt stays clean.
+        # Legacy: format='json' string tells Ollama to produce valid JSON shape
+        # only. If the caller needs field-name guidance, it must live in their
+        # own system prompt (or upgrade to the schema-dict path).
+        format_param: dict | str = output_schema if isinstance(output_schema, dict) else "json"
 
         # Deterministic default inference options. Built fresh every call —
         # no instance state, no cross-call leak. Per-call overrides merge in
@@ -244,7 +148,7 @@ class OllamaProvider(BaseProvider):
 
         payload = {
             "model": model,
-            "messages": [{"role": "system", "content": system_with_schema}] + messages,
+            "messages": [{"role": "system", "content": system}] + messages,
             "format": format_param,
             "stream": False,
             "options": effective_options,
