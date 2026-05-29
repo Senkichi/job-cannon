@@ -40,6 +40,12 @@ def migrated_db():
     run_migrations(path)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # m063 healed pre-existing (ats_platform, ats_slug) clusters; these
+    # tests seed those same clusters by hand to exercise the healer.
+    # m076 (UNIQUE(ats_platform, ats_slug)) would block the seeds, so we
+    # drop its index in the fixture — m063 ran in a world without m076.
+    conn.execute("DROP INDEX IF EXISTS idx_companies_ats_pair")
+    conn.commit()
     yield path, conn
     conn.close()
     if os.path.exists(path):
