@@ -185,6 +185,44 @@ def test_resolve_backward_compat_empty_chain():
     assert result["provider"] == "gemini"
 
 
+def test_resolve_workload_routing_skips_fallback_without_workload_model():
+    """A fallback provider that has no model for the requested workload is
+    filtered out of the cascade rather than raising. (Primary still raises —
+    a misconfigured primary is a hard config error.)
+
+    `local_bundled` has no `score` entry in `_PROVIDER_DEFAULTS`, so listing
+    it as a fallback for the `score` workload should drop it from the
+    returned `fallback` list, leaving the remaining (still-supported)
+    fallbacks behind.
+    """
+    from job_finder.web.model_provider import resolve_workload_routing
+
+    config = {
+        "providers": {
+            "primary": "ollama",
+            "fallback_chain": ["local_bundled", "gemini"],
+        }
+    }
+    routing = resolve_workload_routing("score", config)
+    fallback_providers = [entry["provider"] for entry in routing["fallback"]]
+    assert "local_bundled" not in fallback_providers
+    assert fallback_providers == ["gemini"]
+
+
+def test_resolve_workload_routing_primary_without_workload_model_raises():
+    """Primary unconfigured for the requested workload is a hard config error."""
+    from job_finder.web.model_provider import resolve_workload_routing
+
+    config = {
+        "providers": {
+            "primary": "local_bundled",  # no `score` entry
+            "fallback_chain": [],
+        }
+    }
+    with pytest.raises(ValueError, match="no model for workload"):
+        resolve_workload_routing("score", config)
+
+
 def test_resolve_chain_with_daily_limits_combined():
     config = {
         "providers": {

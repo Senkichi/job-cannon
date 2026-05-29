@@ -79,24 +79,26 @@ def resolve_workload_routing(workload: str, config: dict) -> dict:
     overrides = providers_cfg.get("overrides", {})
     fallback_names = providers_cfg.get("fallback_chain", [])
 
-    def lookup_model(provider: str) -> str:
+    def lookup_model(provider: str) -> str | None:
         # triage uses the quick model
         lookup_key = "quick" if workload == "triage" else workload
         override = overrides.get(provider, {}).get(lookup_key)
         if override:
             return override
-        provider_defaults = _PROVIDER_DEFAULTS.get(provider, {})
-        model = provider_defaults.get(lookup_key)
-        if model is None:
-            # Skip provider (e.g., local_bundled has no score entry)
-            raise ValueError(f"Provider {provider} has no model for workload {lookup_key}")
-        return model
+        return _PROVIDER_DEFAULTS.get(provider, {}).get(lookup_key)
+
+    primary_model = lookup_model(primary_name)
+    if primary_model is None:
+        raise ValueError(
+            f"Provider {primary_name!r} has no model for workload {workload!r}"
+        )
 
     return {
-        "primary": {"provider": primary_name, "model": lookup_model(primary_name)},
+        "primary": {"provider": primary_name, "model": primary_model},
         "fallback": [
-            {"provider": name, "model": lookup_model(name)}
+            {"provider": name, "model": model}
             for name in fallback_names
+            if (model := lookup_model(name)) is not None
         ],
     }
 
