@@ -258,6 +258,103 @@ def wait_for_snapshot_ready(
     return snap_len
 
 
+# Hints that a link's text *looks like* a job title rather than nav chrome.
+# Matched case-insensitively as substrings — the goal here is throughput
+# of plausibly-job-like anchors, not strict title scoring (the extractor's
+# _title_matches handles that downstream).
+_JOB_LINK_HINTS = (
+    "analyst",
+    "engineer",
+    "manager",
+    "scientist",
+    "developer",
+    "consultant",
+    "specialist",
+    "director",
+    "lead",
+    "senior",
+    "principal",
+    "staff",
+    "product",
+    "data",
+    "researcher",
+    "designer",
+    "architect",
+    "associate",
+    "coordinator",
+    "intern",
+)
+
+
+def wait_for_jobs_ready(
+    page,
+    *,
+    timeout_ms: int = 10000,
+    poll_ms: int = 600,
+    stable_polls: int = 2,
+    min_count: int = 3,
+) -> int:
+    """Poll until the count of plausibly-job-shaped links on the page stabilises.
+
+    The static-extractor that runs after a recipe finishes scrapes ``<a
+    href>`` tags. On Workday / jobvite-style SPA careers tenants the
+    ``goto`` step lands on a page whose JavaScript still has to inject
+    the job list — at that moment, only nav chrome is rendered, so the
+    extractor finds nothing. This helper waits for the link count
+    *that looks like a job title* (text contains one of the hint
+    keywords) to be both (a) above ``min_count`` and (b) stable across
+    ``stable_polls`` consecutive polls.
+
+    Returns the final count observed. Caller can decide whether to
+    proceed regardless.
+
+    Args:
+        page: Playwright Page instance (already navigated to a destination URL).
+        timeout_ms: Total budget for polling (default 10s).
+        poll_ms: Interval between checks (default 600ms).
+        stable_polls: Consecutive polls with unchanged count before declaring
+            "ready" (default 2). Catches the case where jobs are still
+            being appended.
+        min_count: Don't declare ready until at least this many plausible
+            job-links are present (default 3). Otherwise an early
+            zero-count poll could trigger immediate exit on a page that
+            simply hasn't loaded anything yet.
+
+    Returns:
+        Final job-link count observed.
+    """
+    elapsed = 0
+    last_count = -1
+    stable = 0
+    while elapsed < timeout_ms:
+        try:
+            cnt = page.evaluate(
+                """(hints) => {
+                    const anchors = document.querySelectorAll('a[href]');
+                    let n = 0;
+                    for (const a of anchors) {
+                        const t = (a.innerText || '').trim().toLowerCase();
+                        if (t.length < 8 || t.length > 200) continue;
+                        if (hints.some(h => t.includes(h))) n++;
+                    }
+                    return n;
+                }""",
+                list(_JOB_LINK_HINTS),
+            )
+        except Exception:
+            cnt = 0
+        if cnt >= min_count and cnt == last_count:
+            stable += 1
+            if stable >= stable_polls:
+                return cnt
+        else:
+            stable = 0
+            last_count = cnt
+        page.wait_for_timeout(poll_ms)
+        elapsed += poll_ms
+    return last_count if last_count >= 0 else 0
+
+
 # ---------------------------------------------------------------------------
 # Recipe execution
 # ---------------------------------------------------------------------------
@@ -686,6 +783,16 @@ def replay_navigation_recipe(
         # Brief wait after interactive steps for page to update
         if step.get("action") in ("click", "type", "press"):
             page.wait_for_timeout(_POST_ACTION_WAIT_MS)
+
+    # Before extraction, poll for job-shaped links to stabilise. Workday
+    # and jobvite SPA tenants finish ``goto`` while only the navigation
+    # chrome is in the DOM — the job list is XHR-injected ~1-4s later.
+    # Without this, ``_extract_with_recipe`` finds only sidebar links
+    # and the recipe falsely reports 0 jobs.
+    try:
+        wait_for_jobs_ready(page)
+    except Exception:
+        pass
 
     return _extract_with_recipe(page, extraction, target_titles, exclusions)
 

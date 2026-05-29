@@ -16,6 +16,7 @@ from job_finder.web.ai_career_navigator import (
     cache_nav_recipe,
     clear_nav_recipe,
     replay_navigation_recipe,
+    wait_for_jobs_ready,
     wait_for_snapshot_ready,
 )
 
@@ -689,3 +690,133 @@ class TestDiscoverNavigationRecipeCascade:
             recipe = self._run_discovery(cascade_config_low)
 
         assert recipe is None
+
+
+class TestWaitForJobsReady:
+    """Tests for the SPA-aware post-goto wait helper.
+
+    ``wait_for_jobs_ready`` is the fix for Workday / jobvite-style
+    careers tenants whose ``goto`` step lands on a search-results
+    URL while the job list is still XHR-loading. Without this, the
+    extractor sees nav chrome only and returns 0 jobs.
+    """
+
+    def test_returns_immediately_when_link_count_stable_above_min(self):
+        """N+1 polls with same count returning ``stable_polls=N`` triggers early exit.
+
+        The first poll sets ``last_count`` as the baseline (stable still 0
+        — there's nothing to compare against yet). The next ``stable_polls``
+        polls each increment ``stable`` if the count is unchanged, so a
+        total of ``stable_polls + 1`` consecutive identical polls is
+        needed before exit. This guards against false-early-exit on a
+        transient zero-count read.
+        """
+        page = MagicMock()
+        # poll 1: baseline=5, stable=0
+        # poll 2: cnt=5 == baseline → stable=1
+        # poll 3: cnt=5 == last → stable=2 → return
+        page.evaluate.side_effect = [5, 5, 5]
+        result = wait_for_jobs_ready(
+            page, timeout_ms=10000, poll_ms=600, stable_polls=2, min_count=3
+        )
+        assert result == 5
+        # 3 polls = 2 wait_for_timeout calls (no wait after the returning poll
+        # because we return mid-iteration).
+        assert page.wait_for_timeout.call_count == 2
+
+    def test_keeps_polling_while_count_still_growing(self):
+        """An increasing link count means the SPA is still loading — don't exit."""
+        page = MagicMock()
+        # 3 → 6 → 9 → 9 → 9: stable hits 2 on the 5th poll
+        page.evaluate.side_effect = [3, 6, 9, 9, 9]
+        result = wait_for_jobs_ready(
+            page, timeout_ms=10000, poll_ms=600, stable_polls=2, min_count=3
+        )
+        assert result == 9
+        assert page.wait_for_timeout.call_count == 4
+
+    def test_below_min_count_keeps_polling_even_if_stable(self):
+        """A stable count of 0 should NOT be treated as ready — guards against
+        zero-link landing pages where the SPA hasn't started rendering yet."""
+        page = MagicMock()
+        # Steady 0 throughout — would exit early on stability if min_count
+        # were ignored. Should instead exhaust the budget.
+        page.evaluate.return_value = 0
+        result = wait_for_jobs_ready(
+            page, timeout_ms=2400, poll_ms=600, stable_polls=2, min_count=3
+        )
+        assert result == 0
+        # 2400/600 = 4 polls; each is followed by wait_for_timeout.
+        assert page.wait_for_timeout.call_count == 4
+
+    def test_returns_last_count_on_timeout_when_count_keeps_growing(self):
+        """Page that keeps loading forever returns last observed count."""
+        page = MagicMock()
+        # Each poll bumps the count — never stable.
+        page.evaluate.side_effect = [3, 5, 8, 11, 14]
+        result = wait_for_jobs_ready(
+            page, timeout_ms=2400, poll_ms=600, stable_polls=2, min_count=3
+        )
+        # 4 polls fit in the budget; last observed count = 11.
+        assert result == 11
+        assert page.wait_for_timeout.call_count == 4
+
+    def test_evaluate_exception_treated_as_zero(self):
+        """``page.evaluate`` raising should not crash the helper."""
+        page = MagicMock()
+        page.evaluate.side_effect = Exception("page detached")
+        result = wait_for_jobs_ready(
+            page, timeout_ms=1800, poll_ms=600, stable_polls=2, min_count=3
+        )
+        assert result == 0
+
+    def test_replay_calls_wait_for_jobs_ready_after_steps(self):
+        """``replay_navigation_recipe`` must invoke the wait before extraction.
+
+        This pins the integration: regressing the call in replay would
+        re-introduce the Workday/jobvite zero-jobs issue. Mocking the
+        wait at the module level lets us assert it ran exactly once.
+        """
+        from job_finder.web import ai_career_navigator as ainav
+
+        page = MagicMock()
+        recipe = {
+            "steps": [
+                {"action": "goto", "url": "https://example.com/search?q=data"},
+            ],
+            "extraction": {"method": "links_in_page"},
+        }
+
+        with (
+            patch.object(ainav, "_execute_step", return_value=True),
+            patch.object(ainav, "wait_for_jobs_ready", return_value=5) as mock_wait,
+            patch.object(ainav, "_extract_with_recipe", return_value=[{"title": "x", "url": "y"}]),
+        ):
+            jobs = replay_navigation_recipe(page, recipe, ["data analyst"], [])
+
+        assert jobs == [{"title": "x", "url": "y"}]
+        mock_wait.assert_called_once_with(page)
+
+    def test_replay_swallows_wait_exception_and_still_extracts(self):
+        """Even if the wait helper crashes, extraction should still run.
+
+        Failing-open here is intentional: a stale Playwright handle that
+        crashes wait_for_jobs_ready shouldn't prevent the extractor from
+        attempting to read whatever's already on the page.
+        """
+        from job_finder.web import ai_career_navigator as ainav
+
+        page = MagicMock()
+        recipe = {
+            "steps": [{"action": "goto", "url": "https://example.com/jobs"}],
+            "extraction": {"method": "links_in_page"},
+        }
+        with (
+            patch.object(ainav, "_execute_step", return_value=True),
+            patch.object(ainav, "wait_for_jobs_ready", side_effect=RuntimeError("page detached")),
+            patch.object(ainav, "_extract_with_recipe", return_value=[]) as mock_extract,
+        ):
+            jobs = replay_navigation_recipe(page, recipe, ["data analyst"], [])
+
+        assert jobs == []
+        mock_extract.assert_called_once()

@@ -370,6 +370,220 @@ class TestTitleMatchesAbbreviations:
 
 
 # ---------------------------------------------------------------------------
+# Tests: _title_matches ordered-word fallback
+# ---------------------------------------------------------------------------
+
+
+class TestTitleMatchesOrderedFallback:
+    """Pins the ordered-tokens-with-bounded-gap fallback added 2026-05-28.
+
+    The strict word-boundary phrase matcher rejects titles where a real
+    job posting inserts a qualifier between target words ("Senior
+    Manager, **Data** Analytics" vs target "Senior Manager, Analytics").
+    The fallback walks target words in order in the candidate, allowing
+    up to ``_MAX_TARGET_GAP`` intervening tokens between each pair, but
+    still requires full-token match per word (so "data" doesn't match
+    "database").
+
+    Catches:
+      - Real near-miss titles unstuck by the fallback
+      - Substring-style false positives that must still be rejected
+      - Order matters (target words can't be reversed)
+      - Exclusions still apply strictly (not loosened)
+      - Empty target list still treated as "match all"
+    """
+
+    def test_inserted_qualifier_passes_fallback(self):
+        """Target 'Senior Manager, Analytics' must match candidate where
+        'Data' interrupts ('Senior Manager, Data Analytics')."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        assert (
+            _title_matches(
+                "Senior Manager, Data Analytics",
+                ["Senior Manager, Analytics"],
+                [],
+            )
+            is True
+        )
+
+    def test_multi_qualifier_in_middle_passes_fallback(self):
+        """Up to _MAX_TARGET_GAP (2) intervening tokens are allowed."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        # 'senior technical lead data analyst' between 'senior' and 'data analyst'
+        # has 'technical lead' as a 2-token gap — at the boundary, must match.
+        assert (
+            _title_matches(
+                "Senior Technical Lead Data Analyst",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is True
+        )
+
+    def test_gap_exceeded_does_not_match(self):
+        """More than _MAX_TARGET_GAP intervening tokens → reject."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        # 3 intervening tokens between 'senior' and 'data analyst' — exceeds
+        # gap=2 cap, so must be rejected to prevent over-broad match.
+        assert (
+            _title_matches(
+                "Senior Marketing Engineering Operations Data Analyst Hiring",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is False
+        )
+
+    def test_full_token_match_blocks_substring(self):
+        """A target word must match a complete candidate token, not appear
+        inside a longer word — preserves the word-boundary guarantee."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        # 'Database' must NOT satisfy target word 'data'.
+        assert (
+            _title_matches(
+                "Database Administrator Senior",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is False
+        )
+
+    def test_order_matters(self):
+        """Target words must appear in order — reversed order rejected."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        # Candidate has all the target words, but in the wrong order.
+        # 'Senior Data Analyst' target → expects [senior, data, analyst]
+        # 'Data Engineer, Senior Tier' has [data, engineer, senior, tier] —
+        # no 'analyst' at all, so reject regardless.
+        assert (
+            _title_matches(
+                "Data Engineer, Senior Tier",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is False
+        )
+
+    def test_reversed_target_words_reject(self):
+        """'Analyst Senior Data' shouldn't match target 'Senior Data Analyst'."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        assert (
+            _title_matches(
+                "Analyst Senior Data Platform",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is False
+        )
+
+    def test_strict_phrase_match_still_wins_fast_path(self):
+        """When the strict matcher succeeds, fallback isn't needed (and
+        shouldn't be called). A contiguous-phrase title matches the same
+        as before."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        assert (
+            _title_matches(
+                "Senior Data Analyst",
+                ["Senior Data Analyst"],
+                [],
+            )
+            is True
+        )
+
+    def test_exclusion_uses_strict_match_only(self):
+        """Exclusions are not loosened — strict word-boundary applies.
+
+        Without this guarantee, an exclusion of 'intern' could match
+        non-intern titles like 'internal mobility lead' under a loose
+        ordered-words matcher.
+
+        Here the inclusion is satisfied via the fallback ('senior' →
+        skip 'internal' → 'data analyst' contiguous), and the exclusion
+        'intern' must NOT trip on the 'internal' substring because
+        \bintern\b doesn't match inside 'internal'.
+        """
+        from job_finder.web.ats_platforms import _title_matches
+
+        assert (
+            _title_matches(
+                "Senior Internal Data Analyst",
+                ["Senior Data Analyst"],
+                ["intern"],
+            )
+            is True
+        )
+
+    def test_exclusion_still_kicks_in_when_present(self):
+        from job_finder.web.ats_platforms import _title_matches
+
+        # 'Intern' present as a standalone token → reject.
+        assert (
+            _title_matches(
+                "Senior Data Analyst Intern",
+                ["Senior Data Analyst"],
+                ["intern"],
+            )
+            is False
+        )
+
+    def test_empty_target_titles_still_matches_anything(self):
+        from job_finder.web.ats_platforms import _title_matches
+
+        assert (
+            _title_matches("Anything Goes Here", [], [])
+            is True
+        )
+
+    def test_real_nvidia_case_now_passes(self):
+        """The headline case from the 2026-05-28 AI-tier diagnostic:
+        NVIDIA's search-result page surfaced 'Senior Manager, Data Analytics'
+        for the keyword 'data', and the strict matcher rejected it
+        because no target_title was a contiguous substring."""
+        from job_finder.web.ats_platforms import _title_matches
+
+        target_titles = [
+            "Senior Manager, Analytics",
+            "Data Scientist",
+            "Senior Data Analyst",
+        ]
+        # Real result-page titles from probe_ai_tier_e2e.py output
+        assert (
+            _title_matches(
+                "Senior Manager, Data Analytics",
+                target_titles,
+                [],
+            )
+            is True
+        )
+        assert (
+            _title_matches(
+                "Senior Technical Data Analyst - Operations E2E Data Intelligence",
+                target_titles,
+                [],
+            )
+            is True
+        )
+
+    def test_ordered_words_match_direct(self):
+        """Direct calls to _ordered_words_match for the low-level invariants."""
+        from job_finder.web.ats_platforms import _ordered_words_match
+
+        # Empty target rejects.
+        assert _ordered_words_match("", "anything goes") is False
+        # Single-word target works as anywhere-substring (within bound).
+        assert _ordered_words_match("analyst", "senior data analyst") is True
+        # Target longer than candidate trivially rejected.
+        assert _ordered_words_match("a b c d", "a b") is False
+
+
+# ---------------------------------------------------------------------------
 # Tests: upsert_company
 # ---------------------------------------------------------------------------
 
