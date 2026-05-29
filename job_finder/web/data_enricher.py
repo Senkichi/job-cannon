@@ -63,7 +63,16 @@ def _maybe_reconcile_ats_identity(
     *,
     reason: str,
 ) -> None:
-    """After ``source_urls`` gains ATS links, reconcile company ATS identity."""
+    """After ``source_urls`` gains ATS links, reconcile company ATS identity.
+
+    Logs at WARNING (not DEBUG) on exception because ``reconcile_company_ats``
+    returns a status dict for operator-meaningful outcomes (``slug_collision``,
+    ``verify_failed``, ``abstain_conflict``) rather than raising. Any exception
+    that reaches this handler is therefore a programmer/infra error (DB lock,
+    AttributeError on a malformed row, import failure) that an operator needs
+    to see. The swallow is kept so a single reconcile failure does not fail
+    the surrounding enrichment run.
+    """
 
     if conn is None:
         return
@@ -75,7 +84,13 @@ def _maybe_reconcile_ats_identity(
 
         reconcile_company_ats(conn, int(cid), reason=reason, config=config)
     except Exception as exc:
-        logger.debug("ATS identity reconcile skipped (%s): %s", reason, exc)
+        logger.warning(
+            "ATS identity reconcile failed (company_id=%s dedup_key=%s reason=%s): %s",
+            cid,
+            job_row.get("dedup_key"),
+            reason,
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------
