@@ -254,10 +254,6 @@ _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
     }
 )
 
-# Alias for backward-compat — canonical definition is in claude_client.py.
-_FREE_PROVIDERS = FREE_PROVIDERS
-
-
 class ProviderCascadeExhaustedError(RuntimeError):
     """Raised when every configured provider in a cascade has been exhausted.
 
@@ -430,18 +426,12 @@ def _sanitized_result(
 ) -> ModelResult:
     """Return a ModelResult with ``_sanitize_output`` applied to its ``data``.
 
-    Sanitization is skipped for Anthropic results (the Anthropic adapter
-    historically returns already-validated payloads), for non-dict data,
-    and when the sanitize pass returns the same object (identity-preserving
-    fast path). Otherwise a new ModelResult is produced via
-    ``dataclasses.replace`` so future fields are picked up automatically.
+    Sanitization is skipped for non-dict data and when the sanitize pass
+    returns the same object (identity-preserving fast path). Otherwise a new
+    ModelResult is produced via ``dataclasses.replace`` so future fields are
+    picked up automatically.
     """
-    if provider_name == "anthropic" or not isinstance(result.data, dict):
-        # Anthropic guard is vestigial post-F2 (commit c8e698d): the adapter
-        # now produces clean dicts identical to ClaudeCodeCLIProvider's
-        # output, so the sanitize pass would be a no-op. Kept short-circuit
-        # to skip the dict copy in _sanitize_output. See
-        # .planning/specs/2026-05-26-PLAN.md "Optional next-session work".
+    if not isinstance(result.data, dict):
         return result
     sanitized = _sanitize_output(result.data, schema)
     if sanitized is result.data:
@@ -582,7 +572,7 @@ def _maybe_record_cost(
             f"(job_id={job_id}, purpose={purpose}, model={result.model})"
         )
 
-    if result.provider in _FREE_PROVIDERS:
+    if result.provider in FREE_PROVIDERS:
         cost_usd = 0.0
     else:
         cost_usd = result.cost_usd
@@ -702,7 +692,7 @@ def call_model(
             continue
 
         # Budget gate for paid providers
-        if entry_provider not in _FREE_PROVIDERS:
+        if entry_provider not in FREE_PROVIDERS:
             if not cost_gate(conn, config, tier):
                 logger.info("Cascade: %s over budget, skipping", entry_provider)
                 continue

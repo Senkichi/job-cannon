@@ -1057,7 +1057,7 @@ def test_cascade_primary_entry_uses_original_system(tmp_path, _reset_daily_state
 
 
 # ---------------------------------------------------------------------------
-# _SUPPORTED_PROVIDERS / _FREE_PROVIDERS / is_supported_provider_name tests
+# _SUPPORTED_PROVIDERS / is_supported_provider_name tests
 # ---------------------------------------------------------------------------
 
 from job_finder.web.model_provider import (
