@@ -292,8 +292,8 @@ def reconcile_company_ats(
         (platform, slug, company_id),
     ).fetchone()
     if existing is not None:
-        existing_id = existing[0] if not isinstance(existing, dict) else existing["id"]
-        existing_name = existing[1] if not isinstance(existing, dict) else existing["name_raw"]
+        existing_id = existing["id"]
+        existing_name = existing["name_raw"]
         logger.warning(
             "ats_identity slug_collision company_id=%d would-promote=%s/%s "
             "but already owned by company_id=%d (%r)",
