@@ -21,11 +21,11 @@ Phase 25 introduced the adapter; F2 (2026-05-26) slimmed it.
 
 from __future__ import annotations
 
-import json
 import logging
 
 from job_finder.web.claude_client import _run_oneshot
 from job_finder.web.model_provider import BaseProvider, ModelResult
+from job_finder.web.providers._cli_envelope import parse_oneshot_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -93,42 +93,11 @@ class AnthropicProvider(BaseProvider):
         del max_tokens  # CLI has no max-tokens knob; accepted for symmetry
         if not messages:
             raise ValueError("messages list must contain at least one message")
-        user_message = messages[-1].get("content", "")
-
         envelope = _run_oneshot(
             model=model,
             system=system,
-            user_message=user_message,
+            user_message=messages[-1].get("content", ""),
             json_schema=output_schema,
             timeout=timeout or self._timeout_default,
         )
-
-        # Parse identically to ClaudeCodeCLIProvider for symmetry.
-        if output_schema is not None:
-            structured = envelope.get("structured_output")
-            if structured is not None and isinstance(structured, dict):
-                data: dict = structured
-            else:
-                data = json.loads(envelope["result"])
-        else:
-            raw = envelope.get("result", "")
-            try:
-                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                data = parsed if isinstance(parsed, dict) else {"text": str(raw).strip()}
-            except (json.JSONDecodeError, TypeError):
-                data = {"text": str(raw).strip()}
-
-        usage = envelope.get("usage") or {}
-        return ModelResult(
-            data=data,
-            # Cost is computed by _maybe_record_cost; for anthropic
-            # (now in FREE_PROVIDERS) that resolves to 0.0 regardless of
-            # what we return here. Keep this 0.0 so ModelResult.cost_usd
-            # matches the row that lands in scoring_costs.
-            cost_usd=0.0,
-            input_tokens=int(usage.get("input_tokens", 0) or 0),
-            output_tokens=int(usage.get("output_tokens", 0) or 0),
-            model=model,
-            provider="anthropic",
-            schema_valid=True,
-        )
+        return parse_oneshot_envelope(envelope, output_schema, model=model, provider="anthropic")

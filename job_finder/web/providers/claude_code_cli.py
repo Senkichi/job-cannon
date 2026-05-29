@@ -18,12 +18,12 @@ callers (model_provider.call_model) build single-turn prompts only.
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 
 from job_finder.web.claude_client import _run_oneshot
 from job_finder.web.model_provider import BaseProvider, ModelResult
+from job_finder.web.providers._cli_envelope import parse_oneshot_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -60,48 +60,11 @@ class ClaudeCodeCLIProvider(BaseProvider):
     ) -> ModelResult:
         if not messages:
             raise ValueError("messages list must contain at least one message")
-        user_message = messages[-1].get("content", "")
-
         envelope = _run_oneshot(
             model=model,
             system=system,
-            user_message=user_message,
+            user_message=messages[-1].get("content", ""),
             json_schema=output_schema,
             timeout=timeout or 180.0,
         )
-
-        # _run_oneshot already raises on is_error/credit-exhaustion, so
-        # by this point envelope is a successful response.
-        if output_schema is not None:
-            # Prefer the CLI's native structured_output (Sonnet/Haiku JSON
-            # mode); fall back to parsing the result string.
-            structured = envelope.get("structured_output")
-            if structured is not None and isinstance(structured, dict):
-                data: dict = structured
-            else:
-                data = json.loads(envelope["result"])
-            schema_valid = True
-        else:
-            # Freeform path: try JSON parse; on failure return {"text": ...}.
-            raw = envelope.get("result", "")
-            try:
-                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                data = parsed if isinstance(parsed, dict) else {"text": str(raw).strip()}
-            except (json.JSONDecodeError, TypeError):
-                data = {"text": str(raw).strip()}
-            # No schema requested — nothing to validate against. True is the "no
-            # error" telemetry value (matches claude_client.call_claude:563 and
-            # AnthropicProvider). False here would bias the cascade audit signal
-            # against CLI providers on schema-less callsites (M-1, 2026-05-20).
-            schema_valid = True
-
-        usage = envelope.get("usage") or {}
-        return ModelResult(
-            data=data,
-            cost_usd=0.0,
-            input_tokens=int(usage.get("input_tokens", 0) or 0),
-            output_tokens=int(usage.get("output_tokens", 0) or 0),
-            model=model,
-            provider="claude_code_cli",
-            schema_valid=schema_valid,
-        )
+        return parse_oneshot_envelope(envelope, output_schema, model=model, provider="claude_code_cli")
