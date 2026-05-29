@@ -71,10 +71,11 @@ def _setup_file_logging() -> None:
     # primp is a Rust HTTP client pulled in via ddgs; it logs every request at INFO.
     logging.getLogger("primp").setLevel(logging.WARNING)
     # ddgs logs every per-engine fallback failure ("Error in engine yahoo: ...")
-    # at INFO. The DDGS object retries across engines internally and we already
-    # emit a single WARNING from enrichment_tiers when ALL engines fail
-    # ("DDGS: all engines returned empty for query"), so the per-engine chatter
-    # is pure noise. WARNING level keeps real DDGS-side warnings visible.
+    # at INFO. The DDGS object retries across engines internally and our own
+    # callers emit a single INFO from enrichment_tiers / agentic_enricher when
+    # ALL engines fail ("DDGS: all engines returned empty for query"), so the
+    # per-engine chatter is pure noise. WARNING level keeps real DDGS-side
+    # warnings visible.
     logging.getLogger("ddgs").setLevel(logging.WARNING)
 
 
