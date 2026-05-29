@@ -61,7 +61,7 @@ class PlatformScanner:
     company_source: str
     fetch_postings: Callable[[str], list[dict]]
     title_of: Callable[[dict], str]
-    posting_to_job: Callable[[dict, str], "dict | None"]
+    posting_to_job: Callable[[dict, str], dict | None]
 
 
 def run_platform_scan(
@@ -125,8 +125,8 @@ def _http_get_json(
     slug: str,
     *,
     retry_on_timeout: bool = False,
-    params: "dict | None" = None,
-    headers: "dict | None" = None,
+    params: dict | None = None,
+    headers: dict | None = None,
 ) -> Any:
     """GET + 200-check + JSON-parse, with optional single timeout retry.
 

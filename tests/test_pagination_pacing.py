@@ -23,7 +23,7 @@ class TestWorkdayPagination:
     def test_fetch_sleeps_between_page_posts(self):
         """U5: _fetch_postings sleeps _PAGE_FETCH_SLEEP_S before each page
         after the first; LIST endpoint is not hammered for multi-page tenants."""
-        from job_finder.web.ats_platforms_internal import _platforms_workday
+        from job_finder.web.ats_platforms import _platforms_workday
 
         # Two pages of _PAGE_SIZE=20 postings; total=40 forces a 2nd POST.
         page_1 = {
@@ -62,7 +62,7 @@ class TestWorkdayPagination:
 
     def test_single_page_does_not_sleep(self):
         """U5 guard: single-page response triggers zero inter-page sleeps."""
-        from job_finder.web.ats_platforms_internal import _platforms_workday
+        from job_finder.web.ats_platforms import _platforms_workday
 
         single_page = {
             "total": 5,
@@ -91,7 +91,7 @@ class TestWorkdayPagination:
 class TestSmartRecruitersPagination:
     def test_fetch_sleeps_between_page_gets(self):
         """U5: same contract as Workday, GET-paginated variant."""
-        from job_finder.web.ats_platforms_internal import _platforms_smartrecruiters
+        from job_finder.web.ats_platforms import _platforms_smartrecruiters
 
         page_1 = {
             "totalFound": 200,
@@ -123,7 +123,7 @@ class TestSmartRecruitersPagination:
 
     def test_single_page_does_not_sleep(self):
         """U5 guard: single-page response triggers zero inter-page sleeps."""
-        from job_finder.web.ats_platforms_internal import _platforms_smartrecruiters
+        from job_finder.web.ats_platforms import _platforms_smartrecruiters
 
         single_page = {
             "totalFound": 3,

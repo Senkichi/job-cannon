@@ -1,0 +1,292 @@
+"""ATS platform job scanning — public surface, registry, and shared utilities.
+
+The 16 ``scan_*`` functions defined here delegate to the
+``PlatformScanner`` registry in ``_registry``. Per-platform HTTP /
+pagination / response parsing lives in ``_platforms_*`` submodules; the
+shared title-normalization machinery lives in ``_title_match``; and the
+Workday / SmartRecruiters per-job description fetchers live in
+``_detail_fetchers``.
+
+This ``__init__`` re-exports every legacy public name so callers that
+import from ``job_finder.web.ats_platforms`` (the historical flat module)
+keep working unchanged. ``requests`` is imported eagerly so existing
+tests that patch ``job_finder.web.ats_platforms.requests.get|post``
+continue to intercept HTTP calls.
+
+History: extracted from ``ats_scanner.py`` (Plan 02 split). The registry
+split landed in polish-review F1 (2026-05-26). The package promotion —
+flat ``ats_platforms.py`` + sibling ``ats_platforms_internal`` package
+folded into a single ``ats_platforms/`` package — landed in H3
+(2026-05-28).
+"""
+
+# `requests` is imported eagerly so tests that do
+# `@patch("job_finder.web.ats_platforms.requests.get")` (and `.post`)
+# resolve `requests` via this package's namespace. `requests` is a
+# module singleton, so the patch is visible to every consumer.
+import requests  # noqa: F401
+
+from job_finder.web.ats_platforms._detail_fetchers import (  # noqa: F401
+    _fetch_smartrecruiters_description,
+    _fetch_workday_description,
+)
+from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
+from job_finder.web.ats_platforms._platforms_bamboohr import SCANNER as _BAMBOOHR_SCANNER
+from job_finder.web.ats_platforms._platforms_breezy import SCANNER as _BREEZY_SCANNER
+from job_finder.web.ats_platforms._platforms_greenhouse import SCANNER as _GREENHOUSE_SCANNER
+from job_finder.web.ats_platforms._platforms_jazzhr import SCANNER as _JAZZHR_SCANNER
+from job_finder.web.ats_platforms._platforms_jobvite import SCANNER as _JOBVITE_SCANNER
+from job_finder.web.ats_platforms._platforms_lever import SCANNER as _LEVER_SCANNER
+from job_finder.web.ats_platforms._platforms_paylocity import SCANNER as _PAYLOCITY_SCANNER
+from job_finder.web.ats_platforms._platforms_personio import SCANNER as _PERSONIO_SCANNER
+from job_finder.web.ats_platforms._platforms_pinpoint import SCANNER as _PINPOINT_SCANNER
+from job_finder.web.ats_platforms._platforms_recruitee import SCANNER as _RECRUITEE_SCANNER
+from job_finder.web.ats_platforms._platforms_rippling import SCANNER as _RIPPLING_SCANNER
+from job_finder.web.ats_platforms._platforms_smartrecruiters import (
+    SCANNER as _SMARTRECRUITERS_SCANNER,
+)
+from job_finder.web.ats_platforms._platforms_teamtailor import SCANNER as _TEAMTAILOR_SCANNER
+from job_finder.web.ats_platforms._platforms_workable import SCANNER as _WORKABLE_SCANNER
+from job_finder.web.ats_platforms._platforms_workday import SCANNER as _WORKDAY_SCANNER
+from job_finder.web.ats_platforms._registry import PlatformScanner, run_platform_scan
+from job_finder.web.ats_platforms._title_match import (  # noqa: F401
+    _MAX_TARGET_GAP,
+    _PUNCT_RUN,
+    _TITLE_EXPANSIONS,
+    _WS_RUN,
+    _compile_word_boundary,
+    _normalize_title,
+    _ordered_words_match,
+    _title_matches,
+)
+
+SCANNERS_BY_NAME: dict[str, PlatformScanner] = {
+    s.name: s
+    for s in (
+        _ASHBY_SCANNER,
+        _BAMBOOHR_SCANNER,
+        _BREEZY_SCANNER,
+        _GREENHOUSE_SCANNER,
+        _JAZZHR_SCANNER,
+        _JOBVITE_SCANNER,
+        _LEVER_SCANNER,
+        _PAYLOCITY_SCANNER,
+        _PERSONIO_SCANNER,
+        _PINPOINT_SCANNER,
+        _RECRUITEE_SCANNER,
+        _RIPPLING_SCANNER,
+        _SMARTRECRUITERS_SCANNER,
+        _TEAMTAILOR_SCANNER,
+        _WORKABLE_SCANNER,
+        _WORKDAY_SCANNER,
+    )
+}
+
+
+# ---------------------------------------------------------------------------
+# Platform scanners — thin delegations to the PlatformScanner registry.
+#
+# The 16 ``scan_*`` functions below are explicit one-liners (rather than a
+# factory) so the public signatures, docstrings, and parameter names
+# travel with each platform's contract — the registry handles the title
+# gate + result-count log line.
+# ---------------------------------------------------------------------------
+
+
+def scan_lever(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Lever API for keyword-matched job postings.
+
+    API: GET https://api.lever.co/v0/postings/{slug}?mode=json
+
+    Returns:
+        List of job dicts with keys: title, company_source, location,
+        description, source_url, salary_min, salary_max, comp_json.
+        Empty list on error or no matches.
+    """
+    return run_platform_scan(_LEVER_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_greenhouse(
+    board_token: str, target_titles: list[str], exclusions: list[str]
+) -> list[dict]:
+    """Scan Greenhouse API for keyword-matched job postings.
+
+    Fetches all active jobs with content and pay transparency data.
+    CRITICAL: pay_input_ranges values are in cents — divide by 100 for dollars
+    (Research Pitfall 7).
+
+    API: GET https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true&pay_transparency=true
+    """
+    return run_platform_scan(_GREENHOUSE_SCANNER, board_token, target_titles, exclusions)
+
+
+def scan_ashby(job_board_name: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Ashby API for keyword-matched job postings.
+
+    Preserves exact slug casing — Ashby slugs are case-sensitive
+    (Research Pitfall 3: jobs.ashbyhq.com/OpenAI != jobs.ashbyhq.com/openai).
+    Single retry on transient timeout (Ashby intermittency, see registry).
+
+    API: GET https://api.ashbyhq.com/posting-api/job-board/{job_board_name}?includeCompensation=true
+    """
+    return run_platform_scan(_ASHBY_SCANNER, job_board_name, target_titles, exclusions)
+
+
+def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Workday CXS API for keyword-matched job postings.
+
+    Workday exposes a standardized POST JSON API across all tenants.
+    Slug format: "{subdomain}/{board}" (e.g. "walmart.wd5/WalmartExternal").
+    Per-job description is fetched via ``_fetch_workday_description``.
+    """
+    return run_platform_scan(_WORKDAY_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_smartrecruiters(
+    slug: str, target_titles: list[str], exclusions: list[str]
+) -> list[dict]:
+    """Scan SmartRecruiters Posting API for keyword-matched job postings.
+
+    SmartRecruiters exposes a public REST API (no auth required) that returns
+    JSON job listings with offset-based pagination.
+
+    API: GET https://api.smartrecruiters.com/v1/companies/{slug}/postings?offset={N}&limit=100
+    Per-job description is fetched via ``_fetch_smartrecruiters_description``.
+    """
+    return run_platform_scan(_SMARTRECRUITERS_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_recruitee(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Recruitee public offers API for keyword-matched job postings.
+
+    API: GET https://{slug}.recruitee.com/api/offers/ → {"offers": [...]}.
+    No auth required. The list response includes title, locations, description,
+    and careers_url; no detail-page fetch is needed for jd_full.
+    """
+    return run_platform_scan(_RECRUITEE_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_breezy(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Breezy HR public JSON feed for keyword-matched job postings.
+
+    API: GET https://{slug}.breezy.hr/json → flat list of position objects.
+    No auth required. The list endpoint omits the full description (only a
+    short summary is exposed); jd_full enrichment happens later via the
+    description URL.
+    """
+    return run_platform_scan(_BREEZY_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_jazzhr(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan JazzHR public feed for keyword-matched job postings.
+
+    API: GET https://{slug}.applytojob.com/apply/jobs/feed?json=1
+        → {"jobs": [...]} OR a bare list, depending on tenant config.
+    """
+    return run_platform_scan(_JAZZHR_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_pinpoint(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Pinpoint public postings JSON for keyword-matched job postings.
+
+    API: GET https://{slug}.pinpointhq.com/postings.json → {"data": [...]}.
+    No auth. Single-shot — Pinpoint returns every active posting in one
+    response with no pagination.
+    """
+    return run_platform_scan(_PINPOINT_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_personio(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Personio public XML feed for keyword-matched job postings.
+
+    API: GET https://{slug}.jobs.personio.{de,com}/xml → workzag-jobs
+    document with <position> children. Tries .de first, falls back to .com
+    on 404 (some tenants migrated TLDs).
+    """
+    return run_platform_scan(_PERSONIO_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_bamboohr(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan BambooHR public careers widget HTML for keyword-matched postings.
+
+    API: GET https://{slug}.bamboohr.com/jobs/embed2.php → HTML widget.
+    The historical /careers/list JSON endpoint was deprecated in 2024 — the
+    widget HTML is now the only public source. Listing does NOT include job
+    descriptions (deferred to enrichment).
+    """
+    return run_platform_scan(_BAMBOOHR_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_teamtailor(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Teamtailor public jobs API for keyword-matched postings.
+
+    API: GET https://{slug}.teamtailor.com/api/jobs → JSON:API document
+    {"data": [{"attributes": {...}, "links": {...}}, ...]}. Per-tenant
+    public unkeyed feed (not the keyed api.teamtailor.com path).
+    """
+    return run_platform_scan(_TEAMTAILOR_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_workable(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Workable public widget endpoint for keyword-matched postings.
+
+    API: GET https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true
+    → {"name": ..., "jobs": [...]}. Empty-jobs path is a clean miss.
+    """
+    return run_platform_scan(_WORKABLE_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_jobvite(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Jobvite — stub. Always returns [].
+
+    Jobvite hosted career pages have no public unauthenticated JSON API
+    and frequently redirect to tenant-custom domains. A real scraper
+    requires per-tenant HTML parsing; deferred. The stub exists so the
+    platform is registered for URL-evidence promotion via B2 fast-path.
+    See _platforms_jobvite.py for the full rationale.
+    """
+    return run_platform_scan(_JOBVITE_SCANNER, slug, target_titles, exclusions)
+
+
+def scan_paylocity(guid: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Paylocity public v2 job feed for keyword-matched postings.
+
+    API: GET https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/{guid}
+    → {"organization": ..., "jobs": [...]}. Each job includes summary,
+    requirements, benefits as separate sections (stitched into description).
+    The "slug" is the tenant GUID extracted from the careers URL path.
+    """
+    return run_platform_scan(_PAYLOCITY_SCANNER, guid, target_titles, exclusions)
+
+
+def scan_rippling(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
+    """Scan Rippling public board API for keyword-matched postings.
+
+    API: GET https://ats.rippling.com/api/v2/board/{slug}/jobs → paginated
+    {"items": [...], "page": ..., "totalPages": ...}. Description is NOT
+    in the list endpoint; enrichment fills jd_full asynchronously.
+    """
+    return run_platform_scan(_RIPPLING_SCANNER, slug, target_titles, exclusions)
+
+
+__all__ = [
+    "SCANNERS_BY_NAME",
+    "PlatformScanner",
+    "run_platform_scan",
+    "scan_ashby",
+    "scan_bamboohr",
+    "scan_breezy",
+    "scan_greenhouse",
+    "scan_jazzhr",
+    "scan_jobvite",
+    "scan_lever",
+    "scan_paylocity",
+    "scan_personio",
+    "scan_pinpoint",
+    "scan_recruitee",
+    "scan_rippling",
+    "scan_smartrecruiters",
+    "scan_teamtailor",
+    "scan_workable",
+    "scan_workday",
+]

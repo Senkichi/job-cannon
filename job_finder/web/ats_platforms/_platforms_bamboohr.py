@@ -18,7 +18,7 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 
-from job_finder.web.ats_platforms_internal._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import PlatformScanner
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 
 logger = logging.getLogger(__name__)

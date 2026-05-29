@@ -52,6 +52,7 @@ job_finder/
 │   ├── scoring_orchestrator.py  # Per-run orchestration, retry, attribution
 │   ├── scheduler/               # APScheduler background jobs (split S7a 2026-05-06: __init__ lifecycle + _pidfile + _ollama + _factories + _jobs + _runners + _sync)
 │   ├── pipeline_detector/       # Multi-signal email classification (split S7b 2026-05-06: __init__ + _constants + _gmail + _signals + _db + _processing)
+│   ├── ats_platforms/           # ATS platform scanners + registry (promoted from flat ats_platforms.py + ats_platforms_internal/ in H3 2026-05-28: __init__ re-exports + _registry + _title_match + _detail_fetchers + 16 _platforms_*)
 │   ├── ats_scanner/             # ATS platform scanner (split S7c 2026-05-06: __init__ + _upsert + _probe + _promote + _run + _run_html)
 │   ├── careers_crawler/         # Multi-tier careers-page crawler (split S7e 2026-05-06: __init__ + _title_filters + _api_cache + _static_tier + _playwright_tier + _ai_nav_tier + _tier_cache + _persistence + _scoring)
 │   ├── migrations/              # Per-version migration modules (split S6 2026-05-06; m001..m051 + _gate, _runner, _post_hooks, types)

@@ -19,7 +19,7 @@ import logging
 import defusedxml.ElementTree as ET
 import requests
 
-from job_finder.web.ats_platforms_internal._registry import PlatformScanner
+from job_finder.web.ats_platforms._registry import PlatformScanner
 from job_finder.web.ats_prober import _PROBE_TIMEOUT
 from job_finder.web.description_formatter import strip_html_to_text
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 _PERSONIO_TLDS = ("de", "com")
 
 
-def _fetch_xml(slug: str) -> "bytes | None":
+def _fetch_xml(slug: str) -> bytes | None:
     """Fetch the Personio XML feed for a slug, trying .de then .com."""
     for tld in _PERSONIO_TLDS:
         url = f"https://{slug}.jobs.personio.{tld}/xml"
