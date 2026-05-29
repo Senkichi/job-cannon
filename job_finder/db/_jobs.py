@@ -44,6 +44,32 @@ _UPSERT_MERGE_COLUMNS = (
 )
 
 
+def _normalize_salary(
+    salary_min: int | None, salary_max: int | None
+) -> tuple[int | None, int | None]:
+    """Enforce salary_min <= salary_max at the persistence boundary.
+
+    Same-unit inversions (parser put the range in reverse order, ratio
+    looks sane) get swapped. Extreme inversions (>10x apart after swap,
+    very likely an hourly-vs-annual unit mix-up from a parser that mashed
+    two source fields together) are nulled — we can't trust either value
+    when the units are inconsistent. Either is preferable to writing a
+    row where downstream filters and the JD-derived salary backfill
+    (m062) silently disagree.
+    """
+    if salary_min is None or salary_max is None:
+        return salary_min, salary_max
+    if salary_min <= salary_max:
+        return salary_min, salary_max
+    # Inversion. Treat as parse error; try to recover via swap if both
+    # values look like they share the same unit (similar magnitude),
+    # otherwise drop both rather than guess.
+    lo, hi = salary_max, salary_min
+    if lo <= 0 or hi / lo > 10:
+        return None, None
+    return lo, hi
+
+
 def merge_description(existing: str | None, new: str | None) -> str | None:
     """Merge two description strings — single source of truth for description merge logic.
 
@@ -170,6 +196,7 @@ def upsert_job(
             jd_full_clause = ", jd_full = ?"
             jd_full_value = (merged_description[:8000],)
 
+        norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
         conn.execute(
             f"""UPDATE jobs SET
                 sources = ?, source_urls = ?, last_seen = ?,
@@ -189,8 +216,8 @@ def upsert_job(
                 now,
                 job.score,
                 json.dumps(job.score_breakdown),
-                job.salary_min,
-                job.salary_max,
+                norm_salary_min,
+                norm_salary_max,
                 merged_description,
                 json.dumps(locs_list),
                 merged_location,
@@ -239,6 +266,7 @@ def upsert_job(
         # (persist_job_assessment) sets scoring_provider + scoring_model
         # atomically via COALESCE, so the discriminator for "real attribution"
         # is scoring_model IS NOT NULL.
+        norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
@@ -255,8 +283,8 @@ def upsert_job(
                 json.dumps([job.source]),
                 json.dumps([job.source_url]),
                 job.source_id,
-                job.salary_min,
-                job.salary_max,
+                norm_salary_min,
+                norm_salary_max,
                 job.description,
                 first_seen,
                 now,
