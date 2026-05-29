@@ -310,33 +310,71 @@ def reconcile_company_ats(
             "existing_owner_name": existing_name,
         }
 
-    conn.execute(
-        """UPDATE companies
-               SET ats_platform = ?,
-                   ats_slug = ?,
-                   ats_probe_status = 'hit',
-                   ats_probe_attempted_at = ?,
-                   ats_evidence_trigger = ?,
-                   ats_evidence_extractor_version = ?,
-                   ats_evidence_unique_url_count = ?,
-                   ats_evidence_job_count = ?,
-                   ats_evidence_reconciled_at = ?,
-                   updated_at = ?
-             WHERE id = ?""",
-        (
-            platform,
-            slug,
-            now,
-            reason[:240] if isinstance(reason, str) else "",
-            ATS_EXTRACTOR_VERSION,
-            unique_url_seen,
-            job_bundle_count,
-            now,
-            now,
+    try:
+        conn.execute(
+            """UPDATE companies
+                   SET ats_platform = ?,
+                       ats_slug = ?,
+                       ats_probe_status = 'hit',
+                       ats_probe_attempted_at = ?,
+                       ats_evidence_trigger = ?,
+                       ats_evidence_extractor_version = ?,
+                       ats_evidence_unique_url_count = ?,
+                       ats_evidence_job_count = ?,
+                       ats_evidence_reconciled_at = ?,
+                       updated_at = ?
+                 WHERE id = ?""",
+            (
+                platform,
+                slug,
+                now,
+                reason[:240] if isinstance(reason, str) else "",
+                ATS_EXTRACTOR_VERSION,
+                unique_url_seen,
+                job_bundle_count,
+                now,
+                now,
+                company_id,
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        # m076's UNIQUE(ats_platform, ats_slug) gate. Defense-in-depth
+        # for the race window between the SELECT-guard above and this
+        # UPDATE: another transaction could have promoted the pair in
+        # between, especially under the scheduler's batch path. The
+        # SELECT-guard would still report "no existing owner" but the
+        # UPDATE would then violate the index.
+        #
+        # Recover by re-querying the real owner and returning the same
+        # slug_collision outcome shape the SELECT-guard would have
+        # produced, with race_detected=True so the audit can tell the
+        # paths apart.
+        racer = conn.execute(
+            """SELECT id, name_raw
+                 FROM companies
+                WHERE ats_platform = ? AND ats_slug = ? AND id != ?""",
+            (platform, slug, company_id),
+        ).fetchone()
+        racer_id = racer["id"] if racer else None
+        racer_name = racer["name_raw"] if racer else None
+        logger.warning(
+            "ats_identity slug_collision (race) company_id=%d would-promote=%s/%s "
+            "but pair now owned by company_id=%s (%r). exc=%s",
             company_id,
-        ),
-    )
-    conn.commit()
+            platform,
+            slug[:48],
+            racer_id,
+            racer_name,
+            exc,
+        )
+        return {
+            **base_meta,
+            "outcome": "slug_collision",
+            "existing_owner_id": racer_id,
+            "existing_owner_name": racer_name,
+            "race_detected": True,
+        }
 
     logger.info(
         "ats_identity promoted company_id=%d platform=%s slug_snip=%s jobs=%d urls=%s",
