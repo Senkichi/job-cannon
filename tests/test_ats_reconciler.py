@@ -200,7 +200,7 @@ def _setup_company_and_jobs(
 
 
 class TestReconcileCompany:
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_live_job_refreshes_last_seen_and_clears_is_stale(
         self,
         mock_scan,
@@ -249,7 +249,7 @@ class TestReconcileCompany:
         # last_seen must be a fresh timestamp (not the old one we seeded)
         assert not row["last_seen"].startswith("2026-01-01")
 
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_missing_job_is_archived(self, mock_scan, tmp_db_path):
         """A tracked job whose posting-ID is NOT in the live board is
         marked expired and archived via update_pipeline_status."""
@@ -284,7 +284,7 @@ class TestReconcileCompany:
         assert row["expiry_status"] == "expired"
         assert row["pipeline_status"] == "archived"
 
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_empty_skips_company(self, mock_scan, tmp_db_path):
         """Safety guard: scan returning [] must NOT mass-expire tracked jobs."""
         from job_finder.web.ats_reconciler import reconcile_company
@@ -306,7 +306,7 @@ class TestReconcileCompany:
         assert result["skip_reason"] == "scan_empty"
         assert result["expired"] == 0  # no false-expire
 
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_exception_skips_company(self, mock_scan, tmp_db_path):
         """Safety guard: scan raising must NOT mass-expire tracked jobs."""
         from job_finder.web.ats_reconciler import reconcile_company
@@ -354,7 +354,7 @@ class TestReconcileCompany:
         because scan_workday's pagination can return partial results
         (observed returning only 40 postings for Walmart during e2e),
         which would cause false-expires. Workday jobs must fall through
-        to Phase C per-URL HTTP GET. See _SUPPORTED_PLATFORMS note in
+        to Phase C per-URL HTTP GET. See _RECONCILABLE_PLATFORMS note in
         ats_reconciler.py.
         """
         from job_finder.web.ats_reconciler import reconcile_company
@@ -378,7 +378,7 @@ class TestReconcileCompany:
         assert result["skip_reason"] == "unsupported_platform"
         assert result["expired"] == 0
 
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_scan_returns_postings_but_no_parseable_ids_skips(
         self,
         mock_scan,
@@ -407,7 +407,7 @@ class TestReconcileCompany:
         assert result["skipped"] is True
         assert result["skip_reason"] == "no_parseable_live_ids"
 
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_unparseable_stored_url_defers_to_phase_c(self, mock_scan, tmp_db_path):
         """If a tracked job's own source_urls don't yield a parseable posting-ID
         (e.g. Gmail-mangled URL), the job is marked 'unparseable' and NOT
@@ -450,7 +450,7 @@ class TestReconcileCompany:
 
 
 class TestReconcileAllCompanies:
-    @patch("job_finder.web.ats_reconciler.scan_lever")
+    @patch("job_finder.web.ats_reconciler.run_platform_scan")
     def test_aggregates_per_company(self, mock_scan, tmp_db_path):
         """Multiple companies are each reconciled; summary aggregates counts."""
         from job_finder.web.ats_reconciler import reconcile_all_companies
@@ -506,7 +506,7 @@ class TestReconcileAllCompanies:
 
         # scan_lever returns the URL only for the first company, so company 2's
         # job is missing from its live board → should be archived.
-        def _fake_scan(slug, targets, excl):
+        def _fake_scan(scanner, slug, targets, excl):
             if slug == "acme":
                 return [{"source_url": "https://jobs.lever.co/acme/aaa-bbb-111"}]
             # beta's tracked job ID (ccc-ddd-222) is absent → expired
