@@ -107,6 +107,7 @@ def upsert_job(
     job: Job,
     *,
     locations_structured: list[JobLocation] | None = None,
+    company_id: int | None = None,
 ) -> bool:
     """Insert or update a job. Returns True if new, False if existing.
 
@@ -120,7 +121,22 @@ def upsert_job(
     three m066 columns: ``locations_structured`` (JSON list[JobLocation]),
     ``workplace_type`` and ``primary_country_code`` (denormalized from
     ``locations_structured[0]`` per SPEC §Schema).
+
+    When ``company_id`` is provided, the caller already resolved the
+    company FK (ATS scanner / careers crawler — both iterate companies
+    rows directly). It's written at INSERT/UPDATE so the row is linked
+    immediately rather than waiting for the daily linkage backfill.
+    Returns False without writing if the normalized company name is in
+    COMPANY_DENYLIST — boundary defense against aggregator names like
+    "Jobgether" / "Mercor" / "RemoteHunter" that have no real ATS
+    presence but appear in source feeds (linkedin, dataforseo, etc.).
     """
+    from job_finder.config import COMPANY_DENYLIST
+    from job_finder.normalizers import normalize_company as _norm_company
+
+    if _norm_company(job.company).lower() in COMPANY_DENYLIST:
+        return False
+
     if locations_structured is None:
         from job_finder.web.location_parser import parse_locations
 
@@ -213,7 +229,8 @@ def upsert_job(
                 location = ?,
                 locations_structured = ?,
                 workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
-                primary_country_code = COALESCE(?, primary_country_code){jd_full_clause}
+                primary_country_code = COALESCE(?, primary_country_code),
+                company_id = COALESCE(?, company_id){jd_full_clause}
             WHERE dedup_key = ?""",
             (
                 json.dumps(sources),
@@ -229,6 +246,7 @@ def upsert_job(
                 locations_json,
                 workplace_type_col,
                 primary_country_code,
+                company_id,
                 *jd_full_value,
                 job.dedup_key,
             ),
@@ -283,8 +301,9 @@ def upsert_job(
                  source_id, salary_min, salary_max, description,
                  first_seen, last_seen, score, score_breakdown, locations_raw,
                  jd_full, scoring_provider,
-                 locations_structured, workplace_type, primary_country_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 locations_structured, workplace_type, primary_country_code,
+                 company_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.dedup_key,
                 job.title,
@@ -306,6 +325,7 @@ def upsert_job(
                 locations_json,
                 workplace_type_col,
                 primary_country_code,
+                company_id,
             ),
         )
         conn.commit()
