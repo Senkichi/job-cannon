@@ -21,13 +21,8 @@ import logging
 import re
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
-from job_finder.web.ats_platforms import (
-    scan_ashby,
-    scan_greenhouse,
-    scan_lever,
-    scan_smartrecruiters,
-    scan_workday,
-)
+from job_finder.web.ats_platforms_internal import SCANNERS_BY_NAME
+from job_finder.web.ats_platforms_internal._registry import run_platform_scan
 from job_finder.web.db_helpers import standalone_connection
 
 logger = logging.getLogger(__name__)
@@ -89,7 +84,7 @@ _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
     "lever": _LEVER_POSTING_RE,
     "ashby": _ASHBY_POSTING_RE,
     # Workday regex is kept for potential Phase C use, but Workday is
-    # intentionally excluded from _SUPPORTED_PLATFORMS below — see note.
+    # intentionally excluded from _RECONCILABLE_PLATFORMS below — see note.
     "workday": _WORKDAY_POSTING_RE,
     "smartrecruiters": _SMARTRECRUITERS_POSTING_RE,
 }
@@ -101,7 +96,9 @@ _SIMPLE_POSTING_ID_PATTERNS: dict[str, re.Pattern] = {
 # upper bound. Workday jobs fall to Phase C per-URL HTTP GET instead.
 # TODO: re-enable once scan_workday exposes total-vs-fetched so we can
 # skip incomplete scans safely.
-_SUPPORTED_PLATFORMS = frozenset({"lever", "ashby", "smartrecruiters", "greenhouse"})
+_RECONCILABLE_PLATFORMS: frozenset[str] = frozenset(
+    {"lever", "ashby", "smartrecruiters", "greenhouse"}
+)
 
 
 def _extract_posting_id(url: str, platform: str) -> str | None:
@@ -129,23 +126,10 @@ def _extract_posting_id(url: str, platform: str) -> str | None:
 
 
 def _scan_open_postings(platform: str, slug: str) -> list[dict]:
-    """Dispatch to the appropriate scan_* with unfiltered title/exclusion lists.
-
-    target_titles=[] and exclusions=[] trigger the 'empty = no filter' branch
-    in ats_platforms._title_matches so we receive the FULL open board, not
-    a subset matching our current target profile.
-    """
-    if platform == "lever":
-        return scan_lever(slug, [], [])
-    if platform == "greenhouse":
-        return scan_greenhouse(slug, [], [])
-    if platform == "ashby":
-        return scan_ashby(slug, [], [])
-    if platform == "smartrecruiters":
-        return scan_smartrecruiters(slug, [], [])
-    if platform == "workday":
-        return scan_workday(slug, [], [])
-    return []
+    """Dispatch to the registered scanner with unfiltered title/exclusion lists."""
+    if platform not in _RECONCILABLE_PLATFORMS:
+        return []
+    return run_platform_scan(SCANNERS_BY_NAME[platform], slug, [], [])
 
 
 def reconcile_company(conn, company_row: dict) -> dict:
@@ -186,7 +170,7 @@ def reconcile_company(conn, company_row: dict) -> dict:
         result["skip_reason"] = "missing_ats_fields"
         return result
 
-    if platform not in _SUPPORTED_PLATFORMS:
+    if platform not in _RECONCILABLE_PLATFORMS:
         # iCIMS, Phenom, UKG, custom — no scan_* available; Phase C handles these.
         result["skipped"] = True
         result["skip_reason"] = "unsupported_platform"
