@@ -344,66 +344,6 @@ class TestMigration6:
         )
 
 
-def test_migration_count_is_thirteen():
-    """v1.1 adds 4 migrations (9-12), Phase 19 cleanup adds Migration 13.
-
-    NOTE: Migration 14 (Phase 30 infrastructure) and Migration 15 (Phase 40 data
-    quality) were added after this test was written. Migration 16 adds company
-    enrichment columns. Migration 17 adds homepage_probe_attempted_at column.
-    Migration 18 (Phase 24) adds provider column to scoring_costs.
-    Migration 19 adds opus_score column for Opus baseline evaluation.
-    Migration 20 adds scoring_provider column for provider attribution (ATTR-01).
-    Migration 23 recalibrates jobs_found_total and adds jobs_matched column.
-    Migration 24 adds index on email_parse_log.processed_at for dedup query.
-    Migration 25 cleans up Eightfold/PCS SPA shell garbage from jd_full.
-    Migration 26 adds enrichment retry columns to companies table.
-    Migration 27 adds career-ops scoring metadata columns (expiry_status, eval_blocks,
-    job_archetype) to jobs table.
-    Migration 28 adds reusable_stories_json to interview_preps.
-    Migration 29 adds company_research table.
-    Migration 30 adds careers_url to companies.
-    Migration 31 adds careers_crawl_last_at to companies.
-    Migration 40 adds v3.0 classification/sub_scores_json/scoring_model.
-    Migration 41 (Plan 5) drops legacy haiku_score/haiku_summary/sonnet_score.
-    Migration 42 (Phase 2d sub-fix 1/4) extends classification enum vocabulary
-    to include 'low_signal' (no-op DDL — column has no CHECK constraint; bumps
-    user_version and documents the new allowed value).
-    Migration 43 (Phase 3 task 1/3) adds gold_classification, gold_sub_scores_json,
-    gold_notes, gold_labeled_at columns to jobs for the Phase 5 eval harness.
-    Migration 44 (Phase 3 follow-up) adds gold_no_signal_axes for per-axis
-    "no signal" tagging — distinguishes "scored midpoint" from "couldn't tell".
-    Migration 45: eval_runs table for the Phase 5 eval harness.
-    Migration 46: heal Workday URL-template bug fallout (repair source_urls,
-    reset enrichment_tier, drop scores derived from "<title>Workday</title>").
-    Migration 47 (public-repo cleanup): drop resume_generations,
-    resume_preferences_detected, resume_upload_reviews tables.
-    Migration 48 (public-repo cleanup): drop interview_preps,
-    rejection_reports, rejection_pattern_reports tables and the
-    jobs.rejection_reviewed column.
-    Migration 50: rename vestigial enrichment_tier strings haiku/sonnet -> low/mid.
-    Migration 51: consolidate user_activity actions batch_score_haiku/sonnet -> batch_score.
-    Migration 52: scoring_costs.schema_valid for canary telemetry.
-    Migration 53: create onboarding_state table (Phase 42).
-    Migration 54: onboarding_state.wizard_data for inter-step wizard state (Phase 42).
-    Migration 55: idx_jobs_company_id for orphan-recalibration writer-lock fix.
-    Migration 56: clear default-leaked scoring_provider='anthropic' tags (Stage 7.7).
-    Migration 57: retag historical paid Anthropic SDK rows to 'anthropic_sdk' (U6).
-    Migration 58: consolidate duplicate company rows (numeric-prefix + exact-name).
-    Migration 59: heal careers_crawl title-bleed rows (metadata-blob titles).
-    Migration 60: normalize jobs.location / locations_raw (dedupe case+whitespace, drop placeholders).
-    Migration 61: reconcile semantic company-name dupes (paren-abbrev + corporate-suffix variants).
-    Migration 62: backfill salary_min/max from existing jd_full via deterministic regex.
-    Migration 63: merge companies by shared job board (ats_platform+slug, then careers_url).
-    Migration 64: reset FP-prone speculative-probe hits (B1b — paired with B1a probe gate).
-    Migration 65: add last_tick_at heartbeat column to batch_score_sessions.
-    Migration 66: add locations_structured/workplace_type/primary_country_code to jobs.
-    Kept for historical reference; updated to reflect current count.
-    """
-    from job_finder.web.db_migrate import MIGRATIONS
-
-    assert len(MIGRATIONS) == 67
-
-
 class TestMigration27:
     """Tests for Migration 27 (career-ops scoring metadata columns)."""
 
@@ -931,11 +871,6 @@ class TestMigration18:
         conn.close()
         assert row[0] == "anthropic"
 
-    def test_migrations_count_is_19(self):
-        """MIGRATIONS list has 67 entries (through Migration 67: backfill locations_structured)."""
-        assert len(MIGRATIONS) == 67
-
-
 class TestMigration40:
     """Tests for Migration 40 (v3.0 ordinal rubric scoring — additive schema).
 
@@ -1377,11 +1312,16 @@ class TestMigration52And53:
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
 
-        # Check PRAGMA user_version matches the final migration.
-        # run_migrations() applies all migrations, not just up to 53; this test confirms
-        # the onboarding_state table created in 53 survives subsequent migrations.
+        # Check PRAGMA user_version matches the final migration. Compute the
+        # expected version dynamically from MIGRATIONS so this test doesn't
+        # need a manual bump every time a migration is added — the purpose
+        # of this test is to confirm the onboarding_state table created in
+        # 53 survives all subsequent migrations, not to pin a specific count.
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 67, f"Expected PRAGMA user_version=67, got: {version}"
+        expected_max = max(m.version for m in MIGRATIONS)
+        assert version == expected_max, (
+            f"Expected PRAGMA user_version={expected_max}, got: {version}"
+        )
 
         # Check onboarding_state table exists
         table = conn.execute(

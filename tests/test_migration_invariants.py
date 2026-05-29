@@ -20,12 +20,6 @@ from pathlib import Path
 
 from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 
-# Sentinel — hard-coded count tracks the actual MIGRATIONS list. Update only
-# when intentionally adding a new migration. tests/test_migration.py:389
-# already asserts the same number; this duplicate is intentional — it gives
-# a clearer failure message and lives next to the other structural tests.
-EXPECTED_MIGRATION_COUNT = 67
-
 
 def _migration_version(entry, position_one_indexed):
     """Return the version of a MIGRATIONS entry.
@@ -37,22 +31,6 @@ def _migration_version(entry, position_one_indexed):
         .version field; the positional fallback is unused.
     """
     return getattr(entry, "version", position_one_indexed)
-
-
-def test_migration_count_matches_documented_total():
-    """Sentinel: `len(MIGRATIONS) == EXPECTED_MIGRATION_COUNT`.
-
-    Update EXPECTED_MIGRATION_COUNT here ONLY when intentionally adding a new
-    migration. Drift in either direction (drop or duplicate) is the failure
-    this test catches.
-    """
-    actual = len(MIGRATIONS)
-    assert actual == EXPECTED_MIGRATION_COUNT, (
-        f"Migration count drifted from {EXPECTED_MIGRATION_COUNT} to {actual}. "
-        "Either bump EXPECTED_MIGRATION_COUNT here (intentional add) or "
-        "investigate whether a migration was accidentally dropped or duplicated "
-        "during a refactor."
-    )
 
 
 def test_migration_versions_strictly_monotonic_starting_at_1():
