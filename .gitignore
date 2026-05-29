@@ -63,6 +63,7 @@ backup_userdata_*.tar.gz
 .smoke_pre_snapshot.json
 update_check.json
 .worktreeinclude
+orchestrator-state/
 
 # SQLite WAL artifacts
 *.db-shm
