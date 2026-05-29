@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from job_finder.web.claude_client import _resolve_cli_binary
@@ -48,14 +49,25 @@ _detection_cache: dict[str, ProviderHandle | None] = {}
 _QUOTA_HINTS: tuple[str, ...] = ("quota", "rate limit", "capacity", "429")
 
 
-def _check_claude_code() -> ProviderHandle | None:
-    if not shutil.which("claude"):
+def _probe_cli(
+    binary_name: str,
+    argv_template: list[str],
+    *,
+    quota_tolerant: bool = False,
+    extra_ok: Callable[[subprocess.CompletedProcess], bool] = lambda _: True,
+) -> tuple[str, subprocess.CompletedProcess] | None:
+    """Run a 10-second liveness probe for a CLI binary.
+
+    Returns (resolved_binary_path, completed_process) on success, None on
+    timeout/OS-error/non-zero exit (with quota_tolerant carve-out for stderr
+    hints in _QUOTA_HINTS) or when extra_ok rejects the result.
+    """
+    if not shutil.which(binary_name):
         return None
-    p = _resolve_cli_binary("claude")
+    p = _resolve_cli_binary(binary_name)
     try:
         result = subprocess.run(
-            [p, "-p", "ping", "--output-format", "json",
-             "--no-session-persistence", "--tools", ""],
+            [p, *argv_template],
             capture_output=True,
             text=True,
             timeout=10,
@@ -63,11 +75,29 @@ def _check_claude_code() -> ProviderHandle | None:
             errors="replace",
         )
     except (subprocess.TimeoutExpired, OSError):
-        logger.debug("claude liveness probe timed out / OS error")
+        logger.debug("%s liveness probe timed out / OS error", binary_name)
         return None
     if result.returncode != 0:
-        logger.debug("claude liveness probe non-zero rc=%s", result.returncode)
+        stderr_lower = (result.stderr or "").lower()
+        if not quota_tolerant or not any(h in stderr_lower for h in _QUOTA_HINTS):
+            logger.debug(
+                "%s liveness probe non-zero rc=%s", binary_name, result.returncode
+            )
+            return None
+    if not extra_ok(result):
         return None
+    return p, result
+
+
+def _check_claude_code() -> ProviderHandle | None:
+    out = _probe_cli(
+        "claude",
+        ["-p", "ping", "--output-format", "json",
+         "--no-session-persistence", "--tools", ""],
+    )
+    if out is None:
+        return None
+    p, _ = out
     return ProviderHandle(
         name="claude_code_cli",
         binary_path=p,
@@ -77,32 +107,14 @@ def _check_claude_code() -> ProviderHandle | None:
 
 
 def _check_gemini_cli() -> ProviderHandle | None:
-    if not shutil.which("gemini"):
+    out = _probe_cli(
+        "gemini",
+        ["-p", "ping", "--output-format", "json"],
+        quota_tolerant=True,
+    )
+    if out is None:
         return None
-    p = _resolve_cli_binary("gemini")
-    try:
-        result = subprocess.run(
-            [p, "-p", "ping", "--output-format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        logger.debug("gemini liveness probe timed out / OS error")
-        return None
-    # Quota-tolerant: non-zero exit is OK if stderr indicates API rate-limit
-    # rather than auth/install failure. The CLI is installed and reachable.
-    if result.returncode != 0:
-        stderr_lower = (result.stderr or "").lower()
-        if not any(hint in stderr_lower for hint in _QUOTA_HINTS):
-            logger.debug(
-                "gemini liveness probe non-zero rc=%s (not quota): %s",
-                result.returncode,
-                stderr_lower[:200],
-            )
-            return None
+    p, _ = out
     return ProviderHandle(
         name="gemini_cli",
         binary_path=p,
@@ -112,31 +124,16 @@ def _check_gemini_cli() -> ProviderHandle | None:
 
 
 def _check_ollama() -> ProviderHandle | None:
-    p = shutil.which("ollama")
-    if not p:
+    out = _probe_cli(
+        "ollama",
+        ["list"],
+        extra_ok=lambda r: len(
+            [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
+        ) >= 2,
+    )
+    if out is None:
         return None
-    try:
-        result = subprocess.run(
-            [p, "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        logger.debug("ollama liveness probe timed out / OS error")
-        return None
-    if result.returncode != 0:
-        logger.debug("ollama liveness probe non-zero rc=%s", result.returncode)
-        return None
-    # Daemon-down case (DESIGN.md §6.5): `ollama list` returns 0 lines or
-    # only the "NAME ID SIZE MODIFIED" header. Require >=2 non-empty lines
-    # so we know at least one model is installed.
-    non_empty_lines = [ln for ln in (result.stdout or "").splitlines() if ln.strip()]
-    if len(non_empty_lines) < 2:
-        logger.debug("ollama list returned <2 non-empty lines")
-        return None
+    p, _ = out
     return ProviderHandle(
         name="ollama",
         binary_path=p,
@@ -146,7 +143,7 @@ def _check_ollama() -> ProviderHandle | None:
 
 
 # Probe registry — the iteration order matches priority order.
-_PROBES: list[tuple[str, "object"]] = [
+_PROBES: list[tuple[str, Callable[[], ProviderHandle | None]]] = [
     ("claude_code_cli", _check_claude_code),
     ("gemini_cli", _check_gemini_cli),
     ("ollama", _check_ollama),
