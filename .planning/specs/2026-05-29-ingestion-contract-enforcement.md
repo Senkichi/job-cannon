@@ -1,63 +1,25 @@
 # Ingestion Contract Enforcement — Design Spec
 
 **Date:** 2026-05-29
-**Status:** Revised after adversarial review (round 2). Pending implementation approval.
-**Author:** Claude (synthesized from one main-context architectural investigation and four parallel sub-agent audits, executed in worktree `audit-location-handling` off `main@6b76c59`)
-**Audience:** A reader with no prior context on this codebase or the conversation that produced this spec.
-
----
-
-## 1.0 Revisions Log — Round 2 Adversarial Review (2026-05-29)
-
-Round 2 found **2 blocking issues**, **3 major issues**, and **1 minor issue**, with overall verdict "directionally strong but not sound as written." All findings independently verified against the worktree code and accepted. Changes applied below in-line; each marked with `[R2-Cn]` for the finding it addresses.
-
-| # | Finding | Disposition | Where applied |
-|---|---|---|---|
-| R2-C1 | I-04/I-05/I-06 as written (`score IS NULL OR scoring_model IS NOT NULL`, etc.) would reject every normal ingestion row. Verified: `JobScorer._score_job` sets `job.score` (default 0.0) before persistence; `upsert_job` INSERT writes `score`, `score_breakdown`, `scoring_provider='heuristic'` but never `scoring_model`/`sub_scores_json`/`classification`. Those LLM fields are written LATER by `persist_job_assessment`. The triggers would `RAISE(ABORT)` on every INSERT. | **Accepted.** Redefined the scoring-state invariants around `scoring_model` as the LLM-presence discriminator (matching the existing comment in `_jobs.py:294`: "The discriminator for 'LLM ran' remains scoring_model IS NOT NULL"). I-03 (`score → scoring_provider`) stays valid as written because heuristic writes `'heuristic'`. I-04 → `scoring_model → sub_scores_json`. I-05 → `scoring_model → classification`. Old I-06 dropped (was redundant with I-04 family). All trigger pairs in m078 SQL rewritten accordingly. | §7 D-02, §8.3 I-03 through I-05, §11.03 |
-| R2-C2 | `ix_jobs_ats_platform_source_id` references `jobs.ats_platform`, which does not exist. Verified: `JOBS_ALL_COLUMNS` in `_jobs.py:30-39` enumerates the full projection; `ats_platform` is a `companies` column (per m076), not a `jobs` column. The `Job` dataclass has no `ats_platform` field. m078 would fail with `no such column`. | **Accepted.** The reviewer's audit-cited problem is **149 cross-COMPANY collisions** (same `source_id` on different companies). `company_id` IS already on `jobs` and is assigned at `upsert_job` time. Switched the I-12 unique index from `(ats_platform, source_id)` to `(company_id, source_id)` — same defensive effect, no new column, no backfill. The Job model and D-05 (source_id namespacing) updated accordingly. | §7 D-05, §8.3 I-12, §11.03 |
-| R2-M1 | I-16 trigger as written (`BEFORE INSERT/UPDATE … writes derived value into NEW.computed_status`) is unimplementable in SQLite — BEFORE triggers cannot assign to `NEW.column`. SQLite has no PL/pgSQL-style `NEW := ...` semantics. | **Accepted.** Switched to **SQLite generated column** (`STORED`): `ALTER TABLE jobs ADD COLUMN computed_status TEXT GENERATED ALWAYS AS (CASE WHEN pipeline_status IN (...) THEN pipeline_status WHEN is_stale THEN 'stale' WHEN expiry_status='expired' THEN 'expired' ELSE pipeline_status END) STORED;`. SQLite 3.31+ supports this; Python 3.13's bundled SQLite is 3.45+. Generated columns are auto-recomputed on row write — exactly the semantics I-16 wanted, without the trigger-assignment impossibility. No recursion concern, no AFTER-trigger guard logic. | §7 D-10, §8.3 I-16, §13.05 |
-| R2-M2 | I-14 jd_full junk gate at `ParsedJob` boundary cannot protect the 5 non-`upsert_job` runtime writers. Verified: `agentic_enricher.py:645`, `ats_scanner/_run.py:520`, `data_enricher.py:173`, `blueprints/jobs.py:714` (manual edit), `blueprints/jobs.py:913` (manual edit) all issue `UPDATE jobs SET jd_full = ?` after `upsert_job` returns. | **Accepted.** Two-tier defense: (a) Python helper `set_jd_full(conn, dedup_key, text, source)` in `job_finder/db/_jd_full.py` that runs the junk gate and is the only sanctioned write path; route all 5 callers through it. (b) DB-level **TRIGGER `tg_jobs_jd_full_junk`** (BEFORE INSERT, BEFORE UPDATE OF jd_full) with `RAISE(ABORT, 'I-14: jd_full matches shell pattern')` when `NEW.jd_full` matches the shell-pattern regex set — absolute defense against any future bypass. The trigger is the architectural enforcement; the helper is the ergonomic API. A new test `tests/test_jd_full_writers_routed.py` enumerates every `jd_full =` writer in the codebase via grep and fails CI on any direct UPDATE outside the helper. | §8.1, §8.3 I-14, §10.03, §11.03 |
-| R2-M3 | `upsert_job` return type changing from `bool` → `UpsertResult` would silently break 4 callers using `if is_new:` truthiness. Verified callers: `ingestion_runner.py:664`, `ats_scanner/_run.py:506`, `ats_scanner/_run_html.py:149`, `careers_crawler/_persistence.py:58` (use boolean), `blueprints/jobs.py:444` (ignores return). | **Accepted.** Explicitly forbid `UpsertResult.__bool__`; require explicit `result.kind == "inserted"` at every call site. Added 47.02 sub-tasks: enumerate all 5 call sites, update each, add per-caller test for `jobs_new`/`jobs_updated` accounting and ATS `summary["jobs_new"]`. Listed in §11.02. | §11.02 |
-| R2-Mn1 | §14.3 says "after Phase 47, all 11 new findings are blocked" — but F-05 (URL canonical), F-06 (salary unit), F-07 (fuzzy match), F-10 (status reconciliation), F-11 (classification re-derive) are materially Phase 49 work. | **Accepted.** Rewrote §14.3 with explicit per-finding/per-phase mapping: F-01/F-04 → Phase 47/48; F-02 → Phase 46+48; F-03 → Phase 47; F-08/F-09 → Phase 47/48; F-05/F-06/F-07/F-10/F-11 → Phase 49. Each gets a regression test in the phase where its enforcement lands. | §14.3 |
-
-**Open question that round-2 did NOT raise** but I want to flag explicitly: the reviewer's recommendation included an Option B for C1 — "split heuristic and LLM scores into separate columns" — which would be cleaner long-term semantics. Rejecting it for this spec on blast-radius grounds (every score-reading site in the UI and scorer would need updating). Captured as a future follow-up in §18 #11.
-
----
-
-## 1.1 Revisions Log — Round 1 Adversarial Review (2026-05-29)
-
-The first-round adversarial review found **2 blocking issues**, **3 major issues**, and **1 minor issue**. All findings were validated against the codebase and accepted. Changes applied below in-line; each marked with `[R1-Cn]` for the finding it addresses.
-
-| # | Finding | Disposition | Where applied |
-|---|---|---|---|
-| R1-C1 | Migration numbers `m074..m078` are already occupied through `m077` in the worktree (`m074_disable_scan_for_unscannable_companies`, `m075_clear_stale_enrichment_error_for_active_companies`, `m076_unique_ats_platform_slug`, `m077_normalize_timestamps_to_utc`). The runner skips any `version ≤ current_version`, so naively-numbered migrations would silently no-op. | **Accepted.** Renumbered all new migrations: `m074 → m078`, `m075 → m079`, `m076 → m080`, `m077 → m081`, `m078 → m082`. All Phase 47 and Phase 49 sections updated. | §11.03, §13.01–13.06, §17, Appendix B |
-| R1-C2 | The plan relies on SQLite supporting `ADD CHECK` and `DROP CHECK` on existing tables, which it does not. CHECK constraints on existing columns require table rebuild; drops require the same. | **Accepted.** Switched the enforcement mechanism from `CHECK constraints` to `BEFORE INSERT/UPDATE TRIGGERS` with `RAISE(ABORT, ...)` for every invariant on existing columns. CHECK constraints are reserved for *new* columns added in the same migration (where they can be specified in the column definition). TRIGGERs are individually droppable via `DROP TRIGGER`, so the rollback story works. | §8.3, §11.03, §17 |
-| R1-M3 | `Job.__post_init__` raising `UnresolvedTitleError` is unimplementable as described — if `__post_init__` raises, the `Job` is never constructed and `upsert_job` cannot catch it. | **Accepted.** Title validation moves from `Job.__post_init__` to `ParsedJob` construction. `Job.__post_init__` is left as-is (raises only on empty title/company, which is already the existing behavior). `ParsedJob.from_job(job)` runs `_clean_title` and `_is_metadata_blob`; on blob match it constructs an `UnresolvedParsedJob` variant *instead of raising*. `upsert_job` accepts both `ParsedJob` and `UnresolvedParsedJob`; the second writes the row with `unresolved=true` on the affected fields. D-09 rewritten. | §7 D-09, §8.3 I-09/I-10, §12.01 |
-| R1-M4 | Phase 46 exit gate ("`posted_date` populated on every new Greenhouse/Workday/Ashby/Lever/SmartRecruiters row") cannot be met by Phase 46 work, because per-source `posted_date` extraction is explicitly deferred to Phase 48. | **Accepted.** Narrowed Phase 46 exit gate to "any `Job` constructed with `posted_date=X` round-trips through `upsert_job` and lands as `posted_date=X` in the column." Per-source extraction gate moves to Phase 48 acceptance. | §9, §10.02 |
-| R1-M5 | `computed_status` is scheduled in both Phase 47 (as invariant I-16) and Phase 49 (as 49.05 / `m077` add-column). Implementing both creates duplicate-column / duplicate-trigger failures. | **Accepted.** `computed_status` moved entirely to Phase 49 (now `m081`). I-16 retains its number but is annotated "added in Phase 49"; Phase 47's acceptance criterion is now "all 15 invariants enforceable at the boundary; I-16 deferred to Phase 49 as the column does not yet exist." | §8.3 I-16, §11.03, §13.05 |
-| R1-Mn6 | Schema-correspondence test (47.04) is underspecified: a strict 1:1 `ParsedJob` ↔ `jobs` column mapping would force `ParsedJob` to include user-owned fields (`user_interest`, `notes`), system-owned fields (`pipeline_status`, `expiry_checked_at`), and scoring-owned fields. | **Accepted.** Added §8.2.1 with explicit per-column categorization (parser-owned, system-owned, scoring-owned, user-owned, gold/eval, dead). The test asserts strict 1:1 for parser-owned columns only; other categories require explicit category tagging in a new `COLUMN_CATEGORIES` constant; the test fails on uncategorized columns. | §8.2.1, §11.04 |
-| R1-N (nits) | (a) §14.2 cross-refs sections that don't exist; (b) R-04 uses `_jd_full` (should be `jd_full`); (c) Appendix B migration list stale. | **Accepted.** Fixed inline. | §14.2, §15 R-04, Appendix B |
-
-The reviewer's confidence statement: "high on the main findings." I agree — these are not preference issues, they would cause implementation failure.
-
-**Open question the reviewer raised in §18 #10** (phase numbering — 46–49 within v5.0 vs new v5.1 milestone) remains for the user's decision. This spec preserves "46–49" as a working name; renaming to v5.1 phases is a project-management call, not an architecture call.
+**Status:** Draft. Ready for review.
+**Audience:** A reader with no prior context on this codebase.
 
 ---
 
 ## 1. TL;DR
 
-The job-board's persistence chokepoint (`upsert_job` in `job_finder/db/_jobs.py:105`) accepts whatever parser-shaped values arrive from 18+ ingestion sources, without enforcing the column-level invariants the rest of the system silently assumes hold. We've shipped 8 fixes in 14 days at this exact seam, and an audit just surfaced **11 additional deficiencies of the same shape**. Patching them one-by-one is whack-a-mole. The architectural fix is to make `upsert_job` enforce a typed contract, with invariants pushed into DB CHECK constraints or triggers where the cost is low (so a future UPDATE path can't silently re-break them), and to wire the already-built-but-unread `unresolved` flag so invalid data becomes *visible* on the board instead of *hidden*.
+The job-board's persistence chokepoint (`upsert_job` in `job_finder/db/_jobs.py:105`) accepts whatever parser-shaped values arrive from 18+ ingestion sources, without enforcing the column-level invariants the rest of the system silently assumes hold. We've shipped 8 fixes in 14 days at this exact seam, and an audit just surfaced **11 additional deficiencies of the same shape**. Patching them one-by-one is whack-a-mole. The architectural fix is to make `upsert_job` enforce a typed contract, push invariants into DB-level enforcement where the cost is low (so a future UPDATE path can't silently re-break them), and wire the already-built-but-unread `unresolved` flag so invalid data becomes *visible* on the board instead of *hidden*.
 
 This spec proposes four phases totaling ~11 working days:
 
 | Phase | Scope | Duration | Reversibility |
 |---|---|---|---|
 | 46 — Tactical Triage | 3 small commits to stop the bleeding (Blue State, `posted_date`, `jd_full` junk) | 1 day | Trivial git revert |
-| 47 — Contract Enforcement | Typed `ParsedJob` input to `upsert_job`, invariant TRIGGERS + UNIQUE INDEX (`m078`), `unresolved` rendering, denylist single-source | 3 days | Per-commit revert; `m078` is paired with `m078_down` that drops triggers/indexes (cheap on SQLite) [R1-C1, R1-C2] |
-| 48 — Structured-Layer Adoption | Migrate Pinpoint / Greenhouse / Workday / SmartRecruiters scanners to emit `JobLocation` + `source_id` directly; push title filter into `ParsedJob` construction (NOT `Job.__post_init__` — see [R1-M3]) | 5 days | Per-scanner revert; no schema change |
+| 47 — Contract Enforcement | Typed `ParsedJob` input to `upsert_job`, invariant TRIGGERS + UNIQUE INDEX (`m078`), `unresolved` rendering, denylist single-source | 3 days | Per-commit revert; `m078` is paired with `m078_down` that drops triggers/indexes (cheap on SQLite) |
+| 48 — Structured-Layer Adoption | Migrate Pinpoint / Greenhouse / Workday / SmartRecruiters scanners to emit `JobLocation` + `source_id` directly; push title filter into `ParsedJob` construction | 5 days | Per-scanner revert; no schema change |
 | 49 — Audits, Backfills, Cleanup | URL canonicalization, salary unit handling, company fuzzy-match tightening, classification re-derivation, status-field reconciliation, dead-column drops | 2 days | Per-commit; one drop migration that is intentionally irreversible (dead columns) |
 
-The architectural payoff is that **each deficiency becomes structurally impossible at the phase where its enforcement lands**: F-01/F-03/F-08/F-09 → Phase 47; F-02/F-04 → Phases 46+48; F-05/F-06/F-07/F-10/F-11 → Phase 49 (per-finding mapping at §14.3, corrected per R2-Mn1). The full set of 11 is blocked only after Phase 49 closes; the recurring-bug-class regression test accumulates assertions across phases.
+The architectural payoff is that **each deficiency becomes structurally impossible at the phase where its enforcement lands**: F-01/F-03/F-08/F-09 → Phase 47; F-02/F-04 → Phases 46+48; F-05/F-06/F-07/F-10/F-11 → Phase 49 (per-finding mapping at §14.3). The full set of 11 is blocked only after Phase 49 closes; the recurring-bug-class regression test accumulates assertions across phases.
 
 ---
 
@@ -68,7 +30,7 @@ For a reader with no codebase context:
 - **Job Cannon**: a single-user Flask web app (localhost:5000) that aggregates job postings from multiple sources, scores them with an LLM cascade, and displays them on a job board. Single-user, local-only, no deployment. Built on SQLite, raw SQL (no ORM), HTMX frontend.
 - **Ingestion source**: any external data feed. Currently 25 distinct labels appear in the DB: Gmail alert emails (`linkedin`, `glassdoor`, `ziprecruiter`, `indeed`, `monster`, `greenhouse`), search APIs (`serpapi`, `dataforseo`, `thordata`), portal scrapers (`portal_jooble`, `portal_adzuna`), ATS platform scanners (`Greenhouse`, `Workday`, `Ashby`, `Lever`, `SmartRecruiters`, etc.), web crawlers (`careers_crawl`, `careers_page`), and one pipeline-detector path (`off_platform_email`).
 - **`upsert_job`**: SQLite UPSERT function at `job_finder/db/_jobs.py:105`. The de-facto chokepoint — every ingestion path *except one* funnels through it. The one bypass is `pipeline_detector/_off_platform.py:253`, which issues raw `INSERT` for email stubs.
-- **`Job` dataclass**: in `job_finder/models.py`. Loose, free-string fields. Has a `dedup_key` derived from `(company, title)`. **Has minimal `__post_init__` today** that raises on empty title/company and applies `strip_legal_entity_prefix` (corrected from spec draft — verified 2026-05-29). This spec does NOT extend `Job.__post_init__`; new validation lives in `ParsedJob` (per R1-M3).
+- **`Job` dataclass**: in `job_finder/models.py`. Loose, free-string fields. Has a `dedup_key` derived from `(company, title)`. Has minimal `__post_init__` that raises on empty title/company and applies `strip_legal_entity_prefix`. This spec does NOT extend `Job.__post_init__`; new validation lives in `ParsedJob`.
 - **`JobLocation`**: structured location dataclass (city / region / region_code / country / country_code / workplace_type / raw / **unresolved**) introduced by migrations `m066` (2026-05-27 18:07), backfilled by `m067` (2026-05-27 21:42), defaulted by `m072` (2026-05-28 17:24). Sits in the `locations_structured` JSON column.
 - **Layer-1 emitter**: a scanner that produces a `JobLocation` directly. Currently only 4 ATS platforms: Ashby, Lever, Rippling, SmartRecruiters, via `ats_scanner/_run.py:506-509`.
 - **Layer-2 emitter**: a scanner that produces a flat `location` string; `upsert_job` falls into `parse_locations()` to derive `JobLocation` heuristically. Lossy. All other 14+ sources are Layer-2.
@@ -111,20 +73,20 @@ Four parallel sub-agents audited four field groups against the production DB (`j
 - 698 rows have `jd_full` starting with `"Sign in"` (LinkedIn login walls); 589 with `"Loading"` (Glassdoor SPA placeholders); 164 with `"Cookie"`; 42 with `"Privacy Policy"`; 4 with `"404"`.
 - These rows **were scored** against the junk. The scoring model evaluated whatever HTML the enrichment tier captured.
 - Same architectural shape as title bleed: scraped text contaminating a canonical field with no boundary check.
-- Fix layer: enrichment-write boundary in `enrichment_tiers/` — reject below min-content-density or matching known shell patterns.
+- Fix layer: a single sanctioned `set_jd_full()` write path with a content-density gate, paired with a DB-level TRIGGER that rejects shell-pattern matches at INSERT/UPDATE.
 
 **F-02. `posted_date` is 98.7% NULL.**
 - 11,591 / 11,740 rows. Every `_platforms_*.py` `_posting_to_job` omits the field. Email parsers set `email_date` on `Job.posted_date`, but `upsert_job` at `_jobs.py:269` only consumes it to derive `first_seen` — **the `posted_date` column is never written.**
 - Functionally a dead column. Recency-based sorting/filtering on the board can't work.
-- This is a NEW architectural pattern (**Pattern A — "set-on-dataclass, lost-in-persistence"**). It implies every other `Job` dataclass field needs auditing for the same drift.
+- This is **Pattern A — "set-on-dataclass, lost-in-persistence."** It implies every other `Job` dataclass field needs auditing for the same drift.
 
 **F-03. `scoring_provider` NULL leak regressed after m071 (8 fresh rows since 2026-05-28).**
 - `m071` backfilled 2,755 historical rows as `'heuristic'`. **Eight new rows have leaked NULL** in the 24 hours since. INSERT path tags `'heuristic'` explicitly; the leak is in a non-INSERT path (UPDATE branch when an existing row matches by `dedup_key`).
-- This is a NEW architectural pattern (**Pattern B — "backfill instead of constraint"**). The fix shape used in `3f884ee` (a one-shot migration) will continue to regress every time *any* UPDATE path skips the invariant. The only durable fix is a DB-level CHECK constraint or trigger.
+- This is **Pattern B — "backfill instead of constraint."** The fix shape used in `3f884ee` (a one-shot migration) will continue to regress every time *any* UPDATE path skips the invariant. The only durable fix is a DB-level constraint.
 
 **F-04. `source_id` missing on 98–100% of ATS source rows.**
 - Greenhouse 98%, Workday 100%, SmartRecruiters 100%, Ashby 98.4%, Lever 98.6%, `careers_crawl`/`careers_page` 100%. Every `_platforms_*.py::_posting_to_job` returns dicts with no `source_id` key, even though the platform's API explicitly returns a stable per-job ID.
-- 149 cross-company collisions among the ones that *are* set (IDs aren't namespaced by `(platform, slug, id)`).
+- 149 cross-company collisions among the ones that *are* set (the same raw `source_id` value matched against multiple `company_id`s).
 - This is the single most extractable missing data — the IDs exist in the API responses we're already parsing. **Strict prerequisite for any future URL-canonical dedup.**
 
 ### 4.2 HIGH — visible to user, semantically wrong
@@ -155,7 +117,7 @@ Four parallel sub-agents audited four field groups against the production DB (`j
 - 31 rows with `)X` shape (Blue State); 92 with trailing state-code; 125 with pipe/semicolon.
 - Both bug shapes converge on two callsites: `careers_scraper.py:322` and `:602` (`careers_page` low-tier path) AND `careers_crawler/_ai_nav_tier.py` (the AI-nav tier of `careers_crawl`).
 - Both bypass `_is_metadata_blob` / `_clean_title` filters that the static-tier path applies.
-- Fix shape: push the filter into `ParsedJob.from_job` so it can't be bypassed (revised from `Job.__post_init__` per R1-M3 — see Phase 48.01).
+- Fix shape: push the filter into `ParsedJob.from_job` so it can't be bypassed (see Phase 48.01).
 
 **F-10. Stale/expired/active status disagreement.**
 - 1,944 rows with active pipeline status (`discovered`, `applied`, `phone_screen`) but `is_stale=1`. The 15 `applied + stale` and 2 `phone_screen + stale` are unambiguously wrong.
@@ -180,7 +142,7 @@ Four parallel sub-agents audited four field groups against the production DB (`j
 
 ### 5.1 What's already correct (and must be preserved)
 
-The audit surfaced things that are **better than my initial diagnosis claimed**:
+The audit surfaced things worth flagging as solid foundation:
 
 1. **Structured-Location architecture is recent and well-designed.** `m066`/`m067`/`m072` shipped 2026-05-27 → 2026-05-28. `JobLocation` is the source of truth, with `workplace_type` and `primary_country_code` denormalized from `[0]`. Filters, sort, UI rendering, dropdowns — all wired.
 2. **`upsert_job` IS the chokepoint.** Every source except `_off_platform.py:253` routes through it. The architecture is right; the contract enforcement is missing.
@@ -191,18 +153,18 @@ The audit surfaced things that are **better than my initial diagnosis claimed**:
 
 The bug class is **`upsert_job` accepts whatever parser-shaped values arrive, without enforcing the column-level invariants the rest of the system silently assumes hold.**
 
-Two NEW patterns surfaced that my initial framing missed:
+Two patterns the audit surfaced:
 
 - **Pattern A — Set on dataclass, lost in persistence.** The `Job` dataclass has fields (`posted_date` is the cleanest example) that `upsert_job` reads for derived values but never writes to the matching column. The dataclass and the schema have silently drifted. F-02 is the visible instance; the prescription is to enforce field-to-column correspondence as part of the contract.
-- **Pattern B — Backfill instead of constraint.** F-03 (`scoring_provider`) regressed because the fix was a one-shot migration (`m071`), not a DB-level invariant. The same shape applies to `m060` (location normalization), `m067` (location backfill). None of these have any DB-level enforcement (TRIGGER or CHECK); the next UPDATE path that skips the invariant re-breaks the table.
+- **Pattern B — Backfill instead of constraint.** F-03 (`scoring_provider`) regressed because the fix was a one-shot migration (`m071`), not a DB-level invariant. The same shape applies to `m060` (location normalization), `m067` (location backfill). None of these have any DB-level enforcement; the next UPDATE path that skips the invariant re-breaks the table.
 
 ### 5.3 The prescription
 
 Three principles:
 
-1. **Single point of enforcement.** Every write goes through one typed contract. The single off-platform bypass at `_off_platform.py:253` is either brought into `upsert_job` or moved to a separate table with explicit documentation.
+1. **Single point of enforcement.** Every write goes through one typed contract. The single off-platform bypass at `_off_platform.py:253` is brought into `upsert_job` with a typed branch.
 2. **Make invalid states visible, not hidden.** The `JobLocation.unresolved` flag was designed for exactly this purpose and is currently written-everywhere-read-nowhere. Wire it to render with a "review needed" badge, exclude from default sort, surface a `/admin/review` triage page.
-3. **Constrain, don't backfill.** Every invariant gets a TRIGGER (for existing-column value rules), a CHECK at column-add time (for new columns added in the same migration), or a Python validator (for cross-field rules). [R1-C2 — SQLite does not support `ALTER TABLE ADD CHECK` on existing columns; the original draft conflated PostgreSQL semantics with SQLite.] Backfill migrations are *one-time* operations to align history, paired with a constraint that prevents the regression.
+3. **Constrain, don't backfill.** Every invariant gets either a SQLite TRIGGER (for reject-on-violation rules on existing columns; SQLite doesn't support `ALTER TABLE ADD CHECK`), a CHECK at column-add time (for new columns added in the same migration, where CHECK clauses ARE supported), a STORED generated column (for derive-on-write values that are deterministic same-row functions; BEFORE triggers can't assign to `NEW.column` in SQLite, so generated columns are the correct mechanism), or a Python validator (for cross-field, cross-row, or cross-table rules). Backfill migrations are *one-time* operations to align history, paired with a constraint that prevents the regression.
 
 These three principles are the design contract for Phase 47. Phases 46, 48, 49 are tactical/expansion work that flows from them.
 
@@ -219,7 +181,7 @@ These three principles are the design contract for Phase 47. Phases 46, 48, 49 a
 - G-05. Wire the `unresolved` flag end-to-end (write → render → filter → triage) (Phase 47)
 - G-06. Unify the denylist resolution path (Phase 47)
 - G-07. Migrate Pinpoint, Greenhouse, Workday, SmartRecruiters scanners to Layer-1 emission of structured location AND `source_id` (Phase 48)
-- G-08. Push title-quality filter into `ParsedJob.from_job` so it cannot be bypassed [R1-M3 corrected from `Job.__post_init__`] (Phase 48)
+- G-08. Push title-quality filter into `ParsedJob.from_job` so it cannot be bypassed (Phase 48)
 - G-09. Canonicalize URLs (strip tracking params) at parser boundary (Phase 49)
 - G-10. Tag salary records with currency + period; flag suspected-unit-confusion rows for review rather than silent reinterpretation (Phase 49)
 - G-11. Tighten company fuzzy-match (legal-entity prefix-strip pre-scoring; raise threshold) (Phase 49)
@@ -230,9 +192,9 @@ These three principles are the design contract for Phase 47. Phases 46, 48, 49 a
 ### Non-goals (explicitly out of scope)
 
 - **NG-01. Full company re-linkage.** F-07's wrong-linkage cases need manual review per company. Tightening the *matcher* is in scope; re-linking the existing 15+ collision cases is a separate operational task.
-- **NG-02. Backfill of historical `posted_date`.** The signal was lost at ingestion time for 11,591 rows. We can backfill from `first_seen` as a conservative proxy, but that conflates "when we saw it" with "when it was posted". Decision: do NOT backfill; new rows go forward with real `posted_date` where available; old rows remain NULL.
+- **NG-02. Backfill of historical `posted_date`.** The signal was lost at ingestion time for 11,591 rows. We could backfill from `first_seen` as a conservative proxy, but that conflates "when we saw it" with "when it was posted". Decision: do NOT backfill; new rows go forward with real `posted_date` where available; old rows remain NULL.
 - **NG-03. Cross-source URL-canonical dedup.** Even after URL canonicalization (G-09), implementing a second dedup pass keyed on canonical URL is a separate effort. Phase 49 only fixes the URL field; using it as a dedup key is a follow-on.
-- **NG-04. Cross-source job dedup beyond `dedup_key`.** Today, the same logical job from `careers_crawl` + `careers_page` produces two rows. Fixing this requires fuzzy title-match-promotion, which is *out of scope* — the Phase 48 title filter at `ParsedJob.from_job` [R1-M3 corrected] will prevent *future* divergence but won't merge existing duplicates.
+- **NG-04. Cross-source job dedup beyond `dedup_key`.** Today, the same logical job from `careers_crawl` + `careers_page` produces two rows. Fixing this requires fuzzy title-match-promotion, which is *out of scope* — the Phase 48 title filter at `ParsedJob.from_job` will prevent *future* divergence but won't merge existing duplicates.
 - **NG-05. Multi-currency salary normalization.** G-10 *tags* records with currency; converting all to USD is out of scope. Multi-currency display and filtering is a UI task for a future phase.
 - **NG-06. Multi-timezone-aware `posted_date`.** Per locked decision [[arch_store_utc_render_local]], we store UTC and render local. `posted_date` semantics from external sources (often a relative "2 days ago") are inherently noisy. We store best-effort UTC; do not attempt to reverse-engineer source-side timezones.
 - **NG-07. Replacing the SQLite raw-SQL approach.** No ORM. Decision is locked at the project level (CLAUDE.md `Don't`).
@@ -242,31 +204,34 @@ These three principles are the design contract for Phase 47. Phases 46, 48, 49 a
 
 ## 7. Locked Design Decisions
 
-Each decision below was considered against ≥1 alternative; the alternative is recorded in §17 (Alternatives Considered) where it materially shaped the choice.
+Each decision below was considered against ≥1 alternative; the alternative is recorded in §16 (Alternatives Considered) where it materially shaped the choice.
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | **D-01** | Type system at the `upsert_job` boundary | `attrs` (`@define(frozen=True, validators=...)`) or a hand-rolled dataclass with `__post_init__` validators — NOT pydantic | Project already uses dataclasses heavily; pydantic adds a 6MB dependency and a different serialization story; `attrs` is lighter and integrates without disrupting existing typing. Final pick (attrs vs raw dataclass+validators) deferred to D-01.a after spike. |
-| **D-02** | Invariant enforcement layer | **[R1-C2, R2-M1 REVISED]** Three SQLite mechanisms used by category: (1) `BEFORE INSERT/UPDATE` TRIGGERs with `RAISE(ABORT, '...')` for **reject-on-violation** invariants on existing columns (cannot use `ADD CHECK` on existing tables in SQLite); (2) `CHECK` constraints embedded in `ALTER TABLE ADD COLUMN ... CHECK(...)` for invariants on **new** columns (Phase 49 only — column-add CHECK IS supported); (3) `GENERATED ALWAYS AS (...) STORED` columns for **derive-on-write** values where the value is a deterministic same-row function (I-16 `computed_status` per R2-M1, since BEFORE triggers cannot assign to `NEW.column` in SQLite). Python validators handle cross-field / cross-row / cross-table rules. All three mechanisms are individually droppable (`DROP TRIGGER`, `DROP INDEX`, `ALTER TABLE DROP COLUMN`), preserving cheap rollback. | Avoids Pattern B (backfill-instead-of-constraint) regressions. Original spec said "CHECK constraints"; round-1 review corrected to TRIGGERs (R1-C2); round-2 review caught that TRIGGER+NEW-assignment is also unsupported in SQLite and required generated columns for I-16 (R2-M1). Performance cost: row-level check per write; measured negligible at this volume (<12k rows). |
+| **D-02** | Invariant enforcement layer | Three SQLite mechanisms used by category: (1) `BEFORE INSERT/UPDATE` TRIGGERs with `RAISE(ABORT, '...')` for **reject-on-violation** invariants on existing columns; (2) `CHECK` constraints embedded in `ALTER TABLE ADD COLUMN ... CHECK(...)` for invariants on **new** columns (Phase 49 only); (3) `GENERATED ALWAYS AS (...) STORED` columns for **derive-on-write** values where the value is a deterministic same-row function. Python validators handle cross-field / cross-row / cross-table rules. All three DB mechanisms are individually droppable (`DROP TRIGGER`, `DROP INDEX`, `ALTER TABLE DROP COLUMN`), preserving cheap rollback. | Avoids Pattern B (backfill-instead-of-constraint) regressions. The three-mechanism split is dictated by SQLite semantics: `ALTER TABLE ADD CHECK` on existing columns is not supported, and BEFORE triggers cannot assign to `NEW.column`. Performance cost: row-level check per write; measured negligible at this volume (<12k rows). |
 | **D-03** | Bad-data handling | Mark `unresolved=true` on the `JobLocation`; the row is written; the UI renders with a "review needed" badge; sorting excludes by default; a `/admin/review` page surfaces them | The `unresolved` mechanism was already designed and is unread. Quarantine table (alternative) duplicates schema, adds promotion UX overhead, and discards the row's continuing presence in scoring queues. Reject (alternative) loses the row outright. Mark-and-render preserves data and makes the failure visible. |
 | **D-04** | Order of Layer-1 scanner migration | Workday first (largest volume + biggest `posted_date` win), then Greenhouse, then Pinpoint (trivial — data already in response), then SmartRecruiters | Pareto: Workday alone is ~900 rows / 7 days; Greenhouse ~825. SmartRecruiters already Layer-1 for `JobLocation` but not for `source_id`. |
-| **D-05** | `source_id` namespacing | **[R2-C2 REVISED]** Composite `(company_id, source_id)` UNIQUE index (partial: `WHERE source_id IS NOT NULL`); per-row `source_id` is the platform's raw ID with no transformation | Round-2 review caught that the original `(ats_platform, source_id)` plan referenced a column that does not exist on the `jobs` table — `ats_platform` is on `companies`, not `jobs` (R2-C2). The audit's 149 collisions were **cross-COMPANY** (same raw `source_id` matched against multiple companies), so `company_id` is the correct namespace scope. `company_id` already exists on jobs and is assigned at `upsert_job` time, so no new column / no backfill is needed. |
+| **D-05** | `source_id` namespacing | Composite `(company_id, source_id)` UNIQUE index (partial: `WHERE source_id IS NOT NULL AND company_id IS NOT NULL`); per-row `source_id` is the platform's raw ID with no transformation | The audit's 149 collisions are cross-COMPANY (same raw `source_id` matched against multiple companies), so `company_id` is the correct namespace scope. `company_id` already exists on jobs and is assigned at `upsert_job` time, so no new column / no backfill is needed. |
 | **D-06** | URL canonicalization | Strip a fixed allowlist of tracking params (`utm_*`, `gh_jid`, `refId`, `trk`, `lipi`, `ref`, `fbclid`, `mc_*`, `_hsenc`, `_hsmi`) at parser boundary BEFORE `upsert_job`; preserve original in a new `source_urls_raw` column for forensics; do NOT yet use canonical URL for dedup | Decoupling canonicalization from dedup avoids inadvertently re-deduping logical jobs that genuinely live at different URLs (e.g., a job posted on both Greenhouse and the company's careers page). Forensics column means we can iterate on the canonical algorithm without losing source data. |
-| **D-07** | Salary unit handling | Tag every priced row with `salary_currency` (default `USD`) and `salary_period` (`annual` / `hourly` / `unknown`); enforce salary range invariants via TRIGGER (per D-02 revised); for the NEW columns added in Phase 49 (`salary_currency`, `salary_period`), use embedded CHECK constraints in the `ALTER TABLE ADD COLUMN` statements (this IS supported in SQLite); flag suspected unit-confusion rows for review via `unresolved`-on-salary (extends F-06 fix); NO blind hourly→annual conversion at write | Blind conversion was rejected because: (a) we don't know annual-hours assumption per region/company; (b) a $40/hour contractor and a $40k/year intern are different jobs that should both display correctly; (c) the existing data is genuinely ambiguous (`64-64` row in Greenhouse parser proves the *parser* doesn't know its own unit). Tagging makes the ambiguity explicit and recoverable. |
+| **D-07** | Salary unit handling | Tag every priced row with `salary_currency` (default `USD`) and `salary_period` (`annual` / `hourly` / `unknown`); enforce salary range invariants via TRIGGER; for the new columns added in Phase 49, use embedded CHECK constraints in the `ALTER TABLE ADD COLUMN` statements; flag suspected unit-confusion rows for review via `unresolved`-on-salary (extends F-06 fix); NO blind hourly→annual conversion at write | Blind conversion was rejected because: (a) we don't know annual-hours assumption per region/company; (b) a $40/hour contractor and a $40k/year intern are different jobs that should both display correctly; (c) the existing data is genuinely ambiguous (`64-64` row in Greenhouse parser proves the *parser* doesn't know its own unit). Tagging makes the ambiguity explicit and recoverable. |
 | **D-08** | `posted_date` semantics | UTC ISO-8601 string in the `posted_date` column; parser-supplied where available; NULL when source doesn't provide (no synthesis from `first_seen`) | Matches `arch_store_utc_render_local`. Synthesizing from `first_seen` would conflate "when posted" with "when ingested" and hide the gap. NULL is honest. |
-| **D-09** | Title filter location | **[R1-M3 REVISED]** Title cleaning + metadata-blob detection runs in `ParsedJob.from_job(job)` construction — NOT in `Job.__post_init__`. On clean: proceeds to a normal `ParsedJob`. On metadata-blob: constructs an `UnresolvedParsedJob` variant *without raising*; this variant carries the raw title + the violation reason and routes through `upsert_job` to write the row with `unresolved=true` on the affected fields. `Job.__post_init__` retains its existing empty-string raises (unchanged). Title-filter logic (`_clean_title`, `_is_metadata_blob`) imported from `careers_crawler/_title_filters.py` and called from `ParsedJob`. | Original spec proposed raising from `Job.__post_init__`, which is unimplementable: an exception during construction means `Job` is never bound, so `upsert_job` can't catch it. The reviewer correctly flagged this (R1-M3). Moving validation to `ParsedJob` construction preserves the boundary-enforcement model and the unconditional-filter guarantee, because every caller of `upsert_job` must construct `ParsedJob` (the shim in 47.02 enforces this during migration; the shim is removed in 48.07). |
-| **D-10** | Status reconciliation | **[R2-M1 REVISED]** Add `jobs.computed_status` as a **SQLite STORED GENERATED column** with `GENERATED ALWAYS AS (CASE WHEN pipeline_status IN ('applied','phone_screen','interviewing','offer','rejected','withdrawn') THEN pipeline_status WHEN is_stale=1 THEN 'stale' WHEN expiry_status='expired' THEN 'expired' ELSE COALESCE(pipeline_status,'active') END) STORED`. UI filters use `computed_status`. | Round-2 caught that the original BEFORE-trigger plan was unimplementable: SQLite BEFORE triggers cannot assign to `NEW.column` (no PL/pgSQL-style `NEW := ...` semantics; R2-M1). SQLite generated columns (3.31+; our 3.45+) give exactly the intended semantics — auto-recomputed on row write, deterministic, no recursion, no AFTER-trigger guard logic needed. The derivation rule above is the same one originally planned; only the mechanism changed. |
+| **D-09** | Title filter location | Title cleaning + metadata-blob detection runs in `ParsedJob.from_job(job)` construction — NOT in `Job.__post_init__`. On clean: proceeds to a normal `ParsedJob`. On metadata-blob: constructs an `UnresolvedParsedJob` variant *without raising*; this variant carries the raw title + the violation reason and routes through `upsert_job` to write the row with `unresolved=true` on the affected fields. `Job.__post_init__` retains its existing empty-string raises. Title-filter logic (`_clean_title`, `_is_metadata_blob`) imported from `careers_crawler/_title_filters.py` and called from `ParsedJob`. | Raising from `Job.__post_init__` is unimplementable: an exception during construction means `Job` is never bound, so `upsert_job` can't catch it. Placing validation in `ParsedJob` construction preserves the boundary-enforcement model and the unconditional-filter guarantee, because every caller of `upsert_job` must construct `ParsedJob` (the shim in 47.02 enforces this during migration; the shim is removed in 48.07). |
+| **D-10** | Status reconciliation | Add `jobs.computed_status` as a **SQLite STORED GENERATED column** with `GENERATED ALWAYS AS (CASE WHEN pipeline_status IN ('applied','phone_screen','interviewing','offer','rejected','withdrawn') THEN pipeline_status WHEN is_stale=1 THEN 'stale' WHEN expiry_status='expired' THEN 'expired' ELSE COALESCE(pipeline_status,'active') END) STORED`. UI filters use `computed_status`. | SQLite generated columns (3.31+; our 3.45+) give exactly the intended semantics — auto-recomputed deterministically on row write, no recursion, no AFTER-trigger guard logic needed. (BEFORE triggers cannot assign to `NEW.column` in SQLite, so a trigger-based mechanism would not work.) |
 | **D-11** | Dead column removal | `opus_score`, `eval_blocks`, `job_archetype` dropped in a dedicated migration in Phase 49 | Removing first reduces audit surface for later work. Drop happens AFTER `gold_*` audit confirms no eval workflow depends on these. |
 | **D-12** | `legitimacy_note` decision | **Wire it.** Add a parser pass that flags suspected scam/MLM jobs into `legitimacy_note`; the `derive_classification` `if legitimacy_note: reject` branch then fires correctly | The branch exists in code and has been silent dead logic. Either wire it or remove the branch. Per [[restore_original_intent]], when a feature is documented but unwired, restore the wiring. |
 | **D-13** | `description` asymmetry decision | Repurpose `description` for parser-supplied short text (when available); keep `jd_full` as the canonical full body; document the split | Two existing semantic roles, neither has bug-fixing leverage in this phase. Documenting the split is the cheap fix. |
 | **D-14** | Scope of company fuzzy-match fix | Tighten the matcher (legal-entity prefix-strip pre-scoring; raise threshold from 85→90; strict minimum string length 8); flag the 15 collision cases for human review; do NOT re-link historical jobs | Re-linking is a per-company human-review task with the potential for further wrong-linkage if automated. Out of scope per NG-01. |
 | **D-15** | Off-platform bypass | Bring `_off_platform.py:253` into `upsert_job` with a new `source='off_platform_email'` typed branch; the dedup_key collision concern is addressed by the existing `f"{candidate.lower()}|off-platform|{ms_timestamp}"` shape, which still produces unique keys | Eliminates the only ingestion bypass. The synthetic dedup_key continues to work because the timestamp suffix ensures uniqueness; no behavioral change. |
 | **D-16** | One worktree, one branch | All four phases execute on `audit-location-handling` branch; one PR per phase; merge each phase to `main` before starting the next | Per project convention (CLAUDE.md "commit directly to main"), but using a worktree branch for the multi-phase set because of the schema-migration risk. Sequencing forces validation against real DB after each phase. |
+| **D-17** | LLM-presence discriminator | `scoring_model IS NOT NULL` is the canonical LLM-scored-row discriminator; `score IS NOT NULL` is not (heuristic scoring writes `score` non-NULL for every ingested row, but never writes `scoring_model`/`sub_scores_json`/`classification`) | Matches the existing comment in `_jobs.py:294` and the actual write semantics of `JobScorer` and `persist_job_assessment`. Invariants on LLM-only fields (sub_scores_json, classification) gate on `scoring_model`, not `score`. |
+| **D-18** | `jd_full` write boundary | Single sanctioned Python helper `set_jd_full(conn, dedup_key, text, source)` for content-density gating + good error messages, paired with a DB-level `BEFORE INSERT/UPDATE OF jd_full` TRIGGER that rejects shell-pattern matches. All five known runtime writers route through the helper; the trigger backstops any future bypass. | Python-only enforcement at the `ParsedJob` boundary cannot protect the writers that bypass `upsert_job` (`agentic_enricher.py:645`, `ats_scanner/_run.py:520`, `data_enricher.py:173`, `blueprints/jobs.py:714`, `blueprints/jobs.py:913`). Two-tier defense closes both surfaces. |
+| **D-19** | `upsert_job` return type | `UpsertResult` dataclass with explicit `kind: Literal["inserted","updated","unchanged"]`. **No `__bool__` defined.** Callers must use explicit `result.kind == "inserted"`. | Boolean truthiness on a result object would silently break the 4 existing callers using `if is_new:` (treating updates as inserts because `UpsertResult` is always truthy). Forcing explicit `result.kind` makes the migration auditable and prevents the foot-gun. |
 
 **Decisions explicitly deferred to spike before commit:**
 
 - **D-01.a** (`attrs` vs hand-rolled dataclass) — 30-minute spike at start of Phase 47 to validate `attrs` integrates cleanly with existing `Job` consumers; fallback is dataclass+validators.
-- **D-17** (`unresolved` UI rendering details — color, copy, sort placement) — defer to UI design within Phase 47; functional requirement is "visually distinct from clean rows."
+- **D-20** (`unresolved` UI rendering details — color, copy, sort placement) — defer to UI design within Phase 47; functional requirement is "visually distinct from clean rows."
 
 ---
 
@@ -277,22 +242,27 @@ Each decision below was considered against ≥1 alternative; the alternative is 
 Today (`job_finder/db/_jobs.py:105`):
 
 ```python
-def upsert_job(conn, job: Job, *, company_id: int | None = None) -> None:
+def upsert_job(conn, job: Job, *, company_id: int | None = None) -> bool:
     # ~200 lines of denormalize → SQL → COALESCE merge
     # Accepts whatever Job contains; produces whatever Job implies
+    # Returns True if a new row was inserted
 ```
 
 After Phase 47:
 
 ```python
-def upsert_job(conn, parsed: ParsedJob, *, company_id: int | None = None) -> UpsertResult:
+def upsert_job(conn, parsed: ParsedJob | UnresolvedParsedJob, *,
+               company_id: int | None = None) -> UpsertResult:
     """
     Single typed-contract entry point.
 
-    `ParsedJob` is validated at construction. If any invariant fails,
-    construction raises a typed exception; callers either fix the data
-    or construct an `UnresolvedJob` explicitly (which writes the row
-    with `unresolved=true` on the affected JobLocation/sub-element).
+    `ParsedJob` is validated at construction. Validation failures route to
+    `UnresolvedParsedJob` (writes the row with `unresolved=true` on the
+    affected sub-element) for I-08, I-09, I-13. Failures of I-07, I-10 raise
+    typed exceptions (the data is genuinely unwritable). All DB-level
+    invariants (TRIGGER-protected) raise `sqlite3.IntegrityError`, which
+    `upsert_job` catches and surfaces as `IngestionRejected` with the
+    originating invariant name.
 
     Returns: UpsertResult(kind: 'inserted'|'updated'|'unchanged',
                           dedup_key, unresolved_reasons: list[str])
@@ -312,16 +282,18 @@ def upsert_job(conn, parsed: ParsedJob, *, company_id: int | None = None) -> Ups
 - `source_urls: list[str]` (canonical; tracking params stripped)
 - `source_urls_raw: list[str]` (forensic original)
 - `salary: SalaryRange | None` (with currency, period)
-- `scoring_provider: ScoringProvider | None` (None at ingest; populated by scorer; **TRIGGER** `tg_jobs_scoring_provider_when_scored` enforces `score IS NULL OR scoring_provider IS NOT NULL` per R1-C2. **[R2-C1 NOTE]** This invariant is already satisfied today because `upsert_job` INSERT writes the literal `'heuristic'` for `scoring_provider` whenever it writes `score`. The trigger is the durable-constraint version of m071's backfill — it ensures no future write path can re-introduce the F-03 NULL-leak pattern. Heuristic scoring also writes `score` non-NULL but NEVER writes `scoring_model`/`sub_scores_json`/`classification` — those are LLM-only fields. `scoring_model IS NOT NULL` is therefore the LLM-presence discriminator, used by I-04 and I-05 (see §8.3).)
+- `scoring_provider: ScoringProvider | None` (None at ingest; populated by scorer; the trigger `tg_jobs_scoring_provider_when_scored` enforces `score IS NULL OR scoring_provider IS NOT NULL`, and this invariant is already satisfied today because `upsert_job` INSERT writes the literal `'heuristic'` for `scoring_provider` whenever it writes `score`)
 - ... (every **parser-owned** column in the `jobs` schema mapped 1:1 per the categorization in §8.2.1 — Pattern A defense)
+
+The `set_jd_full(conn, dedup_key, text, source)` helper (per D-18) is the only sanctioned write path for `jd_full`. It performs Python-level junk-pattern matching and returns `False` (no-op) on gate-hit. The DB-level TRIGGER `tg_jobs_jd_full_junk` backstops the helper at INSERT/UPDATE time.
 
 ### 8.2 ParsedJob ↔ schema correspondence (Pattern A defense)
 
 Phase 47 includes a *one-time audit* that asserts every **parser-owned** column in the `jobs` table has a `ParsedJob` field that maps to it, and vice versa. The audit lives as a unit test (`tests/test_schema_correspondence.py`) that fails CI if a parser-owned column is added without a corresponding `ParsedJob` field. This prevents the next `posted_date`-shaped drift.
 
-#### 8.2.1 Column categorization [R1-Mn6]
+#### 8.2.1 Column categorization
 
-The original spec said "every column" must map to `ParsedJob`. The reviewer correctly flagged that the `jobs` table mixes responsibilities — user-owned (`notes`), system-owned (`pipeline_status`), and scoring-owned columns should NOT be parser-supplied. Revised categorization:
+The `jobs` table mixes responsibilities — user-owned (`notes`), system-owned (`pipeline_status`), and scoring-owned columns should NOT be parser-supplied. Categories are declared as the single source of truth:
 
 ```python
 # job_finder/db/column_categories.py — sole source of truth
@@ -354,7 +326,7 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "is_stale":             "system",          # stale_detector
     "expiry_status":        "system",          # expiry_checker
     "expiry_checked_at":    "system",
-    "computed_status":      "system",          # NEW in Phase 49 — TRIGGER-derived
+    "computed_status":      "system",          # NEW in Phase 49 — STORED generated column
     "company_id":           "system",          # FK; assigned at upsert by company_resolver
     "enrichment_tier":      "system",
     "comp_data_json":       "system",          # company-research output
@@ -395,38 +367,33 @@ The schema-correspondence test (47.04) asserts:
 3. No `ParsedJob` field exists without a `parser`-categorized column (defends against drift the other way).
 4. Categories `system`, `scoring`, `user`, `eval`, `dead` have NO requirement on `ParsedJob`.
 
-This is stricter than the original "every column must map" claim and weaker than "no requirement on non-parser columns" — it's both well-defined and enforceable.
-
-### 8.3 Invariant set (codified) [R1-C2 REVISED]
-
-Per D-02 revised, **CHECK constraints on existing columns are not supported by SQLite's ALTER TABLE**. The enforcement column below now uses TRIGGER for existing-column invariants. CHECK is reserved for new columns being added in the same migration (where the constraint can live in the `ALTER TABLE ADD COLUMN ... CHECK(...)` clause — which IS supported).
+### 8.3 Invariant set (codified)
 
 | # | Invariant | Enforcement | Migration | Notes |
 |---|---|---|---|---|
-| I-01 | `salary_min IS NULL OR salary_min > 0` | **TRIGGER** `tg_jobs_salary_min_positive` BEFORE INSERT/UPDATE; `RAISE(ABORT, 'I-01')` | m078 (Phase 47) | F-06 floor |
-| I-02 | `salary_min IS NULL OR salary_max IS NULL OR salary_min <= salary_max` | **TRIGGER** `tg_jobs_salary_range` BEFORE INSERT/UPDATE | m078 (Phase 47) | Replaces `_normalize_salary` swap logic (which stays as a Python parser-layer convenience but is no longer the safety net) |
-| I-03 | `score IS NULL OR scoring_provider IS NOT NULL` | **TRIGGER** `tg_jobs_scoring_provider_when_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | F-03 fix — the durable-constraint version of m071's backfill. **[R2-C1 NOTE]** Stays as-is because the current `upsert_job` INSERT explicitly tags `scoring_provider='heuristic'` for every row (`_jobs.py:303,324`), so this invariant is already satisfied by ingestion. |
-| I-04 | `scoring_model IS NULL OR sub_scores_json IS NOT NULL` | **TRIGGER** `tg_jobs_subscores_when_llm_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | **[R2-C1 REVISED]** Original spec gated on `score IS NULL` which would have rejected every ingestion row (heuristic scoring writes `score` non-NULL but never `sub_scores_json`). The actual LLM-presence discriminator is `scoring_model IS NOT NULL` (existing comment in `_jobs.py:294`). This invariant now correctly captures "if LLM ran, sub-scores must exist." |
-| I-05 | `scoring_model IS NULL OR classification IS NOT NULL` | **TRIGGER** `tg_jobs_classification_when_llm_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | **[R2-C1 REVISED]** Same fix as I-04: gates on `scoring_model` (the LLM discriminator), not `score`. Captures "if LLM ran, classification must be Python-derived from sub-scores." |
-| I-06 | *(retired)* | — | — | **[R2-C1 RETIRED]** The old I-06 (`score IS NULL OR classification IS NOT NULL`) is subsumed by the revised I-05. Heuristic-scored rows have `classification IS NULL` (correct — Python derivation requires `sub_scores_json` which heuristic doesn't emit); only LLM-scored rows must have `classification` populated. The invariant is unchanged in spirit; just collapsed into I-05's gating. |
-| I-07 | `workplace_type IN ('REMOTE','HYBRID','ONSITE','UNSPECIFIED')` | **TRIGGER** `tg_jobs_workplace_type_domain` BEFORE INSERT/UPDATE | m078 (Phase 47) | Already partially enforced via default; codify the domain |
-| I-08 | `locations_structured` non-empty when `locations_raw` non-empty | **Python validator** at `ParsedJob` boundary | (no migration — code-only) | Cross-field |
-| I-09 | `title` does not match `_TITLE_LOCATION_BLEED_RE` (the Blue State `)XX` shape and trailing state-code shape) | **Python validator** at `ParsedJob.from_job` construction; on failure → `UnresolvedParsedJob` (NOT raise) | (no migration) | F-09 fix; revised location per R1-M3 |
-| I-10 | `title` does not contain any token from `locations_raw` after a paren-close | **Python cross-field validator** at `ParsedJob`; on failure → `UnresolvedParsedJob` | (no migration) | F-09 fix |
-| I-11 | `company` not in denylist | **Python validator** at `ParsedJob`; uses `get_company_denylist(config)` (single source) | (no migration) | F-08 fix |
-| I-12 | `source_id` is unique within `(company_id, source_id)` | **UNIQUE INDEX** `ix_jobs_company_source_id` (partial: `WHERE source_id IS NOT NULL AND company_id IS NOT NULL`) | m078 (Phase 47) | **[R2-C2 REVISED]** Original spec used `(ats_platform, source_id)` referencing a non-existent jobs column. The 149 audit-detected collisions are cross-COMPANY, so `company_id` is the correct namespace and is already on the jobs table. No new column needed. |
-| I-13 | `posted_date IS NULL OR posted_date <= datetime('now', '+1 day')` | **TRIGGER** `tg_jobs_posted_date_not_future` BEFORE INSERT/UPDATE | m078 (Phase 47) | Defense against future-date parser bugs |
-| I-14 | `jd_full` either NULL or above min-content-density threshold (≥400 chars AND not matching shell patterns) | **TWO-TIER: Python validator** in `set_jd_full()` helper (good error messages); **AND TRIGGER** `tg_jobs_jd_full_junk` BEFORE INSERT/UPDATE OF `jd_full` with `RAISE(ABORT, ...)` when matching shell-pattern regex (absolute defense against the 5 non-`upsert_job` writers). | m078 (Phase 47) | **[R2-M2 REVISED]** Original spec had Python-only enforcement at `ParsedJob` boundary, which cannot protect the 5 confirmed runtime writers that bypass `upsert_job` (`agentic_enricher.py:645`, `ats_scanner/_run.py:520`, `data_enricher.py:173`, `blueprints/jobs.py:714`, `blueprints/jobs.py:913`). DB trigger is the architectural enforcement; Python helper is the ergonomic API. |
-| I-15 | `salary_currency IN (...)` and `salary_period IN (...)` | **CHECK constraint** embedded in `ALTER TABLE ADD COLUMN salary_currency TEXT CHECK(...)` | m080 (Phase 49) | D-07; legal because columns are NEW in m080, so CHECK works at column-add time |
-| I-16 | `computed_status` is a deterministic same-row function of (`pipeline_status`, `is_stale`, `expiry_status`) | **GENERATED ALWAYS AS (...) STORED** column (SQLite 3.31+) | **m081 (Phase 49)** [R1-M5: moved from Phase 47] | **[R2-M1 REVISED]** Original spec used `BEFORE INSERT/UPDATE` trigger writing `NEW.computed_status` — impossible in SQLite (NEW is read-only in triggers). Generated columns give exactly the intended semantics: auto-recomputed deterministically on row write, no recursion, no AFTER-trigger guard. SQL: `ALTER TABLE jobs ADD COLUMN computed_status TEXT GENERATED ALWAYS AS (CASE WHEN pipeline_status IN ('applied','phone_screen','interviewing','offer','rejected','withdrawn') THEN pipeline_status WHEN is_stale=1 THEN 'stale' WHEN expiry_status='expired' THEN 'expired' ELSE COALESCE(pipeline_status,'active') END) STORED`. |
+| I-01 | `salary_min IS NULL OR salary_min > 0` | TRIGGER `tg_jobs_salary_min_positive` BEFORE INSERT/UPDATE; `RAISE(ABORT, 'I-01')` | m078 (Phase 47) | F-06 floor |
+| I-02 | `salary_min IS NULL OR salary_max IS NULL OR salary_min <= salary_max` | TRIGGER `tg_jobs_salary_range` BEFORE INSERT/UPDATE | m078 (Phase 47) | Replaces `_normalize_salary` swap logic (which stays as a Python parser-layer convenience but is no longer the safety net) |
+| I-03 | `score IS NULL OR scoring_provider IS NOT NULL` | TRIGGER `tg_jobs_scoring_provider_when_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | F-03 fix — the durable-constraint version of m071's backfill. The current `upsert_job` INSERT explicitly tags `scoring_provider='heuristic'` for every row (`_jobs.py:303,324`), so this invariant is already satisfied by ingestion; the trigger ensures no future write path can re-introduce the regression. |
+| I-04 | `scoring_model IS NULL OR sub_scores_json IS NOT NULL` | TRIGGER `tg_jobs_subscores_when_llm_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | Gates on `scoring_model IS NOT NULL` per D-17 (the LLM-presence discriminator), not on `score` — heuristic-scored rows write `score` without writing `sub_scores_json` and would otherwise be rejected. Captures "if LLM ran, sub-scores must exist." |
+| I-05 | `scoring_model IS NULL OR classification IS NOT NULL` | TRIGGER `tg_jobs_classification_when_llm_scored` BEFORE INSERT/UPDATE | m078 (Phase 47) | Same gating as I-04. Captures "if LLM ran, classification must be Python-derived from sub-scores." |
+| I-06 | `workplace_type IN ('REMOTE','HYBRID','ONSITE','UNSPECIFIED')` | TRIGGER `tg_jobs_workplace_type_domain` BEFORE INSERT/UPDATE | m078 (Phase 47) | Already partially enforced via default; codify the domain |
+| I-07 | `locations_structured` non-empty when `locations_raw` non-empty | Python validator at `ParsedJob` boundary | (no migration — code-only) | Cross-field |
+| I-08 | `title` does not match `_TITLE_LOCATION_BLEED_RE` (the Blue State `)XX` shape and trailing state-code shape) | Python validator at `ParsedJob.from_job` construction; on failure → `UnresolvedParsedJob` (NOT raise) | (no migration) | F-09 fix |
+| I-09 | `title` does not contain any token from `locations_raw` after a paren-close | Python cross-field validator at `ParsedJob`; on failure → `UnresolvedParsedJob` | (no migration) | F-09 fix |
+| I-10 | `company` not in denylist | Python validator at `ParsedJob`; uses `get_company_denylist(config)` (single source) | (no migration) | F-08 fix |
+| I-11 | `source_id` is unique within `(company_id, source_id)` | UNIQUE INDEX `ix_jobs_company_source_id` (partial: `WHERE source_id IS NOT NULL AND company_id IS NOT NULL`) | m078 (Phase 47) | F-04 collision defense. The audit's 149 collisions are cross-company, so `company_id` is the correct namespace scope (already on jobs, no backfill needed). |
+| I-12 | `posted_date IS NULL OR posted_date <= datetime('now', '+1 day')` | TRIGGER `tg_jobs_posted_date_not_future` BEFORE INSERT/UPDATE | m078 (Phase 47) | Defense against future-date parser bugs |
+| I-13 | `jd_full` either NULL or above min-content-density threshold (≥200 chars AND not matching shell patterns) | TWO-TIER: Python validator in `set_jd_full()` helper (rich error messages); AND TRIGGER `tg_jobs_jd_full_junk` BEFORE INSERT/UPDATE OF `jd_full` with `RAISE(ABORT, ...)` when matching shell-pattern strings | m078 (Phase 47) | F-01 fix. The DB trigger is the architectural enforcement (protects the 5 confirmed runtime writers that bypass `upsert_job`); the Python helper is the ergonomic API for the normal write path. |
+| I-14 | `salary_currency IN (...)` and `salary_period IN (...)` | CHECK constraint embedded in `ALTER TABLE ADD COLUMN salary_currency TEXT CHECK(...)` | m080 (Phase 49) | D-07; legal because columns are NEW in m080, so CHECK works at column-add time |
+| I-15 | `computed_status` is a deterministic same-row function of (`pipeline_status`, `is_stale`, `expiry_status`) | STORED GENERATED column (SQLite 3.31+) | m081 (Phase 49) | D-10 / F-10. Auto-recomputed on row write; no recursion concern. |
 
-**Phase 47 enforces I-01 through I-05, I-07 through I-14** (13 invariants total — I-06 retired per R2-C1, I-12 via UNIQUE INDEX). **I-15 lands in Phase 49 m080** (added with new columns). **I-16 lands in Phase 49 m081** (added as generated column). This corrects the earlier "all 16 in Phase 47" overstatement [R1-M5] and the R2-C1 scoring-gate impossibility.
+**Phase 47 enforces I-01 through I-13** (13 invariants). **I-14 lands in Phase 49 m080** (added with new columns). **I-15 lands in Phase 49 m081** (added as generated column).
 
 ### 8.4 The `unresolved` mechanism — wiring it
 
 Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixture; read by zero downstream consumers. Phase 47 changes:
 
-- **Write side**: `ParsedJob` validators route to `UnresolvedParsedJob` instead of raising on certain classes of validation failure (per D-03 and R1-M3). Specifically: I-09, I-10, I-14 produce an `UnresolvedParsedJob` variant carrying the violation reason. Failures of I-08, I-11 raise typed errors (the data is genuinely unwritable — empty location with non-empty raw, or denylisted company). I-01 through I-07, I-12, I-13 fire at the TRIGGER layer and raise `sqlite3.IntegrityError`, which `upsert_job` catches and surfaces to the caller as `IngestionRejected` with the originating invariant name.
+- **Write side**: `ParsedJob` validators route to `UnresolvedParsedJob` instead of raising on certain classes of validation failure (per D-03). Specifically: I-08, I-09, I-13 produce an `UnresolvedParsedJob` variant carrying the violation reason. Failures of I-07, I-10 raise typed errors (the data is genuinely unwritable — empty location with non-empty raw, or denylisted company). I-01 through I-06, I-11, I-12 fire at the TRIGGER layer and raise `sqlite3.IntegrityError`, which `upsert_job` catches and surfaces to the caller as `IngestionRejected` with the originating invariant name.
 - **Render side**: `templates/jobs/_row.html` adds a "review needed" badge for rows where any `JobLocation` has `unresolved=true` or where `jd_full` was junk-gated.
 - **Filter side**: default sort excludes unresolved rows; an explicit filter chip surfaces them.
 - **Triage side**: `/admin/review` page (new blueprint route in `blueprints/admin.py`) shows unresolved rows with reasons and an "approve" / "drop" UX. Approve clears the flag; drop sets `pipeline_status='rejected'`.
@@ -446,14 +413,14 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
 [ParsedJob.from_job(job, ...)]       --- TYPED CONTRACT: validators run here
         |                                — Layer-1 sources pass JobLocation
         |                                — Layer-2 sources route via parse_locations
-        |                                — I-09 / I-10 / I-14 fail → UnresolvedParsedJob
-        |                                — I-08 / I-11 fail → raise (caller handles)
+        |                                — I-08 / I-09 / I-13 fail → UnresolvedParsedJob
+        |                                — I-07 / I-10 fail → raise (caller handles)
         v
 [upsert_job(parsed_or_unresolved)]   --- SINGLE chokepoint
         |                                — Translates ParsedJob → SQL
-        |                                — DB TRIGGERS enforce I-01..I-07, I-13
-        |                                — UNIQUE INDEX enforces I-12
-        |                                — Phase 49: TRIGGER enforces I-16
+        |                                — DB TRIGGERS enforce I-01..I-06, I-12, I-13
+        |                                — UNIQUE INDEX enforces I-11
+        |                                — Phase 49: generated col realizes I-15
         v
 [jobs table]                         --- canonical store
         |
@@ -492,10 +459,10 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
 
 | Phase | Exit gate |
 |---|---|
-| 46 | No new rows with title-bleed shape from any of {`careers_page`, `careers_crawl`-ai-nav}; **[R1-M4 NARROWED]** any `Job` constructed with `posted_date=X` round-trips through `upsert_job` and lands as `posted_date=X` in the column (verified by `tests/test_posted_date_persistence.py`); sources that do not emit `posted_date` continue to write NULL (per-source extraction is Phase 48 scope); zero `jd_full` writes matching shell-pattern allowlist; existing tests still pass |
-| 47 | `tests/test_schema_correspondence.py` passes (per §8.2.1 categorization); **[R1-M5 + R2-C1 REVISED]** 13 invariants enforced at boundary: I-01, I-02, I-03 (TRIGGERs); I-04, I-05 (TRIGGERs gated on `scoring_model IS NOT NULL` per R2-C1); I-07 (TRIGGER); I-08, I-09, I-10, I-11 (Python validators); I-12 (UNIQUE INDEX on `(company_id, source_id)` per R2-C2); I-13 (TRIGGER); I-14 (Python helper + TRIGGER per R2-M2). I-06 retired (subsumed by I-05). I-15 deferred to Phase 49 m080 (column not yet added); I-16 deferred to Phase 49 m081 (generated column, R2-M1). `/admin/review` route returns 200; `unresolved` badge rendering verified visually; denylist single-source test passes; all 5 `upsert_job` call sites updated to `result.kind` checks per R2-M3; `tests/test_jd_full_writers_routed.py` confirms zero direct `UPDATE jobs SET jd_full` outside `_jd_full.py` and migrations. |
-| 48 | Layer-1 emission verified for Pinpoint, Greenhouse, Workday, SmartRecruiters (`source_id` non-NULL ≥95% of new rows from each); per-source `posted_date` extraction lands `posted_date` non-NULL ≥95% of new rows from each of {Greenhouse, Workday, Ashby, Lever, SmartRecruiters} [moved here from Phase 46 per R1-M4]; title filter in `ParsedJob.from_job` blocks 100% of staged Blue State / `_ai_nav` fixture inputs |
-| 49 | I-15 enforced via CHECK on new `salary_currency`/`salary_period` columns (m080); I-16 enforced via TRIGGER on new `computed_status` column (m081); dead columns dropped (m082); `legitimacy_note` either wired with a passing test or removed; URL canonical column populated for new rows; salary currency tagging on new rows; `computed_status` populated and used by `/jobs` filter |
+| 46 | No new rows with title-bleed shape from any of {`careers_page`, `careers_crawl`-ai-nav}; any `Job` constructed with `posted_date=X` round-trips through `upsert_job` and lands as `posted_date=X` in the column (verified by `tests/test_posted_date_persistence.py`); sources that do not emit `posted_date` continue to write NULL (per-source extraction is Phase 48 scope); `set_jd_full()` helper covers all 5 confirmed runtime writers; existing tests still pass |
+| 47 | `tests/test_schema_correspondence.py` passes (per §8.2.1 categorization); 13 invariants enforced at boundary: I-01, I-02, I-03 (TRIGGERs); I-04, I-05 (TRIGGERs gated on `scoring_model IS NOT NULL` per D-17); I-06 (TRIGGER); I-07, I-08, I-09, I-10 (Python validators); I-11 (UNIQUE INDEX on `(company_id, source_id)`); I-12 (TRIGGER); I-13 (Python helper + TRIGGER per D-18). I-14 and I-15 deferred to Phase 49 (their columns don't yet exist). `/admin/review` route returns 200; `unresolved` badge rendering verified visually; denylist single-source test passes; all 5 `upsert_job` call sites updated to `result.kind` checks per D-19; `tests/test_jd_full_writers_routed.py` confirms zero direct `UPDATE jobs SET jd_full` outside `_jd_full.py` and migrations. |
+| 48 | Layer-1 emission verified for Pinpoint, Greenhouse, Workday, SmartRecruiters (`source_id` non-NULL ≥95% of new rows from each); per-source `posted_date` extraction lands `posted_date` non-NULL ≥95% of new rows from each of {Greenhouse, Workday, Ashby, Lever, SmartRecruiters}; title filter in `ParsedJob.from_job` blocks 100% of staged Blue State / `_ai_nav` fixture inputs |
+| 49 | I-14 enforced via CHECK on new `salary_currency`/`salary_period` columns (m080); I-15 enforced via STORED generated column on new `computed_status` (m081); dead columns dropped (m082); `legitimacy_note` either wired with a passing test or removed; URL canonical column populated for new rows; salary currency tagging on new rows; `computed_status` populated and used by `/jobs` filter |
 
 ---
 
@@ -511,9 +478,9 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
 
 **Rollback:** `git revert` — no schema change.
 
-### Commit 46.02 — `posted_date` wiring fix [R1-M4 NARROWED]
+### Commit 46.02 — `posted_date` wiring fix
 
-**Scope (revised):** plumbing only. `posted_date` extraction from per-source APIs lands in Phase 48 alongside Layer-1 adoption.
+**Scope:** plumbing only. `posted_date` extraction from per-source APIs lands in Phase 48 alongside Layer-1 adoption.
 
 **Files:**
 - `job_finder/db/_jobs.py:269`: write `job.posted_date` (UTC ISO) to the `posted_date` column on both INSERT and UPDATE branches. Currently `job.posted_date` is consumed only to derive `first_seen`; this commit adds the column write.
@@ -524,7 +491,7 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
 
 **Rollback:** trivial.
 
-### Commit 46.03 — `jd_full` junk gate [R2-M2 EXPANDED]
+### Commit 46.03 — `jd_full` junk gate (Python helper)
 
 **Scope:** introduce the `set_jd_full()` helper now (no DB trigger yet — that lands with m078 in Phase 47). Route all known writers through the helper as a Phase 46 tactical reduction; Phase 47 adds the DB-level backstop that protects against future bypass.
 
@@ -542,7 +509,7 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
   - `job_finder/web/data_enricher.py:173`
   - `job_finder/web/blueprints/jobs.py:714` (manual edit form)
   - `job_finder/web/blueprints/jobs.py:913` (manual edit form)
-- The `upsert_job` INSERT and UPDATE branches at `_jobs.py:217` and `_jobs.py:284` route their internal jd_full writes through `set_jd_full()` as well, for symmetry. (No new bypass; same code path, just helper-mediated.)
+- The `upsert_job` INSERT and UPDATE branches at `_jobs.py:217` and `_jobs.py:284` route their internal jd_full writes through `set_jd_full()` as well, for symmetry.
 - On gate hit: do NOT write `jd_full`; for `upsert_job`-mediated paths also mark `enrichment_tier='exhausted'` and the parent `JobLocation` row with `unresolved=true` (anticipates Phase 47's wiring; for Phase 46 the bypass writers just skip the write).
 
 **Tests:**
@@ -559,23 +526,23 @@ Today: `JobLocation.unresolved` is written by Layer-2 parser and the m066 fixtur
 
 ### 47.00 — Spike: D-01.a (attrs vs dataclass+validators)
 
-**30-minute spike.** Pick one. Document the choice in `.planning/specs/2026-05-29-ingestion-contract-enforcement.md` under D-01.a.
+**30-minute spike.** Pick one. Document the choice in this spec under D-01.a.
 
 ### 47.01 — `ParsedJob` type + validators
 
 **Files:**
-- `job_finder/parsed_job.py` (new) — `ParsedJob` type with all fields per §8.1; validators for I-08, I-09, I-10, I-11, I-14
+- `job_finder/parsed_job.py` (new) — `ParsedJob` type with all fields per §8.1; validators for I-07, I-08, I-09, I-10, I-13
 - `tests/test_parsed_job_validators.py` — coverage of each validator
 
-### 47.02 — `upsert_job` accepts `ParsedJob` [R2-M3 EXPANDED]
+### 47.02 — `upsert_job` accepts `ParsedJob`
 
 **Files:**
 - `job_finder/db/_jobs.py:105` — function signature change; old `Job` callers wrapped in shim during migration; shim removed at end of Phase 48 (commit 48.07)
 - `tests/test_upsert_job_contract.py` — typed-input round-trip
 
-**[R2-M3] Call-site enumeration and migration (required):**
+**Call-site enumeration and migration (required):**
 
-Round-2 review flagged that changing the return type from `bool` to `UpsertResult` would silently break callers using `if is_new:` truthiness — every `UpsertResult` is truthy regardless of `kind`, so updates would be counted as inserts. All 5 callers in the codebase are enumerated below; each must be updated as part of 47.02:
+Changing the return type from `bool` to `UpsertResult` would silently break callers using `if is_new:` truthiness — every `UpsertResult` is truthy regardless of `kind`, so updates would be counted as inserts. Per D-19, `UpsertResult.__bool__` is explicitly not defined; all 5 callers in the codebase must be updated to use `result.kind`:
 
 | Call site | Current pattern | Required new pattern |
 |---|---|---|
@@ -585,23 +552,19 @@ Round-2 review flagged that changing the return type from `bool` to `UpsertResul
 | `job_finder/web/careers_crawler/_persistence.py:58` | Same `is_new` boolean | Same `result.kind` migration |
 | `job_finder/web/blueprints/jobs.py:444` | Return value ignored (manual add-from-listing path) | Capture `result`; surface `result.unresolved_reasons` to the user in the response message if non-empty |
 
-**Anti-pattern: do NOT implement `UpsertResult.__bool__`.** It would mask the API change and re-introduce the truthiness ambiguity the round-2 review caught. Force explicit `result.kind` access at every call site. The type-checker / runtime test below catches any caller that uses the result in a boolean context.
-
 **Acceptance tests (add to `test_upsert_job_contract.py`):**
 - Insert a new row → `result.kind == "inserted"`; assert `summary["jobs_new"]` increments at each of the 4 boolean call sites in a smoke test
 - Insert a duplicate (existing dedup_key) → `result.kind == "updated"`; assert `summary["jobs_updated"]` increments
-- A `bool(result)` call in test code raises `TypeError` (`__bool__ = None` pattern, or assert `not hasattr(UpsertResult, "__bool__")` if relying on default behavior — pick one and document)
+- A `bool(result)` call in test code raises `TypeError` (use `__bool__ = None` pattern, or assert `not hasattr(UpsertResult, "__bool__")` — pick one and document)
 - For the `blueprints/jobs.py:444` path: an unresolved row's reasons are surfaced in the response
 
-### 47.03 — DB invariants migration [R1-C1, R1-C2, R1-M5 REVISED]
+### 47.03 — DB invariants migration
 
-**Migration number: `m078`** (renumbered from `m074` per R1-C1; latest existing migration is `m077_normalize_timestamps_to_utc`).
-
-**Enforcement mechanism: TRIGGERS** (revised from `CHECK constraints` per R1-C2; SQLite does not support `ALTER TABLE ADD CHECK`).
+**Migration: `m078_contract_invariants.py`** (latest existing migration is `m077_normalize_timestamps_to_utc`).
 
 **Pre-flight backfill (atomic with the migration):** for each invariant about to be enforced, the migration first runs a SELECT to find violating rows. If any exist, the migration logs them and HALTS with an explicit error — refusing to land the trigger until the user either (a) fixes the violating rows by hand, (b) approves a documented quarantine-table move via a config flag, or (c) explicitly waives the invariant. Reasoning: silently dropping or modifying violating rows is the kind of "fix" that creates worse problems than the original; an explicit halt forces a decision.
 
-**Schema operations (m078) [R2-C1, R2-C2, R2-M2 REVISED]:**
+**Schema operations (m078):**
 
 ```sql
 -- ── I-01 salary_min > 0 ────────────────────────────────────────────────
@@ -634,10 +597,10 @@ BEGIN
 END;
 -- (analogous _upd trigger; current INSERT always tags 'heuristic', so this fires only on regression)
 
--- ── I-04 scoring_model → sub_scores_json (LLM-gated) [R2-C1] ──────────
+-- ── I-04 scoring_model → sub_scores_json (LLM-gated, per D-17) ────────
 -- Gates on scoring_model NOT score, because heuristic scoring writes score
--- without writing sub_scores_json. scoring_model IS NOT NULL is the LLM-presence
--- discriminator (per _jobs.py:294 comment).
+-- without writing sub_scores_json. scoring_model IS NOT NULL is the
+-- LLM-presence discriminator.
 CREATE TRIGGER tg_jobs_subscores_when_llm_scored_ins
   BEFORE INSERT ON jobs
   FOR EACH ROW
@@ -647,7 +610,7 @@ BEGIN
 END;
 -- (analogous _upd trigger)
 
--- ── I-05 scoring_model → classification (LLM-gated) [R2-C1] ───────────
+-- ── I-05 scoring_model → classification (LLM-gated, per D-17) ─────────
 CREATE TRIGGER tg_jobs_classification_when_llm_scored_ins
   BEFORE INSERT ON jobs
   FOR EACH ROW
@@ -657,30 +620,28 @@ BEGIN
 END;
 -- (analogous _upd trigger)
 
--- ── I-06 retired per R2-C1 ────────────────────────────────────────────
-
--- ── I-07 workplace_type domain ────────────────────────────────────────
+-- ── I-06 workplace_type domain ────────────────────────────────────────
 CREATE TRIGGER tg_jobs_workplace_type_domain_ins
   BEFORE INSERT ON jobs
   FOR EACH ROW
   WHEN NEW.workplace_type IS NOT NULL
        AND NEW.workplace_type NOT IN ('REMOTE','HYBRID','ONSITE','UNSPECIFIED')
 BEGIN
-  SELECT RAISE(ABORT, 'I-07: workplace_type out of domain');
+  SELECT RAISE(ABORT, 'I-06: workplace_type out of domain');
 END;
 -- (analogous _upd trigger on UPDATE OF workplace_type)
 
--- ── I-13 posted_date not in future ────────────────────────────────────
+-- ── I-12 posted_date not in future ────────────────────────────────────
 CREATE TRIGGER tg_jobs_posted_date_not_future_ins
   BEFORE INSERT ON jobs
   FOR EACH ROW
   WHEN NEW.posted_date IS NOT NULL AND NEW.posted_date > datetime('now', '+1 day')
 BEGIN
-  SELECT RAISE(ABORT, 'I-13: posted_date cannot be more than 1 day in the future');
+  SELECT RAISE(ABORT, 'I-12: posted_date cannot be more than 1 day in the future');
 END;
 -- (analogous _upd trigger on UPDATE OF posted_date)
 
--- ── I-14 jd_full junk gate (database-level defense) [R2-M2] ───────────
+-- ── I-13 jd_full junk gate (database-level defense, per D-18) ─────────
 -- Absolute defense against the 5 confirmed non-upsert_job writers that
 -- bypass any Python-level gate (agentic_enricher.py:645,
 -- ats_scanner/_run.py:520, data_enricher.py:173, blueprints/jobs.py:714,
@@ -692,40 +653,39 @@ CREATE TRIGGER tg_jobs_jd_full_junk_ins
   BEFORE INSERT ON jobs
   FOR EACH ROW
   WHEN NEW.jd_full IS NOT NULL AND (
-       LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'sign in%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'loading%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'open roles at%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'skip to content%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'cookie%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE 'privacy policy%'
-    OR LOWER(SUBSTR(NEW.jd_full, 1, 200)) LIKE '404%'
+       LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'sign in%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'loading%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'open roles at%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'skip to content%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'cookie%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE 'privacy policy%'
+    OR LOWER(SUBSTR(TRIM(NEW.jd_full), 1, 200)) LIKE '404%'
     OR LENGTH(TRIM(NEW.jd_full)) < 200
   )
 BEGIN
-  SELECT RAISE(ABORT, 'I-14: jd_full matches junk shell pattern or is below content-density floor');
+  SELECT RAISE(ABORT, 'I-13: jd_full matches junk shell pattern or is below content-density floor');
 END;
 -- (analogous _upd trigger on UPDATE OF jd_full)
 
--- ── I-12 source_id namespaced by company_id [R2-C2] ───────────────────
--- (company_id, source_id) — NOT (ats_platform, source_id), which referenced
--- a column that does not exist on jobs. The audit's 149 collisions are
--- cross-company, so company_id is the correct namespace scope.
+-- ── I-11 source_id namespaced by company_id ───────────────────────────
+-- The audit's 149 collisions are cross-company, so company_id is the
+-- correct namespace scope. company_id is already on jobs (no new column).
 CREATE UNIQUE INDEX ix_jobs_company_source_id
   ON jobs (company_id, source_id)
   WHERE source_id IS NOT NULL AND company_id IS NOT NULL;
 ```
 
 **Out of m078 (deferred):**
-- **I-15** (salary_currency / salary_period domain) — landed in m080 (Phase 49) where the columns are added via `ALTER TABLE ADD COLUMN ... CHECK(...)` — CHECK in a column-add IS supported.
-- **I-16** (computed_status) — landed in m081 (Phase 49) as a **STORED GENERATED column** when the `computed_status` column itself is added [R1-M5 + R2-M1: original spec scheduled this in both Phase 47 and Phase 49 with an impossible BEFORE-trigger mechanism — moved entirely to Phase 49 with the correct generated-column mechanism].
+- **I-14** (salary_currency / salary_period domain) — landed in m080 (Phase 49) where the columns are added via `ALTER TABLE ADD COLUMN ... CHECK(...)` — CHECK in a column-add is supported in SQLite.
+- **I-15** (computed_status) — landed in m081 (Phase 49) as a STORED GENERATED column when the column itself is added.
 
-**Rollback migration `m078_down`** (paired in same file as a `down(ctx)` helper, invoked by future tooling — for now, hand-runnable): drops each trigger by name (`DROP TRIGGER IF EXISTS tg_jobs_salary_min_positive_ins`, etc.) and drops the UNIQUE INDEX. SQLite supports both drops directly. No table rebuild needed — this is the architectural payoff of choosing TRIGGER over CHECK.
+**Rollback migration `m078_down`** (paired in same file as a `down(ctx)` helper, invoked by future tooling — for now, hand-runnable): drops each trigger by name (`DROP TRIGGER IF EXISTS tg_jobs_salary_min_positive_ins`, etc.) and drops the UNIQUE INDEX. SQLite supports both drops directly. No table rebuild needed.
 
 **Files:**
 - `job_finder/web/migrations/m078_contract_invariants.py` — version=78
 - `tests/test_m078_migration.py` — apply against test DB; verify each trigger raises on a staged violation; verify `m078_down` cleanly removes them
 
-### 47.04 — Pattern A defense: schema correspondence test [R1-Mn6 REVISED]
+### 47.04 — Pattern A defense: schema correspondence test
 
 **Files:**
 - `job_finder/db/column_categories.py` (new) — the `COLUMN_CATEGORIES` constant per §8.2.1
@@ -757,18 +717,18 @@ CREATE UNIQUE INDEX ix_jobs_company_source_id
 - `job_finder/web/pipeline_detector/_off_platform.py:253` — refactor to use `upsert_job` with a `source='off_platform_email'` typed branch
 - `tests/test_off_platform_routes_through_upsert.py`
 
-**Phase 47 acceptance [R1-M5 + R2-C1/C2/M1/M2/M3 REVISED]:** all 8 commits land; `tests/test_schema_correspondence.py` passes; `tests/test_m078_migration.py` passes on a copy of production DB; manual `/admin/review` smoke test; one staged "would-have-leaked" row for each of the 13 enforced invariants (I-01, I-02, I-03, I-04, I-05, I-07, I-08, I-09, I-10, I-11, I-12, I-13, I-14 — note I-06 retired per R2-C1; I-15 and I-16 deferred to Phase 49) confirms enforcement, with the staged inputs explicitly matching the LLM-vs-heuristic semantics (I-04 only ABORTs on rows with `scoring_model IS NOT NULL`; a heuristic-only row with `score=50, scoring_provider='heuristic', scoring_model=NULL, sub_scores_json=NULL` MUST succeed); 5 `upsert_job` call sites verified to use `result.kind` (per R2-M3 enumeration); `tests/test_jd_full_writers_routed.py` passes (per R2-M2); pre-flight backfill confirms zero violators on a copy of production DB before m078 lands.
+**Phase 47 acceptance:** all 8 commits land; `tests/test_schema_correspondence.py` passes; `tests/test_m078_migration.py` passes on a copy of production DB; manual `/admin/review` smoke test; one staged "would-have-leaked" row for each of the 13 enforced invariants (I-01 through I-13) confirms enforcement, with the staged inputs explicitly matching the LLM-vs-heuristic semantics (I-04 only ABORTs on rows with `scoring_model IS NOT NULL`; a heuristic-only row with `score=50, scoring_provider='heuristic', scoring_model=NULL, sub_scores_json=NULL` MUST succeed); 5 `upsert_job` call sites verified to use `result.kind`; `tests/test_jd_full_writers_routed.py` passes; pre-flight backfill confirms zero violators on a copy of production DB before m078 lands.
 
 ---
 
 ## 12. Phase 48 — Structured Layer Adoption (5 days, 1 commit per scanner + 1 for the filter)
 
-### 48.01 — Title filter into `ParsedJob.from_job` [R1-M3 REVISED, D-09]
+### 48.01 — Title filter into `ParsedJob.from_job` (D-09)
 
 **Files:**
 - `job_finder/parsed_job.py` — `ParsedJob.from_job(job: Job, *, source_meta: ...) -> ParsedJob | UnresolvedParsedJob` runs `_clean_title` and `_is_metadata_blob` from `careers_crawler/_title_filters.py:197`. On clean: returns `ParsedJob` with the cleaned title. On metadata-blob match: returns `UnresolvedParsedJob(raw_title=..., reason='title_metadata_blob')` — does NOT raise.
 - `job_finder/db/_jobs.py` — `upsert_job` accepts both `ParsedJob` and `UnresolvedParsedJob`; the second writes the row with `unresolved=true` on the affected fields and surfaces the reason for the admin-review queue.
-- `job_finder/models.py` — **unchanged** (still raises only on empty title/company, the existing behavior; no new raises in `__post_init__` per R1-M3).
+- `job_finder/models.py` — **unchanged** (still raises only on empty title/company, the existing behavior).
 - `careers_crawler/_static_tier.py` — remove duplicate filter (now redundant; the universal enforcement happens at `ParsedJob.from_job`).
 - `tests/test_title_filter_universal.py` — staged inputs from each of `_ai_nav_tier`, `careers_page`, `_static_tier` paths — verify all three flow into `ParsedJob.from_job` and the metadata-blob ones become `UnresolvedParsedJob`.
 
@@ -810,26 +770,24 @@ CREATE UNIQUE INDEX ix_jobs_company_source_id
 - All callers must now produce `ParsedJob`
 - Final test: `grep -r "upsert_job(.*Job(" job_finder/` returns no matches
 
-**Phase 48 acceptance [R1-M3, R1-M4 REVISED]:** all 7 commits land; per-scanner `source_id` and `JobLocation` rates ≥95% on new rows from each of {Workday, Greenhouse, Pinpoint, SmartRecruiters}; per-source `posted_date` non-NULL rate ≥95% on new rows from each of {Workday, Greenhouse, Ashby, Lever, SmartRecruiters} (the gate moved here from Phase 46 per R1-M4); the staged Blue State fixture flows through `ParsedJob.from_job` and yields an `UnresolvedParsedJob` (proves the filter is universal — every `upsert_job` caller routes through `ParsedJob`, the shim is removed in 48.07); shim removal CI gate passes (`grep -r "upsert_job(.*Job(" job_finder/` returns no matches).
+**Phase 48 acceptance:** all 7 commits land; per-scanner `source_id` and `JobLocation` rates ≥95% on new rows from each of {Workday, Greenhouse, Pinpoint, SmartRecruiters}; per-source `posted_date` non-NULL rate ≥95% on new rows from each of {Workday, Greenhouse, Ashby, Lever, SmartRecruiters}; the staged Blue State fixture flows through `ParsedJob.from_job` and yields an `UnresolvedParsedJob` (proves the filter is universal — every `upsert_job` caller routes through `ParsedJob`, the shim is removed in 48.07); shim removal CI gate passes (`grep -r "upsert_job(.*Job(" job_finder/` returns no matches).
 
 ---
 
-## 13. Phase 49 — Audits, Backfills, Cleanup (2 days, ~7 commits) [R1-C1 RENUMBERED]
-
-All migration numbers renumbered to start after `m077_normalize_timestamps_to_utc` (the latest existing migration in the worktree). Old numbers (`m075..m078`) are already occupied by `m075_clear_stale_enrichment_error_for_active_companies`, `m076_unique_ats_platform_slug`, `m077_normalize_timestamps_to_utc`, and Phase 47's new `m078_contract_invariants`.
+## 13. Phase 49 — Audits, Backfills, Cleanup (2 days, ~7 commits)
 
 ### 49.01 — URL canonicalization (D-06)
 
 **Files:**
 - `job_finder/web/url_canonical.py` (new) — `canonicalize_url(raw: str) -> tuple[str, str]` returns `(canonical, raw)`; strips allowlist of tracking params
-- **Migration `m079`** (renumbered from `m075`) — add `source_urls_raw` JSON column; backfill `source_urls_raw = source_urls`; rewrite `source_urls` to canonical
+- **Migration `m079_source_urls_canonical.py`** — add `source_urls_raw` JSON column; backfill `source_urls_raw = source_urls`; rewrite `source_urls` to canonical
 - `ParsedJob` validator at `source_urls`
 - `tests/test_url_canonical.py`
 
-### 49.02 — Salary unit tagging (D-07, I-15)
+### 49.02 — Salary unit tagging (D-07, I-14)
 
 **Files:**
-- **Migration `m080`** (renumbered from `m076`) — add `salary_currency`, `salary_period` columns with defaults `'USD'`, `'unknown'`. **CHECK constraints embedded at column-add time** (`ALTER TABLE jobs ADD COLUMN salary_currency TEXT NOT NULL DEFAULT 'USD' CHECK(salary_currency IN ('USD','GBP','EUR','CAD','AUD','INR','SGD','UNKNOWN'))`). This is the I-15 enforcement; legal in SQLite because the constraint applies to a new column at creation time.
+- **Migration `m080_salary_currency_period.py`** — add `salary_currency`, `salary_period` columns with defaults `'USD'`, `'unknown'`. **CHECK constraints embedded at column-add time** (`ALTER TABLE jobs ADD COLUMN salary_currency TEXT NOT NULL DEFAULT 'USD' CHECK(salary_currency IN ('USD','GBP','EUR','CAD','AUD','INR','SGD','UNKNOWN'))`). This is the I-14 enforcement; legal in SQLite because the constraint applies to a new column at creation time.
 - Parser updates: per-source emit currency + period where determinable
 - Backfill: rows with salary_min < $1000 → `salary_period='unknown'`, flag `unresolved` on salary; rows with `salary_min > $1M` similar
 - `tests/test_salary_tagging.py` — staged inputs in each domain; one invalid-currency staged input that the CHECK rejects
@@ -848,10 +806,10 @@ All migration numbers renumbered to start after `m077_normalize_timestamps_to_ut
 - Codify automatic re-derivation as a TRIGGER `AFTER UPDATE OF sub_scores_json`
 - `tests/test_classification_redrive.py`
 
-### 49.05 — Status reconciliation (D-10 / F-10, I-16) [R1-M5 + R2-M1 REVISED]
+### 49.05 — Status reconciliation (D-10 / F-10, I-15)
 
 **Files:**
-- **Migration `m081`** (renumbered from `m077`) — add `computed_status` as a **SQLite STORED GENERATED column** per I-16. **This is the ONLY phase that touches `computed_status`** (Phase 47 originally claimed it; overlap resolved per R1-M5). Round-2 caught that the originally-planned BEFORE-trigger mechanism was unimplementable in SQLite (no `NEW := ...` semantics); generated columns give exactly the intended semantics (R2-M1).
+- **Migration `m081_computed_status.py`** — add `computed_status` as a SQLite STORED GENERATED column per I-15.
 
   SQL:
   ```sql
@@ -879,7 +837,7 @@ All migration numbers renumbered to start after `m077_normalize_timestamps_to_ut
 
 ### 49.06 — Dead column drops (D-11)
 
-**Migration `m082`** (renumbered from `m078`):
+**Migration `m082_drop_dead_columns.py`:**
 - Drop `opus_score`, `eval_blocks`, `job_archetype`
 - Audit `gold_*` columns — preserve (used by eval workflow)
 - Document `description` vs `jd_full` split in CLAUDE.md and `models.py` docstring
@@ -892,7 +850,7 @@ All migration numbers renumbered to start after `m077_normalize_timestamps_to_ut
 - `derive_classification`'s `if legitimacy_note: reject` branch now fires
 - `tests/test_legitimacy_scanner.py`
 
-**Phase 49 acceptance:** all 7 commits land; m079–m082 apply cleanly on a copy of production DB; dead columns dropped without breaking existing queries; `legitimacy_note` wiring produces ≥1 flagged row in a staged test; `computed_status` resolves all of the 1,944 active+stale conflicts; I-15 (TRIGGER-free, CHECK-at-column-add) and I-16 (TRIGGER on new column) both reject staged violating inputs.
+**Phase 49 acceptance:** all 7 commits land; m079–m082 apply cleanly on a copy of production DB; dead columns dropped without breaking existing queries; `legitimacy_note` wiring produces ≥1 flagged row in a staged test; `computed_status` resolves all of the 1,944 active+stale conflicts; I-14 (CHECK at column-add) and I-15 (generated column) both behave correctly on staged inputs.
 
 ---
 
@@ -904,11 +862,11 @@ Every commit lands with at least one new test that would have caught its specifi
 
 ### 14.2 Per-phase gates
 
-See §9 (Phase exit gates table) and the acceptance paragraph at the end of each phase section (§10 Phase 46, §11 Phase 47, §12 Phase 48, §13 Phase 49) for explicit per-phase acceptance criteria. **[R1-N: cross-references corrected]**
+See §9 (Phase exit gates table) and the acceptance paragraph at the end of each phase section (§10 Phase 46, §11 Phase 47, §12 Phase 48, §13 Phase 49) for explicit per-phase acceptance criteria.
 
-### 14.3 Regression suite — "the 8 + the 11" [R2-Mn1 REVISED]
+### 14.3 Regression suite — "the 8 + the 11"
 
-A new test file `tests/test_recurring_bug_class.py` carries one assertion per (8 + 11) bugs. Round-2 review correctly flagged that the previous wording ("After Phase 47, all 11 are blocked") was an overclaim — F-05, F-06, F-07, F-10, F-11 are materially Phase 49 work. Each finding gets a regression test landed **in the phase where its enforcement lands**, not before.
+A new test file `tests/test_recurring_bug_class.py` carries one assertion per (8 + 11) bugs. Each finding gets a regression test landed **in the phase where its enforcement lands**, not before.
 
 **Per-finding phase mapping:**
 
@@ -917,13 +875,13 @@ A new test file `tests/test_recurring_bug_class.py` carries one assertion per (8
 | F-01 (jd_full junk leakage) | 46 + 47 | Phase 46: `set_jd_full()` helper routes all 5 known writers. Phase 47: m078 TRIGGER `tg_jobs_jd_full_junk` rejects any future bypass. | Tests in 46.03 (helper) and 47.03 (trigger ABORT). |
 | F-02 (posted_date 98.7% NULL) | 46 + 48 | Phase 46: `upsert_job` plumbing fix writes the column. Phase 48: per-source extraction in Layer-1 scanners. | Test in 46.02 (plumbing). Per-source tests in 48.02 (Workday), 48.03 (Greenhouse), 48.05 (SmartRecruiters), 48.06 (Ashby/Lever). |
 | F-03 (scoring_provider NULL leak) | 47 | m078 TRIGGER `tg_jobs_scoring_provider_when_scored` (I-03). | Test in 47.03 — staged INSERT with `score=50, scoring_provider=NULL` ABORTs. |
-| F-04 (source_id missing on ATS) | 48 | Per-scanner Layer-1 adoption emits `source_id`. Phase 47's I-12 UNIQUE INDEX provides cross-company collision defense once data lands. | Tests in 48.02, 48.03, 48.04, 48.05, 48.06. Collision test in 47.03 (I-12). |
+| F-04 (source_id missing on ATS) | 48 | Per-scanner Layer-1 adoption emits `source_id`. Phase 47's I-11 UNIQUE INDEX provides cross-company collision defense once data lands. | Tests in 48.02, 48.03, 48.04, 48.05, 48.06. Collision test in 47.03 (I-11). |
 | F-05 (URL tracking-param leakage) | 49 | `canonicalize_url()` + `source_urls_raw` column (m079). | Test in 49.01 — staged URL with `utm_campaign=…&gh_jid=42` → canonical strips tracking. |
-| F-06 (salary unit confusion) | 49 | `salary_currency` + `salary_period` columns with CHECK (m080, I-15). | Test in 49.02. |
+| F-06 (salary unit confusion) | 49 | `salary_currency` + `salary_period` columns with CHECK (m080, I-14). | Test in 49.02. |
 | F-07 (company fuzzy-match collisions) | 49 | Tightened matcher in `company_resolver.py`. | Test in 49.03. |
-| F-08 (denylist enforced at backfill not boundary) | 47 | Phase 47 single-sources `get_company_denylist(config)` at `ParsedJob` validator (I-11). | Test in 47.07 — config-loaded aggregator name rejected at `ParsedJob.from_job`. |
-| F-09 (title bleed — Blue State shape) | 47 + 48 | Phase 47: I-09/I-10 validators in `ParsedJob.from_job`. Phase 48: universal application after shim removal. | Tests in 47.01 (`ParsedJob` validator unit) and 48.01 (title filter universality across `_ai_nav`, `careers_page`, `_static_tier`). |
-| F-10 (status reconciliation 3-way conflicts) | 49 | `computed_status` STORED generated column (m081, I-16). | Test in 49.05 — recompute-in-Python matches stored value on a 100-row prod-DB sample. |
+| F-08 (denylist enforced at backfill not boundary) | 47 | Phase 47 single-sources `get_company_denylist(config)` at `ParsedJob` validator (I-10). | Test in 47.07 — config-loaded aggregator name rejected at `ParsedJob.from_job`. |
+| F-09 (title bleed — Blue State shape) | 47 + 48 | Phase 47: I-08/I-09 validators in `ParsedJob.from_job`. Phase 48: universal application after shim removal. | Tests in 47.01 (`ParsedJob` validator unit) and 48.01 (title filter universality across `_ai_nav`, `careers_page`, `_static_tier`). |
+| F-10 (status reconciliation 3-way conflicts) | 49 | `computed_status` STORED generated column (m081, I-15). | Test in 49.05 — recompute-in-Python matches stored value on a 100-row prod-DB sample. |
 | F-11 (stale classification post-rubric-change) | 49 | One-shot `scripts/redrive_classification.py` + `AFTER UPDATE OF sub_scores_json` TRIGGER. | Test in 49.04 — staged sub_scores update triggers classification redrive. |
 
 **Historical fixes (the 8):** all 8 land in Phase 47 as regression tests, since each represents a pre-existing invariant the contract now enforces. Each test stages the documented pre-fix input and asserts the appropriate ABORT (for trigger-protected invariants) or `UnresolvedParsedJob` construction (for Python-validated invariants).
@@ -948,10 +906,10 @@ Out of scope for these 4 phases as an *infrastructure* deliverable; in scope as 
 
 | # | Risk | Likelihood | Blast radius | Mitigation |
 |---|---|---|---|---|
-| R-01 | `m078` TRIGGERs fire on existing rows that violate (e.g., an existing row already has `salary_min > salary_max`) — the trigger doesn't run on existing rows at apply time, but the next UPDATE on that row will fail | HIGH | UPDATE failures on legacy bad rows after the migration | **Pre-flight halt** (per 47.03 revised): the migration first SELECTs violating rows for each invariant; if any exist, the migration HALTS with an explicit error, requiring the user to either fix violators by hand, approve a documented quarantine-table move via config flag, or explicitly waive. Silent dropping is rejected. |
+| R-01 | `m078` TRIGGERs fire on existing rows that violate (e.g., an existing row already has `salary_min > salary_max`) — the trigger doesn't run on existing rows at apply time, but the next UPDATE on that row will fail | HIGH | UPDATE failures on legacy bad rows after the migration | **Pre-flight halt** (per 47.03): the migration first SELECTs violating rows for each invariant; if any exist, the migration HALTS with an explicit error, requiring the user to either fix violators by hand, approve a documented quarantine-table move via config flag, or explicitly waive. Silent dropping is rejected. |
 | R-02 | `ParsedJob` adoption is more invasive than estimated; > 5 days | MEDIUM | Phase 47 slips | Phase 47 shim allows incremental migration; Phase 48 finishes the migration |
-| R-03 | TRIGGER for `computed_status` introduces write-time overhead | LOW | Ingestion slowdown | SQLite triggers are cheap; measure with `EXPLAIN QUERY PLAN`; if needed, drop trigger and recompute on read |
-| R-04 | `jd_full` junk gate over-rejects legitimate short job descriptions **[R1-N: typo `_jd_full` → `jd_full` fixed]** | MEDIUM | Coverage loss | Gate uses content-density (token count, sentence count) not just length; tunable threshold; failed JDs route to `unresolved` (not discarded) |
+| R-03 | TRIGGERs introduce write-time overhead | LOW | Ingestion slowdown | SQLite triggers are cheap; measure with `EXPLAIN QUERY PLAN`; if needed, drop trigger and recompute on read |
+| R-04 | `jd_full` junk gate over-rejects legitimate short job descriptions | MEDIUM | Coverage loss | Gate uses content-density (token count, sentence count) not just length; tunable threshold; failed JDs route to `unresolved` (not discarded) |
 | R-05 | Salary currency tagging mislabels (defaults `USD` when source is GBP) | MEDIUM | Wrong-currency display | Per-source mapping table in `_salary_currency_by_source`; fallback to `UNKNOWN` not `USD` when source isn't in table; revisit defaults in §16 alternatives |
 | R-06 | Company fuzzy-match tightening *creates* duplicate companies that were previously (correctly) merged | MEDIUM | Data fragmentation | Phase 49 includes a sample audit: run new matcher over 100 known-merged pairs from prod, manually validate the 5–10 that change behavior |
 | R-07 | URL canonicalization strips a param that was actually semantic (e.g., `?dept=eng` on a multi-dept page) | LOW | Wrong dedup if used for dedup later | NG-03 keeps canonical URL out of dedup; `source_urls_raw` preserves original |
@@ -959,11 +917,10 @@ Out of scope for these 4 phases as an *infrastructure* deliverable; in scope as 
 | R-09 | `legitimacy_note` scanner false-positives reject legitimate jobs | MEDIUM | User misses real opportunities | Scanner sets the flag; `derive_classification` reads it; an admin override on the row clears it. Failures route through `unresolved`, not silent drop |
 | R-10 | The schema-correspondence test (47.04) blocks legitimate future schema work | LOW | Friction on later migrations | Test fails loudly with a "ADD FIELD TO `ParsedJob` OR EXCLUDE FROM TEST" message; explicit per-column allowlist for genuinely-derived columns |
 | R-11 | Phase 48 Layer-1 migration breaks an existing scanner due to API contract assumption | MEDIUM | One scanner offline | Per-scanner commit; revert independently; existing Layer-2 path remains available via fallback for one phase |
-| R-12 | Adversarial reviewer flags a design decision we haven't justified | n/a | Spec rejection | Section §17 enumerates alternatives considered; §18 flags open questions explicitly so reviewer can focus |
-| R-13 | The `unresolved` UI rendering doesn't actually surface the rows visibly enough; users keep missing them | MEDIUM | Pattern continues, just with a flag | UX validation: D-17 deferred to design within Phase 47; explicit user signoff before Phase 47 closes |
-| R-14 | **[R2-M1]** SQLite generated column for `computed_status` (m081) cannot be indexed in some SQLite versions; if `/jobs` filter on `computed_status` is slow on the 11,740-row table, we need a fallback | LOW | Slow filter | Verify at migration time on `jobs.pre-m081.db` copy. Fallback options documented in 49.05: partial expression index on `(pipeline_status, is_stale, expiry_status)`, or materialize via a view. SQLite 3.45+ supports indexes on STORED generated columns. |
-| R-15 | **[R2-M2]** I-14 jd_full trigger uses LIKE patterns (SQLite has no native REGEXP); a sneaky junk variant (e.g. leading whitespace + "Sign in") could slip past the prefix-LIKE matches | MEDIUM | Some junk leaks | Trigger first `TRIM`s the substring, AND the Python helper `set_jd_full()` uses richer regex matching. Defense in depth: the helper catches in normal paths; the trigger catches the residual bypass paths. Add new patterns as discovered (the regression test enumerates them). |
-| R-16 | **[R2-C1]** The `scoring_model`-gated invariant model assumes `scoring_model` is the canonical LLM-presence discriminator. If a future code path writes `scoring_model` without writing `sub_scores_json` (e.g., a logging path during a provider failure), I-04/I-05 ABORT the row | LOW | Failed write in degraded scoring path | Verify `persist_job_assessment` always writes the tuple `(scoring_model, sub_scores_json, classification)` atomically. Add a pre-commit grep for any direct `UPDATE jobs SET scoring_model` outside the assessment write path. |
+| R-12 | The `unresolved` UI rendering doesn't actually surface the rows visibly enough; users keep missing them | MEDIUM | Pattern continues, just with a flag | UX validation: D-20 deferred to design within Phase 47; explicit user signoff before Phase 47 closes |
+| R-13 | SQLite generated column for `computed_status` (m081) cannot be indexed in some SQLite versions; if `/jobs` filter on `computed_status` is slow on the 11,740-row table, we need a fallback | LOW | Slow filter | Verify at migration time on `jobs.pre-m081.db` copy. Fallback options documented in 49.05: partial expression index on `(pipeline_status, is_stale, expiry_status)`, or materialize via a view. SQLite 3.45+ supports indexes on STORED generated columns. |
+| R-14 | I-13 jd_full trigger uses LIKE patterns (SQLite has no native REGEXP); a sneaky junk variant could slip past the prefix-LIKE matches | MEDIUM | Some junk leaks | Trigger first `TRIM`s the substring, AND the Python helper `set_jd_full()` uses richer regex matching. Defense in depth: the helper catches in normal paths; the trigger catches the residual bypass paths. Add new patterns as discovered (the regression test enumerates them). |
+| R-15 | The `scoring_model`-gated invariant model (D-17) assumes `scoring_model` is the canonical LLM-presence discriminator. If a future code path writes `scoring_model` without writing `sub_scores_json` (e.g., a logging path during a provider failure), I-04/I-05 ABORT the row | LOW | Failed write in degraded scoring path | Verify `persist_job_assessment` always writes the tuple `(scoring_model, sub_scores_json, classification)` atomically. Add a pre-commit grep for any direct `UPDATE jobs SET scoring_model` outside the assessment write path. |
 
 ---
 
@@ -971,17 +928,18 @@ Out of scope for these 4 phases as an *infrastructure* deliverable; in scope as 
 
 | Alternative | Why rejected |
 |---|---|
-| **A. Add invariants only as regex/string-pattern guards** ("title must not match `…[A-Z]{2}\b`") | Defines what's invalid, not what's valid. Catches one bug shape per regex; next variant slips. Treadmill not system. (This was my first proposal; rejected during adversarial review.) |
+| **A. Add invariants only as regex/string-pattern guards** ("title must not match `…[A-Z]{2}\b`") | Defines what's invalid, not what's valid. Catches one bug shape per regex; next variant slips. Treadmill not system. |
 | **B. Pydantic at `Job` dataclass level (full replacement)** | Massive blast radius (90+ test files use `Job` directly); 6MB dependency. D-01 limits typed contract to the `upsert_job` boundary; `Job` itself stays a dataclass. |
 | **C. Quarantine table for bad rows** | Duplicates schema; adds promotion UX; discards the row's continuing presence in scoring queues. The `unresolved` flag (already designed, just unwired) achieves the same goal with less surface area. |
 | **D. Nightly DQ sweep job** | 24-hour latency on detection. The user is currently the DQ sweep job, by eye. Per-run/per-write enforcement is faster *and* prevents bad rows from ever reaching the board. |
-| **E. Drop the dead columns FIRST** | Removing first reduces audit surface, but the dead columns include `legitimacy_note` which D-12 chose to wire instead of remove. Sequencing in §9.0 lands cleanup after structural work for clarity. |
+| **E. Drop the dead columns FIRST** | Removing first reduces audit surface, but the dead columns include `legitimacy_note` which D-12 chose to wire instead of remove. Sequencing in §9 lands cleanup after structural work for clarity. |
 | **F. Synthesize `posted_date` from `first_seen` for the 11,591 NULL rows** | Conflates "when ingested" with "when posted". Per NG-02, we leave them NULL; new rows go forward with real data. Honesty preserves the signal that historical data is missing. |
 | **G. Per-parser test fixtures instead of a centralized regression test** | Per-parser tests existed for several of the 8 bugs; they passed; the bug was at the boundary not the parser. The regression test belongs at the boundary where the contract lives. |
 | **H. Refactor `Job` → `ParsedJob` everywhere in one phase** | NG-08. Multiplies blast radius without proportional benefit. `Job` survives as the internal representation; `ParsedJob` is the input contract. |
 | **I. Re-link wrong-attributed companies (F-07) inline** | NG-01. Each re-link is a judgment call; automating risks more wrong-linkage. Surface them for human review via `/admin/review`. |
-| **J. Use SQLite TRIGGERS for *all* invariants (no Python validators)** | Trigger-only is appealing for cross-row enforcement but Python validators handle cross-field rules (I-08, I-09, I-10, I-11, I-14) more clearly — and crucially produce richer error messages with the specific field-pair that violated. Mixed approach [R1-C2 REVISED]: TRIGGER for existing-column value rules; CHECK at column-add for new columns (Phase 49); Python for cross-field. |
+| **J. Use SQLite TRIGGERS for *all* invariants (no Python validators)** | Trigger-only is appealing for cross-row enforcement but Python validators handle cross-field rules (I-07, I-08, I-09, I-10, I-13) more clearly — and crucially produce richer error messages with the specific field-pair that violated. Mixed approach: TRIGGER for existing-column value rules; CHECK at column-add for new columns (Phase 49); generated column for derive-on-write values; Python for cross-field. |
 | **K. Add a CI step that runs `scripts/dq_audit.py` against staging DB** | We have no staging DB. Local-only single-user app. The regression test (`tests/test_recurring_bug_class.py`) is the moral equivalent. |
+| **L. Split heuristic and LLM scores into separate columns** (`heuristic_score`, `llm_score`) | Cleaner long-term semantics — the current dual-meaning `score` column (heuristic OR LLM, distinguishable only via `scoring_model IS NOT NULL` per D-17) is real semantic debt. Rejected for this work on blast-radius grounds: every score-reading site (UI, scorer, eval) would need updating. Logged as a future-milestone follow-up (§18 #10). |
 
 ---
 
@@ -990,39 +948,39 @@ Out of scope for these 4 phases as an *infrastructure* deliverable; in scope as 
 | Phase | Rollback path |
 |---|---|
 | 46 | `git revert` each commit; no schema change. Time to rollback: 5 minutes. |
-| 47 | Per-commit revert for code changes. `m078` rollback (`m078_down` helper in the same file) drops each named TRIGGER and the UNIQUE INDEX. **[R1-C2 NOTE]** This works cleanly in SQLite — TRIGGERs and INDEXes are individually droppable via `DROP TRIGGER IF EXISTS` / `DROP INDEX IF EXISTS`, unlike CHECK constraints which would have required a table rebuild. The architectural choice of TRIGGER over CHECK was made specifically to preserve this rollback cheapness. Time to rollback: 30 minutes including migration. |
+| 47 | Per-commit revert for code changes. `m078` rollback (`m078_down` helper in the same file) drops each named TRIGGER and the UNIQUE INDEX. TRIGGERs and INDEXes are individually droppable via `DROP TRIGGER IF EXISTS` / `DROP INDEX IF EXISTS`, with no table rebuild needed. The choice of TRIGGER (rather than CHECK constraints, which SQLite doesn't support adding to existing columns) preserves this rollback cheapness. Time to rollback: 30 minutes including migration. |
 | 48 | Per-scanner revert. Layer-2 fallback path remains in `upsert_job` until commit 48.07 (shim removal), so any individual scanner can be rolled back without disrupting others. Commit 48.07 is the point of no return — only revertable by also reverting all of 48. |
-| 49 | Per-commit revert for code; column drops (`m082`) are intentionally irreversible (recover from backup if needed). `m079` (URL canonical add), `m080` (salary tagging add), `m081` (computed_status add) have rollback paths: m079 drops the column via `ALTER TABLE DROP COLUMN`; m080 same; m081 drops both the column and its associated TRIGGER. **All three column drops are supported in SQLite 3.35+ (Python 3.13's bundled SQLite is 3.45+); the runner's `no such column` skip handles partial rollbacks.** |
+| 49 | Per-commit revert for code; column drops (`m082`) are intentionally irreversible (recover from backup if needed). `m079` (URL canonical add), `m080` (salary tagging add), `m081` (computed_status add) have rollback paths: m079 drops the column via `ALTER TABLE DROP COLUMN`; m080 same; m081 drops the generated column. All three column drops are supported in SQLite 3.35+ (Python 3.13's bundled SQLite is 3.45+); the runner's `no such column` skip handles partial rollbacks. |
 
 **Bigger-than-one-phase rollback:** worst case, revert the entire branch `audit-location-handling` and recover from a SQLite backup of `jobs.db` taken before Phase 46 lands. Backup is taken as the first action of Phase 46 commit 46.01 (a copy to `jobs.pre-phase46.db`).
 
 ---
 
-## 18. Open Questions for Adversarial Review
+## 18. Open Questions
 
-These are the choices I'm least confident about. The reviewer should specifically flag any of these:
+These are the choices the spec is least confident about. Reviewers should specifically flag any of these:
 
-1. **Is `ParsedJob` the right abstraction line?** I've drawn it at the `upsert_job` boundary because that's where the chokepoint already lives. An alternative is to draw it at the parser-output boundary (every parser emits `ParsedJob` directly, no intermediate `Job` dataclass). That's cleaner but a much larger refactor. Have I picked the right blast radius?
+1. **Is `ParsedJob` the right abstraction line?** Drawn at the `upsert_job` boundary because that's where the chokepoint already lives. An alternative is to draw it at the parser-output boundary (every parser emits `ParsedJob` directly, no intermediate `Job` dataclass). That's cleaner but a much larger refactor. Right blast radius?
 
-2. **Is the `unresolved`-flag approach really better than a quarantine table?** I argued yes (D-03), but a reviewer who's lived through "review queues nobody reviews" might rightly push back. The mitigation (default-sort-excludes + admin page) needs UX validation.
+2. **Is the `unresolved`-flag approach really better than a quarantine table?** D-03 argues yes, but the well-known "review queues nobody reviews" failure mode applies. The mitigation (default-sort-excludes + admin page) needs UX validation.
 
-3. **Are the 16 invariants the right set?** I derived them from the 8 historical + 11 new findings. There may be invariants I haven't surfaced because we haven't yet encountered the bug that would have revealed them. Specifically I'm uncertain about: (a) cross-table invariants like "every job's `company_id` must match a real `companies` row" (today's NULL leakage suggests we don't enforce this); (b) time invariants like "first_seen ≤ last_seen" (almost certainly broken somewhere).
+3. **Are the 15 invariants the right set?** Derived from the 8 historical + 11 new findings. There may be invariants not yet surfaced because we haven't yet encountered the bug that would have revealed them. Specifically uncertain about: (a) cross-table invariants like "every job's `company_id` must match a real `companies` row" (today's NULL leakage suggests we don't enforce this); (b) time invariants like "first_seen ≤ last_seen" (almost certainly broken somewhere).
 
 4. **Is dropping `eval_blocks` safe?** Column is 0/11,740 populated and `grep` shows no writer. But the column might be referenced by an eval workflow tooling outside the main codebase. Phase 49's audit step needs to confirm.
 
-5. **Salary currency defaulting to `'USD'` vs `'UNKNOWN'`** (R-05). I defaulted to `USD` for ease; `UNKNOWN` is more honest but breaks every salary-display template that doesn't handle the case. Trade-off worth a reviewer's eye.
+5. **Salary currency defaulting to `'USD'` vs `'UNKNOWN'`** (R-05). Defaulted to `USD` for ease; `UNKNOWN` is more honest but breaks every salary-display template that doesn't handle the case. Trade-off worth a reviewer's eye.
 
-6. **Phase 48 Layer-1 adoption order** (D-04). I sequenced by volume (Workday first). Alternative: by *failure* rate. Greenhouse has 825 rows / 7 days but `_platforms_greenhouse.py:38-41` has the cents-vs-dollars ambiguity which is *blocking* salary correctness. Should Greenhouse go first?
+6. **Phase 48 Layer-1 adoption order** (D-04). Sequenced by volume (Workday first). Alternative: by *failure* rate. Greenhouse has 825 rows / 7 days but `_platforms_greenhouse.py:38-41` has the cents-vs-dollars ambiguity which is *blocking* salary correctness. Should Greenhouse go first?
 
-7. **`legitimacy_note` wiring (D-12)**. Wire vs remove was 51/49. The `if legitimacy_note: reject` branch in `derive_classification` is genuine architectural intent and I leaned toward restoring it per [[restore_original_intent]]. But shipping a scam-detection scanner is *new feature work* under the guise of cleanup. Reviewer should explicitly bless or reject.
+7. **`legitimacy_note` wiring (D-12)**. Wire vs remove was 51/49. The `if legitimacy_note: reject` branch in `derive_classification` is genuine architectural intent and the spec leaned toward restoring it per [[restore_original_intent]]. But shipping a scam-detection scanner is *new feature work* under the guise of cleanup. Reviewer should explicitly bless or reject.
 
-8. **The off-platform bypass closure (D-15)**. I assumed the synthetic dedup_key continues to work without behavioral change. The pipeline_detector path is more complex than I traced; I might be missing a downstream consumer that depends on the raw `INSERT` path.
+8. **The off-platform bypass closure (D-15)**. Assumed the synthetic dedup_key continues to work without behavioral change. The pipeline_detector path is more complex than was traced; could be missing a downstream consumer that depends on the raw `INSERT` path.
 
-9. **Am I missing a workstream?** The audit covered title/dedup, company/company_id, salary/posted_date/URL/source_id, description/jd_full/scoring. It did NOT audit: `notes`, `fit_analysis`, the `gold_*` columns, `enrichment_tier`, `expiry_*` columns in depth. Could be additional deficiencies there.
+9. **Am I missing a workstream?** The audit covered title/dedup, company/company_id, salary/posted_date/URL/source_id, description/jd_full/scoring. It did NOT audit in depth: `notes`, `fit_analysis`, the `gold_*` columns, `enrichment_tier`, `expiry_*` columns. Could be additional deficiencies there.
 
-10. **Phase numbering.** v5.0 has phases 35–45 already. Per CLAUDE.md, Phase 45 is `cross-platform-pipx-validation-exit-gate`. I'm numbering this work as 46–49. Is that the correct convention, or should this be a separate milestone (v5.1)?
+10. **Heuristic-vs-LLM scoring schema split** (alternative L). The current dual-meaning `score` column (heuristic OR LLM, distinguishable only via `scoring_model IS NOT NULL` per D-17) is real semantic debt. A future milestone could rename `score` → `llm_score`, add `heuristic_score` as its own column, and unblock cleaner invariants ("`llm_score` and `sub_scores_json` are coupled" without the awkward `scoring_model`-gating dance). Out of scope here; logged as a follow-up. Worth flagging now in case reviewer disagrees on out-of-scope.
 
-11. **[R2-C1 follow-up]** Heuristic-vs-LLM scoring schema split. The round-2 reviewer's Option B for C1 was "split heuristic and LLM scores into separate columns." This spec rejected it for the current work on blast-radius grounds (every score-reading site — UI, scorer, eval — would need updating). But the current dual-meaning `score` column (heuristic OR LLM, distinguishable only via `scoring_model IS NOT NULL`) is real semantic debt. A future milestone could rename `score` → `llm_score`, add `heuristic_score` as its own column, and unblock cleaner invariants ("`llm_score` and `sub_scores_json` are coupled" without the awkward `scoring_model`-gating dance). Out of scope here; logged as a follow-up.
+11. **Phase numbering.** v5.0 has phases 35–45 already. Per CLAUDE.md, Phase 45 is `cross-platform-pipx-validation-exit-gate`. This work is numbered 46–49. Correct convention, or should this be a separate milestone (v5.1)?
 
 ---
 
@@ -1088,14 +1046,16 @@ URL tracking params: 1,477 utm + 823 gh_jid + ~95 other; 893 URL collisions.
 
 ## 20. Appendix B — File:Line Reference Index
 
-For the adversarial reviewer's navigation:
+For the reader's navigation:
 
 - `job_finder/db/_jobs.py:105` — `upsert_job` chokepoint
 - `job_finder/db/_jobs.py:134-137` — denylist bypass (F-08)
 - `job_finder/db/_jobs.py:269` — `posted_date` plumbing gap (F-02)
 - `job_finder/db/_jobs.py:140-153` — `JobLocation` enforcement point
+- `job_finder/db/_jobs.py:294` — comment establishing `scoring_model IS NOT NULL` as the LLM-presence discriminator (D-17)
 - `job_finder/db/_classification.py:51-106` — pure `derive_classification`
-- `job_finder/models.py:30-41` — `Job` dataclass `__post_init__` (currently raises only on empty title/company; new title-bleed validation lives in `ParsedJob.from_job`, NOT here — per R1-M3)
+- `job_finder/db/_jd_full.py` — NEW (Phase 46.03: `set_jd_full()` helper, sole sanctioned write path)
+- `job_finder/models.py:30-41` — `Job` dataclass `__post_init__` (raises only on empty title/company; new title-bleed validation lives in `ParsedJob.from_job`, NOT here)
 - `job_finder/parsed_job.py` — NEW (Phase 47.01)
 - `job_finder/web/careers_scraper.py:322`, `:542`, `:602` — careers_page extraction (F-09, Phase 46.01)
 - `job_finder/web/careers_crawler/_static_tier.py:106-152` — title filter (correct path)
@@ -1103,6 +1063,10 @@ For the adversarial reviewer's navigation:
 - `job_finder/web/careers_crawler/_title_filters.py:143-197` — `_is_metadata_blob`, `_clean_title`
 - `job_finder/web/ats_scanner/_run_html.py:142` — careers_page hardcoded empty location
 - `job_finder/web/ats_scanner/_run.py:506-509` — Layer-1 emission for Ashby/Lever/Rippling/SmartRecruiters
+- `job_finder/web/ats_scanner/_run.py:520` — direct `jd_full` write (Phase 46.03 routes through `set_jd_full()`)
+- `job_finder/web/agentic_enricher.py:645` — direct `jd_full` write (Phase 46.03 routes through `set_jd_full()`)
+- `job_finder/web/data_enricher.py:173` — direct `jd_full` write (Phase 46.03 routes through `set_jd_full()`)
+- `job_finder/web/blueprints/jobs.py:714`, `:913` — direct `jd_full` writes from manual edit forms (Phase 46.03 routes through `set_jd_full()`)
 - `job_finder/web/ats_platforms/_platforms_workday.py` — Phase 48.02
 - `job_finder/web/ats_platforms/_platforms_greenhouse.py:30-56` — Phase 48.03
 - `job_finder/web/ats_platforms/_platforms_pinpoint.py:37-46` — Phase 48.04
@@ -1111,12 +1075,11 @@ For the adversarial reviewer's navigation:
 - `job_finder/web/ats_company.py:81-171` — `classify_company_name`
 - `job_finder/web/pipeline_detector/_off_platform.py:253` — bypass closure (D-15, Phase 47.08)
 - `job_finder/web/scoring_orchestrator.py:59-68,130` — scoring path
-- `job_finder/web/migrations/m066`, `m067`, `m071`, `m072` — recent location/scoring migrations (in worktree)
-- `job_finder/web/migrations/m074..m077` — **already exist** in the worktree (`m074_disable_scan_for_unscannable_companies`, `m075_clear_stale_enrichment_error_for_active_companies`, `m076_unique_ats_platform_slug`, `m077_normalize_timestamps_to_utc`) — do NOT collide with these
-- `job_finder/web/migrations/m078_contract_invariants.py` — NEW (Phase 47.03: TRIGGERS for I-01..I-07/I-13 + UNIQUE INDEX for I-12)
+- `job_finder/web/migrations/m066`, `m067`, `m071`, `m072` — recent location/scoring migrations
+- `job_finder/web/migrations/m078_contract_invariants.py` — NEW (Phase 47.03: TRIGGERS for I-01..I-06, I-12, I-13 + UNIQUE INDEX for I-11)
 - `job_finder/web/migrations/m079_source_urls_canonical.py` — NEW (Phase 49.01: add `source_urls_raw` column + backfill)
-- `job_finder/web/migrations/m080_salary_currency_period.py` — NEW (Phase 49.02: add `salary_currency`, `salary_period` columns with CHECK at column-add for I-15)
-- `job_finder/web/migrations/m081_computed_status.py` — NEW (Phase 49.05: add `computed_status` column + TRIGGER for I-16)
+- `job_finder/web/migrations/m080_salary_currency_period.py` — NEW (Phase 49.02: add `salary_currency`, `salary_period` columns with CHECK at column-add for I-14)
+- `job_finder/web/migrations/m081_computed_status.py` — NEW (Phase 49.05: add `computed_status` STORED generated column for I-15)
 - `job_finder/web/migrations/m082_drop_dead_columns.py` — NEW (Phase 49.06: drop `opus_score`, `eval_blocks`, `job_archetype`)
 - `job_finder/web/migrations/_runner.py` — migration runner; skips `version <= current_version` and tolerates `duplicate column name` / `no such column` on re-run
 - `job_finder/db/column_categories.py` — NEW (Phase 47.04: `COLUMN_CATEGORIES` per §8.2.1)
@@ -1125,23 +1088,17 @@ For the adversarial reviewer's navigation:
 
 ## 21. Appendix C — How This Spec Was Produced (provenance)
 
-This spec is the synthesis of one main-context conversation (Claude Opus 4.7 1M) and four parallel sub-agent investigations:
+This spec is the synthesis of one main-context architectural investigation (Claude Opus 4.7 1M, 2026-05-29) plus four parallel sub-agent audits against the production `jobs.db` (11,740 rows):
 
-- Investigation 1 (main context, 2026-05-29): Inspected `jobs.db`, identified Blue State case + `careers_page` 95.8% null-location rate
+- Investigation 1 (main context): Inspected `jobs.db`, identified Blue State case + `careers_page` 95.8% null-location rate
 - Investigation 2 (main context): Audited `upsert_job` write paths, confirmed `careers_page` is active (NOT legacy), identified single-chokepoint plus one bypass
-- Investigation 3 (sub-agent): Audited title + dedup_key (Appendix A.1)
-- Investigation 4 (sub-agent): Audited company + company_id (Appendix A.2)
-- Investigation 5 (sub-agent): Audited salary + posted_date + URLs + source_id (Appendix A.3)
-- Investigation 6 (sub-agent): Audited description + jd_full + scoring metadata (Appendix A.4)
+- Sub-agent 3: Audited title + dedup_key (Appendix A.1)
+- Sub-agent 4: Audited company + company_id (Appendix A.2)
+- Sub-agent 5: Audited salary + posted_date + URLs + source_id (Appendix A.3)
+- Sub-agent 6: Audited description + jd_full + scoring metadata (Appendix A.4)
 
-The conversation went through two rounds of adversarial review (main-context self-critique after initial proposal; user-requested further critique). This spec is the product of that critique and reflects revisions to:
-
-- My initial framing ("no schema-level invariants") → corrected: structured-location architecture exists and works; the gap is contract enforcement at the chokepoint
-- My initial framing ("careers_page is dead code") → corrected: it's the active Phase C HTML fallback
-- My initial proposal (regex invariants, nightly sweep, quarantine table) → replaced: cross-field invariants at boundary, CHECK constraints + TRIGGERS, `unresolved` flag rendering
-
-The spec is intentionally written for a reader with zero context. Every claim about the codebase is either (a) verified by sub-agent inspection (file:line refs); or (b) labeled as belief / assumption where verification is pending.
+The spec is intentionally written for a reader with zero context. Every claim about the codebase is either (a) verified by file:line refs against the worktree; or (b) labeled as belief / assumption where verification is pending.
 
 ---
 
-**End of spec. Awaiting adversarial review.**
+**End of spec.**
