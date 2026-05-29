@@ -353,7 +353,9 @@ def test_detection_source_has_no_shell_true():
 def test_detection_source_uses_timeout_kwarg_on_every_subprocess_run():
     import pathlib
     src = pathlib.Path("job_finder/web/providers/detection.py").read_text()
-    # Coarse but effective: every subprocess.run( opening must be followed
-    # somewhere downstream by timeout=10 in the same call block.
-    assert src.count("subprocess.run(") == 3
-    assert src.count("timeout=10") >= 3
+    # Post-DRY-refactor: a single _probe_cli helper hosts the only
+    # subprocess.run call site for all three CLI probes. The security
+    # invariant (every probe runs with timeout=10) is preserved because
+    # all _check_X stubs route through that one helper.
+    assert src.count("subprocess.run(") == 1
+    assert src.count("timeout=10") >= 1
