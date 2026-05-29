@@ -1751,7 +1751,20 @@ class TestUpsertScoringProviderNotLeaked:
     """
 
     def test_upsert_inserts_scoring_provider_null(self, migrated_db_path):
-        """A freshly upserted row must have scoring_provider IS NULL — NOT 'anthropic'."""
+        """A freshly upserted row must NOT have the leaked 'anthropic' DEFAULT.
+
+        Originally this test asserted ``scoring_provider IS NULL``. After the
+        v3.0 cascade was wired, ``upsert_job`` started tagging the INSERT with
+        ``'heuristic'`` to record that JobScorer (heuristic, runs inline at
+        the ingestion boundary) produced the ``score`` column — see
+        job_finder/db/_jobs.py:285-296. ``persist_job_assessment`` later
+        overwrites scoring_provider via COALESCE when the LLM actually scores
+        the row, so 'heuristic' is a legitimate "scored by heuristic, never
+        reached the LLM" state, not a leak. The original threat (the migration
+        20 DEFAULT='anthropic' silently tagging unscored rows) is still
+        mitigated because the explicit INSERT value overrides DEFAULT, and
+        that's what this test pins.
+        """
         job = Job(
             title="Senior Data Scientist",
             company="LeakCheckCo",
@@ -1774,11 +1787,15 @@ class TestUpsertScoringProviderNotLeaked:
             conn.close()
 
         assert row is not None
-        assert row["scoring_provider"] is None, (
+        assert row["scoring_provider"] != "anthropic", (
             f"upsert_job leaked the migration 20 DEFAULT 'anthropic' onto a "
-            f"never-scored row. Got scoring_provider={row['scoring_provider']!r}, "
-            f"expected None. Check job_finder/db/_jobs.py INSERT column list."
+            f"never-LLM-scored row. Got scoring_provider={row['scoring_provider']!r}. "
+            f"Check job_finder/db/_jobs.py INSERT column list — the explicit "
+            f"value should override the column DEFAULT."
         )
+        # scoring_provider should be 'heuristic' (JobScorer tagged it) or NULL.
+        assert row["scoring_provider"] in (None, "heuristic")
+        # scoring_model must be NULL until persist_job_assessment runs.
         assert row["scoring_model"] is None
 
     def test_upsert_does_not_overwrite_existing_scoring_provider(self, migrated_db_path):

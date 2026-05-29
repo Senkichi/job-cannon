@@ -165,4 +165,8 @@ def test_upsert_job_post_migration_does_not_reintroduce_leak(tmp_db_path):
     finally:
         conn.close()
 
-    assert row["scoring_provider"] is None
+    # 'heuristic' is the intentional inline-JobScorer tag (see _jobs.py:285-296),
+    # not a leak. The leak this test guards against is the migration 20
+    # DEFAULT='anthropic' bleeding through; the explicit INSERT value prevents it.
+    assert row["scoring_provider"] != "anthropic"
+    assert row["scoring_provider"] in (None, "heuristic")

@@ -145,11 +145,15 @@ def _parse_job_card(link_tag, email_date: datetime | None) -> Job | None:
         return _parse_job_card_positional(link_tag, email_date)
 
     if not company:
-        # Title CSS class hit but company CSS class missed: the email is in
-        # a partial / hybrid Glassdoor format we can't reliably parse. Drop
-        # rather than persist a "Unknown"-company orphan that can never join
-        # to a real companies row.
-        return None
+        # Title CSS class hit but company CSS class missed — Glassdoor
+        # randomizes class names independently per field, so this hybrid
+        # state is common after each redesign. The positional extractor
+        # finds the company via a span-text heuristic that survives
+        # class-name churn, so prefer it over returning None (which
+        # silently dropped 100% of cards for any user on a fixture where
+        # COMPANY_CLASS had aged out — see test_eml_fixture_round_trips_to_jobs
+        # against glassdoor_2.eml).
+        return _parse_job_card_positional(link_tag, email_date)
 
     # Find location and salary (both use DETAIL_CLASS)
     detail_els = link_tag.find_all("p", class_=DETAIL_CLASS)
@@ -235,7 +239,7 @@ def _parse_job_card_positional(link_tag, email_date: datetime | None) -> Job | N
         title_idx = i
         break
 
-    if not title or not company:
+    if not title or not company or title_idx is None:
         return None
 
     # Among remaining p tags after title: classify location, salary, age

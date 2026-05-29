@@ -15,6 +15,7 @@ import pytest
 
 from job_finder.web.db_migrate import MIGRATIONS, run_migrations
 from job_finder.web.migrations import Migration
+from job_finder.web.migrations.types import MigrationContext
 
 
 def _get(version: int) -> Migration:
@@ -138,8 +139,20 @@ class TestMigration067Behavior:
         assert r["primary_country_code"] == "CA"
 
     def test_backfill_skips_empty_locations_raw(self, tmp_path):
-        """Row with locations_raw='[]' and no location → all 3 cols stay NULL."""
+        """Row with locations_raw='[]' and no location → all 3 cols stay NULL.
+
+        Tests m067's own behavior in isolation. Running the full migration
+        chain via run_migrations after INSERTing the row would also trigger
+        m072, which backfills NULL workplace_type → 'UNSPECIFIED' as a
+        default sentinel. That would mask whether m067 itself fabricated a
+        value. To pin m067 specifically, we use run_migrations only to set
+        up the schema, INSERT the row after all migrations have already
+        completed (so m072 cannot see it), then invoke m067's py hook
+        directly.
+        """
         db_path = str(tmp_path / "jobs.db")
+        # Schema setup only: m072 runs here, but the test row doesn't exist
+        # yet so its NULL-default backfill has nothing to touch.
         run_migrations(db_path)
 
         with closing(sqlite3.connect(db_path)) as conn:
@@ -162,9 +175,18 @@ class TestMigration067Behavior:
                     "2026-05-27",
                 ),
             )
-            conn.execute("PRAGMA user_version = 66")
             conn.commit()
-        run_migrations(db_path)
+
+        # Re-fire ONLY m067 against the post-INSERT state.
+        with closing(sqlite3.connect(db_path)) as conn:
+            _get(67).py(  # type: ignore[misc]
+                MigrationContext(
+                    conn=conn,
+                    db_path=db_path,
+                    user_data_root=str(tmp_path),
+                )
+            )
+            conn.commit()
 
         with closing(sqlite3.connect(db_path)) as conn:
             conn.row_factory = sqlite3.Row
@@ -173,7 +195,9 @@ class TestMigration067Behavior:
                 "FROM jobs WHERE dedup_key = ?",
                 ("k3",),
             ).fetchone()
-        # parser returns [] → all 3 cols NULL.
+        # Strict: m067 must not fabricate any of the 3 cols when the parser
+        # returns []. (m072's NULL-default backfill is bypassed here by
+        # design — m072 already ran before the row was inserted.)
         assert r["locations_structured"] is None
         assert r["workplace_type"] is None
         assert r["primary_country_code"] is None
