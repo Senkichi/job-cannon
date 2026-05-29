@@ -1079,3 +1079,142 @@ class TestSpeculativeMissCategorization:
         ).fetchone()
         conn.close()
         assert row["miss_reason"] == "blocked_brand"
+
+
+# ---------------------------------------------------------------------------
+# m076: UNIQUE(ats_platform, ats_slug) collision recovery for probe_ats_slugs
+# ---------------------------------------------------------------------------
+
+
+class TestSpeculativeProbeCollisionRecovery:
+    """When the UPDATE in either probe branch would violate the partial
+    UNIQUE index introduced by m076, the company must end on
+    ats_probe_status='miss' with miss_reason='collision'. The legitimate
+    owner of the (platform, slug) pair is untouched.
+    """
+
+    def test_speculative_branch_collision_marks_miss_with_collision_reason(
+        self, migrated_db_path
+    ):
+        """The speculative ladder hits a slug already owned by another company.
+
+        The UPDATE raises sqlite3.IntegrityError; the handler demotes the
+        row to status='miss' with miss_reason='collision' and the pre-
+        existing owner is left as-is.
+        """
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        # Pre-existing legitimate owner of (greenhouse, acme).
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies
+                  (name, name_raw, ats_platform, ats_slug,
+                   ats_probe_status, scan_enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'hit', 1, ?, ?)""",
+            ("acme corp", "Acme Corp", "greenhouse", "acme", now, now),
+        )
+        conn.commit()
+        owner_id = cursor.lastrowid
+        # Pending probe candidate whose derived slug will collide.
+        loser_id = _insert_pending_company(
+            conn, name="Acme", careers_url=None
+        )
+        conn.close()
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._probe._PROBES",
+                new=_build_probes({"greenhouse": True}),
+            ),
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["hits"] == 0
+        assert result["misses"] == 1
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        loser_row = conn.execute(
+            "SELECT ats_probe_status, ats_platform, ats_slug, miss_reason "
+            "FROM companies WHERE id=?",
+            (loser_id,),
+        ).fetchone()
+        owner_row = conn.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id=?",
+            (owner_id,),
+        ).fetchone()
+        conn.close()
+
+        assert loser_row["ats_probe_status"] == "miss"
+        assert loser_row["miss_reason"] == "collision"
+        # Loser must NOT have taken the owner's slug.
+        assert loser_row["ats_platform"] is None
+        assert loser_row["ats_slug"] is None
+        # Pre-existing owner intact.
+        assert owner_row["ats_platform"] == "greenhouse"
+        assert owner_row["ats_slug"] == "acme"
+
+    def test_fastpath_branch_collision_marks_miss_with_collision_reason(
+        self, migrated_db_path
+    ):
+        """The careers_url fast-path tries to write a slug that's owned.
+
+        URL inference picks (greenhouse, acme) from the careers_url; the
+        owner already holds that pair. The fast-path UPDATE raises, the
+        handler demotes the loser to miss/collision.
+        """
+        from job_finder.web.ats_scanner import probe_ats_slugs
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        now = datetime.now().isoformat()
+        cursor = conn.execute(
+            """INSERT INTO companies
+                  (name, name_raw, ats_platform, ats_slug,
+                   ats_probe_status, scan_enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'hit', 1, ?, ?)""",
+            ("acme corp", "Acme Corp", "greenhouse", "acme", now, now),
+        )
+        conn.commit()
+        owner_id = cursor.lastrowid
+        loser_id = _insert_pending_company(
+            conn,
+            name="Acme",
+            careers_url="https://boards.greenhouse.io/acme",
+        )
+        conn.close()
+
+        with (
+            patch(
+                "job_finder.web.ats_scanner._probe._verify_fastpath_live",
+                return_value=True,
+            ),
+            patch("job_finder.web.ats_scanner._probe.time.sleep"),
+        ):
+            result = probe_ats_slugs(migrated_db_path, config={})
+
+        assert result["hits"] == 0
+        assert result["misses"] == 1
+
+        conn = sqlite3.connect(migrated_db_path)
+        conn.row_factory = sqlite3.Row
+        loser_row = conn.execute(
+            "SELECT ats_probe_status, ats_platform, ats_slug, miss_reason "
+            "FROM companies WHERE id=?",
+            (loser_id,),
+        ).fetchone()
+        owner_row = conn.execute(
+            "SELECT ats_platform, ats_slug FROM companies WHERE id=?",
+            (owner_id,),
+        ).fetchone()
+        conn.close()
+
+        assert loser_row["ats_probe_status"] == "miss"
+        assert loser_row["miss_reason"] == "collision"
+        assert loser_row["ats_platform"] is None
+        assert loser_row["ats_slug"] is None
+        assert owner_row["ats_platform"] == "greenhouse"
+        assert owner_row["ats_slug"] == "acme"
