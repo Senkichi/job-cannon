@@ -284,7 +284,7 @@ def cost_gate(
         f"AND provider NOT IN ({free_placeholders})",
         (day_start, *free),
     ).fetchone()
-    return not (row[0] if row else 0.0) >= daily_cap
+    return (row[0] if row else 0.0) < daily_cap
 
 
 # ---------------------------------------------------------------------------
