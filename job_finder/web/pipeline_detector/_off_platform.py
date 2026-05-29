@@ -46,8 +46,8 @@ import logging
 import re
 import sqlite3
 import time
-from datetime import datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.pipeline_detector._constants import ATS_DOMAINS
 
 logger = logging.getLogger(__name__)
@@ -248,7 +248,7 @@ def _try_create_stub_job(
             "attributed_existing": True,
         }
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     dedup_key = f"{candidate.lower()}|off-platform|{int(time.time() * 1000)}"
     conn.execute(
         """INSERT INTO jobs

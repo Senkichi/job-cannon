@@ -284,13 +284,13 @@ class GmailSource:
                 try:
                     from email.utils import parsedate_to_datetime
 
-                    return parsedate_to_datetime(header["value"])
+                    return parsedate_to_datetime(header["value"]).astimezone(UTC).replace(tzinfo=None)
                 except Exception:
                     logger.debug("email date parse failed", exc_info=True)
 
         # Fallback to internalDate
         internal_date = message.get("internalDate")
         if internal_date:
-            return datetime.fromtimestamp(int(internal_date) / 1000, tz=UTC)
+            return datetime.fromtimestamp(int(internal_date) / 1000, tz=UTC).replace(tzinfo=None)
 
         return None

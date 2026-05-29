@@ -6,8 +6,8 @@ Re-exported from the package for backward compatibility.
 
 import logging
 import sqlite3
-from datetime import datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_prober import _PROBE_STATUS_PRECEDENCE
 from job_finder.web.dedup_normalizer import normalize_company
 
@@ -39,7 +39,7 @@ def upsert_company(
     Returns:
         The company_id (integer) for the upserted record, or None on error.
     """
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     normalized_name = normalize_company(name)
 
     try:

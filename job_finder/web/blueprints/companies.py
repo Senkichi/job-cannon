@@ -275,7 +275,7 @@ def toggle(company_id):
         return "Company not found", 404
 
     new_enabled = 0 if company["scan_enabled"] else 1
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     conn.execute(
         "UPDATE companies SET scan_enabled = ?, updated_at = ? WHERE id = ?",
         (new_enabled, now, company_id),
@@ -308,7 +308,7 @@ def update_slug(company_id):
     ats_platform = request.form.get("ats_platform", "").strip() or None
     ats_slug = request.form.get("ats_slug", "").strip() or None
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     try:
         conn.execute(
             """UPDATE companies
@@ -725,7 +725,9 @@ def _compute_health_metrics(conn) -> dict:
     if last_scan_at:
         try:
             last_dt = datetime.fromisoformat(last_scan_at)
-            last_scan_age_days = (datetime.now() - last_dt).days
+            # last_scan_at is stored as naive UTC (see arch-store-utc-render-local);
+            # compare against UTC-now to avoid an N-hour-tz-offset skew.
+            last_scan_age_days = (datetime.now(UTC).replace(tzinfo=None) - last_dt).days
         except (ValueError, TypeError):
             pass
 
@@ -815,9 +817,11 @@ def research_status(company_id, research_id):
     if research["status"] == "generating":
         try:
             requested = datetime.fromisoformat(research["requested_at"])
-            age_minutes = (datetime.now(UTC) - requested.replace(tzinfo=UTC)).total_seconds() / 60
+            if requested.tzinfo is not None:
+                requested = requested.astimezone(UTC).replace(tzinfo=None)
+            age_minutes = (datetime.now(UTC).replace(tzinfo=None) - requested).total_seconds() / 60
             if age_minutes > 10:
-                now = datetime.now(UTC).isoformat()
+                now = utc_now_iso()
                 conn.execute(
                     "UPDATE company_research SET status = 'error', error_msg = ?, completed_at = ? WHERE id = ?",
                     ("Research timed out", now, research_id),

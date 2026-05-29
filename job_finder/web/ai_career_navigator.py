@@ -15,8 +15,8 @@ If replay fails (stale layout), the recipe is re-discovered automatically.
 
 import json
 import logging
-from datetime import datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.claude_client import call_claude
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
@@ -546,7 +546,7 @@ def discover_navigation_recipe(
         )
         return {
             "version": 1,
-            "discovered_at": datetime.now().isoformat(),
+            "discovered_at": utc_now_iso(),
             "steps": [],
             "extraction": {"method": "links_in_page"},
         }
@@ -660,7 +660,7 @@ def discover_navigation_recipe(
     # Build the full recipe with metadata
     recipe = {
         "version": 1,
-        "discovered_at": datetime.now().isoformat(),
+        "discovered_at": utc_now_iso(),
         "steps": steps,
         "extraction": result.get("extraction", {"method": "links_in_page"}),
     }

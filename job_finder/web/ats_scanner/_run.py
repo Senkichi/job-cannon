@@ -18,9 +18,9 @@ import logging
 import sqlite3
 import time
 from collections.abc import Callable
-from datetime import datetime
 
 from job_finder.db import derive_classification
+from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
 from job_finder.web.ats_platforms._platforms_bamboohr import (
@@ -393,7 +393,7 @@ def _scan_one_company_via_ats_api(
     company_name = company["name_raw"]
     platform = company["ats_platform"]
     slug = company["ats_slug"]
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
 
     logger.info("ATS scan: scanning %s (%s/%s)", company_name, platform, slug)
 
@@ -657,7 +657,7 @@ def _log_ats_scan_run(conn: sqlite3.Connection, summary: dict) -> None:
         conn.execute(
             "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored) VALUES (?, ?, ?, ?, ?)",
             (
-                datetime.now().isoformat(),
+                utc_now_iso(),
                 "ats_scan",
                 summary["jobs_discovered"],
                 summary["jobs_new"],

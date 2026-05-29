@@ -944,13 +944,14 @@ class TestStage75Helpers:
         assert _clean_text("") == ""
 
     def test_unix_to_datetime_basic(self):
-        from datetime import timezone
-
+        # Post timezone-normalization (2026-05-29): _unix_to_datetime returns
+        # naive UTC so callers can store the value directly into a column
+        # following the store-UTC convention.
         from job_finder.sources.portal_search_source import _unix_to_datetime
 
         dt = _unix_to_datetime(1779443427)
         assert dt is not None
-        assert dt.tzinfo == timezone.utc
+        assert dt.tzinfo is None  # naive UTC
         assert dt.year == 2026 and dt.month == 5
 
     def test_unix_to_datetime_invalid_inputs(self):

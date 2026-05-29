@@ -20,6 +20,7 @@ import requests
 from jsonschema import ValidationError, validate
 
 # DEFAULT_MODEL_* imports removed in Phase 39 (replaced by _PROVIDER_DEFAULTS)
+from job_finder.json_utils import local_day_utc_window
 from job_finder.web.claude_client import (  # noqa: F401 — record_cost + BudgetExceededError re-exported for callers/tests
     FREE_PROVIDERS,
     BudgetExceededError,
@@ -140,11 +141,13 @@ def _init_usage_from_db(conn: sqlite3.Connection) -> None:
     """
     global _daily_usage, _usage_date
     _daily_usage = {}
+    day_start, day_end = local_day_utc_window()
     rows = conn.execute(
         "SELECT provider, COUNT(*) as cnt "
         "FROM scoring_costs "
-        "WHERE date(timestamp) = date('now') "
-        "GROUP BY provider"
+        "WHERE timestamp >= ? AND timestamp < ? "
+        "GROUP BY provider",
+        (day_start, day_end),
     ).fetchall()
     for row in rows:
         _daily_usage[row[0]] = row[1]

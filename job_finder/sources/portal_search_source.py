@@ -986,7 +986,7 @@ def _unix_to_datetime(value) -> datetime | None:
     if ts <= 0:
         return None
     try:
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
+        return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
     except (OverflowError, OSError, ValueError):
         return None
 

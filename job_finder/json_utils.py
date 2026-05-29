@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,25 @@ def utc_now_iso() -> str:
     a consistent UTC baseline rather than mixing local time and UTC.
     """
     return datetime.now(UTC).replace(tzinfo=None).isoformat()
+
+
+def local_day_utc_window() -> tuple[str, str]:
+    """Return (start_utc_iso, end_utc_iso) bounding the user-local current calendar day.
+
+    Both bounds are naive ISO 8601 UTC strings (same format as timestamps
+    written by utc_now_iso), suitable for ``WHERE timestamp >= ? AND
+    timestamp < ?`` clauses in scoring_costs queries.
+
+    Using local midnight rather than UTC midnight means "today's spend"
+    and "today's quota" align with the user's clock, not UTC — so a
+    budget cap set to $5/day resets at midnight the user sees, not 5 pm PT.
+    """
+    local_now = datetime.now().astimezone()  # aware, system timezone
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_tomorrow = local_midnight + timedelta(days=1)
+    start_utc = local_midnight.astimezone(UTC).replace(tzinfo=None).isoformat()
+    end_utc = local_tomorrow.astimezone(UTC).replace(tzinfo=None).isoformat()
+    return start_utc, end_utc
 
 
 def safe_json_load(value: str | None, default: Any = None) -> Any:

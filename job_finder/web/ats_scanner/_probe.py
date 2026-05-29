@@ -8,7 +8,8 @@ import logging
 import sqlite3
 import time
 from collections.abc import Callable
-from datetime import datetime
+
+from job_finder.json_utils import utc_now_iso
 
 from job_finder.web.ats_detection import (
     ATS_EXTRACTOR_VERSION,
@@ -215,7 +216,7 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             company_id = company["id"]
             company_name = company["name_raw"]
             careers_url = company["careers_url"]
-            now = datetime.now().isoformat()
+            now = utc_now_iso()
 
             # B2 — careers_url hostname fast-path. If careers_url unambiguously
             # identifies an ATS (e.g. https://jobs.ashbyhq.com/{slug},

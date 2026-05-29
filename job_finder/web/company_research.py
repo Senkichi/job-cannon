@@ -15,6 +15,7 @@ import sqlite3
 import threading
 from datetime import UTC, datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import call_model
 
@@ -82,7 +83,7 @@ def start_company_research(
     Returns:
         The new research row ID.
     """
-    now = datetime.now(UTC).isoformat()
+    now = utc_now_iso()
     cursor = conn.execute(
         "INSERT INTO company_research (company_id, status, requested_at) VALUES (?, ?, ?)",
         (company_id, "generating", now),
@@ -163,7 +164,7 @@ def run_company_research_background(
                 else json.dumps(result_obj.data)
             )
             cost_usd = result_obj.cost_usd
-            now = datetime.now(UTC).isoformat()
+            now = utc_now_iso()
 
             conn.execute(
                 """UPDATE company_research
@@ -182,7 +183,7 @@ def run_company_research_background(
         except Exception as e:
             error_msg = str(e)[:500]
             logger.exception("Company research failed for company %d: %s", company_id, e)
-            now = datetime.now(UTC).isoformat()
+            now = utc_now_iso()
             conn.execute(
                 "UPDATE company_research SET status = 'error', error_msg = ?, completed_at = ? WHERE id = ?",
                 (error_msg, now, research_id),

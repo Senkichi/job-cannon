@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 
 def get_dashboard_stats(conn: sqlite3.Connection) -> dict:
@@ -120,7 +120,7 @@ def get_jobs_by_status(conn: sqlite3.Connection) -> dict:
            ORDER BY j.score DESC"""
     ).fetchall()
 
-    now = datetime.now()
+    now = datetime.now(UTC).replace(tzinfo=None)
     result: dict = {}
     for row in rows:
         job = dict(row)

@@ -18,7 +18,8 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime
+
+from job_finder.json_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ def run_retroactive_dedup(conn: sqlite3.Connection) -> int:
                 INSERT INTO merge_log (canonical_key, merged_key, merge_source, merged_at)
                 VALUES (?, ?, ?, ?)
             """,
-                (norm_key, dup_key, "migration", datetime.now().isoformat()),
+                (norm_key, dup_key, "migration", utc_now_iso()),
             )
 
             # Step 6: Delete duplicate row

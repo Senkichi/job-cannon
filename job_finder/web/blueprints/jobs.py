@@ -2,7 +2,7 @@
 
 import logging
 import time as _time
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import requests
@@ -168,17 +168,43 @@ def _get_filter_kwargs() -> dict:
     }
 
 
+def _parse_stored_ts_as_local(iso_str: str) -> datetime | None:
+    """Parse a stored ISO timestamp and return it as naive OS-local datetime.
+
+    Storage contract (see ``arch-store-utc-render-local``): all DB-stored
+    timestamps are naive UTC. Some legacy rows / external-API responses may
+    carry an explicit ``+00:00`` offset. Both shapes are coerced to naive
+    local for display math.
+    """
+    if not iso_str or not isinstance(iso_str, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        # Fall back to the first 19 chars (no tz), still treated as UTC below.
+        try:
+            parsed = datetime.fromisoformat(iso_str[:19])
+        except (ValueError, TypeError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone().replace(tzinfo=None)
+
+
 def relative_date(iso_str):
     """Format date as 'Mar 3 (1w ago)' — absolute then relative.
 
     Per locked user decision: format MUST be 'Mar 3 (1w ago)'
     (absolute date then relative in parentheses).
+
+    Storage is naive UTC (see ``arch-store-utc-render-local``); we convert
+    to OS-local before formatting so jobs ingested earlier the same local
+    day don't display as 'future'.
     """
     if not iso_str:
         return "---"
-    try:
-        dt = datetime.fromisoformat(iso_str[:19])
-    except (ValueError, TypeError):
+    dt = _parse_stored_ts_as_local(iso_str)
+    if dt is None:
         return iso_str[:10] if iso_str else "---"
 
     # Absolute part: "Mar 3" — handle Windows (%#d) vs Unix (%-d)
@@ -212,10 +238,26 @@ def relative_date(iso_str):
     return f"{abs_part} ({rel})"
 
 
+def local_date(iso_str):
+    """Render a stored UTC ISO timestamp as a local YYYY-MM-DD string.
+
+    Replaces template ``iso_str[:10]`` slices that incorrectly assumed local
+    time. A job posted at 23:30 PT (=07:30 UTC next day) now renders as the
+    user-local calendar date instead of the UTC date.
+    """
+    if not iso_str:
+        return ""
+    dt = _parse_stored_ts_as_local(iso_str)
+    if dt is None:
+        return iso_str[:10] if isinstance(iso_str, str) else ""
+    return dt.strftime("%Y-%m-%d")
+
+
 @jobs_bp.record_once
 def _register_filters(state):
-    """Register the relative_date Jinja2 filter when blueprint is registered."""
+    """Register the relative_date / local_date Jinja2 filters when blueprint is registered."""
     state.app.jinja_env.filters["relative_date"] = relative_date
+    state.app.jinja_env.filters["local_date"] = local_date
 
 
 @jobs_bp.route("/", strict_slashes=False)

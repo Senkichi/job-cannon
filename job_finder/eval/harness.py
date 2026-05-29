@@ -34,10 +34,10 @@ import logging
 import sqlite3
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 
 from job_finder.eval import metrics
+from job_finder.json_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +379,7 @@ def run(
         metrics_out = _compute_metrics(gold_rows, per_job_mean, per_job_runs)
 
         run_id = uuid.uuid4().hex
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = utc_now_iso()
         conn.execute(
             """
             INSERT INTO eval_runs

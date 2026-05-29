@@ -16,6 +16,7 @@ through ``parsedate_to_datetime`` -> ``internalDate`` -> ``datetime.now()``.
 import logging
 from datetime import UTC, datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.pipeline_detector._constants import (
     CONFIRMATION_QUERY,
     INTERVIEW_QUERY,
@@ -164,14 +165,14 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
             try:
                 from email.utils import parsedate_to_datetime
 
-                email_date = parsedate_to_datetime(date_str).isoformat()
+                email_date = parsedate_to_datetime(date_str).astimezone(UTC).replace(tzinfo=None).isoformat()
             except Exception:
                 logger.debug("email date parse failed, using internalDate", exc_info=True)
                 internal = msg.get("internalDate")
                 if internal:
-                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=UTC).isoformat()
+                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=UTC).replace(tzinfo=None).isoformat()
                 else:
-                    email_date = datetime.now().isoformat()
+                    email_date = utc_now_iso()
 
             body = _extract_body_from_payload(payload)
 

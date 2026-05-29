@@ -16,9 +16,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from datetime import UTC, datetime
 from pathlib import Path
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.scoring_types import format_salary_range
 
 VALID_CLASSIFICATIONS: tuple[str, ...] = (
@@ -106,7 +106,7 @@ def label_one(db_path: str, dedup_key: str) -> None:
                 cls,
                 json.dumps(sub_scores),
                 note or None,
-                datetime.now(UTC).isoformat(),
+                utc_now_iso(),
                 dedup_key,
             ),
         )

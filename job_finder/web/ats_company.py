@@ -8,10 +8,10 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal
 
 from job_finder.config import get_company_allowlist, get_company_denylist, load_config
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_prober import _PROBE_STATUS_PRECEDENCE
 from job_finder.web.dedup_normalizer import normalize_company
 
@@ -210,7 +210,7 @@ def upsert_company(
         if decision.reason == "denylist":
             try:
                 cleaned = normalize_company(name)
-                now_iso = datetime.now().isoformat()
+                now_iso = utc_now_iso()
                 conn.execute(
                     "UPDATE companies SET scan_enabled = 0, updated_at = ? WHERE name = ?",
                     (now_iso, cleaned),
@@ -221,7 +221,7 @@ def upsert_company(
         logger.debug("upsert_company: rejected '%s' (reason=%s)", name[:60], decision.reason)
         return None
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     normalized_name = decision.cleaned_name  # type: ignore[assignment]  # reject path returned above
 
     try:

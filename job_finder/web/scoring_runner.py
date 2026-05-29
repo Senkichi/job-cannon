@@ -8,9 +8,9 @@ Plan 4 Commit E.
 
 import logging
 import sqlite3
-from datetime import UTC, datetime
 
 from job_finder.db import JOBS_ALL_COLUMNS, persist_job_expiry_state, update_pipeline_status
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.expiry_checker import EXPIRED as _EXPIRED
 from job_finder.web.expiry_checker import check_job_liveness
@@ -107,7 +107,7 @@ def run_scoring(
                 # Liveness gate (D-11): pre-score. Expired rows get the
                 # standard archive update and are counted as skipped_dead.
                 liveness = check_job_liveness(job)
-                now_iso = datetime.now(UTC).isoformat()
+                now_iso = utc_now_iso()
                 persist_job_expiry_state(conn, dedup_key, liveness, now_iso)
                 if liveness == _EXPIRED:
                     logger.info(

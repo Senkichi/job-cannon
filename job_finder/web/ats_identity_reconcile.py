@@ -6,12 +6,12 @@ Orchestrator for ATS–company ``(platform, slug)`` per `.planning/ATS-RECONCILI
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 import sqlite3
 
 from job_finder.config import load_config
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_company import classify_company_name
 from job_finder.web.ats_detection import ATS_EXTRACTOR_VERSION, aggregate_ats_candidates_from_job_bundles
 from job_finder.web.ats_prober import (
@@ -256,7 +256,7 @@ def reconcile_company_ats(
             "contributing_jobs": job_bundle_count,
         }
 
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
 
     base_meta = {
         "company_id": company_id,

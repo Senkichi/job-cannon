@@ -20,8 +20,8 @@ monolith used.
 import json
 import logging
 import sqlite3
-from datetime import datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.pipeline_detector._constants import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def _mark_processed(
         sender: From address of the email.
         detection_type: Classification result or None.
     """
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     jobs_found = 1 if detection_type is not None else 0
     try:
         conn.execute(
@@ -128,7 +128,7 @@ def _insert_detection(
         email_date: Email date as ISO string.
         status: 'pending', 'auto-applied', etc.
     """
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
     conn.execute(
         """INSERT OR IGNORE INTO pipeline_detections
            (gmail_message_id, detection_type, job_id, confidence_score,

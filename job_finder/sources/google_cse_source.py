@@ -9,7 +9,7 @@ defense-in-depth gate so users don't get surprised by a 429 from Google.
 When ``db_path`` is supplied at construction, each query write a zero-cost row
 to ``scoring_costs`` (``provider='google_cse'``, ``purpose='cse_query'``,
 ``cost_usd=0``) and the day-count is read back from the same table with a
-``DATE(timestamp)=DATE('now')`` filter. This survives Flask restarts — the
+``DATE(timestamp, 'localtime')=DATE('now', 'localtime')`` filter. This survives Flask restarts — the
 original in-process counter reset to 0 every boot, which on a long-uptime
 install could let the same calendar day burn through >100 queries by accident.
 
@@ -26,10 +26,11 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import date, datetime
+from datetime import date
 
 import requests
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.models import Job
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ class GoogleCSESource:
                     (
                         _PURPOSE_NAME,
                         _MODEL_NAME,
-                        datetime.now().isoformat(),
+                        utc_now_iso(),
                         _PROVIDER_NAME,
                     ),
                 )
@@ -220,7 +221,7 @@ class GoogleCSESource:
 
     def _roll_quota_if_new_day(self) -> None:
         """In-process counter roll-over only. DB-backed path is calendar-correct
-        by virtue of ``DATE(timestamp)=DATE('now', 'localtime')`` in the query."""
+        by virtue of ``DATE(timestamp, 'localtime')=DATE('now', 'localtime')`` in the query."""
         if self._db_path is not None:
             return
         today = date.today()

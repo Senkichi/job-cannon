@@ -17,11 +17,12 @@ Architecture:
 import concurrent.futures
 import logging
 import time
-from datetime import datetime
 from typing import Any
 
 import requests  # noqa: F401  — bound here so test_careers_crawler patches resolve
 from playwright.sync_api import sync_playwright
+
+from job_finder.json_utils import utc_now_iso
 
 # Title hygiene + URL-path navigation filters — extracted to _title_filters.
 # Re-imported here so the public surface (job_finder.web.careers_crawler.X)
@@ -241,7 +242,7 @@ def crawl_careers_batch(db_path: str, config: dict) -> dict:
                    (timestamp, source, jobs_fetched, jobs_new, jobs_scored)
                    VALUES (?, ?, ?, ?, ?)""",
                 (
-                    datetime.now().isoformat(),
+                    utc_now_iso(),
                     "careers_crawl",
                     summary["jobs_found"],
                     summary["jobs_new"],
@@ -350,7 +351,7 @@ def _crawl_companies(
                     careers_url = company["careers_url"]
                     api_endpoint = company["careers_api_endpoint"]
                     cached_tier = company["careers_crawl_tier"]
-                    now = datetime.now().isoformat()
+                    now = utc_now_iso()
                     tier_used = "static"
 
                     logger.info(

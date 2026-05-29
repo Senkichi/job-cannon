@@ -13,8 +13,8 @@ each ats_scanner submodule under the 600-line house cap.
 import logging
 import sqlite3
 import time
-from datetime import datetime
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.db_helpers import standalone_connection
 
 # Lazy import of HTML careers scraper (ImportError guard — Plan 03)
@@ -91,7 +91,7 @@ def _scan_one_company_via_html(
     miss_company_id = miss_company["id"]
     miss_company_name = miss_company["name_raw"]
     miss_homepage_url = miss_company["homepage_url"]
-    now = datetime.now().isoformat()
+    now = utc_now_iso()
 
     logger.info(
         "ATS HTML fallback: scanning %s via homepage %s",

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import requests
 
+from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_detection import derive_slug_candidates
 from job_finder.web.brand_blocklist import is_blocked_brand
 
@@ -202,7 +203,7 @@ def probe_single_company(
         Dict with at minimum a "status" key: "hit", "error", or "miss".
         "hit" also includes "jobs_found". "error" includes "detail".
     """
-    now = datetime.now(UTC).isoformat()
+    now = utc_now_iso()
 
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
     if company is None:

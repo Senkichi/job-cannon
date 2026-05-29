@@ -632,10 +632,10 @@ def test_daily_increment_existing(_reset_daily_state):
 
 
 def test_daily_limit_resets_on_new_day(tmp_path, _reset_daily_state):
-    from datetime import datetime
+    from job_finder.json_utils import utc_now_iso
 
     conn = _migrated_conn(tmp_path)
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_iso()
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

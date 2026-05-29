@@ -10,7 +10,6 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -98,7 +97,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
         logger.debug("Gmail source disabled in config.")
         return []
 
-    run_id = f"gmail_run_{datetime.now().isoformat()}"
+    run_id = f"gmail_run_{utc_now_iso()}"
     lookback_days = gmail_config.get("lookback_days", DEFAULT_LOOKBACK_DAYS)
 
     # --- Query known message IDs from email_parse_log ---
@@ -169,7 +168,7 @@ def _fetch_gmail(config: dict, conn: sqlite3.Connection, summary: dict) -> list[
                 conn.execute(
                     "INSERT INTO runs (timestamp, source, jobs_fetched, jobs_new, jobs_scored)"
                     " VALUES (?, ?, 0, 0, 0)",
-                    (datetime.now().isoformat(), f"{domain}_parse_failure"),
+                    (utc_now_iso(), f"{domain}_parse_failure"),
                 )
                 conn.commit()
                 logger.debug("Zero-job email routed to activity feed: %s", fail_sender)
@@ -838,7 +837,7 @@ def _log_to_email_parse_log(
             """INSERT OR IGNORE INTO email_parse_log
                (message_id, sender, processed_at, jobs_found, error)
                VALUES (?, ?, ?, ?, ?)""",
-            (message_id, sender, datetime.now().isoformat(), jobs_found, error),
+            (message_id, sender, utc_now_iso(), jobs_found, error),
         )
         conn.commit()
     except Exception as e:

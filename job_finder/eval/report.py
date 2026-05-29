@@ -25,6 +25,8 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
+from job_finder.json_utils import utc_now_iso
+
 AXES: tuple[str, ...] = (
     "title_fit",
     "location_fit",
@@ -90,7 +92,7 @@ def write_report(
     out.append(f"**Run ID:** `{run_id}`")
     out.append(f"**Variant:** {variant_name}")
     out.append(f"**Baseline:** {baseline_run_id or '(none — diagnose mode)'}")
-    out.append(f"**Timestamp:** {datetime.now(UTC).isoformat()}")
+    out.append(f"**Timestamp:** {utc_now_iso()}")
     out.append("")
 
     # --- 1. Headline ----------------------------------------------------------

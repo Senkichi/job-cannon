@@ -358,7 +358,7 @@ class DataForSEOSource:
         posted_date = self._parse_timestamp(item.get("timestamp", ""))
 
         if posted_date is not None:
-            age_days = (datetime.now(UTC) - posted_date).days
+            age_days = (datetime.now(UTC).replace(tzinfo=None) - posted_date).days
             if age_days > self.max_age_days:
                 logger.info(
                     "Skipping '%s' @ '%s' — %d days old (max %d)",
@@ -385,15 +385,17 @@ class DataForSEOSource:
         )
 
     def _parse_timestamp(self, ts: str) -> datetime | None:
-        """Parse DataForSEO timestamp string to UTC-aware datetime.
+        """Parse DataForSEO timestamp string to naive UTC datetime.
 
         DataForSEO format: "2026-03-23 23:06:53 +00:00"
         Python 3.11+ fromisoformat handles this format directly.
+        Returns naive UTC (tzinfo=None) for canonical DB storage.
         """
         if not ts:
             return None
         try:
-            return datetime.fromisoformat(ts)
+            dt = datetime.fromisoformat(ts)
+            return dt.astimezone(UTC).replace(tzinfo=None)
         except (ValueError, TypeError):
             return None
 

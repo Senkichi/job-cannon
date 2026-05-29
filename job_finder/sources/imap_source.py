@@ -217,9 +217,7 @@ class ImapSource:
             from email.utils import parsedate_to_datetime
 
             dt = parsedate_to_datetime(date_header)
-            # Ensure timezone-aware
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            return dt
+            # Normalize to naive UTC regardless of incoming tzinfo
+            return dt.astimezone(UTC).replace(tzinfo=None)
         except Exception:
             return None

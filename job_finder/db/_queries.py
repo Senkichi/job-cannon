@@ -16,10 +16,43 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 from ._jobs import JOBS_ALL_COLUMNS
 
 _log = logging.getLogger(__name__)
+
+
+def _local_day_start_as_utc_iso(days_offset: int = 0) -> str:
+    """Return the start-of-day in user-local time, N days back, as naive UTC ISO.
+
+    days_offset=0  → start of today local
+    days_offset=2  → start of the day 2 days ago local (covers "last 3 days" with 0,1,2)
+
+    Uses datetime.now().astimezone() to treat the system clock as local-aware,
+    then shifts to UTC. This keeps the filter anchored to the user's local midnight
+    rather than UTC midnight.
+    """
+    local_now = datetime.now().astimezone()
+    start_local = (local_now - timedelta(days=days_offset)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return start_local.astimezone(UTC).replace(tzinfo=None).isoformat()
+
+
+def _local_date_str_to_utc_iso(date_str: str, end_of_day: bool = False) -> str:
+    """Convert a local calendar-day string (YYYY-MM-DD) to a naive UTC ISO string.
+
+    date_str is treated as local midnight (start_of_day) or local 23:59:59 (end_of_day).
+    The result is stored-UTC-comparable with first_seen values.
+    """
+    parts = date_str.split("-")
+    year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+    if end_of_day:
+        local_dt = datetime(year, month, day, 23, 59, 59).astimezone()
+    else:
+        local_dt = datetime(year, month, day, 0, 0, 0).astimezone()
+    return local_dt.astimezone(UTC).replace(tzinfo=None).isoformat()
 
 
 _HIDDEN_STATUSES = ("archived", "withdrawn", "dismissed", "rejected")
@@ -232,23 +265,37 @@ def get_filtered_jobs(
         params.append(f"%{location}%")
 
     if posted_within:
-        _within_map = {
-            "today": "date('now')",
-            "3d": "date('now', '-3 days')",
-            "1w": "date('now', '-7 days')",
-            "1m": "date('now', '-1 month')",
-        }
-        if posted_within in _within_map:
-            conditions.append(f"first_seen >= {_within_map[posted_within]}")
+        # Cutoffs are computed in Python as local-midnight-to-UTC so that
+        # "Today" means today in the user's local time, not UTC midnight.
+        _within_cutoff: str | None = None
+        if posted_within == "today":
+            _within_cutoff = _local_day_start_as_utc_iso(0)
+        elif posted_within == "3d":
+            # "Last 3 days" = today + yesterday + day-before-yesterday → offset 2.
+            _within_cutoff = _local_day_start_as_utc_iso(2)
+        elif posted_within == "1w":
+            _within_cutoff = _local_day_start_as_utc_iso(6)
+        elif posted_within == "1m":
+            # Approximate: 30 days back (SQLite's '-1 month' is calendar arithmetic;
+            # 30 days is close enough for a display filter without adding dateutil).
+            _within_cutoff = _local_day_start_as_utc_iso(30)
+        if _within_cutoff is not None:
+            conditions.append("first_seen >= ?")
+            params.append(_within_cutoff)
 
     if freshness:
         from job_finder.utils.business_days import business_days_ago
 
         cutoff = None
         if freshness == "biz1":
-            cutoff = business_days_ago(1).isoformat()
+            # business_days_ago returns a local date; treat as local midnight → UTC.
+            from datetime import time as _time
+            biz_date = business_days_ago(1)
+            cutoff = datetime.combine(biz_date, _time.min).astimezone().astimezone(UTC).replace(tzinfo=None).isoformat()
         elif freshness == "biz3":
-            cutoff = business_days_ago(3).isoformat()
+            from datetime import time as _time
+            biz_date = business_days_ago(3)
+            cutoff = datetime.combine(biz_date, _time.min).astimezone().astimezone(UTC).replace(tzinfo=None).isoformat()
         if cutoff:
             conditions.append("first_seen >= ?")
             params.append(cutoff)
@@ -294,11 +341,14 @@ def get_filtered_jobs(
         conditions.append("sources LIKE ?")
         params.append(f'%"{source}"%')
     if date_from:
+        # date_from is a local YYYY-MM-DD string from <input type="date">;
+        # treat as local midnight and convert to UTC for comparison with stored naive UTC.
         conditions.append("first_seen >= ?")
-        params.append(date_from)
+        params.append(_local_date_str_to_utc_iso(date_from, end_of_day=False))
     if date_to:
-        conditions.append("first_seen <= ? || ' 23:59:59'")
-        params.append(date_to)
+        # date_to is a local YYYY-MM-DD string; treat as local 23:59:59 → UTC.
+        conditions.append("first_seen <= ?")
+        params.append(_local_date_str_to_utc_iso(date_to, end_of_day=True))
 
     # m066 denormalized columns. Values are SQL-bound (no f-string
     # interpolation), but sanity-check the shape so a malformed query

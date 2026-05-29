@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from job_finder.secrets import get_secret
@@ -88,7 +88,7 @@ def run_inbox_check(
         InboxCheckResult. Never raises — DB errors degrade to a yellow status
         with a diagnostic reason.
     """
-    now = now or datetime.now()
+    now = now or datetime.now(UTC).replace(tzinfo=None)
     sources = config.get("sources", {}) or {}
     gmail_enabled = bool(sources.get("gmail", {}).get("enabled", False))
     imap_enabled = bool(sources.get("imap", {}).get("enabled", False))

@@ -1,9 +1,9 @@
 {# Accordion expansion row. Inserted below the compact row via HTMX afterend swap. #}
 {% set sources_list = job.sources | from_json if job.sources else [] %}
 {% set urls_list = job.source_urls | from_json if job.source_urls else [] %}
-{% set first_seen_date = job.first_seen[:10] if job.first_seen else "—" %}
-{% set last_seen_date = job.last_seen[:10] if job.last_seen else "—" %}
-{% set posted_date = job.posted_date[:10] if job.posted_date else "—" %}
+{% set first_seen_date = (job.first_seen | local_date) if job.first_seen else "—" %}
+{% set last_seen_date = (job.last_seen | local_date) if job.last_seen else "—" %}
+{% set posted_date = (job.posted_date | local_date) if job.posted_date else "—" %}
 
 <tr class="border-b border-slate-700 bg-slate-800/40">
   <td colspan="7" class="px-4 py-3">

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from job_finder.config import DEFAULT_DAILY_BUDGET_USD
-from job_finder.json_utils import utc_now_iso
+from job_finder.json_utils import local_day_utc_window, utc_now_iso
 
 try:
     from jsonschema import ValidationError as _ValidationError
@@ -270,19 +270,18 @@ def cost_gate(
     scoring_cfg = config.get("scoring", {})
     daily_cap: float = scoring_cfg.get("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
 
-    now = datetime.now(UTC)
-
     # Only count spend from per-call billed providers (exclude free/subscription)
     free = tuple(FREE_PROVIDERS)
     free_placeholders = ",".join("?" * len(free))
 
-    # Daily check
-    day_start = now.strftime("%Y-%m-%dT00:00:00Z")
+    # Daily check — window anchored on user-local midnight so the cap resets
+    # at the user's calendar day boundary, not UTC midnight (which is 5 pm PT).
+    day_start, day_end = local_day_utc_window()
     row = conn.execute(
         f"SELECT COALESCE(SUM(cost_usd), 0.0) "
-        f"FROM scoring_costs WHERE timestamp >= ? "
+        f"FROM scoring_costs WHERE timestamp >= ? AND timestamp < ? "
         f"AND provider NOT IN ({free_placeholders})",
-        (day_start, *free),
+        (day_start, day_end, *free),
     ).fetchone()
     return (row[0] if row else 0.0) < daily_cap
 
@@ -319,7 +318,8 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
         budget_cap = DEFAULT_DAILY_BUDGET_USD
     now = datetime.now(UTC)
 
-    today_start = now.strftime("%Y-%m-%dT00:00:00Z")
+    # today window: user-local midnight → local tomorrow midnight (both as UTC)
+    today_start, today_end = local_day_utc_window()
     week_start = (
         now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -328,15 +328,16 @@ def get_cost_stats(conn: sqlite3.Connection, budget_cap: float | None = None) ->
     free = tuple(FREE_PROVIDERS)
     free_placeholders = ",".join("?" * len(free))
 
-    # Single query computes all three time-window sums in one index scan
+    # Single query computes all three time-window sums in one index scan.
+    # today uses >= start AND < end (local-day window); week/month use >= only.
     row = conn.execute(
         f"SELECT "
-        f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
+        f"  COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? THEN cost_usd END), 0.0), "
         f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0), "
         f"  COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd END), 0.0) "
         f"FROM scoring_costs "
         f"WHERE timestamp >= ? AND provider NOT IN ({free_placeholders})",
-        (today_start, week_start, month_start, month_start, *free),
+        (today_start, today_end, week_start, month_start, month_start, *free),
     ).fetchone()
     today_spend = float(row[0])
     week_spend = float(row[1])
@@ -456,18 +457,20 @@ def get_usage_stats(conn: sqlite3.Connection) -> dict:
         conn: Open SQLite connection with scoring_costs table.
     """
     now = datetime.now(UTC)
-    today_start = now.strftime("%Y-%m-%dT00:00:00Z")
+    # today window: user-local midnight → local tomorrow midnight (both as UTC)
+    today_start, today_end = local_day_utc_window()
     week_start = (
         now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
     month_start = now.strftime("%Y-%m-01T00:00:00Z")
 
     # Single-pass aggregation: 3 windows × 3 metrics in one scan.
+    # today uses >= start AND < end (local-day window); week/month use >= only.
     row = conn.execute(
         "SELECT "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 END), 0), "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN input_tokens END), 0), "
-        "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? THEN 1 END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? THEN input_tokens END), 0), "
+        "  COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? THEN output_tokens END), 0), "
         "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN 1 END), 0), "
         "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN input_tokens END), 0), "
         "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0), "
@@ -476,7 +479,7 @@ def get_usage_stats(conn: sqlite3.Connection) -> dict:
         "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0) "
         "FROM scoring_costs WHERE timestamp >= ?",
         (
-            today_start, today_start, today_start,
+            today_start, today_end, today_start, today_end, today_start, today_end,
             week_start, week_start, week_start,
             month_start, month_start, month_start,
             month_start,

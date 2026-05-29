@@ -221,12 +221,15 @@ class TestSalaryExtraction:
 
 class TestParseTimestamp:
     def test_parses_dataforseo_format(self, source):
+        # Post timezone-normalization (2026-05-29): _parse_timestamp returns
+        # naive UTC to align with the codebase-wide store-UTC convention.
         dt = source._parse_timestamp("2026-04-01 12:00:00 +00:00")
         assert dt is not None
-        assert dt.tzinfo is not None  # must be timezone-aware
+        assert dt.tzinfo is None  # naive UTC (no offset suffix)
         assert dt.year == 2026
         assert dt.month == 4
         assert dt.day == 1
+        assert dt.hour == 12
 
     def test_returns_none_on_empty_string(self, source):
         assert source._parse_timestamp("") is None
