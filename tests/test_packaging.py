@@ -216,8 +216,7 @@ def test_release_checklist_covers_manual_steps():
     import pytest
 
     checklist = (
-        ".planning/phases/44-pypi-release-pipeline-install-docs/"
-        "PHASE-44-RELEASE-CHECKLIST.md"
+        ".planning/phases/44-pypi-release-pipeline-install-docs/PHASE-44-RELEASE-CHECKLIST.md"
     )
     if not os.path.exists(checklist):
         pytest.skip(f"{checklist} not present (gitignored; expected on CI)")
