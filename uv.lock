@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -846,7 +846,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "keyring", specifier = ">=24.0" },
     { name = "llama-cpp-python", marker = "extra == 'local-ai'", specifier = ">=0.2.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = "~=1.13" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13,<3.0" },
     { name = "numpy", marker = "extra == 'eval'", specifier = "~=2.4" },
     { name = "pdfplumber", specifier = ">=0.10" },
     { name = "platformdirs", specifier = ">=4.0" },

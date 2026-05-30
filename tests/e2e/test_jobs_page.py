@@ -239,9 +239,7 @@ class TestDOMIntegrity:
             f"Sort filter should be restored from localStorage, got: {sort_val!r}"
         )
 
-    def test_posted_within_restore_actually_refreshes_table(
-        self, page: Page, live_server: str
-    ):
+    def test_posted_within_restore_actually_refreshes_table(self, page: Page, live_server: str):
         """posted_within=today restored from localStorage must drive an HTMX fetch
         so the table reflects the filter, not just the dropdown UI.
 
@@ -255,15 +253,55 @@ class TestDOMIntegrity:
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
         page.wait_for_load_state("networkidle")
 
-        # Apply 'today' filter and wait for the HTMX table refresh.
+        # Instrument htmx:afterSettle so we can wait for the swap to fully
+        # apply (HTMX strips the transient `htmx-added` / `htmx-swapping`
+        # classes during settle, so we must read AFTER settle to get a
+        # stable inner_html). networkidle alone fires before the swap settles.
+        page.evaluate(
+            """
+            window._tableSettles = 0;
+            document.body.addEventListener('htmx:afterSettle', function(evt) {
+              if (evt.detail && evt.detail.target && evt.detail.target.id === 'job-table-body') {
+                window._tableSettles += 1;
+              }
+            });
+            """
+        )
+
+        # Apply 'today' filter and wait for the HTMX swap to settle.
         page.select_option("#filter-posted-within", "today")
-        page.wait_for_load_state("networkidle")
+        page.wait_for_function("window._tableSettles >= 1", timeout=10000)
         filtered_html = page.locator("#job-table-body").inner_html()
 
         # Reload — localStorage should reapply 'today' and fire an HTMX request
         # that refreshes #job-table-body to the same filtered contents.
         page.reload()
         page.wait_for_function("typeof htmx !== 'undefined'", timeout=10000)
+        page.wait_for_load_state("networkidle")
+        # Re-instrument after reload (window was reset by navigation) and wait
+        # for the restoreFilters-driven swap to settle. The form's checkbox-on
+        # request and the form-level request both target #job-table-body, so
+        # we wait until at least one has settled before reading.
+        page.evaluate(
+            """
+            window._tableSettles = 0;
+            document.body.addEventListener('htmx:afterSettle', function(evt) {
+              if (evt.detail && evt.detail.target && evt.detail.target.id === 'job-table-body') {
+                window._tableSettles += 1;
+              }
+            });
+            """
+        )
+        # The restore triggers `change` on hide_stale (firstRestored), which
+        # propagates to both the checkbox's own hx-get and the form's hx-trigger.
+        # Wait for at least one settle; if no settle fires (a regression of
+        # the actual bug), let the inner_html comparison below surface it.
+        try:
+            page.wait_for_function("window._tableSettles >= 1", timeout=5000)
+        except Exception:
+            pass
+        # Two requests fire on restore (form + checkbox); give the second
+        # settle a moment to land so we don't capture a state between them.
         page.wait_for_load_state("networkidle")
 
         # Dropdown should show 'today'

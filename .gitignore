@@ -23,6 +23,9 @@ __pycache__/
 
 # Reports
 reports/
+
+# GitHub-issues triage report (regenerable, contains snapshot of open issues)
+triage.json
 eval_results/
 
 # IDE

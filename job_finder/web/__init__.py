@@ -137,6 +137,26 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         run_migrations(app.config["DB_PATH"], user_data_root=str(user_data_dirs.user_data_root()))
     app.teardown_appcontext(close_db)
 
+    # --- Test isolation: pre-seed onboarding_complete so the @before_request
+    # gate doesn't 302 every route to /onboarding/welcome in CI environments
+    # (where _legacy_install_detected() returns False because config.yaml /
+    # experience_profile.json don't exist on a fresh checkout). Many test
+    # fixtures bypass conftest's shared `app` fixture and call create_app()
+    # directly; centralizing the seed here avoids requiring every fixture to
+    # remember to seed. Tests that exercise the redirect (test_onboarding_gate)
+    # UPDATE the row back to 0 in their own fixture (app_unconfigured).
+    if cfg.get("TESTING") or "pytest" in sys.modules:
+        import sqlite3 as _seed_sqlite3
+
+        _seed_conn = _seed_sqlite3.connect(app.config["DB_PATH"])
+        try:
+            _seed_conn.execute(
+                "INSERT OR IGNORE INTO onboarding_state (id, onboarding_complete) VALUES (1, 1)"
+            )
+            _seed_conn.commit()
+        finally:
+            _seed_conn.close()
+
     # --- One-time background passes (TESTING-guarded) ---
     # Runs after migration so all columns exist.
     # Skipped when config has TESTING key OR when running under pytest (sys.modules check).
@@ -164,6 +184,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         # of the precedence stack. On failure (headless Linux without D-Bus, etc.):
         # step 2 is skipped and config.yaml plaintext fallback handles everything.
         from job_finder.secrets import probe_keyring_backend
+
         probe_keyring_backend()
 
         # Warn loudly if the env var is unset and a jobs.db exists at cwd that the
@@ -325,6 +346,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
             banner_context,
             kick_off_background_check_if_due,
         )
+
         kick_off_background_check_if_due(app.config)
         g.update_banner = banner_context()
 

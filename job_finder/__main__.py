@@ -14,7 +14,7 @@ Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
 import argparse
 import logging
 import os
-import sys
+import sys  # noqa: F401 — tests patch `job_finder.__main__.sys.argv`; argparse reads through this module reference
 import threading
 import webbrowser
 
@@ -32,7 +32,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="job-cannon",
         description="Personal job search command center — Flask web app on localhost:5000.",
         epilog="Configuration: see docs/SETUP.md. Without config.yaml the app launches "
-               "into the onboarding wizard on first run.",
+        "into the onboarding wizard on first run.",
     )
     parser.add_argument(
         "--version",
@@ -49,7 +49,8 @@ def _get_version() -> str:
     running from a source checkout without `uv pip install -e .`).
     """
     try:
-        from importlib.metadata import version, PackageNotFoundError
+        from importlib.metadata import PackageNotFoundError, version
+
         try:
             return version("job-cannon")
         except PackageNotFoundError:
