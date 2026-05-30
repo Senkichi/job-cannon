@@ -24,6 +24,16 @@ from job_finder.web.scheduler._ollama import _ensure_ollama_running
 from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
 from job_finder.web.scheduler._sync import run_sync_now
 
+__all__ = [
+    "_acquire_scheduler_pidfile",
+    "_ensure_ollama_running",
+    "get_scheduler",
+    "init_scheduler",
+    "register_all_jobs",
+    "reset_scheduler",
+    "run_sync_now",
+]
+
 logger = logging.getLogger(__name__)
 
 # Module-level singleton -- prevents double initialization

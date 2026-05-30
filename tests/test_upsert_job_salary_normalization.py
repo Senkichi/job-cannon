@@ -33,7 +33,7 @@ from job_finder.web.db_migrate import run_migrations
 
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115 — explicit close+unlink to share path with sqlite3.connect
     tmp.close()
     path = Path(tmp.name)
     try:

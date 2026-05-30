@@ -108,14 +108,14 @@ def test_resolve_provider_missing_primary_raises():
     providers.primary now raises ValueError so misconfiguration fails loud.
     """
     config = {}
-    with pytest.raises(ValueError, match="providers.primary is not configured"):
+    with pytest.raises(ValueError, match=r"providers\.primary is not configured"):
         resolve_provider_config("score", config)
 
 
 def test_resolve_provider_no_providers_section_raises():
     """Same as above — no providers section at all also raises (Fix 4a)."""
     config = {}
-    with pytest.raises(ValueError, match="providers.primary is not configured"):
+    with pytest.raises(ValueError, match=r"providers\.primary is not configured"):
         resolve_provider_config("score", config)
 
 
@@ -284,9 +284,7 @@ def test_call_model_routes_to_configured_provider(tmp_path):
 
         result = call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
-    mock_make_adapter.assert_called_once_with(
-        "gemini", conn, config, job_id=None, purpose=""
-    )
+    mock_make_adapter.assert_called_once_with("gemini", conn, config, job_id=None, purpose="")
     assert result.provider == "gemini"
 
 
@@ -442,9 +440,7 @@ def test_call_model_checks_budget_for_paid_provider(tmp_path):
         mock_adapter.call.return_value = _make_result(provider="cerebras")
         mock_make_adapter.return_value = mock_adapter
 
-        call_model(
-            "score", "sys", [{"role": "user", "content": "hi"}], conn, config
-        )
+        call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_cost_gate.assert_called_once_with(conn, config, "score")
 
@@ -503,9 +499,7 @@ def test_call_model_no_record_cost_for_anthropic(tmp_path):
         mock_adapter.call.return_value = anthropic_result
         mock_make_adapter.return_value = mock_adapter
 
-        call_model(
-            "score", "sys", [{"role": "user", "content": "hi"}], conn, config
-        )
+        call_model("score", "sys", [{"role": "user", "content": "hi"}], conn, config)
 
     mock_record_cost.assert_not_called()
 
@@ -579,7 +573,6 @@ def test_call_model_raises_cascade_exhausted_on_single_provider_schema_failure(t
 # Daily rate limit tracker tests (TEST-03)
 # ---------------------------------------------------------------------------
 
-from datetime import UTC
 
 import job_finder.web.model_provider as _mp
 
@@ -960,28 +953,26 @@ def test_provider_defaults_contains_all_eight_providers():
 
 
 def test_valid_workloads_set_is_quick_score_triage():
-    assert _VALID_WORKLOADS == frozenset({"quick", "score", "triage"})
+    assert frozenset({"quick", "score", "triage"}) == _VALID_WORKLOADS
 
 
 def test_provider_defaults_has_no_legacy_tier_keys_in_inner_maps():
     flat_keys: set[str] = set()
     for mapping in _PROVIDER_DEFAULTS.values():
         flat_keys.update(mapping.keys())
-    assert flat_keys.isdisjoint(
-        {"low", "mid", "high", "scoring", "haiku", "sonnet", "opus"}
-    )
+    assert flat_keys.isdisjoint({"low", "mid", "high", "scoring", "haiku", "sonnet", "opus"})
 
 
 @pytest.mark.xfail(reason="Fixed in Plan 40-02: _LEGACY_TIER_MAP removed in Phase 40")
 def test_legacy_tier_map_translates_quick_to_quick():
-    assert _LEGACY_TIER_MAP["quick"] == "quick"
-    assert _LEGACY_TIER_MAP["score"] == "score"
-    assert _LEGACY_TIER_MAP["score"] == "score"
-    assert _LEGACY_TIER_MAP["score"] == "score"
+    assert _LEGACY_TIER_MAP["quick"] == "quick"  # noqa: F821 — intentionally undefined; xfail asserts the symbol no longer exists
+    assert _LEGACY_TIER_MAP["score"] == "score"  # noqa: F821
+    assert _LEGACY_TIER_MAP["score"] == "score"  # noqa: F821
+    assert _LEGACY_TIER_MAP["score"] == "score"  # noqa: F821
     # Forward-compat passthrough
-    assert _LEGACY_TIER_MAP["quick"] == "quick"
-    assert _LEGACY_TIER_MAP["score"] == "score"
-    assert _LEGACY_TIER_MAP["triage"] == "triage"
+    assert _LEGACY_TIER_MAP["quick"] == "quick"  # noqa: F821
+    assert _LEGACY_TIER_MAP["score"] == "score"  # noqa: F821
+    assert _LEGACY_TIER_MAP["triage"] == "triage"  # noqa: F821
 
 
 @pytest.mark.xfail(reason="Fixed in Plan 40-02: legacy tier names removed in Phase 40")

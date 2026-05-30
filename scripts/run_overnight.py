@@ -6,6 +6,7 @@ app so job functions get proper app context without launching a second
 scheduler. Pauses pipeline_detection on the live scheduler first to avoid
 interference.
 """
+
 import importlib
 import time
 import traceback
@@ -36,7 +37,7 @@ def _resume(job_id: str) -> None:
 
 
 def _run(name: str, mod_path: str, func_name: str, db_path: str, cfg: dict, app) -> object:
-    log(f"\n{'='*64}")
+    log(f"\n{'=' * 64}")
     log(f"START  {name}")
     t0 = time.time()
     try:
@@ -61,7 +62,8 @@ def main() -> None:
     log("Pausing pipeline_detection on live scheduler...")
     _pause("pipeline_detection")
 
-    cfg = yaml.safe_load(open("config.yaml"))
+    with open("config.yaml") as _cfg_fh:
+        cfg = yaml.safe_load(_cfg_fh)
     # SKIP_SCHEDULER (not TESTING) is the right flag here. TESTING also makes
     # 4 job functions no-op silently (careers_crawl, ats_scan, ats_slug_probe,
     # ats_identity_reconcile) — see job_finder/web/scheduler/__init__.py:46
@@ -71,22 +73,35 @@ def main() -> None:
     cfg["SKIP_SCHEDULER"] = True
 
     from job_finder.web import create_app
+
     app = create_app(config=cfg)
     db_path = app.config["DB_PATH"]
     log(f"App context ready, db_path={db_path}")
 
     # Chronological order matching scheduled times (midnight → 7:30 AM)
     sequence = [
-        ("Ingestion (midnight + 8 AM)",     "job_finder.web.pipeline_runner",    "run_ingestion"),
-        ("Enrichment backfill (1 AM)",       "job_finder.web.scheduler._runners", "run_enrichment_backfill_two_stage"),
-        ("Staleness check (2 AM)",           "job_finder.web.expiry_checker",     "run_staleness_check"),
-        ("Agentic backfill (4:15 AM)",       "job_finder.web.agentic_enricher",   "run_agentic_backfill"),
-        ("ATS source-URL promote (4:45 AM)", "job_finder.web.ats_scanner",        "promote_ats_from_source_urls"),
-        ("Careers crawl (5:00 AM)",          "job_finder.web.careers_crawler",    "crawl_careers_batch"),
-        ("Company linkage (5:00 AM)",        "job_finder.web.backfill_companies", "run_company_linkage"),
-        ("Homepage discovery (6:30 AM)",     "job_finder.web.homepage_discoverer","run_homepage_discovery"),
-        ("ATS slug probe (7:30 AM)",         "job_finder.web.ats_scanner",        "probe_ats_slugs"),
-        ("ATS scan (7:00 AM)",               "job_finder.web.ats_scanner",        "run_ats_scan"),
+        ("Ingestion (midnight + 8 AM)", "job_finder.web.pipeline_runner", "run_ingestion"),
+        (
+            "Enrichment backfill (1 AM)",
+            "job_finder.web.scheduler._runners",
+            "run_enrichment_backfill_two_stage",
+        ),
+        ("Staleness check (2 AM)", "job_finder.web.expiry_checker", "run_staleness_check"),
+        ("Agentic backfill (4:15 AM)", "job_finder.web.agentic_enricher", "run_agentic_backfill"),
+        (
+            "ATS source-URL promote (4:45 AM)",
+            "job_finder.web.ats_scanner",
+            "promote_ats_from_source_urls",
+        ),
+        ("Careers crawl (5:00 AM)", "job_finder.web.careers_crawler", "crawl_careers_batch"),
+        ("Company linkage (5:00 AM)", "job_finder.web.backfill_companies", "run_company_linkage"),
+        (
+            "Homepage discovery (6:30 AM)",
+            "job_finder.web.homepage_discoverer",
+            "run_homepage_discovery",
+        ),
+        ("ATS slug probe (7:30 AM)", "job_finder.web.ats_scanner", "probe_ats_slugs"),
+        ("ATS scan (7:00 AM)", "job_finder.web.ats_scanner", "run_ats_scan"),
     ]
 
     results: dict[str, object] = {}
@@ -96,7 +111,7 @@ def main() -> None:
 
     total = round(time.time() - t_total, 1)
 
-    log(f"\n{'='*64}")
+    log(f"\n{'=' * 64}")
     log(f"ALL DONE  (total {total}s)")
     log("Summary:")
     for name, result in results.items():

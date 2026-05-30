@@ -56,12 +56,12 @@ def _factory_ollama():
 
     with patch("requests.get", return_value=health_response):
         provider = OllamaProvider(config={})
+
     # Return a callable that wraps both the provider AND the chat-response patch.
     def _do_call() -> ModelResult:
         with patch("requests.post", return_value=chat_response):
-            return provider.call(
-                "qwen2.5:14b", "s", [{"role": "user", "content": "u"}]
-            )
+            return provider.call("qwen2.5:14b", "s", [{"role": "user", "content": "u"}])
+
     return _do_call
 
 
@@ -89,9 +89,8 @@ def _factory_claude_code_cli():
             "job_finder.web.providers.claude_code_cli._run_oneshot",
             return_value=envelope,
         ):
-            return provider.call(
-                "claude-haiku-4-5", "s", [{"role": "user", "content": "u"}]
-            )
+            return provider.call("claude-haiku-4-5", "s", [{"role": "user", "content": "u"}])
+
     return _do_call
 
 
@@ -115,9 +114,8 @@ def _factory_gemini_cli():
             "job_finder.web.providers.gemini_cli.subprocess.run",
             return_value=run_result,
         ):
-            return provider.call(
-                "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-            )
+            return provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
+
     return _do_call
 
 
@@ -129,11 +127,13 @@ def _factory_local_bundled():
     class _FakeLlama:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+
         def create_chat_completion(self, **kwargs):
             return {
                 "choices": [{"message": {"content": "pong"}}],
                 "usage": {"prompt_tokens": 4, "completion_tokens": 2},
             }
+
     fake_module.Llama = _FakeLlama
     sys.modules["llama_cpp"] = fake_module
 
@@ -143,9 +143,8 @@ def _factory_local_bundled():
         provider = LocalBundledProvider(model_path="/fake.gguf")
 
     def _do_call() -> ModelResult:
-        return provider.call(
-            "ignored", "s", [{"role": "user", "content": "u"}]
-        )
+        return provider.call("ignored", "s", [{"role": "user", "content": "u"}])
+
     return _do_call
 
 
@@ -174,11 +173,17 @@ def test_call_returns_canonical_model_result_shape(factory_fn, expected_provider
     assert isinstance(result, ModelResult)
     assert isinstance(result.data, dict), f"data is {type(result.data).__name__}"
     assert isinstance(result.cost_usd, float), f"cost_usd is {type(result.cost_usd).__name__}"
-    assert isinstance(result.input_tokens, int), f"input_tokens is {type(result.input_tokens).__name__}"
-    assert isinstance(result.output_tokens, int), f"output_tokens is {type(result.output_tokens).__name__}"
+    assert isinstance(result.input_tokens, int), (
+        f"input_tokens is {type(result.input_tokens).__name__}"
+    )
+    assert isinstance(result.output_tokens, int), (
+        f"output_tokens is {type(result.output_tokens).__name__}"
+    )
     assert isinstance(result.model, str), f"model is {type(result.model).__name__}"
     assert isinstance(result.provider, str), f"provider is {type(result.provider).__name__}"
-    assert isinstance(result.schema_valid, bool), f"schema_valid is {type(result.schema_valid).__name__}"
+    assert isinstance(result.schema_valid, bool), (
+        f"schema_valid is {type(result.schema_valid).__name__}"
+    )
 
 
 @pytest.mark.parametrize("factory_fn,expected_provider", PROVIDER_FACTORIES)
@@ -265,7 +270,9 @@ def test_no_shell_true_in_new_provider_files(path):
     for line in lines:
         # Only check lines that are actual subprocess.run function calls
         if "subprocess.run(" in line and not line.strip().startswith("#"):
-            assert "shell=True" not in line, f"{path} contains shell=True in subprocess.run call: {line}"
+            assert "shell=True" not in line, (
+                f"{path} contains shell=True in subprocess.run call: {line}"
+            )
 
 
 @pytest.mark.parametrize("path", _NEW_PROVIDER_FILES)
@@ -283,8 +290,7 @@ def test_every_subprocess_run_has_timeout_kwarg(path):
         # Search the next 500 chars for the call-closing paren + a timeout= kwarg.
         window = src[idx : idx + 500]
         assert "timeout=" in window, (
-            f"{path}: subprocess.run at offset {idx} has no timeout= kwarg "
-            f"within 500 chars"
+            f"{path}: subprocess.run at offset {idx} has no timeout= kwarg within 500 chars"
         )
         cursor = idx + len("subprocess.run(")
     # claude_code_cli.py delegates to _run_oneshot; it intentionally has 0
@@ -300,6 +306,7 @@ def test_every_subprocess_run_has_timeout_kwarg(path):
 
 def test_make_adapter_dispatches_claude_code_cli():
     from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
+
     with patch(
         "job_finder.web.providers.claude_code_cli.shutil.which",
         return_value="/usr/bin/claude",
@@ -310,6 +317,7 @@ def test_make_adapter_dispatches_claude_code_cli():
 
 def test_make_adapter_dispatches_gemini_cli():
     from job_finder.web.providers.gemini_cli import GeminiCLIProvider
+
     with patch(
         "job_finder.web.providers.gemini_cli.shutil.which",
         return_value="/usr/bin/gemini",
@@ -319,7 +327,7 @@ def test_make_adapter_dispatches_gemini_cli():
 
 
 def test_make_adapter_local_bundled_requires_model_path():
-    with pytest.raises(ValueError, match="providers.local_bundled.model_path not configured"):
+    with pytest.raises(ValueError, match=r"providers\.local_bundled\.model_path not configured"):
         _make_adapter("local_bundled", conn=None, config={})
 
 
@@ -330,10 +338,12 @@ def test_make_adapter_local_bundled_with_model_path_constructs_provider():
     class _FakeLlama:
         def __init__(self, **kwargs):
             pass
+
     fake_module.Llama = _FakeLlama
     sys.modules["llama_cpp"] = fake_module
 
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     config = {"providers": {"local_bundled": {"model_path": "/fake.gguf", "n_ctx": 4096}}}
     with patch("pathlib.Path.exists", return_value=True):
         adapter = _make_adapter("local_bundled", conn=None, config=config)
@@ -349,5 +359,6 @@ def test_all_new_providers_are_base_provider_subclasses():
     from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
     from job_finder.web.providers.gemini_cli import GeminiCLIProvider
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     for cls in (ClaudeCodeCLIProvider, GeminiCLIProvider, LocalBundledProvider):
         assert issubclass(cls, BaseProvider), f"{cls.__name__} is not a BaseProvider subclass"

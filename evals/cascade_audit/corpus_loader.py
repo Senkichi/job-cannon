@@ -12,14 +12,13 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def _safe_cache_stem(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", value).strip(" ._")
-    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
+    digest = hashlib.sha1(value.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
     if not cleaned:
         cleaned = "item"
     return f"{cleaned[:80]}-{digest}"
@@ -79,7 +78,9 @@ class CorpusLoader:
             n_per_callsite, conn, round_0_dir
         )
         corpus["extract_jobs"] = self._sample_extract_jobs(
-            50, conn, round_0_dir  # Spec requires 50 companies for extract_jobs
+            50,
+            conn,
+            round_0_dir,  # Spec requires 50 companies for extract_jobs
         )
         corpus["description_reformat"] = self._sample_description_reformat(
             judge_n_per_callsite, conn, round_0_dir
@@ -93,8 +94,7 @@ class CorpusLoader:
 
         # Persist dedup_keys for reproducibility
         dedup_keys = {
-            callsite: [row["dedup_key"] for row in rows]
-            for callsite, rows in corpus.items()
+            callsite: [row["dedup_key"] for row in rows] for callsite, rows in corpus.items()
         }
         self._dedup_keys_file.write_text(json.dumps(dedup_keys, indent=2), encoding="utf-8")
 
@@ -129,9 +129,7 @@ class CorpusLoader:
         corpus["find_careers_url"] = self._load_by_keys(
             "companies", dedup_keys["find_careers_url"], conn
         )
-        corpus["extract_jobs"] = self._load_by_keys(
-            "companies", dedup_keys["extract_jobs"], conn
-        )
+        corpus["extract_jobs"] = self._load_by_keys("companies", dedup_keys["extract_jobs"], conn)
         corpus["description_reformat"] = self._load_by_keys(
             "jobs", dedup_keys["description_reformat"], conn
         )

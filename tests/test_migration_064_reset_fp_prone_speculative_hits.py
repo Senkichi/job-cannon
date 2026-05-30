@@ -251,7 +251,7 @@ class TestRowsOutsideCohortArePreserved:
             )
         _run_m064(path, conn)
 
-        for plat, cid in zip(survivor_platforms, cids):
+        for plat, cid in zip(survivor_platforms, cids, strict=True):
             state = _company_state(conn, cid)
             assert state["ats_platform"] == plat, (
                 f"{plat} row should be preserved; got platform={state['ats_platform']}"
@@ -277,7 +277,7 @@ class TestRowsOutsideCohortArePreserved:
             )
         _run_m064(path, conn)
 
-        for status, cid in zip(("pending", "miss", "error"), cids):
+        for status, cid in zip(("pending", "miss", "error"), cids, strict=True):
             state = _company_state(conn, cid)
             assert state["ats_probe_status"] == status
             assert state["ats_platform"] == "bamboohr"  # preserved

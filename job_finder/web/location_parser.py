@@ -143,11 +143,57 @@ _COUNTRY_ALIASES: dict[str, str] = {
 
 _US_STATE_CODES: frozenset[str] = frozenset(
     {
-        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI",
-        "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
-        "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC",
-        "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
-        "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+        "AL",
+        "AK",
+        "AZ",
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "DE",
+        "FL",
+        "GA",
+        "HI",
+        "ID",
+        "IL",
+        "IN",
+        "IA",
+        "KS",
+        "KY",
+        "LA",
+        "ME",
+        "MD",
+        "MA",
+        "MI",
+        "MN",
+        "MS",
+        "MO",
+        "MT",
+        "NE",
+        "NV",
+        "NH",
+        "NJ",
+        "NM",
+        "NY",
+        "NC",
+        "ND",
+        "OH",
+        "OK",
+        "OR",
+        "PA",
+        "RI",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+        "UT",
+        "VT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+        "DC",
     }
 )
 
@@ -285,9 +331,7 @@ def _lookup_country(token: str) -> tuple[str, str] | None:
 # ─── Region (subdivision) match ──────────────────────────────────────
 
 
-def _lookup_region(
-    token: str, country_code: str
-) -> tuple[str, str] | None:
+def _lookup_region(token: str, country_code: str) -> tuple[str, str] | None:
     """Return ``(region_code_short, region_name)`` for a token within a country.
 
     ``region_code_short`` is the subdivision code WITHOUT the country prefix
@@ -632,7 +676,7 @@ def parse_locations(
             token = match.group(2).lower()
             if token.replace("-", "").replace(" ", "") in {"remote", "fullyremote"}:
                 promoted_workplace = "REMOTE"
-            elif token == "hybrid":
+            elif token == "hybrid":  # noqa: S105 — workplace type token, not a credential
                 promoted_workplace = "HYBRID"
             else:
                 promoted_workplace = "ONSITE"
@@ -671,10 +715,7 @@ def parse_locations(
         # Apply trailing-slash workplace promotion: only fires when the
         # entry's own detection came back UNSPECIFIED (an explicit
         # per-segment token wins over the promoted one).
-        if (
-            promoted_workplace is not None
-            and parsed.workplace_type == "UNSPECIFIED"
-        ):
+        if promoted_workplace is not None and parsed.workplace_type == "UNSPECIFIED":
             parsed = JobLocation(
                 city=parsed.city,
                 region=parsed.region,

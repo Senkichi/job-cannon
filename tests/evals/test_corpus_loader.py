@@ -21,7 +21,6 @@ import pytest
 
 from evals.cascade_audit.corpus_loader import CorpusLoader, _safe_cache_stem
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -61,8 +60,7 @@ def _make_in_memory_db() -> sqlite3.Connection:
     # Seed jobs: enough rows with jd_full > 400 chars and description.
     long_jd = "Lorem ipsum dolor sit amet. " * 25  # ~700 chars
     job_rows = [
-        (f"jobs|fixture|{i}", long_jd, f"Short description for job {i}.")
-        for i in range(10)
+        (f"jobs|fixture|{i}", long_jd, f"Short description for job {i}.") for i in range(10)
     ]
     conn.executemany(
         "INSERT INTO jobs (dedup_key, jd_full, description) VALUES (?, ?, ?)",
@@ -81,8 +79,7 @@ def _make_in_memory_db() -> sqlite3.Connection:
         for i in range(1, 61)  # 60 companies
     ]
     conn.executemany(
-        "INSERT INTO companies (id, homepage_url, name, careers_nav_recipe) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO companies (id, homepage_url, name, careers_nav_recipe) VALUES (?, ?, ?, ?)",
         company_rows,
     )
     conn.commit()
@@ -217,8 +214,7 @@ def test_load_round_1_uses_persisted_dedup_keys(
         round_0_keys = sorted(row["dedup_key"] for row in round_0_corpus[callsite])
         round_1_keys = sorted(row["dedup_key"] for row in round_1_corpus[callsite])
         assert round_0_keys == round_1_keys, (
-            f"{callsite}: round 1 keys diverged from round 0 — "
-            f"reproducibility contract broken"
+            f"{callsite}: round 1 keys diverged from round 0 — reproducibility contract broken"
         )
 
 
@@ -226,7 +222,7 @@ def test_load_round_1_raises_when_round_0_missing(
     loader: CorpusLoader, db_conn: sqlite3.Connection
 ) -> None:
     """Round 1 must fail loudly (FileNotFoundError) if Round 0 wasn't run."""
-    with pytest.raises(FileNotFoundError, match="dedup_keys.json"):
+    with pytest.raises(FileNotFoundError, match=r"dedup_keys\.json"):
         loader.load_round_1(conn=db_conn)
 
 
@@ -263,9 +259,7 @@ def test_parameterized_queries_no_injection(
     # Tables intact.
     tables = {
         row[0]
-        for row in db_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        for row in db_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     assert "jobs" in tables, "jobs table dropped — SQL injection succeeded"
     assert "companies" in tables, "companies table dropped — SQL injection succeeded"

@@ -26,15 +26,15 @@ from job_finder.web.pipeline_detector._constants import (
     SIGNAL_KEYWORDS,
     TITLE_STOP_WORDS,
 )
-from job_finder.web.pipeline_detector._gmail import (
-    _fetch_pipeline_emails,
-    _get_gmail_service,
-)
 from job_finder.web.pipeline_detector._db import (
     _already_processed,
     _insert_detection,
     _load_active_jobs,
     _mark_processed,
+)
+from job_finder.web.pipeline_detector._gmail import (
+    _fetch_pipeline_emails,
+    _get_gmail_service,
 )
 from job_finder.web.pipeline_detector._processing import _process_email
 from job_finder.web.pipeline_detector._signals import (
@@ -46,6 +46,36 @@ from job_finder.web.pipeline_detector._signals import (
     _title_in_email,
     score_match,
 )
+
+__all__ = [
+    "ATS_DOMAINS",
+    "CONFIRMATION_KEYWORDS",
+    "CONFIRMATION_QUERY",
+    "DETECTION_TYPE_TO_STATUS",
+    "INACTIVE_STATUSES",
+    "INTERVIEW_KEYWORDS",
+    "INTERVIEW_QUERY",
+    "QUERY_DETECTION_TYPES",
+    "REJECTION_KEYWORDS",
+    "REJECTION_QUERY",
+    "SIGNAL_KEYWORDS",
+    "TITLE_STOP_WORDS",
+    "_already_processed",
+    "_classify_email",
+    "_company_in_email",
+    "_extract_snippet",
+    "_fetch_pipeline_emails",
+    "_get_gmail_service",
+    "_insert_detection",
+    "_load_active_jobs",
+    "_mark_processed",
+    "_process_email",
+    "_sender_is_ats",
+    "_timing_ok",
+    "_title_in_email",
+    "run_pipeline_detection",
+    "score_match",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -124,5 +154,3 @@ def run_pipeline_detection(db_path: str, config: dict) -> dict:
                 logger.debug("conn.rollback() failed in pipeline detection", exc_info=True)
 
     return summary
-
-

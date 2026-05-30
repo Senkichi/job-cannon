@@ -30,7 +30,7 @@ from job_finder.web.location_canonical import JobLocation
 
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115 — explicit close+unlink to share path with sqlite3.connect
     tmp.close()
     path = Path(tmp.name)
     try:
@@ -53,7 +53,9 @@ def _select_loc_cols(conn: sqlite3.Connection, dedup_key: str) -> sqlite3.Row:
     return row
 
 
-def _make_job(*, location: str = "San Francisco, CA", title: str = "Senior Eng", company: str = "TestCo") -> Job:
+def _make_job(
+    *, location: str = "San Francisco, CA", title: str = "Senior Eng", company: str = "TestCo"
+) -> Job:
     return Job(
         title=title,
         company=company,

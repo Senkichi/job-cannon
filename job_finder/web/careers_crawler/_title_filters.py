@@ -63,6 +63,7 @@ def _is_nav_path(path: str) -> bool:
         return True
     return False
 
+
 # Regex to strip trailing location text from concatenated title+location
 _LOCATION_SUFFIX_RE = re.compile(
     r"\s*[-–—|·•]\s*(?:Remote|Hybrid|On-?site|Anywhere|Multiple|Worldwide).*$",
@@ -189,9 +190,7 @@ def _is_metadata_blob(title: str) -> bool:
         return True
     if _HAS_DOLLAR_RE.search(title):
         return True
-    if _REQ_ID_PIPE_RE.search(title):
-        return True
-    return False
+    return bool(_REQ_ID_PIPE_RE.search(title))
 
 
 def _clean_title(tag, raw_text: str) -> str:

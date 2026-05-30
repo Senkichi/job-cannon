@@ -21,8 +21,8 @@ from flask import current_app, g
 
 from job_finder.json_utils import (
     safe_json_load,  # noqa: F401 -- re-exported for backward compatibility
+    utc_now_iso,
 )
-from job_finder.json_utils import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -229,15 +229,14 @@ def render_polling_status(
     # that ticks every ~8s stays alive indefinitely.
     heartbeat_iso = (
         session["last_tick_at"]
-        if "last_tick_at" in session.keys() and session["last_tick_at"]
+        # sqlite3.Row's __contains__ checks values, not keys; .keys() is required.
+        if "last_tick_at" in session.keys() and session["last_tick_at"]  # noqa: SIM118
         else session["started_at"]
     )
     if status not in _POLLING_TERMINAL_STATES and heartbeat_iso:
         try:
             heartbeat = datetime.fromisoformat(heartbeat_iso)
-            elapsed_min = (
-                datetime.now(UTC).replace(tzinfo=None) - heartbeat
-            ).total_seconds() / 60
+            elapsed_min = (datetime.now(UTC).replace(tzinfo=None) - heartbeat).total_seconds() / 60
             if elapsed_min > cfg.timeout_minutes:
                 logger.warning(
                     "%s session %s stale: no tick for %.1f minutes",

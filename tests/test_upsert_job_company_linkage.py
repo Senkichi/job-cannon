@@ -29,7 +29,7 @@ from job_finder.web.db_migrate import run_migrations
 
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115 — explicit close+unlink to share path with sqlite3.connect
     tmp.close()
     path = Path(tmp.name)
     try:
@@ -54,14 +54,14 @@ def _make_job(*, title: str = "Senior Eng", company: str = "TestCo") -> Job:
 
 
 def _read_company_id(conn: sqlite3.Connection, dedup_key: str) -> int | None:
-    r = conn.execute(
-        "SELECT company_id FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    ).fetchone()
+    r = conn.execute("SELECT company_id FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     return r["company_id"] if r else None
 
 
 def _job_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
-    return conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone() is not None
+    )
 
 
 # ---------- company_id attachment ----------

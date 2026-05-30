@@ -9,7 +9,7 @@ def rows_to_dicts(cursor) -> list[dict]:
     columns = [description[0] for description in cursor.description]
     rows = cursor.fetchall()
     return [
-        dict(row) if hasattr(row, "keys") else dict(zip(columns, row))
+        dict(row) if hasattr(row, "keys") else dict(zip(columns, row, strict=False))
         for row in rows
     ]
 

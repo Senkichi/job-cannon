@@ -25,7 +25,7 @@ from job_finder.web.location_canonical import JobLocation
 
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115 — explicit close+unlink to share path with sqlite3.connect
     tmp.close()
     path = Path(tmp.name)
     try:
@@ -67,8 +67,13 @@ class TestInsertDefaults:
     def test_insert_with_explicit_remote_kept(self, conn: sqlite3.Connection):
         # Layer-1 path: caller passes locations_structured directly.
         loc = JobLocation(
-            city=None, region=None, region_code=None, country=None,
-            country_code=None, workplace_type="REMOTE", raw="Remote",
+            city=None,
+            region=None,
+            region_code=None,
+            country=None,
+            country_code=None,
+            workplace_type="REMOTE",
+            raw="Remote",
             unresolved=False,
         )
         upsert_job(conn, _make_job(title="b"), locations_structured=[loc])
@@ -79,8 +84,13 @@ class TestUpdateNoDowngrade:
     def test_remote_not_downgraded_by_unspecified_reingest(self, conn: sqlite3.Connection):
         # First ingest: REMOTE locked in.
         loc = JobLocation(
-            city=None, region=None, region_code=None, country=None,
-            country_code=None, workplace_type="REMOTE", raw="Remote",
+            city=None,
+            region=None,
+            region_code=None,
+            country=None,
+            country_code=None,
+            workplace_type="REMOTE",
+            raw="Remote",
             unresolved=False,
         )
         upsert_job(conn, _make_job(title="c"), locations_structured=[loc])
@@ -98,8 +108,13 @@ class TestUpdateNoDowngrade:
         # Re-ingest with structured REMOTE — real value upgrades the
         # UNSPECIFIED placeholder.
         loc = JobLocation(
-            city=None, region=None, region_code=None, country=None,
-            country_code=None, workplace_type="REMOTE", raw="Remote",
+            city=None,
+            region=None,
+            region_code=None,
+            country=None,
+            country_code=None,
+            workplace_type="REMOTE",
+            raw="Remote",
             unresolved=False,
         )
         upsert_job(conn, _make_job(title="d"), locations_structured=[loc])

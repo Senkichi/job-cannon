@@ -7,6 +7,7 @@ Polls logs/app.log until the job emits a success line ("<Name>: {...}") or a
 failure line ("<Name> failed: ..."), then re-pauses the job. Default max wait
 is 60s. Prints the success/error line plus any WARNING/ERROR/Traceback lines.
 """
+
 from __future__ import annotations
 
 import sys
@@ -50,8 +51,8 @@ def main() -> int:
     start_size = LOG_PATH.stat().st_size if LOG_PATH.exists() else 0
 
     trigger_url = f"http://127.0.0.1:5000/admin/jobs/{job_id}/run-now"
-    req = urllib.request.Request(trigger_url, method="POST")
-    print(f"[trigger] {urllib.request.urlopen(req).read().decode().strip()}")
+    req = urllib.request.Request(trigger_url, method="POST")  # noqa: S310 — fixed http://127.0.0.1 scheme
+    print(f"[trigger] {urllib.request.urlopen(req).read().decode().strip()}")  # noqa: S310
 
     # Poll log for completion.
     deadline = time.time() + max_wait
@@ -73,7 +74,7 @@ def main() -> int:
 
     # Always re-pause so cron next-firing doesn't interfere.
     pause_url = f"http://127.0.0.1:5000/admin/jobs/{job_id}/pause"
-    urllib.request.urlopen(urllib.request.Request(pause_url, method="POST")).read()
+    urllib.request.urlopen(urllib.request.Request(pause_url, method="POST")).read()  # noqa: S310 — fixed http://127.0.0.1 scheme
 
     # Read all log content since trigger.
     with open(LOG_PATH, "rb") as f:

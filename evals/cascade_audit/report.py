@@ -81,9 +81,9 @@ def write_report(
         avg_confidence = sum(v.get("confidence", 0) for v in verdicts) / total if total else 0
 
         out.append(f"- Total comparisons: {total}")
-        out.append(f"- A wins: {wins_a} ({wins_a/total:.1%})" if total else "- A wins: 0")
-        out.append(f"- B wins: {wins_b} ({wins_b/total:.1%})" if total else "- B wins: 0")
-        out.append(f"- Ties: {ties} ({ties/total:.1%})" if total else "- Ties: 0")
+        out.append(f"- A wins: {wins_a} ({wins_a / total:.1%})" if total else "- A wins: 0")
+        out.append(f"- B wins: {wins_b} ({wins_b / total:.1%})" if total else "- B wins: 0")
+        out.append(f"- Ties: {ties} ({ties / total:.1%})" if total else "- Ties: 0")
         out.append(f"- Average confidence: {avg_confidence:.2f}")
     else:
         out.append("_(no verdicts recorded)")
@@ -114,9 +114,7 @@ def _load_round_2_artifacts(artifacts_dir: Path) -> dict[str, dict]:
             artifacts[callsite] = json.loads(artifact_path.read_text(encoding="utf-8"))
     missing = [callsite for callsite in CALLSITES if callsite not in artifacts]
     if missing:
-        raise FileNotFoundError(
-            "Missing Round 2 aggregate artifacts: " + ", ".join(missing)
-        )
+        raise FileNotFoundError("Missing Round 2 aggregate artifacts: " + ", ".join(missing))
     return artifacts
 
 
@@ -182,7 +180,7 @@ def _calibration_log(artifacts: dict[str, dict]) -> list[str]:
                 continue
             verdicts = row.get("verdicts", [])
             # Add one entry per individual verdict, not per provider-callsite pair
-            for verdict in verdicts:
+            for _verdict in verdicts:
                 entries.append(
                     f"Check {len(entries) + 1}: {callsite} / {provider} vs anthropic - PASS"
                 )

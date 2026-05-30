@@ -284,7 +284,7 @@ def main() -> int:
     try:
         wrote = 0
         skipped = 0
-        for cid, key, url, recipe in RECIPES:
+        for cid, key, _url, recipe in RECIPES:
             if only and key != only:
                 skipped += 1
                 continue
