@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import socket
 from dataclasses import dataclass
-from pathlib import Path
 
 from job_finder.web import user_data_dirs
 
@@ -42,6 +41,7 @@ class CheckResult:
 
 
 # --- D-11 strings ---
+
 
 def check_db_writable() -> CheckResult:
     """Touch-and-unlink probe in the user_data_root parent of jobs.db.

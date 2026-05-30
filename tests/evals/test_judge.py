@@ -1,8 +1,6 @@
 """Unit tests for judge protocol (Phase 36)."""
 
-from unittest.mock import Mock, patch
-
-import pytest
+from unittest.mock import Mock
 
 from evals.cascade_audit.judge import JUDGE_SYSTEM_PROMPT, judge_pair, judge_with_position_swap
 from evals.cascade_audit.verdict import Verdict

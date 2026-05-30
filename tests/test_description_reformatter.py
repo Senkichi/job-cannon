@@ -196,9 +196,7 @@ class TestReformatDescriptionCascade:
                 patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
             ):
                 mock_cm.return_value = make_model_result({"text": _REFORMATTED})
-                result = reformat_description(
-                    _RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK
-                )
+                result = reformat_description(_RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK)
 
             mock_cm.assert_called_once()
             assert mock_cm.call_args.kwargs["tier"] == "quick"
@@ -221,9 +219,7 @@ class TestReformatDescriptionCascade:
                 mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
                 # call_claude returns 3-tuple (result, cost, schema_valid)
                 mock_cc.return_value = ({"text": "CLI fallback reformatted text"}, 0.0002, True)
-                result = reformat_description(
-                    _RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK
-                )
+                result = reformat_description(_RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK)
 
             mock_cm.assert_called_once()
             mock_cc.assert_called_once()
@@ -243,9 +239,7 @@ class TestReformatDescriptionCascade:
             ):
                 mock_cm.side_effect = ProviderCascadeExhaustedError("exhausted")
                 mock_cc.side_effect = RuntimeError("CLI unavailable")
-                result = reformat_description(
-                    _RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK
-                )
+                result = reformat_description(_RAW_DESC, conn=conn, config=_CASCADE_CONFIG_QUICK)
 
             assert result == _RAW_DESC
         finally:
@@ -262,9 +256,7 @@ class TestReformatDescriptionCascade:
             patch("job_finder.web.description_reformatter.call_claude") as mock_cc,
         ):
             mock_cc.return_value = ({"text": "Reformatted via CLI"}, 0.0002, True)
-            result = reformat_description(
-                _RAW_DESC, conn=None, config=_CASCADE_CONFIG_QUICK
-            )
+            result = reformat_description(_RAW_DESC, conn=None, config=_CASCADE_CONFIG_QUICK)
 
         mock_cm.assert_not_called()
         mock_cc.assert_called_once()
@@ -290,9 +282,7 @@ class TestRunDescriptionReformatPass:
     """The pass opens its own connection, so reformat_description always sees
     conn != None and routes through call_model. Patching call_model is enough."""
 
-    def test_processes_only_unformatted_jobs(
-        self, db_with_unformatted_jobs, make_model_result
-    ):
+    def test_processes_only_unformatted_jobs(self, db_with_unformatted_jobs, make_model_result):
         from job_finder.web.description_reformatter import run_description_reformat_pass
 
         with patch("job_finder.web.description_reformatter.call_model") as mock_cm:
@@ -311,15 +301,11 @@ class TestRunDescriptionReformatPass:
 
         with patch("job_finder.web.description_reformatter.call_model") as mock_cm:
             mock_cm.return_value = make_model_result({"text": _REFORMATTED})
-            run_description_reformat_pass(
-                db_with_unformatted_jobs, config=_CASCADE_CONFIG_QUICK
-            )
+            run_description_reformat_pass(db_with_unformatted_jobs, config=_CASCADE_CONFIG_QUICK)
 
         conn = sqlite3.connect(db_with_unformatted_jobs)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT dedup_key, description_reformatted FROM jobs"
-        ).fetchall()
+        rows = conn.execute("SELECT dedup_key, description_reformatted FROM jobs").fetchall()
         conn.close()
 
         for row in rows:
@@ -364,9 +350,7 @@ class TestRunDescriptionReformatPass:
 
         with patch("job_finder.web.description_reformatter.call_model") as mock_cm:
             mock_cm.side_effect = _echo
-            run_description_reformat_pass(
-                db_with_unformatted_jobs, config=_CASCADE_CONFIG_QUICK
-            )
+            run_description_reformat_pass(db_with_unformatted_jobs, config=_CASCADE_CONFIG_QUICK)
 
         conn = sqlite3.connect(db_with_unformatted_jobs)
         unprocessed = conn.execute(

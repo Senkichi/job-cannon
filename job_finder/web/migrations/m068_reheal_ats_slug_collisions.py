@@ -135,9 +135,7 @@ def _looks_aggregator(name: str | None) -> bool:
     return any(t in _AGGREGATOR_HINTS for t in tokens)
 
 
-def _slug_name_match_strength(
-    row: sqlite3.Row, slug_norm: str, slug_tokens: list[str]
-) -> int:
+def _slug_name_match_strength(row: sqlite3.Row, slug_norm: str, slug_tokens: list[str]) -> int:
     """How strongly does this name match the slug? Higher is better.
 
     Levels:
@@ -152,11 +150,7 @@ def _slug_name_match_strength(
     name_norm = _normalize_for_match(name)
     if not name_norm:
         return 0
-    if slug_norm and (
-        slug_norm == name_norm
-        or slug_norm in name_norm
-        or name_norm in slug_norm
-    ):
+    if slug_norm and (slug_norm == name_norm or slug_norm in name_norm or name_norm in slug_norm):
         return 3
     nm_tokens = _name_tokens(name)
     if nm_tokens and slug_tokens:
@@ -255,9 +249,7 @@ def _rewrite_loser_jobs(
     return (moved, deleted)
 
 
-def _repoint_side_tables(
-    conn: sqlite3.Connection, loser_id: int, canonical_id: int
-) -> None:
+def _repoint_side_tables(conn: sqlite3.Connection, loser_id: int, canonical_id: int) -> None:
     conn.execute(
         "UPDATE company_scan_log SET company_id = ? WHERE company_id = ?",
         (canonical_id, loser_id),
@@ -290,9 +282,7 @@ def _heal(ctx: MigrationContext) -> None:
 
         by_key: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
         for r in rows:
-            by_key[
-                (r["ats_platform"].strip().lower(), r["ats_slug"].strip())
-            ].append(r)
+            by_key[(r["ats_platform"].strip().lower(), r["ats_slug"].strip())].append(r)
 
         clusters = [(k, v) for k, v in by_key.items() if len(v) > 1]
         merged_rows = jobs_moved_total = jobs_deleted_total = 0
@@ -305,9 +295,7 @@ def _heal(ctx: MigrationContext) -> None:
                 if int(r["id"]) == canonical_id:
                     continue
                 loser_id = int(r["id"])
-                jm, jd = _rewrite_loser_jobs(
-                    conn, loser_id, canonical_id, canonical_name
-                )
+                jm, jd = _rewrite_loser_jobs(conn, loser_id, canonical_id, canonical_name)
                 _repoint_side_tables(conn, loser_id, canonical_id)
                 conn.execute("DELETE FROM companies WHERE id = ?", (loser_id,))
                 merged_rows += 1

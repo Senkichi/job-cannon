@@ -11,9 +11,9 @@ from evals.cascade_audit.judge import JUDGE_SYSTEM_PROMPT, judge_pair, judge_wit
 from evals.cascade_audit.verdict import Verdict
 
 __all__ = [
+    "JUDGE_SYSTEM_PROMPT",
     "CorpusLoader",
     "Verdict",
     "judge_pair",
     "judge_with_position_swap",
-    "JUDGE_SYSTEM_PROMPT",
 ]

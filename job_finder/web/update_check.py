@@ -1,14 +1,15 @@
 """Update-check service — fetches latest GitHub release, caches result, exposes
 banner context for the Jinja2 template layer. See Phase 43 D-01..D-04.
 """
+
 import json
 import logging
 import os
 import threading
-from datetime import datetime, timedelta, timezone
-from importlib.metadata import version as _pkg_version, PackageNotFoundError
+from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -19,9 +20,7 @@ from job_finder.web.user_data_dirs import (
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_RELEASES_LATEST_URL = (
-    "https://api.github.com/repos/Senkichi/job-cannon/releases/latest"
-)
+_GITHUB_RELEASES_LATEST_URL = "https://api.github.com/repos/Senkichi/job-cannon/releases/latest"
 _STALE_AFTER = timedelta(hours=24)
 _FETCH_TIMEOUT_SECONDS = 5
 _MAX_VERSION_LEN = 64  # defense against absurd tag_name responses
@@ -36,14 +35,14 @@ def _empty_cache() -> dict:
     }
 
 
-def _is_stale(cache: Optional[dict]) -> bool:
+def _is_stale(cache: dict | None) -> bool:
     if not cache or not cache.get("checked_at"):
         return True
     try:
         checked_at = datetime.fromisoformat(cache["checked_at"].replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return True
-    return datetime.now(timezone.utc) - checked_at > _STALE_AFTER
+    return datetime.now(UTC) - checked_at > _STALE_AFTER
 
 
 def _write_cache_atomic(cache: dict, cache_path: Path) -> None:
@@ -61,7 +60,7 @@ def _write_cache_atomic(cache: dict, cache_path: Path) -> None:
         raise
 
 
-def current_version() -> Optional[str]:
+def current_version() -> str | None:
     """Return the installed package version with leading 'v', or None.
 
     Source of truth: pyproject.toml > project.version surfaced via
@@ -75,13 +74,13 @@ def current_version() -> Optional[str]:
         return None
 
 
-def read_cache() -> Optional[dict]:
+def read_cache() -> dict | None:
     """Read update_check.json; return None on missing or unparseable."""
     path = update_check_path()
     if not path.exists():
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             return None
@@ -109,13 +108,16 @@ def append_dismissed_version(version_str: str) -> None:
     _write_cache_atomic(cache, update_check_path())
 
 
-def _fetch_and_persist() -> Optional[dict]:
+def _fetch_and_persist() -> dict | None:
     """GET GitHub releases/latest, parse tag_name, persist cache. Silent-fail (D-04)."""
     try:
         response = requests.get(
             _GITHUB_RELEASES_LATEST_URL,
             timeout=_FETCH_TIMEOUT_SECONDS,
-            headers={"Accept": "application/vnd.github+json", "User-Agent": "job-cannon-update-check"},
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "job-cannon-update-check",
+            },
         )
     except requests.RequestException as e:
         logger.info("Update check network error (non-fatal): %s", e)
@@ -138,7 +140,7 @@ def _fetch_and_persist() -> Optional[dict]:
         return None
     prior = read_cache() or _empty_cache()
     cache = {
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
         "latest_version": latest,
         "current_version": current_version(),
         "dismissed_versions": list(prior.get("dismissed_versions") or []),
@@ -173,7 +175,7 @@ def kick_off_background_check_if_due(config: dict) -> None:
     logger.debug("Update check started in background thread")
 
 
-def banner_context() -> Optional[dict]:
+def banner_context() -> dict | None:
     """Return banner template dict, or None if no banner should render (D-08)."""
     cache = read_cache()
     if not cache:

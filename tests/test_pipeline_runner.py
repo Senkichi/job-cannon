@@ -1,9 +1,8 @@
 """Tests for pipeline_runner IMAP vs Gmail routing."""
 
 import os
-import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -50,9 +49,10 @@ def test_run_ingestion_uses_imap_when_enabled(tmp_db):
         },
     }
 
-    with patch("job_finder.web.pipeline_runner._fetch_imap") as mock_fetch_imap, patch(
-        "job_finder.web.pipeline_runner._fetch_gmail"
-    ) as mock_fetch_gmail:
+    with (
+        patch("job_finder.web.pipeline_runner._fetch_imap") as mock_fetch_imap,
+        patch("job_finder.web.pipeline_runner._fetch_gmail") as mock_fetch_gmail,
+    ):
         mock_fetch_imap.return_value = []
         mock_fetch_gmail.return_value = []
 
@@ -88,9 +88,10 @@ def test_run_ingestion_falls_back_to_gmail_when_imap_disabled(tmp_db):
         },
     }
 
-    with patch("job_finder.web.pipeline_runner._fetch_imap") as mock_fetch_imap, patch(
-        "job_finder.web.pipeline_runner._fetch_gmail"
-    ) as mock_fetch_gmail:
+    with (
+        patch("job_finder.web.pipeline_runner._fetch_imap") as mock_fetch_imap,
+        patch("job_finder.web.pipeline_runner._fetch_gmail") as mock_fetch_gmail,
+    ):
         mock_fetch_imap.return_value = []
         mock_fetch_gmail.return_value = []
 

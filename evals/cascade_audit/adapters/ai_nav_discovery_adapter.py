@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 from evals.cascade_audit.adapters import rows_to_dicts
 from evals.cascade_audit.corpus_loader import _safe_cache_stem
@@ -31,7 +30,14 @@ class AiNavDiscoveryAdapter:
         )
         return rows_to_dicts(cursor)
 
-    def exercise(self, row: dict, provider: str, config: dict, conn: sqlite3.Connection, playwright_context=None) -> dict:
+    def exercise(
+        self,
+        row: dict,
+        provider: str,
+        config: dict,
+        conn: sqlite3.Connection,
+        playwright_context=None,
+    ) -> dict:
         """Exercise ai_nav_discovery production code."""
         from job_finder.web.ai_career_navigator import discover_navigation_recipe
 
@@ -46,6 +52,7 @@ class AiNavDiscoveryAdapter:
             raise FileNotFoundError(f"Cached recipe not found: {recipe_path}")
 
         import json
+
         cached_recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
 
         result = discover_navigation_recipe(

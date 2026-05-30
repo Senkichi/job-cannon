@@ -36,11 +36,11 @@ _KEYRING_UNAVAILABLE = False  # set by probe_keyring_backend()
 #   2. Update the read-site caller to use get_secret() instead of dict access.
 # An empty tuple means "no env var; keyring or config only".
 SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
-    "sources.imap.app_password":           (),
-    "sources.serpapi.api_key":             ("SERPAPI_API_KEY",),
-    "sources.thordata.api_key":            ("THORDATA_API_KEY",),
-    "sources.dataforseo.api_key":          ("DATAFORSEO_API_KEY",),
-    "sources.jsearch.rapidapi_key":        ("JSEARCH_RAPIDAPI_KEY", "RAPIDAPI_KEY"),
+    "sources.imap.app_password": (),
+    "sources.serpapi.api_key": ("SERPAPI_API_KEY",),
+    "sources.thordata.api_key": ("THORDATA_API_KEY",),
+    "sources.dataforseo.api_key": ("DATAFORSEO_API_KEY",),
+    "sources.jsearch.rapidapi_key": ("JSEARCH_RAPIDAPI_KEY", "RAPIDAPI_KEY"),
     # Stage 2 free-portal credentials. USAJobs/Adzuna require both halves;
     # Jooble is single-key. The user_agent_email field for USAJobs is the
     # required User-Agent header value (an email address) rather than a
@@ -49,24 +49,24 @@ SECRET_ENV_VARS: dict[str, tuple[str, ...]] = {
     # (sources.portal_search.<name>.*) where the Settings UI writes them
     # — Stage 7.1 reconciled the schema mismatch where the keyring used
     # top-level paths while config / parser / read sites used nested.
-    "sources.portal_search.usajobs.user_agent_email":    ("USAJOBS_USER_AGENT_EMAIL",),
-    "sources.portal_search.usajobs.authorization_key":   ("USAJOBS_AUTHORIZATION_KEY",),
-    "sources.portal_search.adzuna.app_id":               ("ADZUNA_APP_ID",),
-    "sources.portal_search.adzuna.app_key":              ("ADZUNA_APP_KEY",),
-    "sources.portal_search.jooble.api_key":              ("JOOBLE_API_KEY",),
+    "sources.portal_search.usajobs.user_agent_email": ("USAJOBS_USER_AGENT_EMAIL",),
+    "sources.portal_search.usajobs.authorization_key": ("USAJOBS_AUTHORIZATION_KEY",),
+    "sources.portal_search.adzuna.app_id": ("ADZUNA_APP_ID",),
+    "sources.portal_search.adzuna.app_key": ("ADZUNA_APP_KEY",),
+    "sources.portal_search.jooble.api_key": ("JOOBLE_API_KEY",),
     # Stage 3 — Google Programmable Search Engine (free 100/day quota).
     # cse_id is the Programmable Search Engine ID, not a secret per se, but
     # routed through the same precedence stack for symmetry with api_key.
-    "sources.google_cse.api_key":          ("GOOGLE_CSE_API_KEY",),
-    "sources.google_cse.cse_id":           ("GOOGLE_CSE_ID",),
-    "providers.api_keys.openrouter":       ("OPENROUTER_API_KEY",),
-    "providers.api_keys.gemini":           ("GEMINI_API_KEY",),
-    "providers.api_keys.groq":             ("GROQ_API_KEY",),
-    "providers.api_keys.cerebras":         ("CEREBRAS_API_KEY",),
-    "providers.api_keys.anthropic":        ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY"),
-    "providers.api_keys.mistral":          ("MISTRAL_API_KEY",),
-    "providers.api_keys.cohere":           ("CO_API_KEY",),
-    "providers.api_keys.sambanova":        ("SAMBANOVA_API_KEY",),
+    "sources.google_cse.api_key": ("GOOGLE_CSE_API_KEY",),
+    "sources.google_cse.cse_id": ("GOOGLE_CSE_ID",),
+    "providers.api_keys.openrouter": ("OPENROUTER_API_KEY",),
+    "providers.api_keys.gemini": ("GEMINI_API_KEY",),
+    "providers.api_keys.groq": ("GROQ_API_KEY",),
+    "providers.api_keys.cerebras": ("CEREBRAS_API_KEY",),
+    "providers.api_keys.anthropic": ("ANTHROPIC_API_KEY", "JF_ANTHROPIC_API_KEY"),
+    "providers.api_keys.mistral": ("MISTRAL_API_KEY",),
+    "providers.api_keys.cohere": ("CO_API_KEY",),
+    "providers.api_keys.sambanova": ("SAMBANOVA_API_KEY",),
 }
 
 

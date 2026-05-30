@@ -102,16 +102,14 @@ def _consolidate(ctx: MigrationContext) -> None:
     repointed_exact = 0
 
     # --- Pass 1: numeric-prefix orphans ---
-    rows = conn.execute(
-        "SELECT id, name, name_raw FROM companies ORDER BY id ASC"
-    ).fetchall()
+    rows = conn.execute("SELECT id, name, name_raw FROM companies ORDER BY id ASC").fetchall()
     for orphan_id, orphan_name, _name_raw in rows:
         if not orphan_name:
             continue
         match = _NUMERIC_PREFIX_RE.match(orphan_name)
         if not match:
             continue
-        stripped = orphan_name[match.end():].strip()
+        stripped = orphan_name[match.end() :].strip()
         if not stripped:
             continue
         canonical_id = _find_canonical_by_name(conn, stripped)

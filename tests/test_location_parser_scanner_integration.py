@@ -51,9 +51,7 @@ def test_smartrecruiters_full_structured_location_passes_through():
 
 
 def test_smartrecruiters_remote_true_promotes_workplace_type():
-    posting = {
-        "location": {"city": "Toronto", "countryCode": "CA", "remote": True}
-    }
+    posting = {"location": {"city": "Toronto", "countryCode": "CA", "remote": True}}
     out = smartrecruiters_canon(posting)
     assert len(out) == 1
     assert out[0].workplace_type == "REMOTE"

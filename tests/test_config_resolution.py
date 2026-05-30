@@ -4,12 +4,9 @@ Covers the new platformdirs-based config loading with allow_missing support,
 plus the atomic write_config function.
 """
 
-import os
-
 import pytest
 
 from job_finder.config import ConfigNotFoundError, load_config, write_config
-from job_finder.web import user_data_dirs
 
 
 class TestLoadConfig:

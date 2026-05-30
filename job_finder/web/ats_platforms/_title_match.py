@@ -205,8 +205,7 @@ def _title_matches(title: str, target_titles: list[str], exclusions: list[str]) 
         if not any(_compile_word_boundary(t).search(normalized) for t in target_titles):
             # Ordered-words fallback — slower but rescues narrow phrases.
             if not any(
-                _ordered_words_match(_normalize_title(t), normalized)
-                for t in target_titles
+                _ordered_words_match(_normalize_title(t), normalized) for t in target_titles
             ):
                 return False
 

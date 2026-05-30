@@ -1,6 +1,5 @@
 """Unit tests for job_finder.web.onboarding.state (Phase 42, STRANGE-WIZ-01)."""
 
-import json
 import sqlite3
 
 import pytest
@@ -34,7 +33,9 @@ def test_read_wizard_data_returns_empty_dict_on_fresh_row(migrated_conn):
 def test_write_wizard_data_deep_merges_into_existing(migrated_conn):
     """Writing a slice deep-merges into the existing dict (D-14: re-submit overwrites the slice)."""
     write_wizard_data(migrated_conn, {"provider": {"name": "ollama", "model": "qwen2.5:14b"}})
-    write_wizard_data(migrated_conn, {"provider": {"model": "qwen2.5:32b"}, "imap": {"host": "imap.gmail.com"}})
+    write_wizard_data(
+        migrated_conn, {"provider": {"model": "qwen2.5:32b"}, "imap": {"host": "imap.gmail.com"}}
+    )
 
     data = read_wizard_data(migrated_conn)
     assert data["provider"]["name"] == "ollama"  # preserved
@@ -86,7 +87,9 @@ def test_deep_merge_immutability(migrated_conn):
 
 def test_malformed_wizard_data_resets_to_empty(migrated_conn):
     """If wizard_data is corrupted JSON (e.g. truncated), read_wizard_data must return {} not raise."""
-    migrated_conn.execute("INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete, wizard_data) VALUES (1, 0, 'not valid json')")
+    migrated_conn.execute(
+        "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete, wizard_data) VALUES (1, 0, 'not valid json')"
+    )
     migrated_conn.commit()
     assert read_wizard_data(migrated_conn) == {}
 
@@ -148,6 +151,7 @@ def test_write_config_atomic_temp_rename(tmp_path):
 
     # Patch yaml.dump on the module reference used by state.py
     import job_finder.web.onboarding.state as state_mod
+
     original_yaml_dump = state_mod.yaml.dump
     state_mod.yaml.dump = raise_oserror
     try:

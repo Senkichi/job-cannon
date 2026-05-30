@@ -23,7 +23,6 @@ from job_finder.web.db_helpers import (
     render_polling_status,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -282,9 +281,7 @@ class TestHeartbeatStaleness:
     timeout, while still tripping on a hung bg-thread that stopped ticking.
     """
 
-    def test_recent_tick_keeps_session_alive_despite_old_started_at(
-        self, app, db_path
-    ):
+    def test_recent_tick_keeps_session_alive_despite_old_started_at(self, app, db_path):
         """A scan that started 2 hours ago but ticked 5 seconds ago is healthy.
 
         This is the failure mode the m065 fix targets: the legitimate ATS scan
@@ -308,9 +305,7 @@ class TestHeartbeatStaleness:
 
         # DB row must NOT have been flipped to error.
         conn = sqlite3.connect(db_path)
-        row = conn.execute(
-            "SELECT status FROM batch_score_sessions WHERE id=?", (sid,)
-        ).fetchone()
+        row = conn.execute("SELECT status FROM batch_score_sessions WHERE id=?", (sid,)).fetchone()
         conn.close()
         assert row[0] == "running"
 

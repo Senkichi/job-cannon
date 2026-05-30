@@ -30,7 +30,7 @@ from datetime import datetime
 # Emoji-laden subject lines crash cp1252 on Windows — force UTF-8 stdout.
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from job_finder.web import user_data_dirs
 from job_finder.web.pipeline_detector._signals import (
@@ -52,7 +52,10 @@ def _would_still_auto_apply(job_company: str, det: sqlite3.Row) -> tuple[bool, s
     sender = det["email_from"] or ""
 
     company_now = _company_in_email(
-        job_company, body="", subject=subject, from_address=sender,
+        job_company,
+        body="",
+        subject=subject,
+        from_address=sender,
     )
     if not company_now:
         return False, f"company '{job_company}' no longer matches subject/sender"
@@ -119,9 +122,7 @@ def _candidates(conn: sqlite3.Connection, sim_states: dict[str, str]) -> list[sq
     return out
 
 
-def _find_detection_for_transition(
-    conn: sqlite3.Connection, job_id: str, event_ts: str
-):
+def _find_detection_for_transition(conn: sqlite3.Connection, job_id: str, event_ts: str):
     """Find the detection that triggered a specific auto-detected event.
 
     A job can have multiple auto-applied detections over time (Future's
@@ -153,7 +154,11 @@ def repair(db_path: str, apply: bool) -> dict:
     for _pass in range(10):
         cands = _candidates(conn, sim_states)
         # Skip ones already dismissed in this run
-        cands = [c for c in cands if (sim_states.get(c["dedup_key"], c["db_status"]) or "discovered") != "discovered"]
+        cands = [
+            c
+            for c in cands
+            if (sim_states.get(c["dedup_key"], c["db_status"]) or "discovered") != "discovered"
+        ]
         if not cands:
             break
 

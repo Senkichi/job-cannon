@@ -22,8 +22,12 @@ import sqlite3
 from pathlib import Path
 
 import yaml
-from flask import g, redirect, request, url_for
-from flask import Response  # re-export of werkzeug.wrappers.Response; more idiomatic in blueprint code
+from flask import (
+    Response,  # re-export of werkzeug.wrappers.Response; more idiomatic in blueprint code
+    redirect,
+    request,
+    url_for,
+)
 
 from job_finder.web import user_data_dirs
 from job_finder.web.db_helpers import get_db
@@ -36,6 +40,7 @@ _WHITELIST_EXACT: tuple[str, ...] = ("/favicon.ico",)
 
 
 # --- Helpers ---
+
 
 def _deep_merge(base: dict, overrides: dict) -> dict:
     """Recursively merge overrides into base, returning a new dict.
@@ -82,7 +87,8 @@ def _write_config(config: dict, config_path: str | Path) -> None:
             except OSError as exc:
                 logger.warning(
                     "could not chmod 0600 on %s; secrets may be world-readable: %s",
-                    config_path, exc,
+                    config_path,
+                    exc,
                 )
     except Exception:
         try:
@@ -93,6 +99,7 @@ def _write_config(config: dict, config_path: str | Path) -> None:
 
 
 # --- wizard_data CRUD (D-13a) ---
+
 
 def _ensure_row(db: sqlite3.Connection) -> None:
     """Single-row store: INSERT (id=1, onboarding_complete=0, wizard_data='{}') if missing."""
@@ -128,6 +135,7 @@ def write_wizard_data(db: sqlite3.Connection, slice_: dict) -> None:
 
 # --- Completion state ---
 
+
 def is_onboarding_complete(db: sqlite3.Connection) -> bool:
     """Return True if onboarding_state.onboarding_complete = 1."""
     row = db.execute("SELECT onboarding_complete FROM onboarding_state WHERE id = 1").fetchone()
@@ -145,6 +153,7 @@ def mark_onboarding_complete(db: sqlite3.Connection) -> None:
 
 # --- D-19 legacy-install heuristic ---
 
+
 def _legacy_install_detected() -> bool:
     """Per D-19: if onboarding_state row is missing AND config.yaml exists AND
     experience_profile.json exists in user_data_root, treat the install as already-onboarded.
@@ -159,6 +168,7 @@ def _legacy_install_detected() -> bool:
 
 
 # --- @app.before_request gate (D-18) ---
+
 
 def gate_onboarding() -> Response | None:
     """Redirect unwhitelisted paths to /onboarding/welcome when onboarding_complete=0.

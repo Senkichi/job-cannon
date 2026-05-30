@@ -44,8 +44,7 @@ class ClaudeCodeCLIProvider(BaseProvider):
         bin_path = shutil.which("claude")
         if bin_path is None:
             raise RuntimeError(
-                "claude CLI not found on PATH. "
-                "Install: npm install -g @anthropic-ai/claude-code"
+                "claude CLI not found on PATH. Install: npm install -g @anthropic-ai/claude-code"
             )
         self._bin = bin_path
 
@@ -67,4 +66,6 @@ class ClaudeCodeCLIProvider(BaseProvider):
             json_schema=output_schema,
             timeout=timeout or 180.0,
         )
-        return parse_oneshot_envelope(envelope, output_schema, model=model, provider="claude_code_cli")
+        return parse_oneshot_envelope(
+            envelope, output_schema, model=model, provider="claude_code_cli"
+        )

@@ -317,9 +317,7 @@ _IMAP_SPEC = SourceSpec(
     extract_jobs=lambda src, source_cfg: src.fetch_jobs()[0],
     # IMAP requires `email` in the config in addition to the app_password
     # secret; surface a non-silent error if it's missing.
-    validate_config=lambda cfg: (
-        "sources.imap.email is required" if not cfg.get("email") else None
-    ),
+    validate_config=lambda cfg: "sources.imap.email is required" if not cfg.get("email") else None,
 )
 
 
@@ -383,9 +381,7 @@ def _fetch_portal_search(
     if not keywords:
         keywords = list(config.get("profile", {}).get("target_titles") or [])
         if not keywords:
-            logger.info(
-                "Portal search: no keywords and no profile.target_titles, skipping"
-            )
+            logger.info("Portal search: no keywords and no profile.target_titles, skipping")
             return []
         used_fallback = True
         logger.info(
@@ -450,9 +446,7 @@ def _fetch_portal_search(
     # the gate is a no-op — preserves legacy behavior.
     profile = config.get("profile") or {}
     gate_target_titles = list(profile.get("target_titles") or [])
-    gate_exclusions = list(
-        (profile.get("exclusions") or {}).get("title_keywords") or []
-    )
+    gate_exclusions = list((profile.get("exclusions") or {}).get("title_keywords") or [])
 
     try:
         from job_finder.sources.portal_search_source import fetch_all_portals
@@ -502,33 +496,43 @@ def _inject_portal_search_creds(portal_cfg: dict, config: dict) -> dict:
 
     usajobs = dict(augmented.get("usajobs") or {})
     if usajobs.get("enabled"):
-        ua = get_secret(
-            "sources.portal_search.usajobs.user_agent_email", config=config
-        ) or usajobs.get("user_agent_email", "") or ""
-        ak = get_secret(
-            "sources.portal_search.usajobs.authorization_key", config=config
-        ) or usajobs.get("authorization_key", "") or ""
+        ua = (
+            get_secret("sources.portal_search.usajobs.user_agent_email", config=config)
+            or usajobs.get("user_agent_email", "")
+            or ""
+        )
+        ak = (
+            get_secret("sources.portal_search.usajobs.authorization_key", config=config)
+            or usajobs.get("authorization_key", "")
+            or ""
+        )
         usajobs["user_agent_email"] = ua
         usajobs["authorization_key"] = ak
         augmented["usajobs"] = usajobs
 
     adzuna = dict(augmented.get("adzuna") or {})
     if adzuna.get("enabled"):
-        aid = get_secret(
-            "sources.portal_search.adzuna.app_id", config=config
-        ) or adzuna.get("app_id", "") or ""
-        akey = get_secret(
-            "sources.portal_search.adzuna.app_key", config=config
-        ) or adzuna.get("app_key", "") or ""
+        aid = (
+            get_secret("sources.portal_search.adzuna.app_id", config=config)
+            or adzuna.get("app_id", "")
+            or ""
+        )
+        akey = (
+            get_secret("sources.portal_search.adzuna.app_key", config=config)
+            or adzuna.get("app_key", "")
+            or ""
+        )
         adzuna["app_id"] = aid
         adzuna["app_key"] = akey
         augmented["adzuna"] = adzuna
 
     jooble = dict(augmented.get("jooble") or {})
     if jooble.get("enabled"):
-        jkey = get_secret(
-            "sources.portal_search.jooble.api_key", config=config
-        ) or jooble.get("api_key", "") or ""
+        jkey = (
+            get_secret("sources.portal_search.jooble.api_key", config=config)
+            or jooble.get("api_key", "")
+            or ""
+        )
         jooble["api_key"] = jkey
         augmented["jooble"] = jooble
 

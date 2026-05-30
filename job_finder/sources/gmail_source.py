@@ -284,7 +284,9 @@ class GmailSource:
                 try:
                     from email.utils import parsedate_to_datetime
 
-                    return parsedate_to_datetime(header["value"]).astimezone(UTC).replace(tzinfo=None)
+                    return (
+                        parsedate_to_datetime(header["value"]).astimezone(UTC).replace(tzinfo=None)
+                    )
                 except Exception:
                     logger.debug("email date parse failed", exc_info=True)
 

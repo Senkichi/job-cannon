@@ -871,6 +871,7 @@ class TestMigration18:
         conn.close()
         assert row[0] == "anthropic"
 
+
 class TestMigration40:
     """Tests for Migration 40 (v3.0 ordinal rubric scoring — additive schema).
 
@@ -1290,7 +1291,8 @@ class TestMigration51ConsolidateBatchScoreActions:
         mig51 = next(m for m in MIGRATIONS if m.version == 51)
         _apply_migration(ctx, mig51)
         actions = {
-            r["action"] for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
+            r["action"]
+            for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
         }
         assert "batch_score_haiku" not in actions
         assert "batch_score_sonnet" not in actions
@@ -1298,7 +1300,8 @@ class TestMigration51ConsolidateBatchScoreActions:
         assert "rescore" in actions
         _apply_migration(ctx, mig51)
         actions2 = {
-            r["action"] for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
+            r["action"]
+            for r in conn.execute("SELECT DISTINCT action FROM user_activity").fetchall()
         }
         assert actions2 == actions
         conn.close()
@@ -1339,14 +1342,18 @@ class TestMigration52And53:
         # Insert a row and verify onboarding_complete defaults to 0
         conn.execute("INSERT INTO onboarding_state (id) VALUES (1)")
         conn.commit()
-        row = conn.execute("SELECT onboarding_complete FROM onboarding_state WHERE id = 1").fetchone()
+        row = conn.execute(
+            "SELECT onboarding_complete FROM onboarding_state WHERE id = 1"
+        ).fetchone()
         assert row[0] == 0, f"Expected onboarding_complete=0, got: {row[0]}"
 
         # Check schema_valid column exists on scoring_costs (from migration 52)
         scoring_costs_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(scoring_costs)").fetchall()
         }
-        assert "schema_valid" in scoring_costs_cols, "schema_valid column missing from scoring_costs"
+        assert "schema_valid" in scoring_costs_cols, (
+            "schema_valid column missing from scoring_costs"
+        )
 
         conn.close()
 
@@ -1403,7 +1410,16 @@ class TestMigration57:
         conn, _ctx, _mig = self._seed_and_apply_m57(
             tmp_path,
             rows=[
-                ("j1", "scoring", "claude-sonnet-4-6", 1000, 500, 5.50, "2026-05-19T12:00:00Z", "anthropic"),
+                (
+                    "j1",
+                    "scoring",
+                    "claude-sonnet-4-6",
+                    1000,
+                    500,
+                    5.50,
+                    "2026-05-19T12:00:00Z",
+                    "anthropic",
+                ),
             ],
         )
         row = conn.execute(
@@ -1419,12 +1435,19 @@ class TestMigration57:
         conn, _ctx, _mig = self._seed_and_apply_m57(
             tmp_path,
             rows=[
-                ("j2", "scoring", "claude-haiku-4-5", 100, 50, 0.0, "2026-05-26T12:00:00Z", "anthropic"),
+                (
+                    "j2",
+                    "scoring",
+                    "claude-haiku-4-5",
+                    100,
+                    50,
+                    0.0,
+                    "2026-05-26T12:00:00Z",
+                    "anthropic",
+                ),
             ],
         )
-        row = conn.execute(
-            "SELECT provider FROM scoring_costs WHERE job_id = 'j2'"
-        ).fetchone()
+        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'j2'").fetchone()
         conn.close()
         assert row["provider"] == "anthropic"
 
@@ -1451,16 +1474,23 @@ class TestMigration57:
         conn, ctx, mig57 = self._seed_and_apply_m57(
             tmp_path,
             rows=[
-                ("j5", "scoring", "claude-sonnet-4-6", 1000, 500, 5.50, "2026-05-19T12:00:00Z", "anthropic"),
+                (
+                    "j5",
+                    "scoring",
+                    "claude-sonnet-4-6",
+                    1000,
+                    500,
+                    5.50,
+                    "2026-05-19T12:00:00Z",
+                    "anthropic",
+                ),
             ],
         )
         # Roll back user_version so _apply_migration runs m057 again.
         conn.execute("PRAGMA user_version = 56")
         conn.commit()
         _apply_migration(ctx, mig57)
-        row = conn.execute(
-            "SELECT provider FROM scoring_costs WHERE job_id = 'j5'"
-        ).fetchone()
+        row = conn.execute("SELECT provider FROM scoring_costs WHERE job_id = 'j5'").fetchone()
         conn.close()
         # Still anthropic_sdk after second apply.
         assert row["provider"] == "anthropic_sdk"

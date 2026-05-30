@@ -210,7 +210,9 @@ if __name__ == "__main__":
 
     if len(sys.argv) != 2:
         print("Usage: python -m job_finder.web.onboarding.resume_parser <resume.pdf>")
-        print("Extracts structured profile from PDF/DOCX resume and writes experience_profile.json")
+        print(
+            "Extracts structured profile from PDF/DOCX resume and writes experience_profile.json"
+        )
         sys.exit(2)
 
     resume_path = Path(sys.argv[1])

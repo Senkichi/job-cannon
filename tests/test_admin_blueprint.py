@@ -11,11 +11,10 @@ Focus areas:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,7 +26,7 @@ def _fake_job(job_id: str, *, next_run_time: datetime | None = None) -> MagicMoc
     job = MagicMock()
     job.id = job_id
     job.name = job_id
-    job.next_run_time = next_run_time or datetime(2026, 5, 19, 12, 0, tzinfo=timezone.utc)
+    job.next_run_time = next_run_time or datetime(2026, 5, 19, 12, 0, tzinfo=UTC)
     job.trigger = "cron[hour='0,8,16']"
     return job
 

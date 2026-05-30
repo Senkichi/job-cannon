@@ -375,9 +375,7 @@ def enrich_single_job(
         return None
 
     # Step 1: Generate search queries via call_model
-    queries = _generate_queries(
-        title, company, n=_MAX_SEARCH_QUERIES, conn=conn, config=config
-    )
+    queries = _generate_queries(title, company, n=_MAX_SEARCH_QUERIES, conn=conn, config=config)
     logger.info("Agentic: %d queries for '%s' @ '%s'", len(queries), title[:40], company[:20])
 
     # Step 2: Search and collect candidate URLs

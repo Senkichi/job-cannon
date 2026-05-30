@@ -3,17 +3,20 @@
 Orchestrator for ATS–company ``(platform, slug)`` per `.planning/ATS-RECONCILIATION-PLAN.md`.
 ``hit`` is written only after a live probe succeeds; ingestion and enrichment hints use
 ``pending`` until reconcile runs."""
+
 from __future__ import annotations
 
 import logging
-from typing import Any
-
 import sqlite3
+from typing import Any
 
 from job_finder.config import load_config
 from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_company import classify_company_name
-from job_finder.web.ats_detection import ATS_EXTRACTOR_VERSION, aggregate_ats_candidates_from_job_bundles
+from job_finder.web.ats_detection import (
+    ATS_EXTRACTOR_VERSION,
+    aggregate_ats_candidates_from_job_bundles,
+)
 from job_finder.web.ats_prober import (
     _probe_ashby,
     _probe_bamboohr,

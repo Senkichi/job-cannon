@@ -282,8 +282,7 @@ def _legacy_extract_card_fields(container) -> dict | None:
     job_links = [
         a
         for a in card_links
-        if a.get_text(strip=True).lower() not in _EXCLUDE_TEXTS
-        and len(a.get_text(strip=True)) > 1
+        if a.get_text(strip=True).lower() not in _EXCLUDE_TEXTS and len(a.get_text(strip=True)) > 1
     ]
     if len(job_links) < 2:
         return None
@@ -338,7 +337,7 @@ def _extract_source_id(url: str) -> str:
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
         for key in ("upn", "gh_jid", "jobId", "job_id", "id"):
-            if key in qs and qs[key]:
+            if qs.get(key):
                 return qs[key][0][:64]
     except Exception:
         logger.debug("trueup source_id extraction failed", exc_info=True)

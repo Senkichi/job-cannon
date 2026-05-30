@@ -177,9 +177,7 @@ def _extract_company_from_sender(from_address: str) -> str | None:
     if domain in PERSONAL_EMAIL_DOMAINS:
         return None
 
-    if domain in SCHEDULING_DOMAINS or any(
-        domain.endswith("." + d) for d in SCHEDULING_DOMAINS
-    ):
+    if domain in SCHEDULING_DOMAINS or any(domain.endswith("." + d) for d in SCHEDULING_DOMAINS):
         return None
 
     registrable = _registrable_domain(domain)
@@ -218,9 +216,7 @@ def _find_existing_job_by_normalized_company(
     return best
 
 
-def _try_create_stub_job(
-    email: dict, conn: sqlite3.Connection
-) -> dict | None:
+def _try_create_stub_job(email: dict, conn: sqlite3.Connection) -> dict | None:
     """Create (or attribute to) a stub job for an off-platform application.
 
     Returns a dict ``{"dedup_key", "company", "attributed_existing"}``

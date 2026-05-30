@@ -27,7 +27,9 @@ def _build_mock_client(folder_count: int = 5):
     client = MagicMock()
     client.__enter__.return_value = client
     client.__exit__.return_value = False
-    client.list_folders.return_value = [(b"\\HasNoChildren", b"/", f"FOLDER_{i}") for i in range(folder_count)]
+    client.list_folders.return_value = [
+        (b"\\HasNoChildren", b"/", f"FOLDER_{i}") for i in range(folder_count)
+    ]
     return client
 
 
@@ -90,7 +92,7 @@ def test_gaierror_returns_host_kind(fake_creds):
 def test_timeout_returns_timeout_kind(fake_creds):
     """socket.timeout → error_kind='timeout', message names the timeout value."""
     with patch("job_finder.web.onboarding.imap_test.IMAPClient") as mock_cls:
-        mock_cls.side_effect = socket.timeout("login took too long")
+        mock_cls.side_effect = TimeoutError("login took too long")
 
         result = check_imap(**fake_creds)
 

@@ -119,9 +119,7 @@ def classify_company_name(
     # the real employer name is withheld). Cannot be overridden by config —
     # these are meaningless for scoring and research.
     if cleaned in _PLACEHOLDER_NAMES:
-        return CompanyNameDecision(
-            cleaned_name=None, action="reject", reason="placeholder_name"
-        )
+        return CompanyNameDecision(cleaned_name=None, action="reject", reason="placeholder_name")
 
     # Hard reject: URLs, HTML tags, email alert artifacts
     for pattern in _GARBAGE_PATTERNS:

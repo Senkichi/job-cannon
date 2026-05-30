@@ -377,13 +377,11 @@ def run_enrichment_backfill(
         # Terminal tiers: 'serpapi' (got JD), 'agentic' (got JD via Playwright),
         # 'exhausted' (all tiers tried and failed). 'mid' is terminal for the
         # enrichment pipeline (fully enriched at balanced tier).
-        base_sql = (
-            """SELECT * FROM jobs
+        base_sql = """SELECT * FROM jobs
                WHERE (enrichment_tier IS NULL
                       OR enrichment_tier NOT IN ('exhausted', 'serpapi', 'agentic', 'mid'))
                  AND (jd_full IS NULL OR jd_full = '' OR salary_min IS NULL)
                ORDER BY first_seen DESC"""
-        )
         if limit is None:
             rows = conn.execute(base_sql).fetchall()
         else:

@@ -33,9 +33,7 @@ class TestMigration065Shape:
     def test_migration_065_is_sql_only_no_py_hook(self):
         m = _get(65)
         assert m.py is None
-        assert m.sql == [
-            "ALTER TABLE batch_score_sessions ADD COLUMN last_tick_at TEXT"
-        ]
+        assert m.sql == ["ALTER TABLE batch_score_sessions ADD COLUMN last_tick_at TEXT"]
 
 
 class TestMigration065Behavior:
@@ -43,8 +41,7 @@ class TestMigration065Behavior:
         run_migrations(tmp_db_path)
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             cols = [
-                r[1]
-                for r in conn.execute("PRAGMA table_info(batch_score_sessions)").fetchall()
+                r[1] for r in conn.execute("PRAGMA table_info(batch_score_sessions)").fetchall()
             ]
         assert "last_tick_at" in cols, (
             f"m065 did not add last_tick_at to batch_score_sessions. Columns: {cols}"
@@ -84,8 +81,10 @@ class TestMigration065Behavior:
             # Sqlite supports DROP COLUMN as of 3.35. Reset user_version to 64
             # to trigger m065 re-application.
             conn.execute("ALTER TABLE batch_score_sessions DROP COLUMN last_tick_at")
-            conn.execute("INSERT INTO batch_score_sessions (session_type, status, started_at) "
-                         "VALUES ('scoring', 'running', '2026-05-27T00:00:00')")
+            conn.execute(
+                "INSERT INTO batch_score_sessions (session_type, status, started_at) "
+                "VALUES ('scoring', 'running', '2026-05-27T00:00:00')"
+            )
             conn.execute("PRAGMA user_version = 64")
             conn.commit()
 
@@ -93,9 +92,7 @@ class TestMigration065Behavior:
         run_migrations(tmp_db_path)
 
         with closing(sqlite3.connect(tmp_db_path)) as conn:
-            row = conn.execute(
-                "SELECT status, last_tick_at FROM batch_score_sessions"
-            ).fetchone()
+            row = conn.execute("SELECT status, last_tick_at FROM batch_score_sessions").fetchone()
         assert row[0] == "running"
         assert row[1] is None, (
             "Pre-existing row should have NULL last_tick_at after column add. "

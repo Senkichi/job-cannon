@@ -98,13 +98,10 @@ class TestNumericPrefixCollapse:
 
         # Orphan deleted
         assert (
-            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone()
-            is None
+            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone() is None
         )
         # Job re-pointed
-        row = conn.execute(
-            "SELECT company_id FROM jobs WHERE dedup_key = 'job-1'"
-        ).fetchone()
+        row = conn.execute("SELECT company_id FROM jobs WHERE dedup_key = 'job-1'").fetchone()
         assert row["company_id"] == canonical_id
         # Scan log re-pointed
         row = conn.execute(
@@ -127,9 +124,7 @@ class TestNumericPrefixCollapse:
             is not None
         )
         assert (
-            conn.execute(
-                "SELECT 1 FROM companies WHERE id = ?", (canonical_id,)
-            ).fetchone()
+            conn.execute("SELECT 1 FROM companies WHERE id = ?", (canonical_id,)).fetchone()
             is not None
         )
 
@@ -140,8 +135,7 @@ class TestNumericPrefixCollapse:
         orphan_id = _insert_company(conn, "001_ bcbsa")
         _run_m058(path, conn)
         assert (
-            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone()
-            is None
+            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone() is None
         )
         assert canonical_id  # silences linter
 
@@ -151,9 +145,7 @@ class TestNumericPrefixCollapse:
         orphan_id = _insert_company(conn, "100 lonely")
         _run_m058(path, conn)
         # Untouched
-        row = conn.execute(
-            "SELECT name FROM companies WHERE id = ?", (orphan_id,)
-        ).fetchone()
+        row = conn.execute("SELECT name FROM companies WHERE id = ?", (orphan_id,)).fetchone()
         assert row["name"] == "100 lonely"
 
     def test_short_digit_prefix_with_three_digits(self, migrated_db):
@@ -164,8 +156,7 @@ class TestNumericPrefixCollapse:
         _insert_job_for_company(conn, "job-evernorth", orphan_id)
         _run_m058(path, conn)
         assert (
-            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone()
-            is None
+            conn.execute("SELECT 1 FROM companies WHERE id = ?", (orphan_id,)).fetchone() is None
         )
         row = conn.execute(
             "SELECT company_id FROM jobs WHERE dedup_key = 'job-evernorth'"
@@ -206,9 +197,7 @@ class TestExactDuplicateCollapse:
         second_id = _insert_company(conn, "stripe")
         _run_m058(path, conn)
         # Only one row remains.
-        rows = conn.execute(
-            "SELECT id FROM companies WHERE LOWER(name) = 'stripe'"
-        ).fetchall()
+        rows = conn.execute("SELECT id FROM companies WHERE LOWER(name) = 'stripe'").fetchall()
         assert len(rows) == 1
         assert rows[0]["id"] == first_id
         assert second_id  # silences linter
@@ -220,9 +209,7 @@ class TestSafety:
         a = _insert_company(conn, "acme")
         b = _insert_company(conn, "globex")
         _run_m058(path, conn)
-        assert (
-            conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0] == 2
-        )
+        assert conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0] == 2
         assert a < b
 
     def test_idempotent_rerun(self, migrated_db):

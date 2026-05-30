@@ -489,9 +489,15 @@ def _parse_form_to_config(form) -> dict:
     usajobs = {}
     if _has("portal_search_usajobs_enabled"):
         usajobs["enabled"] = _checked("portal_search_usajobs_enabled")
-    if _has("portal_search_usajobs_user_agent_email") and form["portal_search_usajobs_user_agent_email"]:
+    if (
+        _has("portal_search_usajobs_user_agent_email")
+        and form["portal_search_usajobs_user_agent_email"]
+    ):
         usajobs["user_agent_email"] = form["portal_search_usajobs_user_agent_email"]
-    if _has("portal_search_usajobs_authorization_key") and form["portal_search_usajobs_authorization_key"]:
+    if (
+        _has("portal_search_usajobs_authorization_key")
+        and form["portal_search_usajobs_authorization_key"]
+    ):
         usajobs["authorization_key"] = form["portal_search_usajobs_authorization_key"]
     if usajobs:
         portal_search["usajobs"] = usajobs

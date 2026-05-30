@@ -338,9 +338,7 @@ class TestRipplingScanner:
             "name": "Director, Investor Relations",
             "url": "https://ats.rippling.com/joinroot/jobs/1dc592e2",
             "department": {"name": "CFO Org"},
-            "locations": [
-                {"name": "Remote (United States)", "workplaceType": "REMOTE"}
-            ],
+            "locations": [{"name": "Remote (United States)", "workplaceType": "REMOTE"}],
         }
         job = _posting_to_job(posting, "joinroot")
         assert job["title"] == "Director, Investor Relations"

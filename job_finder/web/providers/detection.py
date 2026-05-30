@@ -36,10 +36,10 @@ logger = logging.getLogger(__name__)
 class ProviderHandle:
     """Description of an available provider, surfaced to the wizard / Settings UI."""
 
-    name: str          # "claude_code_cli" | "gemini_cli" | "ollama"
-    binary_path: str   # absolute path from shutil.which()
-    cost_label: str    # human-readable for wizard UI
-    priority: int      # lower = preferred (1=claude_code_cli, 2=gemini_cli, 3=ollama)
+    name: str  # "claude_code_cli" | "gemini_cli" | "ollama"
+    binary_path: str  # absolute path from shutil.which()
+    cost_label: str  # human-readable for wizard UI
+    priority: int  # lower = preferred (1=claude_code_cli, 2=gemini_cli, 3=ollama)
 
 
 # Module-level cache — process-lifetime; no TTL eviction (CONTEXT.md D-03).
@@ -80,9 +80,7 @@ def _probe_cli(
     if result.returncode != 0:
         stderr_lower = (result.stderr or "").lower()
         if not quota_tolerant or not any(h in stderr_lower for h in _QUOTA_HINTS):
-            logger.debug(
-                "%s liveness probe non-zero rc=%s", binary_name, result.returncode
-            )
+            logger.debug("%s liveness probe non-zero rc=%s", binary_name, result.returncode)
             return None
     if not extra_ok(result):
         return None
@@ -92,8 +90,7 @@ def _probe_cli(
 def _check_claude_code() -> ProviderHandle | None:
     out = _probe_cli(
         "claude",
-        ["-p", "ping", "--output-format", "json",
-         "--no-session-persistence", "--tools", ""],
+        ["-p", "ping", "--output-format", "json", "--no-session-persistence", "--tools", ""],
     )
     if out is None:
         return None
@@ -127,9 +124,7 @@ def _check_ollama() -> ProviderHandle | None:
     out = _probe_cli(
         "ollama",
         ["list"],
-        extra_ok=lambda r: len(
-            [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
-        ) >= 2,
+        extra_ok=lambda r: len([ln for ln in (r.stdout or "").splitlines() if ln.strip()]) >= 2,
     )
     if out is None:
         return None

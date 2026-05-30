@@ -438,9 +438,9 @@ def _scannable_count(conn, config: dict) -> int:
     estimate being slightly off is harmless.
     """
     from job_finder.web.ats_scanner._run import (
+        _DEFAULT_HIGH_SCORE_THRESHOLD,
         _count_phase_a_eligible,
         _count_phase_c_eligible,
-        _DEFAULT_HIGH_SCORE_THRESHOLD,
     )
 
     try:
@@ -449,9 +449,7 @@ def _scannable_count(conn, config: dict) -> int:
                 "high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD
             )
         )
-        return _count_phase_a_eligible(conn, threshold) + _count_phase_c_eligible(
-            conn, threshold
-        )
+        return _count_phase_a_eligible(conn, threshold) + _count_phase_c_eligible(conn, threshold)
     except Exception:
         return 0
 
@@ -590,6 +588,7 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
     progress fragment's percent-complete bar lines up with the planned
     total. ``total`` was set by the POST route from ``_scannable_count``.
     """
+
     def _tick(scanned: int, total: int) -> None:
         """Persist live (scanned, total) so the polling fragment shows N of M.
 
@@ -601,8 +600,7 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
         try:
             with standalone_connection(db_path) as tick_conn:
                 tick_conn.execute(
-                    "UPDATE batch_score_sessions "
-                    "SET scored=?, total=?, last_tick_at=? WHERE id=?",
+                    "UPDATE batch_score_sessions SET scored=?, total=?, last_tick_at=? WHERE id=?",
                     (scanned, total, utc_now_iso(), session_id),
                 )
                 tick_conn.commit()

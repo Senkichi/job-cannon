@@ -95,7 +95,9 @@ def _to_canonical(item: dict) -> list[JobLocation]:
         state_code = state_code_raw or (state.upper() if state and len(state) == 2 else None)
         country = _str(loc.get("country")) or None
         country_code_raw = _str(loc.get("countryCode")).upper()
-        country_code = country_code_raw or (country.upper() if country and len(country) == 2 else None)
+        country_code = country_code_raw or (
+            country.upper() if country and len(country) == 2 else None
+        )
         # Don't double-store: if state/country was actually a 2-letter code,
         # leave the long name None.
         region = state if state and len(state) != 2 else None
@@ -146,9 +148,7 @@ def _location_string(item: dict) -> str:
 
 def _posting_to_job(item: dict, slug: str) -> dict:
     source_url = item.get("url") or (
-        f"https://ats.rippling.com/{slug}/jobs/{item.get('id')}"
-        if item.get("id")
-        else ""
+        f"https://ats.rippling.com/{slug}/jobs/{item.get('id')}" if item.get("id") else ""
     )
     return {
         "title": item.get("name") or "",

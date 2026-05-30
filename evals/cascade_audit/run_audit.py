@@ -67,9 +67,7 @@ def _get_git_commit_sha() -> str:
         return "unknown"
 
 
-def _write_artifact_atomically(
-    artifact_path: Path, data: dict, provenance: dict
-) -> None:
+def _write_artifact_atomically(artifact_path: Path, data: dict, provenance: dict) -> None:
     """Write artifact JSON atomically with provenance block.
 
     Args:
@@ -81,7 +79,9 @@ def _write_artifact_atomically(
         "provenance": provenance,
         "config_snapshot": provenance.get("config_snapshot", {}),
         "model_versions": provenance.get("model_versions", {}),
-        "commit_sha": provenance.get("commit_sha", provenance.get("harness_commit_sha", "unknown")),
+        "commit_sha": provenance.get(
+            "commit_sha", provenance.get("harness_commit_sha", "unknown")
+        ),
         "data": data,
         "timestamp": datetime.now(UTC).isoformat(),
     }
@@ -218,7 +218,9 @@ def _write_callsite_round_artifact(
             sum(int(row.get("accuracy", 0) * int(row.get("sample_size", 0))) for row in rows),
             sum(int(row.get("sample_size", 0)) for row in rows),
         )
-        summary["verdict"] = "SUITABLE" if "SUITABLE" in verdicts else (verdicts[0] if verdicts else "UNSUITABLE")
+        summary["verdict"] = (
+            "SUITABLE" if "SUITABLE" in verdicts else (verdicts[0] if verdicts else "UNSUITABLE")
+        )
     artifact_path = artifact_dir / f"round_{round_num}" / f"{callsite}_r{round_num}.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     _write_artifact_atomically(artifact_path, summary, provenance)
@@ -286,9 +288,7 @@ def _exercise_rows(
                         "winner": metrics.get("judge_winner"),
                         "rationale": metrics.get("judge_rationale"),
                         "confidence": metrics.get("judge_confidence"),
-                        "position_swap_agreement": metrics.get(
-                            "judge_position_swap_agreement"
-                        ),
+                        "position_swap_agreement": metrics.get("judge_position_swap_agreement"),
                     }
                 )
             results.append(
@@ -316,7 +316,12 @@ def _exercise_rows(
         "artifact_provenance": "pass",
         "row_execution": "pass" if metrics["error_count"] == 0 else "partial",
     }
-    return {"rows": results, "metrics": metrics, "verdicts": verdicts, "gate_outcomes": gate_outcomes}
+    return {
+        "rows": results,
+        "metrics": metrics,
+        "verdicts": verdicts,
+        "gate_outcomes": gate_outcomes,
+    }
 
 
 def main() -> None:
@@ -386,7 +391,8 @@ def main() -> None:
         # Load corpus based on round
         if round_num == 0:
             corpus = loader.load_round_0(
-                n_per_callsite=3, conn=conn  # Round 0 uses n=3 per callsite
+                n_per_callsite=3,
+                conn=conn,  # Round 0 uses n=3 per callsite
             )
         else:
             corpus = loader.load_round_1(conn=conn)
@@ -431,9 +437,7 @@ def main() -> None:
                 artifact_data = _enrich_artifact_data(round_num, artifact_data)
                 provider_results[provider] = artifact_data
 
-                artifact_path = (
-                    artifact_dir / f"round_{round_num}" / f"{callsite}_{provider}.json"
-                )
+                artifact_path = artifact_dir / f"round_{round_num}" / f"{callsite}_{provider}.json"
                 artifact_path.parent.mkdir(parents=True, exist_ok=True)
                 _write_artifact_atomically(artifact_path, artifact_data, provenance)
 

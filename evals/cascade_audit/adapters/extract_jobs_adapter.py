@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 import requests
 
@@ -99,7 +98,9 @@ class ExtractJobsAdapter:
         candidate_titles = set()
         if isinstance(gold, list):
             gold_titles = {job.get("title", "").lower() for job in gold if isinstance(job, dict)}
-        candidate_titles = {job.get("title", "").lower() for job in candidate if isinstance(job, dict)}
+        candidate_titles = {
+            job.get("title", "").lower() for job in candidate if isinstance(job, dict)
+        }
 
         if gold_titles and candidate_titles:
             intersection = gold_titles & candidate_titles
@@ -110,7 +111,11 @@ class ExtractJobsAdapter:
 
         # Hallucinated job rate
         if gold_titles:
-            hallucinated = len(candidate_titles - gold_titles) / len(candidate_titles) if candidate_titles else 0.0
+            hallucinated = (
+                len(candidate_titles - gold_titles) / len(candidate_titles)
+                if candidate_titles
+                else 0.0
+            )
             metrics["hallucinated_job_rate"] = hallucinated
         else:
             metrics["hallucinated_job_rate"] = 0.0

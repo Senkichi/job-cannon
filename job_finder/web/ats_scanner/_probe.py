@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 
 from job_finder.json_utils import utc_now_iso
-
 from job_finder.web.ats_detection import (
     ATS_EXTRACTOR_VERSION,
     derive_slug_candidates,
@@ -55,9 +54,7 @@ logger = logging.getLogger(__name__)
 # functions remain available and are used by reconcile's _verify_live step.
 #
 # This was the corollary of the v2 audit at .planning/ATS-COVERAGE-AUDIT-2026-05-27.md.
-_FP_PRONE_PLATFORMS: frozenset[str] = frozenset(
-    {"bamboohr", "personio", "recruitee", "breezy"}
-)
+_FP_PRONE_PLATFORMS: frozenset[str] = frozenset({"bamboohr", "personio", "recruitee", "breezy"})
 
 # (platform, probe_fn) pairs. Ordering matches the historical ladder:
 # original three (Lever / Greenhouse / Ashby) first because they have the
@@ -234,14 +231,11 @@ def probe_ats_slugs(db_path: str, config: dict) -> dict:
             #   - 'careers_url:...'           → B2 fast-path (this branch)
             #   - 'scheduled_promote' (etc.)  → reconcile_company_ats path
             #   - NULL                        → legacy speculative-probe hit
-            inferred = (
-                extract_ats_from_url_best(careers_url) if careers_url else None
-            )
+            inferred = extract_ats_from_url_best(careers_url) if careers_url else None
             if inferred is not None:
                 fp_platform, fp_slug, _specificity = inferred
-                if (
-                    fp_platform in _URL_FASTPATH_PLATFORMS
-                    and _verify_fastpath_live(fp_platform, fp_slug)
+                if fp_platform in _URL_FASTPATH_PLATFORMS and _verify_fastpath_live(
+                    fp_platform, fp_slug
                 ):
                     trigger = f"careers_url:{careers_url}"[:240]
                     try:

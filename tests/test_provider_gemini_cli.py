@@ -148,9 +148,7 @@ def test_call_returns_seven_field_model_result_with_correct_types():
         "job_finder.web.providers.gemini_cli.subprocess.run",
         return_value=_mock_run(stdout='{"result": "hi"}'),
     ):
-        result = provider.call(
-            "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-        )
+        result = provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
     assert isinstance(result, ModelResult)
     assert isinstance(result.data, dict)
     assert isinstance(result.cost_usd, float)
@@ -167,9 +165,7 @@ def test_call_returns_zero_cost_and_gemini_cli_provider():
         "job_finder.web.providers.gemini_cli.subprocess.run",
         return_value=_mock_run(stdout='{"result": "ok"}'),
     ):
-        result = provider.call(
-            "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-        )
+        result = provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
     assert result.cost_usd == 0.0
     assert result.provider == "gemini_cli"
     assert result.input_tokens == 0
@@ -187,9 +183,7 @@ def test_freeform_plain_text_returns_text_dict():
         "job_finder.web.providers.gemini_cli.subprocess.run",
         return_value=_mock_run(stdout='{"result": "plain text"}'),
     ):
-        result = provider.call(
-            "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-        )
+        result = provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"text": "plain text"}
     # M-1 (2026-05-20): no-schema path returns schema_valid=True. Nothing to
     # validate against; True is the "no error" telemetry value (matches
@@ -203,9 +197,7 @@ def test_freeform_json_string_returns_parsed_dict():
         "job_finder.web.providers.gemini_cli.subprocess.run",
         return_value=_mock_run(stdout='{"result": "{\\"x\\": 7}"}'),
     ):
-        result = provider.call(
-            "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-        )
+        result = provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
     assert result.data == {"x": 7}
     # M-1: no schema requested → schema_valid=True (see comment above).
     assert result.schema_valid is True
@@ -256,9 +248,7 @@ def test_non_zero_exit_raises_runtime_error():
         return_value=_mock_run(returncode=1, stdout="", stderr="quota exhausted"),
     ):
         with pytest.raises(RuntimeError, match="gemini CLI failed"):
-            provider.call(
-                "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-            )
+            provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
 
 
 def test_timeout_expired_raises_timeout_error():
@@ -268,9 +258,7 @@ def test_timeout_expired_raises_timeout_error():
         side_effect=subprocess.TimeoutExpired(cmd="gemini", timeout=180.0),
     ):
         with pytest.raises(TimeoutError, match="gemini CLI timed out"):
-            provider.call(
-                "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-            )
+            provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
 
 
 def test_invalid_json_stdout_raises_runtime_error():
@@ -280,9 +268,7 @@ def test_invalid_json_stdout_raises_runtime_error():
         return_value=_mock_run(stdout="this is not json"),
     ):
         with pytest.raises(RuntimeError, match="Invalid JSON from gemini CLI"):
-            provider.call(
-                "gemini-2.0-flash", "s", [{"role": "user", "content": "u"}]
-            )
+            provider.call("gemini-2.0-flash", "s", [{"role": "user", "content": "u"}])
 
 
 def test_empty_messages_raises_value_error():
@@ -298,6 +284,7 @@ def test_empty_messages_raises_value_error():
 
 def test_module_source_has_no_shell_true_and_uses_list_argv():
     import pathlib
+
     src = pathlib.Path("job_finder/web/providers/gemini_cli.py").read_text()
     # Check for actual shell=True in subprocess.run calls, not in docstrings
     lines = src.split("\n")

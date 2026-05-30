@@ -87,12 +87,8 @@ def _assert_no_unhealed_dupes(ctx: MigrationContext) -> None:
                 LIMIT 5""",
             (platform, slug),
         ).fetchall()
-        member_repr = ", ".join(
-            f"id={m[0]}({m[1]!r})" for m in members
-        )
-        cluster_details.append(
-            f"{platform}/{slug} ×{count} [{member_repr}]"
-        )
+        member_repr = ", ".join(f"id={m[0]}({m[1]!r})" for m in members)
+        cluster_details.append(f"{platform}/{slug} ×{count} [{member_repr}]")
 
     raise RuntimeError(
         "m076: cannot create UNIQUE(ats_platform, ats_slug) — "

@@ -8,7 +8,6 @@ deprecation-warning memo and the _KEYRING_UNAVAILABLE flag.
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Precedence stack
 # ---------------------------------------------------------------------------
@@ -215,22 +214,26 @@ def test_list_secrets_empty_when_keyring_unavailable(monkeypatch):
 
 def test_walk_config_returns_none_for_missing_key():
     from job_finder.secrets import _walk_config
+
     assert _walk_config({"a": {}}, "a.b") is None
 
 
 def test_walk_config_returns_none_for_non_dict_intermediate():
     from job_finder.secrets import _walk_config
+
     assert _walk_config({"a": "not-a-dict"}, "a.b") is None
 
 
 def test_walk_config_returns_none_for_empty_string():
     """Empty-string values are treated as missing so the precedence stack continues."""
     from job_finder.secrets import _walk_config
+
     assert _walk_config({"a": {"b": ""}}, "a.b") is None
 
 
 def test_walk_config_returns_non_empty_string():
     from job_finder.secrets import _walk_config
+
     assert _walk_config({"a": {"b": "value"}}, "a.b") == "value"
 
 
@@ -242,6 +245,7 @@ def test_walk_config_returns_non_empty_string():
 def test_probe_keyring_backend_returns_true_against_in_memory_backend():
     """The autouse fixture installs an in-memory backend, so probe succeeds."""
     from job_finder.secrets import probe_keyring_backend
+
     assert probe_keyring_backend() is True
 
 

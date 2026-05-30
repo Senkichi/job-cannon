@@ -52,14 +52,9 @@ class TestMigration066Behavior:
     def test_adds_all_three_columns_on_fresh_db(self, tmp_db_path):
         run_migrations(tmp_db_path)
         with closing(sqlite3.connect(tmp_db_path)) as conn:
-            cols = [
-                r[1]
-                for r in conn.execute("PRAGMA table_info(jobs)").fetchall()
-            ]
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
         for expected in ("locations_structured", "workplace_type", "primary_country_code"):
-            assert expected in cols, (
-                f"m066 did not add {expected} to jobs. Columns: {cols}"
-            )
+            assert expected in cols, f"m066 did not add {expected} to jobs. Columns: {cols}"
 
     def test_columns_are_nullable_text(self, tmp_db_path):
         run_migrations(tmp_db_path)
@@ -70,9 +65,7 @@ class TestMigration066Behavior:
             }
         for col_name in ("locations_structured", "workplace_type", "primary_country_code"):
             col = info[col_name]
-            assert col["type"].upper() == "TEXT", (
-                f"{col_name} should be TEXT, got {col['type']}"
-            )
+            assert col["type"].upper() == "TEXT", f"{col_name} should be TEXT, got {col['type']}"
             assert col["notnull"] == 0, f"{col_name} must be nullable"
             assert col["dflt_value"] is None, f"{col_name} must have no default"
 
@@ -96,10 +89,7 @@ class TestMigration066Behavior:
         """
         run_migrations(tmp_db_path)
         with closing(sqlite3.connect(tmp_db_path)) as conn:
-            cols = [
-                r[1]
-                for r in conn.execute("PRAGMA table_info(jobs)").fetchall()
-            ]
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
         assert "location" in cols, "m066 must not drop legacy `location` column"
         assert "locations_raw" in cols, "m066 must not drop legacy `locations_raw` column"
 
@@ -190,10 +180,7 @@ class TestMigration066Behavior:
 
         with closing(sqlite3.connect(tmp_db_path)) as conn:
             v = conn.execute("PRAGMA user_version").fetchone()[0]
-            cols = [
-                r[1]
-                for r in conn.execute("PRAGMA table_info(jobs)").fetchall()
-            ]
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()]
         assert v >= 66
         # Columns are not duplicated.
         assert cols.count("locations_structured") == 1

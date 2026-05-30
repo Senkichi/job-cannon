@@ -82,9 +82,7 @@ class ImapSource:
 
                 for uid, msg_data in messages.items():
                     rfc822_bytes = msg_data[b"RFC822"]
-                    message = email.message_from_bytes(
-                        rfc822_bytes, policy=email.policy.default
-                    )
+                    message = email.message_from_bytes(rfc822_bytes, policy=email.policy.default)
 
                     # Extract email components
                     sender = self._extract_sender(message)
@@ -92,9 +90,7 @@ class ImapSource:
                     email_date = self._extract_date(message)
 
                     if not sender or not body:
-                        logger.warning(
-                            "Skipping message with missing sender or body: UID %s", uid
-                        )
+                        logger.warning("Skipping message with missing sender or body: UID %s", uid)
                         # Mark seen to avoid reprocessing
                         client.add_flags([uid], [b"\\Seen"])
                         processed_uids.append(str(uid))
@@ -186,7 +182,9 @@ class ImapSource:
                 try:
                     payload = part.get_payload(decode=True)
                     if payload:
-                        body = payload.decode(part.get_content_charset() or "utf-8", errors="ignore")
+                        body = payload.decode(
+                            part.get_content_charset() or "utf-8", errors="ignore"
+                        )
                 except Exception:
                     continue
             elif content_type == "text/html" and body is None:
@@ -194,7 +192,9 @@ class ImapSource:
                 try:
                     payload = part.get_payload(decode=True)
                     if payload:
-                        body = payload.decode(part.get_content_charset() or "utf-8", errors="ignore")
+                        body = payload.decode(
+                            part.get_content_charset() or "utf-8", errors="ignore"
+                        )
                 except Exception:
                     continue
 

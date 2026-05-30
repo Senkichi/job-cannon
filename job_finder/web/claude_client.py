@@ -72,12 +72,12 @@ FREE_PROVIDERS: frozenset[str] = frozenset(
     {
         "gemini",
         "ollama",
-        "anthropic",         # F2 — CLI subscription transport, $0 per call
-        "claude_cli",        # existing — internal call_claude() path
-        "claude_code_cli",   # NEW — ClaudeCodeCLIProvider (Plan 02)
-        "gemini_cli",        # NEW — GeminiCLIProvider (Plan 03)
-        "local_bundled",     # NEW — LocalBundledProvider (Plan 04)
-        "google_cse",        # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
+        "anthropic",  # F2 — CLI subscription transport, $0 per call
+        "claude_cli",  # existing — internal call_claude() path
+        "claude_code_cli",  # NEW — ClaudeCodeCLIProvider (Plan 02)
+        "gemini_cli",  # NEW — GeminiCLIProvider (Plan 03)
+        "local_bundled",  # NEW — LocalBundledProvider (Plan 04)
+        "google_cse",  # Stage 3 — Google Programmable Search Engine ($0 up to 100/day quota)
     }
 )
 
@@ -91,10 +91,7 @@ def is_anthropic_available() -> bool:
     ``JF_ANTHROPIC_API_KEY``. When neither is set, the CLI rejects the call
     during cascade execution, so the cascade should skip this hop preemptively.
     """
-    return bool(
-        os.environ.get("ANTHROPIC_API_KEY")
-        or os.environ.get("JF_ANTHROPIC_API_KEY")
-    )
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("JF_ANTHROPIC_API_KEY"))
 
 
 class BudgetExceededError(Exception):
@@ -191,7 +188,17 @@ def record_cost(
     conn.execute(
         "INSERT INTO scoring_costs (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider, schema_valid) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (job_id, purpose, model, input_tokens, output_tokens, cost_usd, timestamp, provider, int(schema_valid)),
+        (
+            job_id,
+            purpose,
+            model,
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            timestamp,
+            provider,
+            int(schema_valid),
+        ),
     )
     conn.commit()
     return cost_usd
@@ -479,9 +486,18 @@ def get_usage_stats(conn: sqlite3.Connection) -> dict:
         "  COALESCE(SUM(CASE WHEN timestamp >= ? THEN output_tokens END), 0) "
         "FROM scoring_costs WHERE timestamp >= ?",
         (
-            today_start, today_end, today_start, today_end, today_start, today_end,
-            week_start, week_start, week_start,
-            month_start, month_start, month_start,
+            today_start,
+            today_end,
+            today_start,
+            today_end,
+            today_start,
+            today_end,
+            week_start,
+            week_start,
+            week_start,
+            month_start,
+            month_start,
+            month_start,
             month_start,
         ),
     ).fetchone()

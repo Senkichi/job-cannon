@@ -7,7 +7,7 @@ generation with mocked database to avoid dependency on production data.
 import json
 import sqlite3
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -96,7 +96,12 @@ def mock_artifact_dir(tmp_path: Path):
         artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
 
     # Create other required aggregate artifacts with empty verdicts
-    for callsite in ["parse_structured_fields", "find_careers_url", "extract_jobs", "ai_nav_discovery"]:
+    for callsite in [
+        "parse_structured_fields",
+        "find_careers_url",
+        "extract_jobs",
+        "ai_nav_discovery",
+    ]:
         artifact = {
             "provenance": {"test": "data"},
             "data": {
@@ -164,9 +169,7 @@ def test_cascade_audit_report_generation(mock_artifact_dir: Path, tmp_path: Path
     """Test CASCADE-AUDIT.md report generation with calibration log."""
     output_path = tmp_path / "CASCADE-AUDIT.md"
 
-    write_cascade_audit_report(
-        artifacts_dir=mock_artifact_dir, output_path=output_path
-    )
+    write_cascade_audit_report(artifacts_dir=mock_artifact_dir, output_path=output_path)
 
     # Verify report was created
     assert output_path.exists()
@@ -187,7 +190,7 @@ def test_cascade_audit_report_generation(mock_artifact_dir: Path, tmp_path: Path
 
 def test_calibration_log_verdict_counting(mock_artifact_dir: Path):
     """Test that calibration log counts individual verdicts, not provider pairs."""
-    from evals.cascade_audit.report import _load_round_2_artifacts, _calibration_log
+    from evals.cascade_audit.report import _calibration_log, _load_round_2_artifacts
 
     artifacts = _load_round_2_artifacts(mock_artifact_dir)
     calibration = _calibration_log(artifacts)

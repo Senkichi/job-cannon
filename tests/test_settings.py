@@ -745,9 +745,7 @@ class TestSettingsStage7FreePortalsTile:
             assert jooble.get("api_key", "") == ""
         finally:
             try:
-                keyring.delete_password(
-                    "job-cannon", "sources.portal_search.jooble.api_key"
-                )
+                keyring.delete_password("job-cannon", "sources.portal_search.jooble.api_key")
             except Exception:
                 pass
 
@@ -766,15 +764,9 @@ class TestSettingsStage7FreePortalsTile:
         keyring.set_password(
             "job-cannon", "sources.portal_search.usajobs.authorization_key", "OLD"
         )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.adzuna.app_id", "OLD_ID"
-        )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.adzuna.app_key", "OLD_KEY"
-        )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.jooble.api_key", "OLD_JK"
-        )
+        keyring.set_password("job-cannon", "sources.portal_search.adzuna.app_id", "OLD_ID")
+        keyring.set_password("job-cannon", "sources.portal_search.adzuna.app_key", "OLD_KEY")
+        keyring.set_password("job-cannon", "sources.portal_search.jooble.api_key", "OLD_JK")
 
         try:
             # Submit form with toggles re-enabled but blank credential fields
@@ -966,10 +958,7 @@ class TestSettingsStage72ImapTile:
                 },
             )
             assert resp.status_code == 302
-            assert (
-                keyring.get_password("job-cannon", "sources.imap.app_password")
-                == "PRESERVED"
-            )
+            assert keyring.get_password("job-cannon", "sources.imap.app_password") == "PRESERVED"
         finally:
             try:
                 keyring.delete_password("job-cannon", "sources.imap.app_password")
@@ -994,9 +983,7 @@ class TestSettingsStage72ImapTile:
         )
         assert resp.status_code == 302
         try:
-            assert (
-                keyring.get_password("job-cannon", "sources.imap.app_password") == raw
-            )
+            assert keyring.get_password("job-cannon", "sources.imap.app_password") == raw
         finally:
             try:
                 keyring.delete_password("job-cannon", "sources.imap.app_password")
@@ -1031,8 +1018,9 @@ class TestSettingsStage72ImapTile:
     def test_secret_set_flag_drives_placeholder(self, settings_client):
         """secret_set['sources.imap.app_password'] flips True after a keyring write,
         which is what swaps the password input's placeholder from (not set) to (set)."""
-        import keyring
         import re
+
+        import keyring
 
         # Initially not set — placeholder should be "(not set)"
         try:
@@ -1042,9 +1030,7 @@ class TestSettingsStage72ImapTile:
         resp = settings_client.get("/settings/")
         body = resp.data.decode("utf-8")
         # Scope the assertion to the imap_app_password input block.
-        m = re.search(
-            r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body
-        )
+        m = re.search(r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body)
         assert m, "imap_app_password input missing"
         assert m.group(1) == "(not set)"
 
@@ -1053,9 +1039,7 @@ class TestSettingsStage72ImapTile:
         try:
             resp2 = settings_client.get("/settings/")
             body2 = resp2.data.decode("utf-8")
-            m2 = re.search(
-                r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body2
-            )
+            m2 = re.search(r'name="imap_app_password"[^>]*placeholder="([^"]+)"', body2)
             assert m2
             assert "set" in m2.group(1).lower()
             assert "type to replace" in m2.group(1).lower()
@@ -1095,13 +1079,9 @@ class TestSettingsCheckboxBrowserShape:
             ("target_titles", "Staff Data Scientist\nSenior Data Scientist"),
             ("profile_skills", "Python\nSQL\nSpark"),
         ]
-        return settings_client.post(
-            "/settings/save", data=MultiDict(base + list(fields))
-        )
+        return settings_client.post("/settings/save", data=MultiDict(base + list(fields)))
 
-    def test_gmail_enabled_persists_via_browser_shape(
-        self, settings_client, settings_app
-    ):
+    def test_gmail_enabled_persists_via_browser_shape(self, settings_client, settings_app):
         resp = self._browser_post(
             settings_client,
             [("gmail_enabled", ""), ("gmail_enabled", "on")],
@@ -1111,9 +1091,7 @@ class TestSettingsCheckboxBrowserShape:
             saved = yaml.safe_load(f)
         assert saved["sources"]["gmail"]["enabled"] is True
 
-    def test_gmail_enabled_unchecked_via_browser_shape(
-        self, settings_client, settings_app
-    ):
+    def test_gmail_enabled_unchecked_via_browser_shape(self, settings_client, settings_app):
         # Only the hidden submits when the box is unchecked.
         resp = self._browser_post(
             settings_client,
@@ -1124,9 +1102,7 @@ class TestSettingsCheckboxBrowserShape:
             saved = yaml.safe_load(f)
         assert saved["sources"]["gmail"]["enabled"] is False
 
-    def test_portal_search_master_persists_via_browser_shape(
-        self, settings_client, settings_app
-    ):
+    def test_portal_search_master_persists_via_browser_shape(self, settings_client, settings_app):
         resp = self._browser_post(
             settings_client,
             [

@@ -105,9 +105,7 @@ def _heal_locations(ctx: MigrationContext) -> None:
         logger.info("m060: jobs table not present, no-op")
         return
 
-    rows = conn.execute(
-        "SELECT dedup_key, locations_raw, location FROM jobs"
-    ).fetchall()
+    rows = conn.execute("SELECT dedup_key, locations_raw, location FROM jobs").fetchall()
 
     updated = 0
     cleared = 0

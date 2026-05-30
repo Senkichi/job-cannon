@@ -134,9 +134,7 @@ class TestSourceApiSalaryPreserved:
     def test_both_existing_left_alone(self, migrated_db):
         path, conn = migrated_db
         jd = _LONG_JD + " Compensation: $120,000 - $150,000 per year."
-        _insert_job(
-            conn, "test|both", jd, salary_min=110_000, salary_max=140_000
-        )
+        _insert_job(conn, "test|both", jd, salary_min=110_000, salary_max=140_000)
         _run_m062(path, conn)
         assert _read_salary(conn, "test|both") == (110_000, 140_000)
 

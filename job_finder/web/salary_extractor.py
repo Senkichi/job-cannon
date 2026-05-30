@@ -121,9 +121,7 @@ def extract_salary_from_text(text: str | None) -> tuple[int | None, int | None]:
                 continue
             # K-elision: "$120-150" with no K/M units on either side and
             # both values plausible-as-thousands.
-            both_units_missing = (
-                not match.group("low_unit") and not match.group("high_unit")
-            )
+            both_units_missing = not match.group("low_unit") and not match.group("high_unit")
             if both_units_missing and low < 1000 and high < 1000:
                 low *= 1000
                 high *= 1000

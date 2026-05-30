@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 from bs4 import BeautifulSoup
 
-
 # ---------------------------------------------------------------------------
 # Public-surface imports
 # ---------------------------------------------------------------------------

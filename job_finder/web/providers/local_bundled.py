@@ -56,9 +56,7 @@ class LocalBundledProvider(BaseProvider):
             ) from exc
 
         if not model_path:
-            raise FileNotFoundError(
-                "providers.local_bundled.model_path not configured"
-            )
+            raise FileNotFoundError("providers.local_bundled.model_path not configured")
         if not pathlib.Path(model_path).exists():
             raise FileNotFoundError(f"GGUF model not found: {model_path!r}")
 

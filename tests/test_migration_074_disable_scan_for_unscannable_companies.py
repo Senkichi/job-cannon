@@ -48,9 +48,9 @@ def _insert(
 
 
 def _scan_enabled(conn: sqlite3.Connection, name: str) -> int:
-    return conn.execute(
-        "SELECT scan_enabled FROM companies WHERE name = ?", (name,)
-    ).fetchone()["scan_enabled"]
+    return conn.execute("SELECT scan_enabled FROM companies WHERE name = ?", (name,)).fetchone()[
+        "scan_enabled"
+    ]
 
 
 def _run(path: str, conn: sqlite3.Connection) -> None:

@@ -42,6 +42,7 @@ def test_db_writable_failure_names_path(monkeypatch, tmp_path):
 
     def boom(self, *args, **kwargs):
         raise OSError("Permission denied")
+
     monkeypatch.setattr(Path, "touch", boom)
 
     result = check_db_writable()
@@ -96,4 +97,7 @@ def test_run_all_never_raises(monkeypatch):
     # Should NOT raise — should return a CheckResult with ok=False
     results = run_all()
     assert results[0].ok is False
-    assert "could not resolve" in results[0].detail or "simulated DB resolution failure" in results[0].detail
+    assert (
+        "could not resolve" in results[0].detail
+        or "simulated DB resolution failure" in results[0].detail
+    )

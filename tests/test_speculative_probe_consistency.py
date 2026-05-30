@@ -620,13 +620,9 @@ class TestSpeculativeProbeFpExclusion:
         """The 4 platforms named in the audit are exactly the FP-prone set."""
         from job_finder.web.ats_scanner._probe import _FP_PRONE_PLATFORMS
 
-        assert _FP_PRONE_PLATFORMS == frozenset(
-            {"bamboohr", "personio", "recruitee", "breezy"}
-        )
+        assert frozenset({"bamboohr", "personio", "recruitee", "breezy"}) == _FP_PRONE_PLATFORMS
 
-    def test_shipped_probes_ladder_does_not_consult_fp_prone_platforms(
-        self, migrated_db_path
-    ):
+    def test_shipped_probes_ladder_does_not_consult_fp_prone_platforms(self, migrated_db_path):
         """End-to-end: running probe_ats_slugs with the SHIPPED _PROBES list
         on a pending famous-brand row produces miss (no FP) because none of
         the speculative-ladder platforms will hit, and the FP-prone ones
@@ -752,9 +748,7 @@ class TestCareersUrlFastPath:
         assert row["ats_evidence_unique_url_count"] == 1
         assert row["ats_evidence_job_count"] == 0
 
-    def test_recruitee_url_fastpath_can_assign_fp_prone_platform(
-        self, migrated_db_path
-    ):
+    def test_recruitee_url_fastpath_can_assign_fp_prone_platform(self, migrated_db_path):
         """URL evidence beats the speculative-ladder FP-prone exclusion.
 
         bamboohr/personio/recruitee/breezy are banned from speculative
@@ -835,9 +829,7 @@ class TestCareersUrlFastPath:
         assert row["ats_probe_status"] == "hit"
         assert row["ats_platform"] == "ashby"
 
-    def test_fastpath_verifier_returning_false_falls_through(
-        self, migrated_db_path
-    ):
+    def test_fastpath_verifier_returning_false_falls_through(self, migrated_db_path):
         """careers_url points at a supported ATS but the live probe returns
         False (e.g. tenant deleted). Should NOT write a fast-path hit;
         should fall through to brand blocklist + speculative ladder."""
@@ -966,9 +958,7 @@ class TestSpeculativeMissCategorization:
     Legacy NULL rows are not retroactively backfilled -- they stay NULL until
     the company is re-probed."""
 
-    def test_speculative_exhausted_when_all_probes_return_false(
-        self, migrated_db_path
-    ):
+    def test_speculative_exhausted_when_all_probes_return_false(self, migrated_db_path):
         from job_finder.web.ats_scanner import probe_ats_slugs
 
         conn = sqlite3.connect(migrated_db_path)
@@ -1002,9 +992,7 @@ class TestSpeculativeMissCategorization:
         assert row["ats_probe_status"] == "miss"
         assert row["miss_reason"] == "speculative_exhausted"
 
-    def test_speculative_rejected_when_consistency_gate_blocks_all_hits(
-        self, migrated_db_path
-    ):
+    def test_speculative_rejected_when_consistency_gate_blocks_all_hits(self, migrated_db_path):
         """careers_url positively identifies platform X, but speculative
         probes hit platform Y (collision). The consistency gate rejects all
         Y-hits, and no other platform yields a hit. miss_reason should be
@@ -1093,9 +1081,7 @@ class TestSpeculativeProbeCollisionRecovery:
     owner of the (platform, slug) pair is untouched.
     """
 
-    def test_speculative_branch_collision_marks_miss_with_collision_reason(
-        self, migrated_db_path
-    ):
+    def test_speculative_branch_collision_marks_miss_with_collision_reason(self, migrated_db_path):
         """The speculative ladder hits a slug already owned by another company.
 
         The UPDATE raises sqlite3.IntegrityError; the handler demotes the
@@ -1118,9 +1104,7 @@ class TestSpeculativeProbeCollisionRecovery:
         conn.commit()
         owner_id = cursor.lastrowid
         # Pending probe candidate whose derived slug will collide.
-        loser_id = _insert_pending_company(
-            conn, name="Acme", careers_url=None
-        )
+        loser_id = _insert_pending_company(conn, name="Acme", careers_url=None)
         conn.close()
 
         with (
@@ -1157,9 +1141,7 @@ class TestSpeculativeProbeCollisionRecovery:
         assert owner_row["ats_platform"] == "greenhouse"
         assert owner_row["ats_slug"] == "acme"
 
-    def test_fastpath_branch_collision_marks_miss_with_collision_reason(
-        self, migrated_db_path
-    ):
+    def test_fastpath_branch_collision_marks_miss_with_collision_reason(self, migrated_db_path):
         """The careers_url fast-path tries to write a slug that's owned.
 
         URL inference picks (greenhouse, acme) from the careers_url; the

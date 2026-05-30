@@ -26,7 +26,9 @@ FIXTURES_BY_SENDER = {
         "linkedin_jobs_3.eml",
         "linkedin_jobs_4.eml",
     ],
-    "noreply@glassdoor.com": ["glassdoor_2.eml"],  # glassdoor.eml needs scrubbing (contains personal data)
+    "noreply@glassdoor.com": [
+        "glassdoor_2.eml"
+    ],  # glassdoor.eml needs scrubbing (contains personal data)
     "alert@indeed.com": [
         "indeed_alert.eml",
         "indeed_alert_2.eml",
@@ -108,9 +110,9 @@ def test_eml_fixture_round_trips_to_jobs():
                 assert job.company, f"Job missing company from fixture: {fixture_path}"
                 assert job.source, f"Job missing source from fixture: {fixture_path}"
                 # Check for either source_url or url depending on model field
-                assert (
-                    job.source_url or getattr(job, "url", None)
-                ), f"Job missing source_url/url from fixture: {fixture_path}"
+                assert job.source_url or getattr(job, "url", None), (
+                    f"Job missing source_url/url from fixture: {fixture_path}"
+                )
 
 
 def test_email_fixtures_do_not_contain_obvious_pii():
@@ -121,7 +123,7 @@ def test_email_fixtures_do_not_contain_obvious_pii():
         pytest.skip("Fixtures directory not found")
 
     for fixture_path in fixtures_dir.glob("*.eml"):
-        with open(fixture_path, "r", encoding="utf-8") as f:
+        with open(fixture_path, encoding="utf-8") as f:
             content = f.read()
 
         # Check for To: headers

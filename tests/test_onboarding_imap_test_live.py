@@ -16,7 +16,6 @@ import pytest
 
 from job_finder.web.onboarding.imap_test import check_imap
 
-
 _ENV_EMAIL = "JOB_CANNON_TEST_GMAIL_EMAIL"
 _ENV_PW = "JOB_CANNON_TEST_GMAIL_APP_PW"
 

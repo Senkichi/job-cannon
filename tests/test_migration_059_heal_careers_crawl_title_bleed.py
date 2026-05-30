@@ -75,9 +75,9 @@ def _run_m059(path: str, conn: sqlite3.Connection) -> None:
 
 
 def _job_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    ).fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone() is not None
+    )
 
 
 def test_migration_declares_version_59():

@@ -28,6 +28,7 @@ def _seed_onboarding_complete(db_path: str) -> None:
     seeds columns that exist in Migration 53.
     """
     import sqlite3
+
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
@@ -232,6 +233,7 @@ def app_unconfigured(tmp_db_path):
     application = create_app(config=test_config)
 
     import sqlite3
+
     conn = sqlite3.connect(tmp_db_path)
     try:
         conn.execute(
@@ -613,6 +615,7 @@ def isolated_keyring(monkeypatch):
     monkeypatch.setattr("keyring.core._keyring_backend", backend)
 
     from job_finder import secrets as secrets_mod
+
     monkeypatch.setattr(secrets_mod, "_KEYRING_UNAVAILABLE", False)
     secrets_mod._warned.clear()
     yield backend

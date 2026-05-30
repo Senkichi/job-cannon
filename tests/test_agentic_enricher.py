@@ -122,9 +122,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             return_value=_make_model_result(queries),
         ):
-            result = _generate_queries(
-                "Data Scientist", "Acme Corp", n=2, conn=None, config={}
-            )
+            result = _generate_queries("Data Scientist", "Acme Corp", n=2, conn=None, config={})
         assert result == queries[:2]
 
     def test_dict_queries_key(self):
@@ -135,9 +133,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             return_value=_make_model_result({"queries": ["q1", "q2", "q3"]}),
         ):
-            result = _generate_queries(
-                "Engineer", "BetterHelp", n=3, conn=None, config={}
-            )
+            result = _generate_queries("Engineer", "BetterHelp", n=3, conn=None, config={})
         assert result == ["q1", "q2", "q3"]
 
     def test_dict_search_queries_key(self):
@@ -148,9 +144,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             return_value=_make_model_result({"search_queries": ["sq1", "sq2"]}),
         ):
-            result = _generate_queries(
-                "ML Engineer", "Stripe", n=4, conn=None, config={}
-            )
+            result = _generate_queries("ML Engineer", "Stripe", n=4, conn=None, config={})
         assert result == ["sq1", "sq2"]
 
     def test_provider_exception_fallback(self):
@@ -161,9 +155,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             side_effect=RuntimeError("connection refused"),
         ):
-            result = _generate_queries(
-                "Staff Data Scientist", "Stripe", n=4, conn=None, config={}
-            )
+            result = _generate_queries("Staff Data Scientist", "Stripe", n=4, conn=None, config={})
         fallback = _fallback_queries("Staff Data Scientist", "Stripe")
         assert result == fallback
 
@@ -175,9 +167,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             return_value=_make_model_result({"unexpected_key": 42}),
         ):
-            result = _generate_queries(
-                "Analyst", "Uber", n=3, conn=None, config={}
-            )
+            result = _generate_queries("Analyst", "Uber", n=3, conn=None, config={})
         # Should be non-empty fallback queries
         assert len(result) > 0
         assert all(isinstance(q, str) for q in result)
@@ -192,9 +182,7 @@ class TestGenerateQueries:
             "job_finder.web.model_provider.call_model",
             return_value=_make_model_result(["q1", "q2"]),
         ):
-            result = mod._generate_queries(
-                "DS", "Co", n=2, conn=None, config={}
-            )
+            result = mod._generate_queries("DS", "Co", n=2, conn=None, config={})
         assert result == ["q1", "q2"]
 
 
@@ -619,7 +607,7 @@ class TestRunAgenticBackfill:
 
             received_conns: list[sqlite3.Connection] = []
 
-            def _capture(_job, _page, *, conn, config):  # noqa: ARG001
+            def _capture(_job, _page, *, conn, config):
                 # The cascade calls conn.execute() on this — must be open.
                 conn.execute("SELECT 1").fetchone()
                 received_conns.append(conn)

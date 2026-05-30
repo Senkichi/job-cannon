@@ -74,12 +74,14 @@ def _fetch_postings(slug: str) -> list[dict]:
             if value:
                 descriptions.append(value)
 
-        positions.append({
-            "id": position_id,
-            "name": title,
-            "office": location,
-            "__description_raw": "\n\n".join(descriptions),
-        })
+        positions.append(
+            {
+                "id": position_id,
+                "name": title,
+                "office": location,
+                "__description_raw": "\n\n".join(descriptions),
+            }
+        )
 
     return positions
 

@@ -26,7 +26,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Public-surface sentinel
 # ---------------------------------------------------------------------------
@@ -250,8 +249,7 @@ def test_classification_gate_runs_before_scoring(conn_with_email_log, monkeypatc
     result = _process_email(email, conn_with_email_log, jobs)
     assert result == "skipped"
     assert score_match_spy.call_count == 0, (
-        "score_match ran on an unclassified email -- classification gate must "
-        "run BEFORE scoring"
+        "score_match ran on an unclassified email -- classification gate must run BEFORE scoring"
     )
 
 

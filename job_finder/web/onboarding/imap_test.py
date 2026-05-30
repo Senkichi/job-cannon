@@ -70,7 +70,9 @@ def check_imap(
             folders = client.list_folders()
             # Per D-09: assert >= 1 folder returned
             if len(folders) < 1:
-                logger.info("imap_test: login OK but list_folders returned 0 folders for %s", email)
+                logger.info(
+                    "imap_test: login OK but list_folders returned 0 folders for %s", email
+                )
                 return ImapTestResult(
                     ok=False,
                     error_kind="other",
@@ -100,7 +102,7 @@ def check_imap(
             error_kind="host",
             message=f"Could not reach {host} — network issue?",
         )
-    except socket.timeout:
+    except TimeoutError:
         logger.info("imap_test: timeout for host=%s email=%s after %ds", host, email, timeout)
         return ImapTestResult(
             ok=False,

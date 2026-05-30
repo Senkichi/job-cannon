@@ -1,8 +1,7 @@
 """Tests for job_finder.__main__ CLI entry point --help and --version short-circuit."""
+
 import subprocess
 import sys
-
-import pytest
 
 
 def test_help_exits_clean_without_config(tmp_path, monkeypatch):

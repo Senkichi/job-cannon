@@ -49,11 +49,7 @@ def _drop(ctx: MigrationContext) -> None:
     # Count + delete in one connection. JSON LIKE on the sources string
     # is fine here — the column stores a JSON array literal like
     # ``["glassdoor"]`` or ``["serpapi", "glassdoor"]``.
-    where = (
-        "company = 'Unknown' "
-        "AND sources LIKE '%\"glassdoor\"%' "
-        "AND company_id IS NULL"
-    )
+    where = "company = 'Unknown' AND sources LIKE '%\"glassdoor\"%' AND company_id IS NULL"
     found = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}").fetchone()[0]
     if found == 0:
         logger.info("m070: no Glassdoor 'Unknown' orphans to delete")

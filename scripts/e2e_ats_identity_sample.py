@@ -23,9 +23,9 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from job_finder.config import load_config, resolve_config_path
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.ats_identity_reconcile import reconcile_company_ats
 from job_finder.web.db_helpers import standalone_connection
+from job_finder.web.db_migrate import run_migrations
 
 
 def _resolve_db(custom: str | None) -> tuple[Path, dict]:
@@ -59,9 +59,7 @@ def main() -> int:
         cand = argv[0]
         sfx = Path(cand).suffix.lower()
         # First arg looks like DB path rather than cohort size
-        if sfx in (".db", ".sqlite", ".sqlite3"):
-            db_arg = argv.pop(0)
-        elif cand.lower() == "jobs.db":
+        if sfx in (".db", ".sqlite", ".sqlite3") or cand.lower() == "jobs.db":
             db_arg = argv.pop(0)
 
     limit = 10
@@ -150,7 +148,7 @@ def main() -> int:
                 if outcome.get("platform") or slug_snip:
                     pair = f" ({outcome.get('platform') or '?'}:{slug_snip or '?'})"
                 print(
-                    f"  id={cid} row_status={str(r['ats_probe_status']):>7} "
+                    f"  id={cid} row_status={r['ats_probe_status']!s:>7} "
                     f"name={_truncate(r['name'])} -> {tag}{pair}{meta}"
                 )
             print()

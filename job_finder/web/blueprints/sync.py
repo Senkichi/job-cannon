@@ -197,11 +197,7 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
             # portal that returned at least one job. Scoop them up dynamically
             # so adding a new portal doesn't require touching this dict.
             for key, value in summary.items():
-                if (
-                    key.startswith("portal_")
-                    and key.endswith("_fetched")
-                    and key not in metadata
-                ):
+                if key.startswith("portal_") and key.endswith("_fetched") and key not in metadata:
                     metadata[key] = value
             log_activity(
                 db_path,

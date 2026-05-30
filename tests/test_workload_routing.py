@@ -1,4 +1,5 @@
 import pytest
+
 from job_finder.web.model_provider import (
     _PROVIDER_DEFAULTS,
     _VALID_WORKLOADS,
@@ -7,7 +8,7 @@ from job_finder.web.model_provider import (
 
 
 def test_valid_workloads_are_quick_score_triage():
-    assert _VALID_WORKLOADS == {"quick", "score", "triage"}
+    assert {"quick", "score", "triage"} == _VALID_WORKLOADS
 
 
 def test_provider_defaults_cover_all_workloads_for_all_providers():
@@ -35,15 +36,21 @@ def test_resolve_routing_claude_code_cli_score_returns_sonnet():
 
 
 def test_resolve_routing_triage_uses_quick_model():
-    routing_q = resolve_workload_routing("quick", {"providers": {"primary": "ollama", "fallback_chain": []}})
-    routing_t = resolve_workload_routing("triage", {"providers": {"primary": "ollama", "fallback_chain": []}})
+    routing_q = resolve_workload_routing(
+        "quick", {"providers": {"primary": "ollama", "fallback_chain": []}}
+    )
+    routing_t = resolve_workload_routing(
+        "triage", {"providers": {"primary": "ollama", "fallback_chain": []}}
+    )
     assert routing_t["primary"]["model"] == routing_q["primary"]["model"]
 
 
 def test_resolve_routing_cascade_per_workload():
     routing = resolve_workload_routing(
         workload="score",
-        config={"providers": {"primary": "claude_code_cli", "fallback_chain": ["gemini", "anthropic"]}},
+        config={
+            "providers": {"primary": "claude_code_cli", "fallback_chain": ["gemini", "anthropic"]}
+        },
     )
     chain = [routing["primary"]] + routing["fallback"]
     assert [e["provider"] for e in chain] == ["claude_code_cli", "gemini", "anthropic"]

@@ -1,6 +1,6 @@
 """Tests for update_check.py service module."""
-import json
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -95,9 +95,7 @@ def test_current_version_returns_string_or_none(monkeypatch):
 
     # When package is installed
     mock_version = "5.0.0"
-    monkeypatch.setattr(
-        "job_finder.web.update_check._pkg_version", lambda _: mock_version
-    )
+    monkeypatch.setattr("job_finder.web.update_check._pkg_version", lambda _: mock_version)
     result = update_check.current_version()
     assert result == "v5.0.0"
 
@@ -112,20 +110,18 @@ def test_current_version_returns_string_or_none(monkeypatch):
 
 def test_is_stale_returns_true_when_checked_at_older_than_24h():
     """Test 8: _is_stale returns True when checked_at >24h old."""
-    old_time = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    old_time = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
     cache = {"checked_at": old_time}
     assert update_check._is_stale(cache) is True
 
-    fresh_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    fresh_time = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     cache = {"checked_at": fresh_time}
     assert update_check._is_stale(cache) is False
 
     assert update_check._is_stale(None) is True
 
 
-def test_kick_off_background_check_if_due_skips_when_testing_true(
-    tmp_path, monkeypatch
-):
+def test_kick_off_background_check_if_due_skips_when_testing_true(tmp_path, monkeypatch):
     """Test 9: kick_off_background_check_if_due skips when TESTING=True."""
     mock_thread = []
     monkeypatch.setattr(
@@ -162,6 +158,7 @@ def test_silent_fail_on_http_non_200(tmp_path, monkeypatch):
 
 def test_silent_fail_on_bad_json(tmp_path, monkeypatch):
     """Test 12: silent fail on bad JSON."""
+
     class MockResponse:
         status_code = 200
 

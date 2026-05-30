@@ -131,8 +131,7 @@ class TestMigration067Behavior:
         with closing(sqlite3.connect(db_path)) as conn:
             conn.row_factory = sqlite3.Row
             r = conn.execute(
-                "SELECT workplace_type, primary_country_code "
-                "FROM jobs WHERE dedup_key = ?",
+                "SELECT workplace_type, primary_country_code FROM jobs WHERE dedup_key = ?",
                 ("k2",),
             ).fetchone()
         assert r["workplace_type"] == "REMOTE"

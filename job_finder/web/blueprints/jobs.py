@@ -353,9 +353,7 @@ def add_from_listing():
             200,
         )
 
-    if not (
-        listing_url.startswith("https://") or listing_url.startswith("http://")
-    ):
+    if not (listing_url.startswith("https://") or listing_url.startswith("http://")):
         return (
             render_template(
                 "jobs/_add_listing_manual_result.html",
@@ -373,9 +371,7 @@ def add_from_listing():
     if user_title and user_company:
         title, company = user_title, user_company
     else:
-        inferred_title, inferred_company = infer_title_company_from_listing_url(
-            listing_url
-        )
+        inferred_title, inferred_company = infer_title_company_from_listing_url(listing_url)
         title = user_title or inferred_title
         company = user_company or inferred_company
 
@@ -469,12 +465,15 @@ def add_from_listing():
     enriched: dict = {}
     enrich_error = None
     try:
-        enriched = enrich_job(
-            job_row,
-            serpapi_key=serpapi_key,
-            conn=conn,
-            config=config,
-        ) or {}
+        enriched = (
+            enrich_job(
+                job_row,
+                serpapi_key=serpapi_key,
+                conn=conn,
+                config=config,
+            )
+            or {}
+        )
     except Exception as e:
         enrich_error = str(e)
         logger.warning("add_from_listing: enrich_job failed for %s: %s", dedup_key, e)
@@ -493,13 +492,11 @@ def add_from_listing():
     jd_len = len((job_row.get("jd_full") or "").strip())
     if enriched:
         enrich_summary = (
-            "Enrichment ran: filled gaps from the listing URL and cheaper tiers "
-            "where available."
+            "Enrichment ran: filled gaps from the listing URL and cheaper tiers where available."
         )
     elif jd_len >= 200:
         enrich_summary = (
-            "A full job description is already available from your notes or the "
-            "listing page."
+            "A full job description is already available from your notes or the listing page."
         )
     else:
         enrich_summary = (

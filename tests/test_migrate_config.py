@@ -6,7 +6,7 @@ to the Phase 40 flat providers.{primary, fallback_chain, overrides} shape.
 
 import yaml
 
-from job_finder.migrate_config import migrate_file, ALREADY_MIGRATED, MIGRATED, UNKNOWN_SHAPE
+from job_finder.migrate_config import ALREADY_MIGRATED, MIGRATED, UNKNOWN_SHAPE, migrate_file
 
 
 def _write_yaml(path, data):

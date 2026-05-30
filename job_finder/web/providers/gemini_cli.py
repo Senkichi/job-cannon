@@ -49,8 +49,7 @@ class GeminiCLIProvider(BaseProvider):
     def __init__(self, config: dict | None = None) -> None:
         if shutil.which("gemini") is None:
             raise RuntimeError(
-                "gemini CLI not found on PATH. "
-                "Install: npm install -g @google/generative-ai-cli"
+                "gemini CLI not found on PATH. Install: npm install -g @google/generative-ai-cli"
             )
         # _resolve_cli_binary unwraps the npm .CMD shim to the real .exe on
         # Windows so prompt args containing `|` (e.g. JSON schema unions) are
@@ -73,17 +72,19 @@ class GeminiCLIProvider(BaseProvider):
         user_message = messages[-1].get("content", "")
         schema_block = ""
         if output_schema is not None:
-            schema_block = (
-                "\n\nRespond ONLY with JSON conforming to this schema:\n"
-                + json.dumps(output_schema)
+            schema_block = "\n\nRespond ONLY with JSON conforming to this schema:\n" + json.dumps(
+                output_schema
             )
         combined_prompt = f"{system}\n\n{user_message}{schema_block}"
 
         cmd: list[str] = [
             self._bin,
-            "-p", combined_prompt,
-            "--output-format", "json",
-            "--model", model,
+            "-p",
+            combined_prompt,
+            "--output-format",
+            "json",
+            "--model",
+            model,
         ]
 
         try:
@@ -102,9 +103,7 @@ class GeminiCLIProvider(BaseProvider):
         except FileNotFoundError as exc:
             # Binary disappeared between __init__ and call. Treat as RuntimeError
             # so the cascade falls through.
-            raise RuntimeError(
-                "gemini CLI not found at invocation time (PATH changed?)"
-            ) from exc
+            raise RuntimeError("gemini CLI not found at invocation time (PATH changed?)") from exc
 
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()[:300] or "unknown error"
@@ -148,7 +147,7 @@ class GeminiCLIProvider(BaseProvider):
         return ModelResult(
             data=data,
             cost_usd=0.0,
-            input_tokens=0,   # gemini CLI does not expose token counts
+            input_tokens=0,  # gemini CLI does not expose token counts
             output_tokens=0,
             model=model,
             provider="gemini_cli",

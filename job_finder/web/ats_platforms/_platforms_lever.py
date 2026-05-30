@@ -38,7 +38,9 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
     raw_locations: list[str] = []
     all_locations = categories.get("allLocations")
     if isinstance(all_locations, list):
-        raw_locations.extend(str(s).strip() for s in all_locations if isinstance(s, str) and s.strip())
+        raw_locations.extend(
+            str(s).strip() for s in all_locations if isinstance(s, str) and s.strip()
+        )
     primary = categories.get("location")
     if isinstance(primary, str) and primary.strip() and primary.strip() not in raw_locations:
         raw_locations.append(primary.strip())

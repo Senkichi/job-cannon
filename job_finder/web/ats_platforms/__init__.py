@@ -142,9 +142,7 @@ def scan_workday(slug: str, target_titles: list[str], exclusions: list[str]) -> 
     return run_platform_scan(_WORKDAY_SCANNER, slug, target_titles, exclusions)
 
 
-def scan_smartrecruiters(
-    slug: str, target_titles: list[str], exclusions: list[str]
-) -> list[dict]:
+def scan_smartrecruiters(slug: str, target_titles: list[str], exclusions: list[str]) -> list[dict]:
     """Scan SmartRecruiters Posting API for keyword-matched job postings.
 
     SmartRecruiters exposes a public REST API (no auth required) that returns

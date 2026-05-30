@@ -187,9 +187,7 @@ def test_call_returns_zero_tokens_when_usage_missing(provider):
 
 def test_call_raises_on_empty_messages(provider):
     """Empty messages list → ValueError, no subprocess invocation."""
-    with patch(
-        "job_finder.web.providers.anthropic_provider._run_oneshot"
-    ) as mock_oneshot:
+    with patch("job_finder.web.providers.anthropic_provider._run_oneshot") as mock_oneshot:
         with pytest.raises(ValueError, match="messages list must contain"):
             provider.call(
                 model="claude-haiku-4-5",

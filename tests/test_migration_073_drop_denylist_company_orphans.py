@@ -59,8 +59,7 @@ def _insert(
 
 def _exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
     return (
-        conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
-        is not None
+        conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone() is not None
     )
 
 

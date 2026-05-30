@@ -1,5 +1,4 @@
 """Tests for PyPI packaging metadata and release workflows."""
-import pytest
 
 
 def test_license_is_spdx_string():
@@ -116,7 +115,9 @@ def test_publish_runs_smoke_test_before_upload():
                 break
             root_perms_block.append(line)
     root_perms = "\n".join(root_perms_block)
-    assert "id-token" not in root_perms, f"id-token must be job-scoped, not workflow-root. Got: {root_perms!r}"
+    assert "id-token" not in root_perms, (
+        f"id-token must be job-scoped, not workflow-root. Got: {root_perms!r}"
+    )
 
 
 def test_release_yml_no_longer_creates_gh_release():
@@ -180,7 +181,7 @@ def test_readme_install_above_the_fold():
     # Install section should be relatively early (before line 100)
     assert install_line < 100, "Install section should appear above the fold"
     # Should mention pipx install
-    install_section = "\n".join(lines[install_line:install_line + 20])
+    install_section = "\n".join(lines[install_line : install_line + 20])
     assert "pipx install job-cannon" in install_section.lower()
 
 
@@ -198,12 +199,16 @@ def test_readme_mentions_update_banner():
     with open("README.md") as f:
         content = f.read()
     # Should mention update notifications or banner
-    assert "update" in content.lower() and ("banner" in content.lower() or "notification" in content.lower())
+    assert "update" in content.lower() and (
+        "banner" in content.lower() or "notification" in content.lower()
+    )
 
 
 def test_release_checklist_covers_manual_steps():
     """PHASE-44-RELEASE-CHECKLIST.md exists and covers PyPI/TestPyPI setup."""
-    with open(".planning/phases/44-pypi-release-pipeline-install-docs/PHASE-44-RELEASE-CHECKLIST.md") as f:
+    with open(
+        ".planning/phases/44-pypi-release-pipeline-install-docs/PHASE-44-RELEASE-CHECKLIST.md"
+    ) as f:
         content = f.read()
     assert "PyPI" in content
     assert "TestPyPI" in content

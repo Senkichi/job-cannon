@@ -36,7 +36,6 @@ from playwright.sync_api import sync_playwright
 from job_finder.web.ai_career_navigator import (
     RecipeStaleError,
     _derive_search_term,
-    _extract_with_recipe,
     replay_navigation_recipe,
     wait_for_snapshot_ready,
 )
@@ -166,7 +165,9 @@ def main() -> int:
     profile_cfg = cfg.get("profile", {})
     target_titles = profile_cfg.get("target_titles", [])
     exclusions_cfg = profile_cfg.get("exclusions", {})
-    exclusions = exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    exclusions = (
+        exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    )
 
     db_path = cfg.get("db_path", "jobs.db")
     companies = _load_ai_tier_companies(db_path)

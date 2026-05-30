@@ -245,19 +245,21 @@ def test_format_canonical_location_filter_renders_full_entry(app) -> None:
     """Filter renders ``City, Region · Country · Workplace``."""
     with app.app_context():
         env = app.jinja_env
-        template = env.from_string(
-            "{{ value | format_canonical_location }}"
+        template = env.from_string("{{ value | format_canonical_location }}")
+        json_str = json.dumps(
+            [
+                {
+                    "city": "San Francisco",
+                    "region": "California",
+                    "region_code": "CA",
+                    "country": "United States",
+                    "country_code": "US",
+                    "workplace_type": "REMOTE",
+                    "raw": "San Francisco, CA",
+                    "unresolved": False,
+                }
+            ]
         )
-        json_str = json.dumps([{
-            "city": "San Francisco",
-            "region": "California",
-            "region_code": "CA",
-            "country": "United States",
-            "country_code": "US",
-            "workplace_type": "REMOTE",
-            "raw": "San Francisco, CA",
-            "unresolved": False,
-        }])
         result = template.render(value=json_str)
         assert result == "San Francisco, CA · US · Remote"
 
@@ -266,17 +268,19 @@ def test_format_canonical_location_filter_omits_unspecified_workplace(app) -> No
     """UNSPECIFIED workplace_type is omitted from the rendered string."""
     with app.app_context():
         env = app.jinja_env
-        template = env.from_string(
-            "{{ value | format_canonical_location }}"
+        template = env.from_string("{{ value | format_canonical_location }}")
+        json_str = json.dumps(
+            [
+                {
+                    "city": "Toronto",
+                    "region_code": "ON",
+                    "country_code": "CA",
+                    "workplace_type": "UNSPECIFIED",
+                    "raw": "Toronto, ON",
+                    "unresolved": False,
+                }
+            ]
         )
-        json_str = json.dumps([{
-            "city": "Toronto",
-            "region_code": "ON",
-            "country_code": "CA",
-            "workplace_type": "UNSPECIFIED",
-            "raw": "Toronto, ON",
-            "unresolved": False,
-        }])
         result = template.render(value=json_str)
         assert result == "Toronto, ON · CA"
 
@@ -285,9 +289,7 @@ def test_format_canonical_location_filter_caps_at_max_entries(app) -> None:
     """Overflow appears as ``+N more``; default max is 3 entries."""
     with app.app_context():
         env = app.jinja_env
-        template = env.from_string(
-            "{{ value | format_canonical_location }}"
-        )
+        template = env.from_string("{{ value | format_canonical_location }}")
         entries = [
             {
                 "city": f"City{i}",
@@ -310,9 +312,7 @@ def test_format_canonical_location_filter_empty_input_returns_empty(app) -> None
     """None / empty string / invalid JSON → empty string."""
     with app.app_context():
         env = app.jinja_env
-        template = env.from_string(
-            "{{ value | format_canonical_location }}"
-        )
+        template = env.from_string("{{ value | format_canonical_location }}")
         assert template.render(value=None) == ""
         assert template.render(value="") == ""
         assert template.render(value="not-json") == ""

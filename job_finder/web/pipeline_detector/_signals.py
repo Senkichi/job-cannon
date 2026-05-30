@@ -122,18 +122,14 @@ def _company_in_email(
     # Strategy 2: distinctive-token match
     tokens = [t.strip(".,;:()&") for t in company_lower.split()]
     tokens = [t for t in tokens if t]
-    distinctive = [
-        t for t in tokens if len(t) >= 4 and t not in COMPANY_STOP_WORDS
-    ]
+    distinctive = [t for t in tokens if len(t) >= 4 and t not in COMPANY_STOP_WORDS]
     if not distinctive:
         # All tokens are generic suffixes or too short (e.g. "CVS Health",
         # "EQT Corporation"). Only Strategy 1 (already failed) can attribute
         # — fail closed.
         return False
 
-    return all(
-        re.search(r"\b" + re.escape(t) + r"\b", surface) for t in distinctive
-    )
+    return all(re.search(r"\b" + re.escape(t) + r"\b", surface) for t in distinctive)
 
 
 def _title_in_email(title: str, subject: str, body: str) -> bool:
@@ -261,9 +257,7 @@ def _sender_matches_company(from_address: str, company: str | None) -> bool:
     sender_domain = match.group(1).lower()
 
     tokens = [t.strip(".,;:()&") for t in company.lower().split()]
-    distinctive = [
-        t for t in tokens if len(t) >= 4 and t and t not in COMPANY_STOP_WORDS
-    ]
+    distinctive = [t for t in tokens if len(t) >= 4 and t and t not in COMPANY_STOP_WORDS]
     if not distinctive:
         return False
     return all(t in sender_domain for t in distinctive)

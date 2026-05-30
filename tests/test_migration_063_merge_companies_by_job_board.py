@@ -149,13 +149,17 @@ class TestMergeByAtsSlug:
     def test_same_platform_slug_merges(self, migrated_db):
         path, conn = migrated_db
         keep = _insert_company(
-            conn, "Sony Interactive Entertainment",
-            ats_platform="greenhouse", ats_slug="sonyinteractiveentertainmentglobal",
+            conn,
+            "Sony Interactive Entertainment",
+            ats_platform="greenhouse",
+            ats_slug="sonyinteractiveentertainmentglobal",
             jobs_found_total=42,
         )
         orphan = _insert_company(
-            conn, "PlayStation",
-            ats_platform="greenhouse", ats_slug="sonyinteractiveentertainmentglobal",
+            conn,
+            "PlayStation",
+            ats_platform="greenhouse",
+            ats_slug="sonyinteractiveentertainmentglobal",
             jobs_found_total=3,
         )
         _insert_job_for_company(conn, "test|j1", orphan)
@@ -175,13 +179,17 @@ class TestMergeByAtsSlug:
         regardless of insertion order. Keeps the more-active row."""
         path, conn = migrated_db
         first = _insert_company(
-            conn, "TRM",
-            ats_platform="ashby", ats_slug="trm-labs",
+            conn,
+            "TRM",
+            ats_platform="ashby",
+            ats_slug="trm-labs",
             jobs_found_total=2,
         )
         second = _insert_company(
-            conn, "TRM Labs",
-            ats_platform="ashby", ats_slug="trm-labs",
+            conn,
+            "TRM Labs",
+            ats_platform="ashby",
+            ats_slug="trm-labs",
             jobs_found_total=15,
         )
 
@@ -221,12 +229,14 @@ class TestMergeByCareersUrl:
     def test_same_canonical_url_merges(self, migrated_db):
         path, conn = migrated_db
         keep = _insert_company(
-            conn, "Empower Retirement",
+            conn,
+            "Empower Retirement",
             careers_url="https://jobs.empower.com/",
             jobs_found_total=10,
         )
         orphan = _insert_company(
-            conn, "Empower",
+            conn,
+            "Empower",
             careers_url="http://www.jobs.empower.com",
             jobs_found_total=1,
         )
@@ -239,12 +249,14 @@ class TestMergeByCareersUrl:
     def test_trailing_query_string_normalized(self, migrated_db):
         path, conn = migrated_db
         keep = _insert_company(
-            conn, "Yahoo",
+            conn,
+            "Yahoo",
             careers_url="https://www.yahooinc.com/careers/",
             jobs_found_total=5,
         )
         orphan = _insert_company(
-            conn, "Yahoo!",
+            conn,
+            "Yahoo!",
             careers_url="https://yahooinc.com/careers?utm_source=referral",
             jobs_found_total=0,
         )
@@ -271,14 +283,18 @@ class TestSlugPassRunsBeforeUrlPass:
     def test_slug_match_collapses_even_when_url_also_matches(self, migrated_db):
         path, conn = migrated_db
         keep = _insert_company(
-            conn, "Big Co",
-            ats_platform="greenhouse", ats_slug="bigco",
+            conn,
+            "Big Co",
+            ats_platform="greenhouse",
+            ats_slug="bigco",
             careers_url="https://bigco.com/careers",
             jobs_found_total=20,
         )
         orphan = _insert_company(
-            conn, "BigCo Inc",
-            ats_platform="greenhouse", ats_slug="bigco",
+            conn,
+            "BigCo Inc",
+            ats_platform="greenhouse",
+            ats_slug="bigco",
             careers_url="https://www.bigco.com/careers/",
             jobs_found_total=0,
         )
@@ -288,22 +304,29 @@ class TestSlugPassRunsBeforeUrlPass:
         # Single merge; no double-counting / no leftover orphan.
         assert _company_exists(conn, keep)
         assert not _company_exists(conn, orphan)
-        assert conn.execute(
-            "SELECT COUNT(*) FROM companies WHERE name LIKE '%BigCo%' OR name LIKE 'Big Co'"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM companies WHERE name LIKE '%BigCo%' OR name LIKE 'Big Co'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 class TestIdempotence:
     def test_second_run_is_noop(self, migrated_db):
         path, conn = migrated_db
         keep = _insert_company(
-            conn, "Co A",
-            ats_platform="lever", ats_slug="shared",
+            conn,
+            "Co A",
+            ats_platform="lever",
+            ats_slug="shared",
             jobs_found_total=5,
         )
         orphan = _insert_company(
-            conn, "Co B",
-            ats_platform="lever", ats_slug="shared",
+            conn,
+            "Co B",
+            ats_platform="lever",
+            ats_slug="shared",
             jobs_found_total=1,
         )
 
@@ -313,9 +336,12 @@ class TestIdempotence:
 
         _run_m063(path, conn)  # second pass: no clusters with >1 row
         assert _company_exists(conn, keep)
-        assert conn.execute(
-            "SELECT COUNT(*) FROM companies WHERE ats_platform = 'lever' AND ats_slug = 'shared'"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM companies WHERE ats_platform = 'lever' AND ats_slug = 'shared'"
+            ).fetchone()[0]
+            == 1
+        )
 
 
 class TestEmptyDatabase:

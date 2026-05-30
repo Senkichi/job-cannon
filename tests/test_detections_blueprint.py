@@ -258,15 +258,9 @@ class TestDismissAction:
         badge in the same request that fades the card out.
         """
         client, db_path, conn = client_with_db
-        d1 = _insert_pending_detection(
-            conn, "betterhelp|data scientist|san jose ca", "rejection"
-        )
-        _insert_pending_detection(
-            conn, "stripe|senior data scientist|remote", "rejection"
-        )
-        _insert_pending_detection(
-            conn, "google|staff data scientist|remote", "interview"
-        )
+        d1 = _insert_pending_detection(conn, "betterhelp|data scientist|san jose ca", "rejection")
+        _insert_pending_detection(conn, "stripe|senior data scientist|remote", "rejection")
+        _insert_pending_detection(conn, "google|staff data scientist|remote", "interview")
         # Before any action: 3 pending.
         response = client.post(f"/detections/{d1}/dismiss")
         assert response.status_code == 200

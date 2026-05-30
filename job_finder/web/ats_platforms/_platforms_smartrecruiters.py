@@ -94,10 +94,15 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
     country = (loc.get("country") or "").strip() or None
     country_code = (loc.get("countryCode") or "").strip().upper() or None
     workplace_type = "REMOTE" if loc.get("remote") else "UNSPECIFIED"
-    if not any((city, region, region_code, country, country_code)) and workplace_type == "UNSPECIFIED":
+    if (
+        not any((city, region, region_code, country, country_code))
+        and workplace_type == "UNSPECIFIED"
+    ):
         return []
     raw = ", ".join(
-        p for p in [loc.get("city"), loc.get("region"), loc.get("country")] if isinstance(p, str) and p
+        p
+        for p in [loc.get("city"), loc.get("region"), loc.get("country")]
+        if isinstance(p, str) and p
     )
     return [
         JobLocation(

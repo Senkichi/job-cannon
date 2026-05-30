@@ -50,11 +50,13 @@ def _fetch_postings(slug: str) -> list[dict]:
         if anchor is None:
             continue
         location_el = item.find(class_="BambooHR-ATS-Location")
-        postings.append({
-            "title": anchor.get_text(strip=True),
-            "href": anchor.get("href") or "",
-            "location": location_el.get_text(strip=True) if location_el else "",
-        })
+        postings.append(
+            {
+                "title": anchor.get_text(strip=True),
+                "href": anchor.get("href") or "",
+                "location": location_el.get_text(strip=True) if location_el else "",
+            }
+        )
     return postings
 
 

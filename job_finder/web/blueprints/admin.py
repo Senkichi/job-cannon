@@ -13,6 +13,7 @@ serves the request -- which is also the only worker (single-process app).
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 
 from flask import Blueprint, jsonify
 
@@ -110,7 +111,7 @@ def run_job_now(job_id: str):
     (e.g. ``reconcile_all_companies``) was the root cause of the writer-lock
     starvation regression chased in rev 6→8 (see ``.planning/NEXT_STEPS``).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     sched, err = _scheduler_or_503()
     if err:
@@ -123,12 +124,10 @@ def run_job_now(job_id: str):
     if _job_currently_running(sched, job_id):
         logger.info("Admin: run-now for %s rejected — instance already running", job_id)
         return (
-            jsonify(
-                {"id": job_id, "triggered": False, "reason": "already running"}
-            ),
+            jsonify({"id": job_id, "triggered": False, "reason": "already running"}),
             409,
         )
 
-    job.modify(next_run_time=datetime.now(timezone.utc))
+    job.modify(next_run_time=datetime.now(UTC))
     logger.warning("Admin: triggered immediate run of %s", job_id)
     return jsonify({"id": job_id, "triggered": True})

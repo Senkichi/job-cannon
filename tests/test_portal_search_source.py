@@ -556,9 +556,7 @@ class TestFetchUsajobs:
 
         from job_finder.sources.portal_search_source import _fetch_usajobs
 
-        jobs = _fetch_usajobs(
-            ["Analyst"], user_agent_email="me@x.com", authorization_key="key123"
-        )
+        jobs = _fetch_usajobs(["Analyst"], user_agent_email="me@x.com", authorization_key="key123")
         assert len(jobs) == 1
         assert jobs[0].source == "portal_usajobs"
         assert jobs[0].company == "Department of Defense"
@@ -574,10 +572,7 @@ class TestFetchUsajobs:
 
         from job_finder.sources.portal_search_source import _fetch_usajobs
 
-        assert (
-            _fetch_usajobs(["Analyst"], user_agent_email="me@x", authorization_key="k")
-            == []
-        )
+        assert _fetch_usajobs(["Analyst"], user_agent_email="me@x", authorization_key="k") == []
 
 
 class TestFetchAdzuna:
@@ -756,18 +751,14 @@ class TestFetchAllPortalsStage2:
             "adzuna": {"enabled": True, "app_id": "id", "app_key": "k", "country": "gb"},
             "jooble": {"enabled": True, "api_key": "abc"},
         }
-        fetch_all_portals(
-            ["Engineer"], dataforseo_source=None, portal_config=portal_config
-        )
+        fetch_all_portals(["Engineer"], dataforseo_source=None, portal_config=portal_config)
 
         mock_jobicy.assert_called_once()
         mock_yc.assert_called_once()
         mock_usajobs.assert_called_once_with(
             ["Engineer"], user_agent_email="me@x.com", authorization_key="k"
         )
-        mock_adzuna.assert_called_once_with(
-            ["Engineer"], app_id="id", app_key="k", country="gb"
-        )
+        mock_adzuna.assert_called_once_with(["Engineer"], app_id="id", app_key="k", country="gb")
         mock_jooble.assert_called_once_with(["Engineer"], api_key="abc")
 
 
@@ -1402,13 +1393,9 @@ class TestUsajobsMojibakeRepair:
                         "MatchedObjectDescriptor": {
                             "PositionTitle": "Weâ€™re hiring Analyst",
                             "OrganizationName": "Sociâ€™étê Federal",
-                            "PositionLocation": [
-                                {"LocationName": "San Joséâ€™, CA"}
-                            ],
+                            "PositionLocation": [{"LocationName": "San Joséâ€™, CA"}],
                             "PositionURI": "https://usajobs.gov/jobs/1",
-                            "UserArea": {
-                                "Details": {"JobSummary": "Joinâ€™ the team"}
-                            },
+                            "UserArea": {"Details": {"JobSummary": "Joinâ€™ the team"}},
                         }
                     }
                 ]
@@ -1480,9 +1467,7 @@ class TestAdzunaMojibakeRepair:
 
         from job_finder.sources.portal_search_source import _fetch_adzuna
 
-        jobs = _fetch_adzuna(
-            ["engineer"], app_id="dummy", app_key="dummy"
-        )
+        jobs = _fetch_adzuna(["engineer"], app_id="dummy", app_key="dummy")
         assert len(jobs) == 1
         assert "â€™" not in jobs[0].title
         assert "â€™" not in jobs[0].company
@@ -1506,9 +1491,7 @@ class TestAdzunaMojibakeRepair:
 
         from job_finder.sources.portal_search_source import _fetch_adzuna
 
-        jobs = _fetch_adzuna(
-            ["engineer"], app_id="dummy", app_key="dummy"
-        )
+        jobs = _fetch_adzuna(["engineer"], app_id="dummy", app_key="dummy")
         assert len(jobs) == 1
         assert jobs[0].description in ("", None)
 

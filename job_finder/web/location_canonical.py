@@ -27,9 +27,7 @@ from typing import Any, Literal
 
 WorkplaceType = Literal["REMOTE", "HYBRID", "ONSITE", "UNSPECIFIED"]
 
-_VALID_WORKPLACE_TYPES: frozenset[str] = frozenset(
-    {"REMOTE", "HYBRID", "ONSITE", "UNSPECIFIED"}
-)
+_VALID_WORKPLACE_TYPES: frozenset[str] = frozenset({"REMOTE", "HYBRID", "ONSITE", "UNSPECIFIED"})
 
 
 @dataclass(frozen=True, slots=True)

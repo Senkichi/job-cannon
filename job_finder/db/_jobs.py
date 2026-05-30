@@ -17,7 +17,8 @@ import sqlite3
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.models import Job
-from job_finder.web.location_canonical import JobLocation, to_json as _locations_to_json
+from job_finder.web.location_canonical import JobLocation
+from job_finder.web.location_canonical import to_json as _locations_to_json
 
 from ._persistence import update_pipeline_status
 
@@ -156,7 +157,9 @@ def upsert_job(
     # column being populated for filter logic and rollups. UPDATE-branch
     # coalesces below so 'UNSPECIFIED' from a re-ingestion never downgrades
     # a real value like 'REMOTE' that an earlier scan extracted.
-    workplace_type_col = locations_structured[0].workplace_type if locations_structured else "UNSPECIFIED"
+    workplace_type_col = (
+        locations_structured[0].workplace_type if locations_structured else "UNSPECIFIED"
+    )
     primary_country_code = locations_structured[0].country_code if locations_structured else None
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",

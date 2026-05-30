@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, datetime
-from typing import Any
 
 from evals.cascade_audit.adapters import rows_to_dicts
 
@@ -54,7 +53,6 @@ class CompanyResearchAdapter:
     def score(self, gold: dict, candidate: dict) -> dict:
         """Score candidate against gold using judge protocol."""
         from evals.cascade_audit.judge import judge_with_position_swap
-        from job_finder.web.model_provider import _make_adapter
 
         if self._judge_provider is not None:
             verdict, agreement = judge_with_position_swap(

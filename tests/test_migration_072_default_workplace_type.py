@@ -37,9 +37,7 @@ def migrated_db():
         os.remove(path)
 
 
-def _insert(
-    conn: sqlite3.Connection, *, dedup_key: str, workplace_type: str | None
-) -> None:
+def _insert(conn: sqlite3.Connection, *, dedup_key: str, workplace_type: str | None) -> None:
     conn.execute(
         """INSERT INTO jobs
               (dedup_key, title, company, location, source_urls,

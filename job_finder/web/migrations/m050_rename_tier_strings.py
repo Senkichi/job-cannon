@@ -1,4 +1,5 @@
 """Migration 50 — rename vestigial enrichment_tier literals to low/mid/high."""
+
 from job_finder.web.migrations.types import Migration
 
 MIGRATION = Migration(

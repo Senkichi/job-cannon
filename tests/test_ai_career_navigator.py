@@ -89,14 +89,16 @@ class TestWaitForSnapshotReady:
 
     def test_polls_until_snapshot_grows(self):
         page = MagicMock()
-        snapshots = ["short", "still short", "now we have a snapshot that is longer than fifty chars indeed"]
+        snapshots = [
+            "short",
+            "still short",
+            "now we have a snapshot that is longer than fifty chars indeed",
+        ]
         with patch(
             "job_finder.web.ai_career_navigator._take_snapshot",
             side_effect=snapshots,
         ):
-            result = wait_for_snapshot_ready(
-                page, timeout_ms=8000, poll_ms=500, min_chars=50
-            )
+            result = wait_for_snapshot_ready(page, timeout_ms=8000, poll_ms=500, min_chars=50)
         assert result >= 50
         # First two polls were below threshold so wait_for_timeout was called twice
         assert page.wait_for_timeout.call_count == 2
@@ -108,9 +110,7 @@ class TestWaitForSnapshotReady:
             "job_finder.web.ai_career_navigator._take_snapshot",
             return_value="short",
         ):
-            result = wait_for_snapshot_ready(
-                page, timeout_ms=2000, poll_ms=500, min_chars=50
-            )
+            result = wait_for_snapshot_ready(page, timeout_ms=2000, poll_ms=500, min_chars=50)
         # Never crossed min_chars; returns the last observed (short) length
         assert result == len("short")
         # Polled 4 times within the 2000ms budget
@@ -122,9 +122,7 @@ class TestWaitForSnapshotReady:
             "job_finder.web.ai_career_navigator._take_snapshot",
             side_effect=Exception("snapshot failed"),
         ):
-            result = wait_for_snapshot_ready(
-                page, timeout_ms=1000, poll_ms=500, min_chars=50
-            )
+            result = wait_for_snapshot_ready(page, timeout_ms=1000, poll_ms=500, min_chars=50)
         assert result == 0
         # Polled 2 times before timeout
         assert page.wait_for_timeout.call_count == 2

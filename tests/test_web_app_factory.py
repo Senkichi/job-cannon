@@ -1,9 +1,5 @@
 """Tests for Flask app factory with user_data_dirs integration."""
 
-import os
-
-import pytest
-
 from job_finder.web import create_app
 
 

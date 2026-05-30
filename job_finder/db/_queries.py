@@ -290,12 +290,26 @@ def get_filtered_jobs(
         if freshness == "biz1":
             # business_days_ago returns a local date; treat as local midnight → UTC.
             from datetime import time as _time
+
             biz_date = business_days_ago(1)
-            cutoff = datetime.combine(biz_date, _time.min).astimezone().astimezone(UTC).replace(tzinfo=None).isoformat()
+            cutoff = (
+                datetime.combine(biz_date, _time.min)
+                .astimezone()
+                .astimezone(UTC)
+                .replace(tzinfo=None)
+                .isoformat()
+            )
         elif freshness == "biz3":
             from datetime import time as _time
+
             biz_date = business_days_ago(3)
-            cutoff = datetime.combine(biz_date, _time.min).astimezone().astimezone(UTC).replace(tzinfo=None).isoformat()
+            cutoff = (
+                datetime.combine(biz_date, _time.min)
+                .astimezone()
+                .astimezone(UTC)
+                .replace(tzinfo=None)
+                .isoformat()
+            )
         if cutoff:
             conditions.append("first_seen >= ?")
             params.append(cutoff)

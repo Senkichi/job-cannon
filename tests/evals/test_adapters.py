@@ -1,16 +1,15 @@
 """Unit tests for cascade audit adapters (Phase 36)."""
 
 import sqlite3
-from unittest.mock import Mock, patch
 
-import pytest
-
-from evals.cascade_audit.adapters.parse_structured_fields_adapter import ParseStructuredFieldsAdapter
-from evals.cascade_audit.adapters.find_careers_url_adapter import FindCareersUrlAdapter
-from evals.cascade_audit.adapters.extract_jobs_adapter import ExtractJobsAdapter
-from evals.cascade_audit.adapters.description_reformat_adapter import DescriptionReformatAdapter
-from evals.cascade_audit.adapters.company_research_adapter import CompanyResearchAdapter
 from evals.cascade_audit.adapters.ai_nav_discovery_adapter import AiNavDiscoveryAdapter
+from evals.cascade_audit.adapters.company_research_adapter import CompanyResearchAdapter
+from evals.cascade_audit.adapters.description_reformat_adapter import DescriptionReformatAdapter
+from evals.cascade_audit.adapters.extract_jobs_adapter import ExtractJobsAdapter
+from evals.cascade_audit.adapters.find_careers_url_adapter import FindCareersUrlAdapter
+from evals.cascade_audit.adapters.parse_structured_fields_adapter import (
+    ParseStructuredFieldsAdapter,
+)
 
 
 def test_parse_structured_fields_adapter_sample():
@@ -65,8 +64,8 @@ def test_find_careers_url_adapter_score():
 
 def test_extract_jobs_adapter_sample():
     """Test ExtractJobsAdapter.sample()."""
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = ExtractJobsAdapter(artifact_dir=Path(tmpdir))
@@ -82,8 +81,8 @@ def test_extract_jobs_adapter_sample():
 
 def test_extract_jobs_adapter_score():
     """Test ExtractJobsAdapter.score()."""
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = ExtractJobsAdapter(artifact_dir=Path(tmpdir))
@@ -146,8 +145,8 @@ def test_company_research_adapter_score():
 
 def test_ai_nav_discovery_adapter_sample():
     """Test AiNavDiscoveryAdapter.sample()."""
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = AiNavDiscoveryAdapter(artifact_dir=Path(tmpdir))
@@ -163,8 +162,8 @@ def test_ai_nav_discovery_adapter_sample():
 
 def test_ai_nav_discovery_adapter_score():
     """Test AiNavDiscoveryAdapter.score()."""
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         adapter = AiNavDiscoveryAdapter(artifact_dir=Path(tmpdir))

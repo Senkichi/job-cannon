@@ -92,9 +92,7 @@ def _canonical_careers_url(raw: str | None) -> str:
     return host + path
 
 
-def _repoint_and_delete(
-    conn: sqlite3.Connection, orphan_id: int, canonical_id: int
-) -> None:
+def _repoint_and_delete(conn: sqlite3.Connection, orphan_id: int, canonical_id: int) -> None:
     """Mirror m058/m061's helper: re-point known FK references then drop the orphan."""
     conn.execute(
         "UPDATE jobs SET company_id = ? WHERE company_id = ?",

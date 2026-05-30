@@ -31,7 +31,9 @@ from job_finder.web.providers.claude_code_cli import ClaudeCodeCLIProvider
 
 def _make_provider() -> ClaudeCodeCLIProvider:
     """Construct with claude binary mocked-present."""
-    with patch("job_finder.web.providers.claude_code_cli.shutil.which", return_value="/usr/bin/claude"):
+    with patch(
+        "job_finder.web.providers.claude_code_cli.shutil.which", return_value="/usr/bin/claude"
+    ):
         return ClaudeCodeCLIProvider(config={})
 
 
@@ -157,9 +159,7 @@ def test_schema_prefers_structured_output_when_present():
         "job_finder.web.providers.claude_code_cli._run_oneshot",
         return_value=_envelope(result="ignored", structured_output=struct),
     ):
-        result = provider.call(
-            "m", "s", [{"role": "user", "content": "u"}], output_schema=schema
-        )
+        result = provider.call("m", "s", [{"role": "user", "content": "u"}], output_schema=schema)
     assert result.data == {"x": 42}
     assert result.schema_valid is True
 
@@ -171,9 +171,7 @@ def test_schema_falls_back_to_result_parse_when_no_structured_output():
         "job_finder.web.providers.claude_code_cli._run_oneshot",
         return_value=_envelope(result='{"x": 7}'),
     ):
-        result = provider.call(
-            "m", "s", [{"role": "user", "content": "u"}], output_schema=schema
-        )
+        result = provider.call("m", "s", [{"role": "user", "content": "u"}], output_schema=schema)
     assert result.data == {"x": 7}
     assert result.schema_valid is True
 
@@ -223,6 +221,8 @@ def test_module_does_not_call_subprocess_directly():
     import pathlib
 
     src = pathlib.Path("job_finder/web/providers/claude_code_cli.py").read_text()
-    assert "subprocess.run" not in src, "claude_code_cli.py should delegate via _run_oneshot, not call subprocess directly"
+    assert "subprocess.run" not in src, (
+        "claude_code_cli.py should delegate via _run_oneshot, not call subprocess directly"
+    )
     assert "shell=True" not in src
     assert "--bare" not in src

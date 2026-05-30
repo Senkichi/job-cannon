@@ -158,7 +158,7 @@ def _normalize_column(
         return (0, 0)
 
     rows = conn.execute(
-        f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL"  # noqa: S608 — column allowlisted
+        f"SELECT rowid, {column} FROM {table} WHERE {column} IS NOT NULL"
     ).fetchall()
 
     phase_a_updates: list[tuple[str, int]] = []
@@ -178,12 +178,12 @@ def _normalize_column(
 
     if phase_a_updates:
         conn.executemany(
-            f"UPDATE {table} SET {column} = ? WHERE rowid = ?",  # noqa: S608
+            f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
             phase_a_updates,
         )
     if phase_b_updates:
         conn.executemany(
-            f"UPDATE {table} SET {column} = ? WHERE rowid = ?",  # noqa: S608
+            f"UPDATE {table} SET {column} = ? WHERE rowid = ?",
             phase_b_updates,
         )
 

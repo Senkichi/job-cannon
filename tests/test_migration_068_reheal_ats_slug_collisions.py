@@ -94,9 +94,7 @@ def _insert_job(
 
 
 def _run(conn, db_path):
-    ctx = MigrationContext(
-        conn=conn, db_path=db_path, user_data_root=".", initial_version=67
-    )
+    ctx = MigrationContext(conn=conn, db_path=db_path, user_data_root=".", initial_version=67)
     _heal(ctx)
     conn.commit()
 
@@ -124,7 +122,13 @@ def test_aggregator_name_loses_to_real_company(migrated_db):
         homepage_url=None,
         jobs_found_total=20,  # MORE jobs than real one — would beat m063
     )
-    _insert_job(conn, "experimentation jobs|staff data scientist", "Experimentation Jobs", aggregator_id, title="Staff Data Scientist")
+    _insert_job(
+        conn,
+        "experimentation jobs|staff data scientist",
+        "Experimentation Jobs",
+        aggregator_id,
+        title="Staff Data Scientist",
+    )
 
     _run(conn, path)
 
@@ -191,7 +195,9 @@ def test_dedup_collision_deletes_loser_job(migrated_db):
         ats_slug="headway",
     )
     # Canonical already has the job
-    _insert_job(conn, "headway|staff data scientist", "Headway", canon_id, title="Staff Data Scientist")
+    _insert_job(
+        conn, "headway|staff data scientist", "Headway", canon_id, title="Staff Data Scientist"
+    )
     # Loser has the SAME title under wrong name
     _insert_job(
         conn,
@@ -219,7 +225,10 @@ def test_null_slug_untouched(migrated_db):
 
     _run(conn, path)
 
-    assert conn.execute("SELECT COUNT(*) FROM companies WHERE id IN (?, ?)", (a, b)).fetchone()[0] == 2
+    assert (
+        conn.execute("SELECT COUNT(*) FROM companies WHERE id IN (?, ?)", (a, b)).fetchone()[0]
+        == 2
+    )
 
 
 def test_idempotent_rerun(migrated_db):

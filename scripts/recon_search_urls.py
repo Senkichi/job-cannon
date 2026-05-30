@@ -62,9 +62,17 @@ def recon(browser, name: str, url: str, keyword: str) -> dict:
 
         # Strategy 2: try clicking a "Search jobs" / "View jobs" link first
         link_text_candidates = [
-            "Search jobs", "Search Jobs", "View jobs", "View Jobs",
-            "Open Positions", "Find a job", "Find Jobs", "Browse jobs",
-            "Job Search", "All jobs", "All Jobs",
+            "Search jobs",
+            "Search Jobs",
+            "View jobs",
+            "View Jobs",
+            "Open Positions",
+            "Find a job",
+            "Find Jobs",
+            "Browse jobs",
+            "Job Search",
+            "All jobs",
+            "All Jobs",
         ]
         for txt in link_text_candidates:
             try:

@@ -1078,5 +1078,3 @@ class TestRunRegistryHygiene:
         ):
             assert key in result
             assert isinstance(result[key], int)
-
-

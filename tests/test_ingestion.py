@@ -1452,9 +1452,7 @@ class TestFetchPortalSearchWiring:
     def test_empty_keywords_falls_back_to_target_titles(self, base_config):
         """When portal_search.keywords is empty, profile.target_titles is used."""
         base_config["sources"]["portal_search"]["keywords"] = []
-        base_config["profile"] = {
-            "target_titles": ["Staff Data Scientist", "Principal Engineer"]
-        }
+        base_config["profile"] = {"target_titles": ["Staff Data Scientist", "Principal Engineer"]}
 
         from job_finder.web.ingestion_runner import _fetch_portal_search
 
@@ -1645,9 +1643,7 @@ class TestPerPortalBreakdown:
 
         assert summary["portal_search_fetched"] == 0
         # No portal_<name>_fetched keys at all when there's nothing to count.
-        portal_keys = [
-            k for k in summary if k.startswith("portal_") and k.endswith("_fetched")
-        ]
+        portal_keys = [k for k in summary if k.startswith("portal_") and k.endswith("_fetched")]
         # Only portal_search_fetched (the aggregate) — no per-portal keys.
         assert portal_keys == ["portal_search_fetched"]
 
@@ -1718,11 +1714,7 @@ class TestPerPortalBreakdown:
             "portal_search_fetched": summary.get("portal_search_fetched", 0),
         }
         for key, value in summary.items():
-            if (
-                key.startswith("portal_")
-                and key.endswith("_fetched")
-                and key not in metadata
-            ):
+            if key.startswith("portal_") and key.endswith("_fetched") and key not in metadata:
                 metadata[key] = value
 
         assert metadata["portal_remoteok_fetched"] == 1
@@ -1885,15 +1877,9 @@ class TestInjectPortalSearchCreds:
         keyring.set_password(
             "job-cannon", "sources.portal_search.usajobs.authorization_key", "KR_KEY"
         )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.adzuna.app_id", "KR_ID"
-        )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.adzuna.app_key", "KR_APP_KEY"
-        )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.jooble.api_key", "KR_JOOBLE"
-        )
+        keyring.set_password("job-cannon", "sources.portal_search.adzuna.app_id", "KR_ID")
+        keyring.set_password("job-cannon", "sources.portal_search.adzuna.app_key", "KR_APP_KEY")
+        keyring.set_password("job-cannon", "sources.portal_search.jooble.api_key", "KR_JOOBLE")
 
         try:
             augmented = _inject_portal_search_creds(portal_cfg, full_cfg)
@@ -1974,9 +1960,7 @@ class TestInjectPortalSearchCreds:
         portal_cfg = self._portal_cfg(
             jooble={"enabled": True, "api_key": "PLAINTEXT"},
         )
-        keyring.set_password(
-            "job-cannon", "sources.portal_search.jooble.api_key", "KEYRING"
-        )
+        keyring.set_password("job-cannon", "sources.portal_search.jooble.api_key", "KEYRING")
         monkeypatch.setenv("JOOBLE_API_KEY", "ENV_VAR_WINS")
 
         try:
@@ -1984,9 +1968,7 @@ class TestInjectPortalSearchCreds:
             assert augmented["jooble"]["api_key"] == "ENV_VAR_WINS"
         finally:
             try:
-                keyring.delete_password(
-                    "job-cannon", "sources.portal_search.jooble.api_key"
-                )
+                keyring.delete_password("job-cannon", "sources.portal_search.jooble.api_key")
             except Exception:
                 pass
 
@@ -2106,17 +2088,17 @@ class TestFetchPortalSearchTitleGate:
             )
 
         # _fetch_himalayas returns 3 jobs: 1 on-target, 1 off-target, 1 excluded.
-        with patch(
-            "job_finder.sources.portal_search_source._fetch_himalayas",
-            return_value=[
-                _job("Senior Data Scientist"),  # passes gate
-                _job("IT Service Lead"),  # off-target, dropped
-                _job("Senior Data Scientist Intern"),  # excluded
-            ],
-        ), patch(
-            "job_finder.sources.portal_search_source._fetch_remoteok", return_value=[]
-        ), patch(
-            "job_finder.sources.portal_search_source._fetch_remotive", return_value=[]
+        with (
+            patch(
+                "job_finder.sources.portal_search_source._fetch_himalayas",
+                return_value=[
+                    _job("Senior Data Scientist"),  # passes gate
+                    _job("IT Service Lead"),  # off-target, dropped
+                    _job("Senior Data Scientist Intern"),  # excluded
+                ],
+            ),
+            patch("job_finder.sources.portal_search_source._fetch_remoteok", return_value=[]),
+            patch("job_finder.sources.portal_search_source._fetch_remotive", return_value=[]),
         ):
             summary: dict = {}
             jobs = _fetch_portal_search(gated_config, summary)
@@ -2354,9 +2336,7 @@ class TestNonPortalIngestionTitleGate:
         mock_source = MagicMock()
         mock_source.collect_results.return_value = self._mixed_jobs("dataforseo")
         summary: dict = {"dataforseo_errors": []}
-        jobs = _collect_dataforseo_results(
-            mock_source, ["task1"], summary, config=gated_config
-        )
+        jobs = _collect_dataforseo_results(mock_source, ["task1"], summary, config=gated_config)
 
         assert [j.title for j in jobs] == ["Senior Data Scientist"]
         assert summary["dataforseo_fetched"] == 1

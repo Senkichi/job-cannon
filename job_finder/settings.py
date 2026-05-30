@@ -152,5 +152,3 @@ class Settings:
             raise ValueError(f"Invalid ingestion.lookback_days: {self.ingestion.lookback_days}")
         if self.ingestion.max_results < 1:
             raise ValueError(f"Invalid ingestion.max_results: {self.ingestion.max_results}")
-
-

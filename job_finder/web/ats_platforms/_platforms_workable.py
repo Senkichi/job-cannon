@@ -73,8 +73,7 @@ def _posting_to_job(job: dict, slug: str) -> dict:
     source_url = (
         job.get("application_url")
         or job.get("url")
-        or (job.get("shortcode")
-        and f"https://apply.workable.com/{slug}/j/{job.get('shortcode')}")
+        or (job.get("shortcode") and f"https://apply.workable.com/{slug}/j/{job.get('shortcode')}")
         or ""
     )
     return {

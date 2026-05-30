@@ -319,10 +319,7 @@ class TestTitleMatchesAbbreviations:
         # The exclusion check should use word boundaries, so 'Lead' in the
         # exclusions list does NOT match the substring 'Lead' inside
         # 'Leadership Trainee'.
-        assert (
-            _title_matches("Leadership Trainee", ["Trainee"], exclusions=["Lead"])
-            is True
-        )
+        assert _title_matches("Leadership Trainee", ["Trainee"], exclusions=["Lead"]) is True
 
     def test_exclusion_with_abbreviation_normalized(self):
         """Exclusion list also benefits from abbreviation expansion."""
@@ -362,10 +359,7 @@ class TestTitleMatchesAbbreviations:
         # Pre-upgrade behavior preserved: 'Data Scientist' matches inside
         # 'Senior Staff Data Scientist, Search'.
         assert (
-            _title_matches(
-                "Senior Staff Data Scientist, Search", ["Data Scientist"], []
-            )
-            is True
+            _title_matches("Senior Staff Data Scientist, Search", ["Data Scientist"], []) is True
         )
 
 
@@ -536,10 +530,7 @@ class TestTitleMatchesOrderedFallback:
     def test_empty_target_titles_still_matches_anything(self):
         from job_finder.web.ats_platforms import _title_matches
 
-        assert (
-            _title_matches("Anything Goes Here", [], [])
-            is True
-        )
+        assert _title_matches("Anything Goes Here", [], []) is True
 
     def test_real_nvidia_case_now_passes(self):
         """The headline case from the 2026-05-28 AI-tier diagnostic:
@@ -1849,7 +1840,9 @@ class TestRunAtsScanHtmlFallback:
 
                 mock_careers_get.side_effect = [mock_find_resp, mock_scrape_resp]
 
-                with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
+                with patch(
+                    "job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None
+                ):
                     with patch("job_finder.web.ats_scanner._run.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -1912,7 +1905,10 @@ class TestRunAtsScanHtmlFallback:
                 "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://startup.co/careers",
             ),
-            patch("job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=scraped_jobs),
+            patch(
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page",
+                return_value=scraped_jobs,
+            ),
             patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
         ):
             with patch("job_finder.web.ats_scanner._run.time.sleep"):
@@ -2026,7 +2022,9 @@ class TestRunAtsScanHtmlFallback:
 
         with patch("job_finder.web.ats_scanner._run_html.find_careers_url", return_value=None):
             with patch("job_finder.web.ats_scanner._run_html.scrape_careers_page") as mock_scrape:
-                with patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
+                with patch(
+                    "job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None
+                ):
                     with patch("job_finder.web.ats_scanner._run.time.sleep"):
                         result = run_ats_scan(migrated_db_path, config=config)
 
@@ -2125,7 +2123,8 @@ class TestHTMLJobsScoring:
                 return_value="https://startup.co/careers",
             ):
                 with patch(
-                    "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=html_jobs
+                    "job_finder.web.ats_scanner._run_html.scrape_careers_page",
+                    return_value=html_jobs,
                 ):
                     with patch(
                         "job_finder.web.ats_scanner._run.score_and_persist_job",
@@ -2181,7 +2180,8 @@ class TestHTMLJobsScoring:
                 return_value="https://startup.co/careers",
             ):
                 with patch(
-                    "job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=html_jobs
+                    "job_finder.web.ats_scanner._run_html.scrape_careers_page",
+                    return_value=html_jobs,
                 ):
                     with patch(
                         "job_finder.web.ats_scanner._run.score_and_persist_job",
@@ -3156,9 +3156,11 @@ class TestAtsJdFullStorage:
 
         # Isolate ATS promote-to-jd_full behavior: pre-score enrich_job runs when
         # salary_min is missing and would otherwise fetch a real JD from the network.
-        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp), patch(
-            "job_finder.web.data_enricher.enrich_job", return_value={}
-        ), patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None):
+        with (
+            patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp),
+            patch("job_finder.web.data_enricher.enrich_job", return_value={}),
+            patch("job_finder.web.ats_scanner._run.score_and_persist_job", return_value=None),
+        ):
             run_ats_scan(migrated_db_path, config=config)
 
         conn = sqlite3.connect(migrated_db_path)
@@ -3267,7 +3269,10 @@ class TestHtmlFallbackDescriptionPassthrough:
                 "job_finder.web.ats_scanner._run_html.find_careers_url",
                 return_value="https://acme.com/careers",
             ),
-            patch("job_finder.web.ats_scanner._run_html.scrape_careers_page", return_value=scraped_jobs),
+            patch(
+                "job_finder.web.ats_scanner._run_html.scrape_careers_page",
+                return_value=scraped_jobs,
+            ),
         ):
             result = run_ats_scan(migrated_db_path, config)
 
@@ -3430,7 +3435,14 @@ def _insert_scored_job(conn, company_name: str, dedup_key: str, sub_sum_target: 
     from datetime import datetime
 
     # Build sub_scores summing to sub_sum_target with each axis in [1, 5].
-    axes = ["title_fit", "location_fit", "comp_fit", "domain_match", "seniority_match", "skills_match"]
+    axes = [
+        "title_fit",
+        "location_fit",
+        "comp_fit",
+        "domain_match",
+        "seniority_match",
+        "skills_match",
+    ]
     sub_scores = dict.fromkeys(axes, 1)  # start at min (sum=6)
     remaining = sub_sum_target - 6
     i = 0

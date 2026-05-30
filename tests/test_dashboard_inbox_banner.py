@@ -47,13 +47,17 @@ def test_green_status_no_banner():
 
 def test_yellow_status_no_banner():
     """Yellow is informational, not banner-worthy — only RED or auth-fail banners."""
-    fake = _result(status="yellow", summary="emails came in but 0 jobs", emails_in_window=3, jobs_in_window=0)
+    fake = _result(
+        status="yellow", summary="emails came in but 0 jobs", emails_in_window=3, jobs_in_window=0
+    )
     with patch("job_finder.web.onboarding.inbox_check.run_inbox_check", return_value=fake):
         assert _get_inbox_banner({}, None) is None
 
 
 def test_red_status_banners_with_status_summary():
-    fake = _result(status="red", summary="No job alerts in the last 24 hours", reason="check senders")
+    fake = _result(
+        status="red", summary="No job alerts in the last 24 hours", reason="check senders"
+    )
     with patch("job_finder.web.onboarding.inbox_check.run_inbox_check", return_value=fake):
         banner = _get_inbox_banner({}, None)
     assert banner is not None

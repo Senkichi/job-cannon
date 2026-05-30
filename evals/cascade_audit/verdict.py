@@ -22,10 +22,6 @@ class Verdict(BaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    winner: Literal["A", "B", "tie"] = Field(
-        description="Which output won: 'A', 'B', or 'tie'"
-    )
+    winner: Literal["A", "B", "tie"] = Field(description="Which output won: 'A', 'B', or 'tie'")
     rationale: str = Field(description="Brief explanation of the decision")
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Confidence score 0-1"
-    )
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")

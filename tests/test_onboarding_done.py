@@ -131,7 +131,9 @@ def test_done_step_end_to_end(configured_app, monkeypatch):
     # --- Side effect 3: onboarding_state.onboarding_complete = 1 AND wizard_data = '{}' ---
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        row = conn.execute("SELECT onboarding_complete, wizard_data FROM onboarding_state WHERE id=1").fetchone()
+        row = conn.execute(
+            "SELECT onboarding_complete, wizard_data FROM onboarding_state WHERE id=1"
+        ).fetchone()
     finally:
         conn.close()
     assert row[0] == 1
@@ -143,9 +145,12 @@ def test_done_step_end_to_end(configured_app, monkeypatch):
     call_kwargs = call_args.kwargs
     # The scheduled callable is the FIRST positional arg (the no-arg closure _first_ingest)
     scheduled_callable = call_args.args[0]
-    assert callable(scheduled_callable), f"add_job first arg must be callable, got {type(scheduled_callable)!r}"
+    assert callable(scheduled_callable), (
+        f"add_job first arg must be callable, got {type(scheduled_callable)!r}"
+    )
     # Closure name should be `_first_ingest` (per Task 1 action block); we accept any zero-arg callable defensively
     import inspect
+
     sig = inspect.signature(scheduled_callable)
     assert len(sig.parameters) == 0, (
         f"Scheduled callable must be no-arg (APScheduler calls it with zero args), "
@@ -157,6 +162,7 @@ def test_done_step_end_to_end(configured_app, monkeypatch):
     assert call_kwargs["replace_existing"] is True
     # run_date should be in the near future
     from datetime import datetime
+
     assert "run_date" in call_kwargs
     delta = (call_kwargs["run_date"] - datetime.now()).total_seconds()
     assert 0 < delta < 30, f"run_date delta {delta}s is out of expected ~5s window"
@@ -177,16 +183,29 @@ def test_done_scheduled_closure_invokes_run_ingestion(configured_app, monkeypatc
     _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1", (json.dumps(wizard_payload),))
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
         conn.commit()
     finally:
         conn.close()
 
     mock_scheduler = MagicMock()
-    mock_run_ingestion = MagicMock(return_value={"jobs_new": 0, "gmail_fetched": 0, "serpapi_fetched": 0, "thordata_fetched": 0, "dataforseo_fetched": 0})
+    mock_run_ingestion = MagicMock(
+        return_value={
+            "jobs_new": 0,
+            "gmail_fetched": 0,
+            "serpapi_fetched": 0,
+            "thordata_fetched": 0,
+            "dataforseo_fetched": 0,
+        }
+    )
 
-    with patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=mock_scheduler), \
-         patch("job_finder.web.pipeline_runner.run_ingestion", mock_run_ingestion):
+    with (
+        patch("job_finder.web.onboarding.blueprint.get_scheduler", return_value=mock_scheduler),
+        patch("job_finder.web.pipeline_runner.run_ingestion", mock_run_ingestion),
+    ):
         resp = configured_app.test_client().post("/onboarding/done")
     assert resp.status_code == 302
 
@@ -211,14 +230,21 @@ def test_done_no_temp_files_left_behind(configured_app, monkeypatch):
     wizard_payload = {
         "provider": {"name": "ollama"},
         "imap": {"email": "x@y.com", "app_password": "xxxx"},
-        "profile_edit": {"target_titles": "Engineer", "target_locations": "Remote", "skills": "python"},
+        "profile_edit": {
+            "target_titles": "Engineer",
+            "target_locations": "Remote",
+            "skills": "python",
+        },
         "resume_profile": {},
         "schedule": {"cadence_preset": "light"},
     }
     _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1", (json.dumps(wizard_payload),))
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -245,7 +271,10 @@ def test_done_handles_scheduler_failure_gracefully(configured_app, monkeypatch):
     _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1", (json.dumps(wizard_payload),))
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -273,7 +302,10 @@ def test_done_redirect_target_is_internal_only(configured_app, monkeypatch):
     _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1", (json.dumps(wizard_payload),))
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -299,7 +331,10 @@ def test_done_get_renders_summary_from_wizard_data(configured_app):
     _seed_wizard_data(configured_app.config["DB_PATH"], wizard_payload)
     conn = sqlite3.connect(configured_app.config["DB_PATH"])
     try:
-        conn.execute("UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1", (json.dumps(wizard_payload),))
+        conn.execute(
+            "UPDATE onboarding_state SET onboarding_complete=0, wizard_data=? WHERE id=1",
+            (json.dumps(wizard_payload),),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -544,6 +579,5 @@ def test_done_writes_provider_api_key_to_keyring(configured_app):
     cfg_path: Path = configured_app._test_cfg_path
     written = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert written["providers"]["api_keys"]["openrouter"] == "", (
-        f"plaintext should be cleared, got "
-        f"{written['providers']['api_keys']['openrouter']!r}"
+        f"plaintext should be cleared, got {written['providers']['api_keys']['openrouter']!r}"
     )

@@ -328,12 +328,8 @@ class TestJobBoardRoutes:
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = lambda: None
-        mock_resp.text = (
-            "<html><head><title>Sr PM | Contoso</title></head><body></body></html>"
-        )
-        with patch(
-            "job_finder.web.blueprints.jobs.requests.get", return_value=mock_resp
-        ):
+        mock_resp.text = "<html><head><title>Sr PM | Contoso</title></head><body></body></html>"
+        with patch("job_finder.web.blueprints.jobs.requests.get", return_value=mock_resp):
             title, company = infer_title_company_from_listing_url("https://x.com/j/1")
         assert title == "Sr PM"
         assert company == "Contoso"
@@ -847,7 +843,9 @@ def unscored_client(app_with_unscored_jobs):
 
 
 class TestBatchScoreStart:
-    def test_batch_score_start_returns_progress_fragment_when_unscored_exist(self, unscored_client):
+    def test_batch_score_start_returns_progress_fragment_when_unscored_exist(
+        self, unscored_client
+    ):
         """POST /dashboard/batch-score/start returns progress fragment with session_id."""
         response = unscored_client.post("/dashboard/batch-score/start")
         assert response.status_code == 200
@@ -2696,8 +2694,7 @@ class TestAsyncScanFlow:
         db_path = app_with_companies.config["DB_PATH"]
         conn = sqlite3.connect(db_path)
         row = conn.execute(
-            "SELECT session_type, status, total FROM batch_score_sessions "
-            "ORDER BY id DESC LIMIT 1"
+            "SELECT session_type, status, total FROM batch_score_sessions ORDER BY id DESC LIMIT 1"
         ).fetchone()
         conn.close()
         assert row is not None
@@ -2852,8 +2849,7 @@ class TestAsyncScanFlow:
 
         conn = sqlite3.connect(db_path)
         row = conn.execute(
-            "SELECT status, scored, error_msg, finished_at "
-            "FROM batch_score_sessions WHERE id = ?",
+            "SELECT status, scored, error_msg, finished_at FROM batch_score_sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         conn.close()
@@ -2901,8 +2897,7 @@ class TestAsyncScanFlow:
 
         conn = sqlite3.connect(db_path)
         row = conn.execute(
-            "SELECT status, error_msg, finished_at "
-            "FROM batch_score_sessions WHERE id = ?",
+            "SELECT status, error_msg, finished_at FROM batch_score_sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
         conn.close()
@@ -2911,9 +2906,7 @@ class TestAsyncScanFlow:
         assert "connection timeout" in (error_msg or "")
         assert finished_at is not None
 
-    def test_companies_index_shows_polling_fragment_when_scan_running(
-        self, app_with_companies
-    ):
+    def test_companies_index_shows_polling_fragment_when_scan_running(self, app_with_companies):
         """When a status='running' ats_scan session exists, GET /companies/
         inlines the polling progress fragment so the user sees scan progress
         immediately after navigating back to the page (no manual re-click)."""
@@ -2942,9 +2935,7 @@ class TestAsyncScanFlow:
         # Live N-of-M count from the session row
         assert "Scanned 3 of 7" in data
 
-    def test_companies_index_omits_polling_fragment_when_no_running_scan(
-        self, app_with_companies
-    ):
+    def test_companies_index_omits_polling_fragment_when_no_running_scan(self, app_with_companies):
         """With no running ats_scan session, the page renders an empty
         #scan-result slot and no polling trigger."""
         client = app_with_companies.test_client()

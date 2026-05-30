@@ -221,9 +221,7 @@ class TestReconcileCompanyAts:
                         'hit', 1, ?, ?)""",
             (now, now),
         )
-        racer_id = real_conn.execute(
-            "SELECT last_insert_rowid()"
-        ).fetchone()[0]
+        racer_id = real_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         real_conn.commit()
 
         class _EmptyCursor:
@@ -274,9 +272,7 @@ class TestReconcileCompanyAts:
             proxy,  # type: ignore[arg-type]
             cid,
             reason="test",
-            config={
-                "ats": {"identity_reconcile": {"enabled": True, "shadow": False}}
-            },
+            config={"ats": {"identity_reconcile": {"enabled": True, "shadow": False}}},
         )
 
         # Race-detected outcome shape matches the SELECT-guard outcome,
@@ -288,9 +284,7 @@ class TestReconcileCompanyAts:
 
         # Loser left in pre-reconcile state (no platform/slug written).
         loser_row = dict(
-            real_conn.execute(
-                "SELECT * FROM companies WHERE id = ?", (cid,)
-            ).fetchone()
+            real_conn.execute("SELECT * FROM companies WHERE id = ?", (cid,)).fetchone()
         )
         assert loser_row["ats_platform"] is None
         assert loser_row["ats_slug"] is None

@@ -26,7 +26,6 @@ from job_finder.web.onboarding.resume_parser import (
     parse_resume,
 )
 
-
 # --- Fixtures ---
 
 
@@ -130,10 +129,13 @@ def test_parse_resume_threads_conn_and_config_to_call_llm(
 ):
     """parse_resume must thread conn/config through to _call_llm. The C-1 bug
     silently dropped these because parse_resume's signature didn't accept them."""
-    with patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="Sample resume text",
-    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Sample resume text",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
         mock_call.return_value = _make_result(valid_profile_data)
 
         # Use a real Path with a .pdf suffix so _extract_text dispatch logic
@@ -152,11 +154,14 @@ def test_parse_resume_threads_conn_and_config_to_call_llm(
 # --- Behavior tests (no behavioral change from C-1 fix; just kwarg surface) ---
 
 
-def test_parse_resume_docx_extracts_paragraphs(in_memory_db, stub_config, valid_profile_data, tmp_path):
+def test_parse_resume_docx_extracts_paragraphs(
+    in_memory_db, stub_config, valid_profile_data, tmp_path
+):
     """DOCX extraction reads paragraphs and feeds the result into call_model."""
-    with patch("job_finder.web.onboarding.resume_parser.Document") as mock_doc_class, patch(
-        "job_finder.web.onboarding.resume_parser.call_model"
-    ) as mock_call:
+    with (
+        patch("job_finder.web.onboarding.resume_parser.Document") as mock_doc_class,
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
         mock_doc = MagicMock()
         mock_para1 = MagicMock()
         mock_para1.text = "First paragraph"
@@ -190,11 +195,13 @@ def test_parse_resume_rejects_unsupported_extension(in_memory_db, stub_config, t
 
 def test_parse_resume_blank_text_returns_empty_profile(in_memory_db, stub_config, tmp_path):
     """Blank extracted text returns empty profile without calling LLM."""
-    with patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="",
-    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
-
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
         fake_pdf = tmp_path / "resume.pdf"
         fake_pdf.write_bytes(b"%PDF-1.4\n")
 
@@ -206,10 +213,13 @@ def test_parse_resume_blank_text_returns_empty_profile(in_memory_db, stub_config
 
 def test_parse_resume_llm_failure_returns_empty_profile(in_memory_db, stub_config, tmp_path):
     """call_model exception returns empty profile (defensive, never raises)."""
-    with patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="Sample resume text",
-    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Sample resume text",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
         mock_call.side_effect = Exception("LLM error")
 
         fake_pdf = tmp_path / "resume.pdf"
@@ -335,10 +345,13 @@ def test_call_llm_prompt_instructs_skill_inference_when_no_skills_section(
 
 def test_parse_resume_successful_flow(in_memory_db, stub_config, valid_profile_data, tmp_path):
     """End-to-end happy path with mocked call_model."""
-    with patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="Resume text",
-    ), patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call:
+    with (
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Resume text",
+        ),
+        patch("job_finder.web.onboarding.resume_parser.call_model") as mock_call,
+    ):
         mock_call.return_value = _make_result(valid_profile_data)
 
         fake_pdf = tmp_path / "resume.pdf"

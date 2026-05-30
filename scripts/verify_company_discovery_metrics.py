@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from job_finder.config import load_config
 
@@ -23,7 +23,7 @@ _CAREERS_SQL = "je.value IN ('careers_crawl','careers_page')"
 
 
 def _since_iso(days: int) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    return (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
 
 def run_window_metrics(
@@ -87,10 +87,11 @@ def run_window_metrics(
 
     ats_hq_rate = (ats_hq_discovered / ats_hq_possible) * 100 if ats_hq_possible else 0.0
 
-    print("\nATS ingestion (ATS-hit companies with HQ jobs from ATS sources in window):", flush=True)
     print(
-        f"  {ats_ing_rate:.1f}% "
-        f"({ats_ing_count} / {ats_hit_companies} ats_hit companies)",
+        "\nATS ingestion (ATS-hit companies with HQ jobs from ATS sources in window):", flush=True
+    )
+    print(
+        f"  {ats_ing_rate:.1f}% ({ats_ing_count} / {ats_hit_companies} ats_hit companies)",
         flush=True,
     )
     print(
@@ -116,11 +117,12 @@ def run_window_metrics(
     ).fetchone()["cnt"]
 
     car_ing_rate = (
-        (car_high_quality / crawl_eligible_companies) * 100
-        if crawl_eligible_companies
-        else 0.0
+        (car_high_quality / crawl_eligible_companies) * 100 if crawl_eligible_companies else 0.0
     )
-    print("\nCareers ingestion (eligible companies with HQ jobs from careers sources in window):", flush=True)
+    print(
+        "\nCareers ingestion (eligible companies with HQ jobs from careers sources in window):",
+        flush=True,
+    )
     print(
         f"  {car_ing_rate:.1f}% "
         f"({car_high_quality} / {crawl_eligible_companies} crawl-eligible companies)",
@@ -236,8 +238,7 @@ def main() -> None:
     )
     print("\nATS discovery rate (static, not windowed):", flush=True)
     print(
-        f"  {ats_disc_rate:.1f}% "
-        f"(hit={ats_disc['ats_hits']} / probed={ats_disc['ats_possible']})",
+        f"  {ats_disc_rate:.1f}% (hit={ats_disc['ats_hits']} / probed={ats_disc['ats_possible']})",
         flush=True,
     )
 

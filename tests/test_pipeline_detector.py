@@ -1132,98 +1132,125 @@ class TestCompanyMatcherFalsePositiveRegressions:
         """`Meru Health` reduced to single sig-word 'health' under old rules."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Meru Health",
-            body="Greenhouse interview reminder body text",
-            subject="Reminder for interview with Midi Health for the Senior role",
-            from_address="Greenhouse <no-reply@greenhouse.io>",
-        ) is False
+        assert (
+            _company_in_email(
+                "Meru Health",
+                body="Greenhouse interview reminder body text",
+                subject="Reminder for interview with Midi Health for the Senior role",
+                from_address="Greenhouse <no-reply@greenhouse.io>",
+            )
+            is False
+        )
 
     def test_cvs_health_not_matched_by_midi_health_email(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "CVS Health",
-            body="",
-            subject="Midi Health Interview Confirmation - Zoom Link Enclosed",
-            from_address="Patricia Stark <patricia.stark@midihealth.com>",
-        ) is False
+        assert (
+            _company_in_email(
+                "CVS Health",
+                body="",
+                subject="Midi Health Interview Confirmation - Zoom Link Enclosed",
+                from_address="Patricia Stark <patricia.stark@midihealth.com>",
+            )
+            is False
+        )
 
     def test_john_muir_health_not_matched_by_midi_health(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "John Muir Health",
-            body="",
-            subject="Next Steps with Midi Health - Interview Availability",
-            from_address="Patricia Stark <patricia.stark@midihealth.com>",
-        ) is False
+        assert (
+            _company_in_email(
+                "John Muir Health",
+                body="",
+                subject="Next Steps with Midi Health - Interview Availability",
+                from_address="Patricia Stark <patricia.stark@midihealth.com>",
+            )
+            is False
+        )
 
     def test_relx_inc_company_not_matched_by_hinge_health_email(self):
         """`RELX Inc. Company` reduced to single sig-word 'company' under old rules."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "RELX Inc. Company",
-            body="",
-            subject="Samuel, Thank you for applying to Hinge Health!",
-            from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
-        ) is False
+        assert (
+            _company_in_email(
+                "RELX Inc. Company",
+                body="",
+                subject="Samuel, Thank you for applying to Hinge Health!",
+                from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
+            )
+            is False
+        )
 
     def test_eqt_corporation_not_matched_by_mozilla_email(self):
         """`EQT Corporation` reduces to 'corporation' (stop-word) under old rules."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "EQT Corporation",
-            body="",
-            subject="Thank you for applying to Mozilla!",
-            from_address="no-reply@us.greenhouse-mail.io",
-        ) is False
+        assert (
+            _company_in_email(
+                "EQT Corporation",
+                body="",
+                subject="Thank you for applying to Mozilla!",
+                from_address="no-reply@us.greenhouse-mail.io",
+            )
+            is False
+        )
 
     def test_us_tech_solutions_not_matched_by_cadence_email(self):
         """`US Tech Solutions` reduces to 'solutions' (stop-word) under new rules."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "US Tech Solutions",
-            body="",
-            subject="Next steps for the Data Analytics Lead role at Cadence",
-            from_address="Rachel Oh <rachel.oh@cadencerp.com>",
-        ) is False
+        assert (
+            _company_in_email(
+                "US Tech Solutions",
+                body="",
+                subject="Next steps for the Data Analytics Lead role at Cadence",
+                from_address="Rachel Oh <rachel.oh@cadencerp.com>",
+            )
+            is False
+        )
 
     def test_target_not_matched_by_gitlab_interview(self):
         """`Target` is short and not in subject — body 'target start date' is ignored."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Target",
-            body="Please pick a target start date for the interview.",
-            subject="Your interview with GitLab is scheduled for Apr 28",
-            from_address="GitLab <no-reply@interviews.modernloop.io>",
-        ) is False
+        assert (
+            _company_in_email(
+                "Target",
+                body="Please pick a target start date for the interview.",
+                subject="Your interview with GitLab is scheduled for Apr 28",
+                from_address="GitLab <no-reply@interviews.modernloop.io>",
+            )
+            is False
+        )
 
     def test_youtube_not_matched_by_okta_application(self):
         """Marketing footer 'follow us on YouTube' must not attribute."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "YouTube",
-            body="Follow us on YouTube, LinkedIn, Twitter for updates.",
-            subject="Thank you for applying to Okta!",
-            from_address="no-reply@okta.com",
-        ) is False
+        assert (
+            _company_in_email(
+                "YouTube",
+                body="Follow us on YouTube, LinkedIn, Twitter for updates.",
+                subject="Thank you for applying to Okta!",
+                from_address="no-reply@okta.com",
+            )
+            is False
+        )
 
     def test_apple_not_matched_by_ironclad_application(self):
         """Body mentions like 'Apple stock options' must not attribute."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Apple",
-            body="Apple stock options as part of our benefits package.",
-            subject="Ironclad | Samuel, we received your application!",
-            from_address="Ironclad Hiring Team <no-reply@ashbyhq.com>",
-        ) is False
+        assert (
+            _company_in_email(
+                "Apple",
+                body="Apple stock options as part of our benefits package.",
+                subject="Ironclad | Samuel, we received your application!",
+                from_address="Ironclad Hiring Team <no-reply@ashbyhq.com>",
+            )
+            is False
+        )
 
 
 class TestCompanyMatcherTruePositiveRegressions:
@@ -1232,53 +1259,68 @@ class TestCompanyMatcherTruePositiveRegressions:
     def test_hinge_health_matched_by_own_email(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Hinge Health",
-            body="",
-            subject="Samuel, Thank you for applying to Hinge Health!",
-            from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
-        ) is True
+        assert (
+            _company_in_email(
+                "Hinge Health",
+                body="",
+                subject="Samuel, Thank you for applying to Hinge Health!",
+                from_address="Hinge Health Hiring Team <no-reply@greenhouse.io>",
+            )
+            is True
+        )
 
     def test_gitlab_matched_by_own_email(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "GitLab",
-            body="",
-            subject="Thank you for applying to GitLab",
-            from_address="no-reply@us.greenhouse-mail.io",
-        ) is True
+        assert (
+            _company_in_email(
+                "GitLab",
+                body="",
+                subject="Thank you for applying to GitLab",
+                from_address="no-reply@us.greenhouse-mail.io",
+            )
+            is True
+        )
 
     def test_scale_matched_by_own_email(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Scale",
-            body="",
-            subject="Samuel, Phone Interview with Scale!",
-            from_address="Bryce Knox <bryce.knox@scale.com>",
-        ) is True
+        assert (
+            _company_in_email(
+                "Scale",
+                body="",
+                subject="Samuel, Phone Interview with Scale!",
+                from_address="Bryce Knox <bryce.knox@scale.com>",
+            )
+            is True
+        )
 
     def test_doximity_matched_by_own_email(self):
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Doximity",
-            body="",
-            subject="Doximity Next Steps",
-            from_address="Tiffany Nguyen <tinguyen@doximity.com>",
-        ) is True
+        assert (
+            _company_in_email(
+                "Doximity",
+                body="",
+                subject="Doximity Next Steps",
+                from_address="Tiffany Nguyen <tinguyen@doximity.com>",
+            )
+            is True
+        )
 
     def test_company_matched_via_sender_when_subject_is_generic(self):
         """Subject lacks company; sender domain has it."""
         from job_finder.web.pipeline_detector import _company_in_email
 
-        assert _company_in_email(
-            "Anthropic",
-            body="",
-            subject="Your application has been received",
-            from_address="careers@anthropic.com",
-        ) is True
+        assert (
+            _company_in_email(
+                "Anthropic",
+                body="",
+                subject="Your application has been received",
+                from_address="careers@anthropic.com",
+            )
+            is True
+        )
 
 
 class TestAutoApplyThreshold:
@@ -1300,8 +1342,17 @@ class TestAutoApplyThreshold:
             "source_urls, salary_min, salary_max, description, first_seen, "
             "last_seen, pipeline_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                dedup_key, title, company, "Remote", '["linkedin"]', '["https://x"]',
-                None, None, "", datetime.now().isoformat(), datetime.now().isoformat(),
+                dedup_key,
+                title,
+                company,
+                "Remote",
+                '["linkedin"]',
+                '["https://x"]',
+                None,
+                None,
+                "",
+                datetime.now().isoformat(),
+                datetime.now().isoformat(),
                 status,
             ),
         )
@@ -1312,8 +1363,7 @@ class TestAutoApplyThreshold:
         from job_finder.web.pipeline_detector import _process_email
 
         _, conn = migrated_db
-        self._insert_job(conn, "acme|senior data analyst|remote",
-                         "Senior Data Analyst", "Acme")
+        self._insert_job(conn, "acme|senior data analyst|remote", "Senior Data Analyst", "Acme")
         jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
 
         # Acme in subject + "analyst" in subject + recent timing.
@@ -1337,8 +1387,9 @@ class TestAutoApplyThreshold:
         from job_finder.web.pipeline_detector import _process_email
 
         _, conn = migrated_db
-        self._insert_job(conn, "waymo|sr product data scientist|remote",
-                         "Sr Product Data Scientist", "Waymo")
+        self._insert_job(
+            conn, "waymo|sr product data scientist|remote", "Sr Product Data Scientist", "Waymo"
+        )
         jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
 
         email = self._make_processed_email(
@@ -1360,8 +1411,7 @@ class TestAutoApplyThreshold:
         from job_finder.web.pipeline_detector import _process_email
 
         _, conn = migrated_db
-        self._insert_job(conn, "scale|analytics lead|remote",
-                         "Analytics Lead", "Scale")
+        self._insert_job(conn, "scale|analytics lead|remote", "Analytics Lead", "Scale")
         jobs = [dict(j) for j in conn.execute("SELECT * FROM jobs").fetchall()]
 
         # Scale in subject + "analytics" in subject + recent + ats sender (greenhouse).
@@ -1392,24 +1442,21 @@ class TestSenderMatchesCompany:
         """`Hinge Health` -> distinctive=['hinge'] -> sender 'hingehealth.com' matches."""
         from job_finder.web.pipeline_detector._signals import _sender_matches_company
 
-        assert _sender_matches_company(
-            "Lily Fang <lily.fang@hingehealth.com>", "Hinge Health"
-        ) is True
+        assert (
+            _sender_matches_company("Lily Fang <lily.fang@hingehealth.com>", "Hinge Health")
+            is True
+        )
 
     def test_personal_address_does_not_match(self):
         from job_finder.web.pipeline_detector._signals import _sender_matches_company
 
-        assert _sender_matches_company(
-            "samuel.martin@gmail.com", "Waymo"
-        ) is False
+        assert _sender_matches_company("samuel.martin@gmail.com", "Waymo") is False
 
     def test_third_party_ats_does_not_match(self):
         """Greenhouse-mail.io is the ATS, not the company — must not corroborate."""
         from job_finder.web.pipeline_detector._signals import _sender_matches_company
 
-        assert _sender_matches_company(
-            "no-reply@us.greenhouse-mail.io", "Anthropic"
-        ) is False
+        assert _sender_matches_company("no-reply@us.greenhouse-mail.io", "Anthropic") is False
 
     def test_company_with_all_stop_words_never_matches(self):
         """`EQT Corporation` -> distinctive=[] (eqt<4, corporation in stop set) -> never matches."""
@@ -1421,9 +1468,7 @@ class TestSenderMatchesCompany:
     def test_unrelated_domain_does_not_match(self):
         from job_finder.web.pipeline_detector._signals import _sender_matches_company
 
-        assert _sender_matches_company(
-            "no-reply@okta.com", "YouTube"
-        ) is False
+        assert _sender_matches_company("no-reply@okta.com", "YouTube") is False
 
 
 class TestDismissedJobsExcludedFromCandidates:
@@ -1439,9 +1484,18 @@ class TestDismissedJobsExcludedFromCandidates:
             "source_urls, salary_min, salary_max, description, first_seen, "
             "last_seen, pipeline_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                "apple|data sci|remote", "Senior DS", "Apple", "Remote",
-                '["linkedin"]', '["https://x"]', None, None, "",
-                now, now, "dismissed",
+                "apple|data sci|remote",
+                "Senior DS",
+                "Apple",
+                "Remote",
+                '["linkedin"]',
+                '["https://x"]',
+                None,
+                None,
+                "",
+                now,
+                now,
+                "dismissed",
             ),
         )
         conn.commit()
@@ -1520,10 +1574,7 @@ class TestExtractCompanyFromSender:
             _extract_company_from_sender,
         )
 
-        assert (
-            _extract_company_from_sender("Waymo Careers <no-reply@waymo.com>")
-            == "Waymo"
-        )
+        assert _extract_company_from_sender("Waymo Careers <no-reply@waymo.com>") == "Waymo"
 
     def test_returns_none_for_empty_or_unparseable(self):
         from job_finder.web.pipeline_detector._off_platform import (
@@ -1553,9 +1604,7 @@ class TestNormalizeForDedup:
             _normalize_for_dedup,
         )
 
-        assert _normalize_for_dedup("Hinge Health") == _normalize_for_dedup(
-            "Hingehealth"
-        )
+        assert _normalize_for_dedup("Hinge Health") == _normalize_for_dedup("Hingehealth")
 
     def test_strips_punctuation_for_match(self):
         from job_finder.web.pipeline_detector._off_platform import (
@@ -1686,9 +1735,7 @@ class TestProcessEmailOffPlatform:
             "detection_type": detection_type,
         }
 
-    def test_confirmation_with_unknown_company_creates_stub_and_applies(
-        self, migrated_db
-    ):
+    def test_confirmation_with_unknown_company_creates_stub_and_applies(self, migrated_db):
         """Confirmation email from a company-domain sender we have no job for
         creates a stub job, marks it applied, writes pipeline_events +
         pipeline_detections, and returns auto_updated."""
@@ -1711,33 +1758,28 @@ class TestProcessEmailOffPlatform:
 
         # Stub job exists
         stub = conn.execute(
-            "SELECT dedup_key, company, pipeline_status FROM jobs "
-            "WHERE company = 'Waymo'"
+            "SELECT dedup_key, company, pipeline_status FROM jobs WHERE company = 'Waymo'"
         ).fetchone()
         assert stub is not None
         assert stub["pipeline_status"] == "applied"
 
         # pipeline_events row with source='off-platform'
         event = conn.execute(
-            "SELECT * FROM pipeline_events WHERE job_id = ? "
-            "AND source = 'off-platform'",
+            "SELECT * FROM pipeline_events WHERE job_id = ? AND source = 'off-platform'",
             (stub["dedup_key"],),
         ).fetchone()
         assert event is not None
 
         # pipeline_detections row with off_platform_stub marker
         det = conn.execute(
-            "SELECT matched_signals, status FROM pipeline_detections "
-            "WHERE gmail_message_id = ?",
+            "SELECT matched_signals, status FROM pipeline_detections WHERE gmail_message_id = ?",
             ("off_e2e_001",),
         ).fetchone()
         assert det is not None
         assert "off_platform_stub" in det["matched_signals"]
         assert det["status"] == "auto-applied"
 
-    def test_interview_email_creates_stub_and_moves_to_phone_screen(
-        self, migrated_db
-    ):
+    def test_interview_email_creates_stub_and_moves_to_phone_screen(self, migrated_db):
         """Interview-type detection should land the stub in phone_screen,
         not applied."""
         from job_finder.web.pipeline_detector import _process_email
@@ -1785,9 +1827,7 @@ class TestProcessEmailOffPlatform:
         ).fetchone()[0]
         assert count == 0
 
-    def test_confirmation_from_ats_sender_falls_through_to_skipped(
-        self, migrated_db
-    ):
+    def test_confirmation_from_ats_sender_falls_through_to_skipped(self, migrated_db):
         """Confirmation email from an ATS sender (no employer identity in
         domain) should still be skipped — Option 1's rules can't extract
         the company. Option 2 (LLM fallback) would handle this case."""

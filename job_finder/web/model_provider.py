@@ -40,15 +40,16 @@ _VALID_WORKLOADS: frozenset[str] = frozenset({"quick", "score", "triage"})
 #
 # Triage entries are absent here (resolved as identical to `quick` at lookup time).
 _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
-    "claude_code_cli": {"quick": "claude-haiku-4-5",  "score": "claude-sonnet-4-6"},
-    "anthropic":       {"quick": "claude-haiku-4-5",  "score": "claude-sonnet-4-6"},
-    "gemini":          {"quick": "gemini-2.5-flash",  "score": "gemini-2.5-pro"},
-    "gemini_cli":      {"quick": "gemini-2.5-flash",  "score": "gemini-2.5-pro"},
-    "ollama":          {"quick": "qwen2.5:14b",       "score": "qwen2.5:14b"},
-    "local_bundled":   {"quick": "Qwen2.5-3B-Instruct-Q4_K_M", "score": None},
-    "groq":            {"quick": "llama-3.1-8b-instant", "score": "llama-3.3-70b-versatile"},
-    "cerebras":        {"quick": "llama3.1-8b",            "score": "llama-3.3-70b"},
+    "claude_code_cli": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
+    "anthropic": {"quick": "claude-haiku-4-5", "score": "claude-sonnet-4-6"},
+    "gemini": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
+    "gemini_cli": {"quick": "gemini-2.5-flash", "score": "gemini-2.5-pro"},
+    "ollama": {"quick": "qwen2.5:14b", "score": "qwen2.5:14b"},
+    "local_bundled": {"quick": "Qwen2.5-3B-Instruct-Q4_K_M", "score": None},
+    "groq": {"quick": "llama-3.1-8b-instant", "score": "llama-3.3-70b-versatile"},
+    "cerebras": {"quick": "llama3.1-8b", "score": "llama-3.3-70b"},
 }
+
 
 def resolve_workload_routing(workload: str, config: dict) -> dict:
     """Resolve workload-class -> {primary, fallback} routing.
@@ -74,8 +75,7 @@ def resolve_workload_routing(workload: str, config: dict) -> dict:
         # job_finder.config; the error propagates to call_model's caller,
         # which logs it.
         raise ValueError(
-            "providers.primary is not configured. "
-            "See config.example.yaml for the Phase 40 schema."
+            "providers.primary is not configured. See config.example.yaml for the Phase 40 schema."
         )
     overrides = providers_cfg.get("overrides", {})
     fallback_names = providers_cfg.get("fallback_chain", [])
@@ -90,9 +90,7 @@ def resolve_workload_routing(workload: str, config: dict) -> dict:
 
     primary_model = lookup_model(primary_name)
     if primary_model is None:
-        raise ValueError(
-            f"Provider {primary_name!r} has no model for workload {workload!r}"
-        )
+        raise ValueError(f"Provider {primary_name!r} has no model for workload {workload!r}")
 
     return {
         "primary": {"provider": primary_name, "model": primary_model},
@@ -102,6 +100,7 @@ def resolve_workload_routing(workload: str, config: dict) -> dict:
             if (model := lookup_model(name)) is not None
         ],
     }
+
 
 # Daily usage tracking — module-level state for rate limiting.
 # Resets automatically on date rollover; bootstraps from scoring_costs DB.
@@ -256,6 +255,7 @@ _SUPPORTED_PROVIDERS: frozenset[str] = frozenset(
         "local_bundled",
     }
 )
+
 
 class ProviderCascadeExhaustedError(RuntimeError):
     """Raised when every configured provider in a cascade has been exhausted.
@@ -424,9 +424,7 @@ def _sanitize_output(data: dict, schema: dict | None) -> dict:
     return result
 
 
-def _sanitized_result(
-    result: ModelResult, schema: dict | None, provider_name: str
-) -> ModelResult:
+def _sanitized_result(result: ModelResult, schema: dict | None, provider_name: str) -> ModelResult:
     """Return a ModelResult with ``_sanitize_output`` applied to its ``data``.
 
     Sanitization is skipped for non-dict data and when the sanitize pass
@@ -498,8 +496,7 @@ def _make_adapter(
     if provider_name == "anthropic":
         if not is_anthropic_available():
             raise ValueError(
-                "Anthropic CLI not configured "
-                "(ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY missing)"
+                "Anthropic CLI not configured (ANTHROPIC_API_KEY / JF_ANTHROPIC_API_KEY missing)"
             )
         return AnthropicProvider()
     if provider_name == "gemini":

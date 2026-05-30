@@ -321,8 +321,7 @@ def _process_one(
                 # the F4 script is a best-effort reprobe and should not
                 # abort on a single collision.
                 log.warning(
-                    "f4_reprobe_misses: collision %s/%s for id=%s (%s) — "
-                    "skipping. exc=%s",
+                    "f4_reprobe_misses: collision %s/%s for id=%s (%s) — skipping. exc=%s",
                     hit_platform,
                     hit_slug,
                     company_id,

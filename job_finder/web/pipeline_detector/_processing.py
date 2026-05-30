@@ -125,10 +125,7 @@ def _process_email(
                     stub["dedup_key"],
                     target_status,
                     source="off-platform",
-                    evidence=(
-                        f"off-platform stub from "
-                        f"{email.get('from_address', '')!r}"
-                    ),
+                    evidence=(f"off-platform stub from {email.get('from_address', '')!r}"),
                 )
                 snippet = _extract_snippet(email.get("body", ""), detection_type)
                 _insert_detection(

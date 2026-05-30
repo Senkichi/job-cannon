@@ -54,8 +54,10 @@ def _mock_run(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicM
 
 def _which_mock(available: set[str]):
     """Returns a fn that mocks shutil.which: returns /usr/bin/<bin> for bins in `available`."""
+
     def _impl(name: str) -> str | None:
         return f"/usr/bin/{name}" if name in available else None
+
     return _impl
 
 
@@ -159,9 +161,7 @@ def test_only_ollama_present():
         ),
         patch(
             "job_finder.web.providers.detection.subprocess.run",
-            return_value=_mock_run(
-                returncode=0, stdout="NAME ID\nqwen2.5:14b abc\n"
-            ),
+            return_value=_mock_run(returncode=0, stdout="NAME ID\nqwen2.5:14b abc\n"),
         ),
     ):
         handles = detect_available_providers()
@@ -341,6 +341,7 @@ def test_refresh_true_bypasses_cache():
 
 def test_detection_source_has_no_shell_true():
     import pathlib
+
     src = pathlib.Path("job_finder/web/providers/detection.py").read_text()
     # Check for actual shell=True in subprocess.run calls, not in docstrings
     lines = src.split("\n")
@@ -352,6 +353,7 @@ def test_detection_source_has_no_shell_true():
 
 def test_detection_source_uses_timeout_kwarg_on_every_subprocess_run():
     import pathlib
+
     src = pathlib.Path("job_finder/web/providers/detection.py").read_text()
     # Post-DRY-refactor: a single _probe_cli helper hosts the only
     # subprocess.run call site for all three CLI probes. The security

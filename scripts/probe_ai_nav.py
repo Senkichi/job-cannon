@@ -41,16 +41,22 @@ from job_finder.web.ai_career_navigator import (
 _SNAPSHOTS: dict[str, str] = {}
 _RAW_RESPONSES: dict[str, object] = {}
 _orig_take_snapshot = _ainav._take_snapshot
+
+
 def _logging_take_snapshot(page):
     text = _orig_take_snapshot(page)
     _SNAPSHOTS[page.url] = text
     return text
+
+
 _ainav._take_snapshot = _logging_take_snapshot
 
 _orig_call_model = None
 try:
     from job_finder.web import model_provider as _mp
+
     _orig_call_model = _mp.call_model
+
     def _logging_call_model(*args, **kwargs):
         result = _orig_call_model(*args, **kwargs)
         # purpose=='ai_nav_discovery' is the one we want to capture
@@ -60,6 +66,7 @@ try:
                 last_url = list(_SNAPSHOTS.keys())[-1]
                 _RAW_RESPONSES[last_url] = getattr(result, "data", result)
         return result
+
     _mp.call_model = _logging_call_model
     # discover_navigation_recipe imports call_model at module-load; re-patch the reference there
     _ainav.call_model = _logging_call_model
@@ -98,6 +105,7 @@ TARGETS = [
 
 # Optional restriction via env var: PROBE_ONLY="genentech,apple"
 import os as _os
+
 _only_env = _os.environ.get("PROBE_ONLY", "").strip().lower()
 if _only_env:
     _wanted = {s.strip() for s in _only_env.split(",") if s.strip()}
@@ -122,6 +130,7 @@ def _load_config() -> dict:
 def _load_recipe_from_db(db_path: str, company_id: int) -> dict | None:
     """Read careers_nav_recipe JSON from the companies table."""
     import sqlite3
+
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -135,6 +144,7 @@ def _load_recipe_from_db(db_path: str, company_id: int) -> dict | None:
         if not row or not row["careers_nav_recipe"]:
             return None
         import json as _json
+
         return _json.loads(row["careers_nav_recipe"])
     except Exception as e:
         print(f"[probe] could not read recipe for company_id={company_id}: {e}")
@@ -208,7 +218,13 @@ def probe_one_replay(
     return record
 
 
-def probe_one(browser, target: tuple[int, str, str], target_titles: list[str], exclusions: list[str], config: dict) -> dict:
+def probe_one(
+    browser,
+    target: tuple[int, str, str],
+    target_titles: list[str],
+    exclusions: list[str],
+    config: dict,
+) -> dict:
     """Probe a single company. Returns a record dict for the summary."""
     cid, name, url = target
     record = {
@@ -267,6 +283,7 @@ def probe_one(browser, target: tuple[int, str, str], target_titles: list[str], e
                 page.wait_for_timeout(2500)
                 # Mimic _try_ai_navigation's replay path — execute steps, then extract
                 from job_finder.web.ai_career_navigator import _derive_search_term, _execute_step
+
                 kw = _derive_search_term(target_titles)
                 for step in recipe["steps"]:
                     if "value" in step and "{keyword}" in step.get("value", ""):
@@ -303,14 +320,20 @@ def main() -> int:
     profile_cfg = cfg.get("profile", {})
     target_titles = profile_cfg.get("target_titles", [])
     exclusions_cfg = profile_cfg.get("exclusions", {})
-    exclusions = exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    exclusions = (
+        exclusions_cfg.get("title_keywords", []) if isinstance(exclusions_cfg, dict) else []
+    )
 
     from_db = _os.environ.get("PROBE_FROM_DB", "").strip() == "1"
     db_path = cfg.get("db_path", "jobs.db")
 
     logger.info("Target titles: %s", target_titles)
     logger.info("Title exclusions: %d", len(exclusions))
-    logger.info("Probing %d companies (mode=%s)", len(TARGETS), "replay_from_db" if from_db else "discovery")
+    logger.info(
+        "Probing %d companies (mode=%s)",
+        len(TARGETS),
+        "replay_from_db" if from_db else "discovery",
+    )
     if from_db:
         logger.info("DB path: %s", db_path)
 
@@ -348,9 +371,13 @@ def main() -> int:
     print()
     print("=" * 110)
     if from_db:
-        print(f"{'Company':<22}{'reach':<8}{'snap':<8}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}")
+        print(
+            f"{'Company':<22}{'reach':<8}{'snap':<8}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}"
+        )
     else:
-        print(f"{'Company':<22}{'reach':<8}{'pre_jobs':<10}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}")
+        print(
+            f"{'Company':<22}{'reach':<8}{'pre_jobs':<10}{'recipe':<10}{'steps':<8}{'replay':<10}{'error':<40}"
+        )
     print("=" * 110)
     for r in records:
         recipe_str = "yes" if r["recipe"] else "null"
@@ -381,6 +408,7 @@ def main() -> int:
     print()
     print("=== Recipes (where produced) ===")
     import json as _json
+
     for r in records:
         if r["recipe"]:
             print(f"\n--- {r['name']} (id={r['id']}) — replay_jobs={r['replay_jobs']} ---")

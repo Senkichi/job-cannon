@@ -577,10 +577,7 @@ class TestCleanTitle:
             "Intelligent SystemsJR2018470US, CA, Santa Clara"
         )
         tag = self._make_tag(f'<a href="/j">{raw}</a>')
-        expected = (
-            "Senior Technical Data Analyst - Operations E2E Data "
-            "Intelligent Systems"
-        )
+        expected = "Senior Technical Data Analyst - Operations E2E Data Intelligent Systems"
         assert _clean_title(tag, raw) == expected
 
     def test_clean_title_strips_bare_jr_prefixed_req_id(self):

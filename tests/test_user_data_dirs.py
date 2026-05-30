@@ -1,9 +1,6 @@
 """Tests for platformdirs-backed user data directory helpers."""
 
 import logging
-import os
-
-import pytest
 
 from job_finder.web import user_data_dirs
 
@@ -58,9 +55,7 @@ def test_user_data_root_uses_platformdirs_without_override(monkeypatch):
         # Return a fake path for the test
         return "/fake/user/data/dir"
 
-    monkeypatch.setattr(
-        user_data_dirs.platformdirs, "user_data_dir", mock_user_data_dir
-    )
+    monkeypatch.setattr(user_data_dirs.platformdirs, "user_data_dir", mock_user_data_dir)
 
     result = user_data_dirs.user_data_root()
     assert captured_app_name == "JobCannon"

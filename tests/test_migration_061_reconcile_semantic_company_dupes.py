@@ -87,7 +87,9 @@ def _run_m061(path: str, conn: sqlite3.Connection) -> None:
 
 
 def _company_exists(conn: sqlite3.Connection, company_id: int) -> bool:
-    return conn.execute("SELECT 1 FROM companies WHERE id = ?", (company_id,)).fetchone() is not None
+    return (
+        conn.execute("SELECT 1 FROM companies WHERE id = ?", (company_id,)).fetchone() is not None
+    )
 
 
 def test_migration_declares_version_61():
@@ -177,13 +179,17 @@ class TestCorporateSuffixCollapse:
         assert _company_exists(conn, canonical_id)
         assert not _company_exists(conn, orphan_id)
         # Both FK refs re-pointed
-        assert conn.execute(
-            "SELECT company_id FROM jobs WHERE dedup_key = 'test|j1'"
-        ).fetchone()[0] == canonical_id
-        assert conn.execute(
-            "SELECT company_id FROM company_scan_log WHERE company_id = ?",
-            (canonical_id,),
-        ).fetchone() is not None
+        assert (
+            conn.execute("SELECT company_id FROM jobs WHERE dedup_key = 'test|j1'").fetchone()[0]
+            == canonical_id
+        )
+        assert (
+            conn.execute(
+                "SELECT company_id FROM company_scan_log WHERE company_id = ?",
+                (canonical_id,),
+            ).fetchone()
+            is not None
+        )
 
     def test_inc_and_llc_suffix_merge(self, migrated_db):
         path, conn = migrated_db
@@ -235,7 +241,9 @@ class TestIdempotence:
         _run_m061(path, conn)
         assert _company_exists(conn, canonical_id)
         # No new rows were created or destroyed
-        count = conn.execute("SELECT COUNT(*) FROM companies WHERE name LIKE 'Albertsons%'").fetchone()[0]
+        count = conn.execute(
+            "SELECT COUNT(*) FROM companies WHERE name LIKE 'Albertsons%'"
+        ).fetchone()[0]
         assert count == 1
 
 

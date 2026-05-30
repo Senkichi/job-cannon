@@ -695,7 +695,7 @@ class TestPidfileSelfRelease:
         # Holding briefly then exit gives the OS a chance to release.
         child_script = f"""
 import sys
-sys.path.insert(0, {repr(str(__import__('pathlib').Path(__file__).resolve().parent.parent))!s})
+sys.path.insert(0, {repr(str(__import__("pathlib").Path(__file__).resolve().parent.parent))!s})
 from unittest.mock import MagicMock
 from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
 
@@ -798,11 +798,12 @@ class TestScheduledSyncPortalMetadata:
         def _capture_log_activity(db_path, action, metadata=None, **kwargs):
             captured_metadata.update(metadata or {})
 
-        with patch(
-            "job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary
-        ), patch(
-            "job_finder.web.activity_tracker.log_activity",
-            side_effect=_capture_log_activity,
+        with (
+            patch("job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary),
+            patch(
+                "job_finder.web.activity_tracker.log_activity",
+                side_effect=_capture_log_activity,
+            ),
         ):
             run_pipeline()
 
@@ -835,18 +836,17 @@ class TestScheduledSyncPortalMetadata:
         def _capture_log_activity(db_path, action, metadata=None, **kwargs):
             captured_metadata.update(metadata or {})
 
-        with patch(
-            "job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary
-        ), patch(
-            "job_finder.web.activity_tracker.log_activity",
-            side_effect=_capture_log_activity,
+        with (
+            patch("job_finder.web.pipeline_runner.run_ingestion", return_value=synthetic_summary),
+            patch(
+                "job_finder.web.activity_tracker.log_activity",
+                side_effect=_capture_log_activity,
+            ),
         ):
             run_pipeline()
 
         portal_keys = [
-            k
-            for k in captured_metadata
-            if k.startswith("portal_") and k.endswith("_fetched")
+            k for k in captured_metadata if k.startswith("portal_") and k.endswith("_fetched")
         ]
         # Only the aggregate — no per-portal noise.
         assert portal_keys == ["portal_search_fetched"]

@@ -33,10 +33,7 @@ def test_open_browser_swallows_exceptions(caplog):
             main_mod._open_browser("http://127.0.0.1:5000")
 
         # Warning was logged but no exception escaped.
-        assert any(
-            "Could not open browser" in record.getMessage()
-            for record in caplog.records
-        )
+        assert any("Could not open browser" in record.getMessage() for record in caplog.records)
 
 
 def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
@@ -46,10 +43,11 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
     fake_app = MagicMock()
-    with patch("job_finder.config.load_config", return_value={}), patch(
-        "job_finder.web.create_app", return_value=fake_app
-    ), patch("job_finder.__main__.threading.Timer") as mock_timer, patch(
-        "job_finder.__main__.sys.argv", ["job-cannon"]
+    with (
+        patch("job_finder.config.load_config", return_value={}),
+        patch("job_finder.web.create_app", return_value=fake_app),
+        patch("job_finder.__main__.threading.Timer") as mock_timer,
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
     ):
         main_mod.main()
 
@@ -67,10 +65,11 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
     fake_app = MagicMock()
     fake_timer = MagicMock()
 
-    with patch("job_finder.config.load_config", return_value={}), patch(
-        "job_finder.web.create_app", return_value=fake_app
-    ), patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class, patch(
-        "job_finder.__main__.sys.argv", ["job-cannon"]
+    with (
+        patch("job_finder.config.load_config", return_value={}),
+        patch("job_finder.web.create_app", return_value=fake_app),
+        patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
     ):
         main_mod.main()
 
@@ -94,9 +93,11 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
 
     cfg = {"server": {"host": "0.0.0.0", "port": 8080, "debug": False}}
     fake_app = MagicMock()
-    with patch("job_finder.config.load_config", return_value=cfg), patch(
-        "job_finder.web.create_app", return_value=fake_app
-    ), patch("job_finder.__main__.sys.argv", ["job-cannon"]):
+    with (
+        patch("job_finder.config.load_config", return_value=cfg),
+        patch("job_finder.web.create_app", return_value=fake_app),
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+    ):
         main_mod.main()
 
     captured = capsys.readouterr()
@@ -112,9 +113,11 @@ def test_main_passes_use_reloader_false(monkeypatch):
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
     fake_app = MagicMock()
-    with patch("job_finder.config.load_config", return_value={}), patch(
-        "job_finder.web.create_app", return_value=fake_app
-    ), patch("job_finder.__main__.sys.argv", ["job-cannon"]):
+    with (
+        patch("job_finder.config.load_config", return_value={}),
+        patch("job_finder.web.create_app", return_value=fake_app),
+        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+    ):
         main_mod.main()
 
     fake_app.run.assert_called_once()

@@ -2,8 +2,6 @@
 
 import sqlite3
 
-import pytest
-
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations.m054_wizard_data_column import MIGRATION
 
@@ -56,7 +54,9 @@ def test_existing_row_has_wizard_data_defaulted(tmp_db_path):
     run_migrations(tmp_db_path)  # runs all migrations in order
     conn = sqlite3.connect(tmp_db_path)
     try:
-        conn.execute("INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 0)")
+        conn.execute(
+            "INSERT OR REPLACE INTO onboarding_state (id, onboarding_complete) VALUES (1, 0)"
+        )
         conn.commit()
         row = conn.execute("SELECT wizard_data FROM onboarding_state WHERE id=1").fetchone()
         assert row[0] == "{}"

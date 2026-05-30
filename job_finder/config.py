@@ -7,6 +7,7 @@ codebase.  Import the constant you need rather than hard-coding a number.
 import os
 import tempfile
 from pathlib import Path
+
 import yaml
 
 DEFAULT_CONFIG_PATH = "config.yaml"
@@ -34,6 +35,7 @@ DEFAULT_MIN_SCORE_THRESHOLD = 40
 # --- Model defaults ---
 # Legacy tier constants removed in Phase 40 (replaced by _PROVIDER_DEFAULTS)
 
+
 def resolve_triage_enabled(config: dict) -> bool:
     """Resolve 'auto' string to bool based on primary provider.
 
@@ -51,6 +53,7 @@ def resolve_triage_enabled(config: dict) -> bool:
         return primary not in _LOCAL_PRIMARIES
 
     return bool(enabled)
+
 
 # --- Database ---
 DEFAULT_DB_PATH = "jobs.db"

@@ -16,9 +16,9 @@ silently green.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import tempfile
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -84,7 +84,15 @@ def test_parse_resume_dispatches_through_call_model_to_provider_seam(
     test fails inside call_model with TypeError, not silently green.
     """
     expected_profile = {
-        "positions": [{"title": "Eng", "company": "X", "start_date": "2020", "end_date": "2024", "description": "d"}],
+        "positions": [
+            {
+                "title": "Eng",
+                "company": "X",
+                "start_date": "2020",
+                "end_date": "2024",
+                "description": "d",
+            }
+        ],
         "skills": ["Python"],
         "education": [],
         "target_roles_suggested": ["Senior Eng"],
@@ -94,7 +102,16 @@ def test_parse_resume_dispatches_through_call_model_to_provider_seam(
 
     captured_call = {}
 
-    def fake_provider_call(self, model, system, messages, output_schema=None, max_tokens=1024, timeout=None, options=None):
+    def fake_provider_call(
+        self,
+        model,
+        system,
+        messages,
+        output_schema=None,
+        max_tokens=1024,
+        timeout=None,
+        options=None,
+    ):
         # Signature matches OllamaProvider.call (positional). call_model invokes
         # adapter.call(model, system, messages, output_schema, max_tokens, timeout)
         # positionally (model_provider.py:699-706).
@@ -115,12 +132,15 @@ def test_parse_resume_dispatches_through_call_model_to_provider_seam(
 
     # Patch the provider seam, not call_model. Patch the bound method on the
     # OllamaProvider class so any instance call_model constructs gets the stub.
-    with patch(
-        "job_finder.web.providers.ollama_provider.OllamaProvider.call",
-        fake_provider_call,
-    ), patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="Senior Engineer at X, Python, Remote",
+    with (
+        patch(
+            "job_finder.web.providers.ollama_provider.OllamaProvider.call",
+            fake_provider_call,
+        ),
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Senior Engineer at X, Python, Remote",
+        ),
     ):
         pdf = _make_pdf(tmp_path)
         result = parse_resume(pdf, conn=migrated_db_for_integration, config=integration_config)
@@ -153,7 +173,16 @@ def test_parse_resume_records_cost_via_call_model(
         "salary_range_suggested": {},
     }
 
-    def fake_provider_call(self, model, system, messages, output_schema=None, max_tokens=1024, timeout=None, options=None):
+    def fake_provider_call(
+        self,
+        model,
+        system,
+        messages,
+        output_schema=None,
+        max_tokens=1024,
+        timeout=None,
+        options=None,
+    ):
         return ModelResult(
             data=expected_profile,
             cost_usd=0.0,
@@ -164,12 +193,15 @@ def test_parse_resume_records_cost_via_call_model(
             schema_valid=True,
         )
 
-    with patch(
-        "job_finder.web.providers.ollama_provider.OllamaProvider.call",
-        fake_provider_call,
-    ), patch(
-        "job_finder.web.onboarding.resume_parser._extract_text",
-        return_value="Sample text",
+    with (
+        patch(
+            "job_finder.web.providers.ollama_provider.OllamaProvider.call",
+            fake_provider_call,
+        ),
+        patch(
+            "job_finder.web.onboarding.resume_parser._extract_text",
+            return_value="Sample text",
+        ),
     ):
         pdf = _make_pdf(tmp_path)
         parse_resume(pdf, conn=migrated_db_for_integration, config=integration_config)

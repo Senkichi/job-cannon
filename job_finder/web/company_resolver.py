@@ -426,5 +426,3 @@ def link_jobs_to_companies(
     )
 
     return linked_count, new_company_ids, matched_count
-
-

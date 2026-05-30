@@ -1,5 +1,5 @@
 """Tests for update banner rendering in base.html."""
-import json
+
 import pytest
 from flask import Blueprint, render_template_string
 
@@ -186,4 +186,7 @@ def test_latest_version_html_escaped(client, tmp_path):
     # Check that the version string in the banner is escaped
     assert b"v5.0.1&lt;script&gt;" in resp.data
     # Check that the raw version string does NOT appear in the banner link
-    assert b'href="https://github.com/Senkichi/job-cannon/releases/tag/v5.0.1<script>"' not in resp.data
+    assert (
+        b'href="https://github.com/Senkichi/job-cannon/releases/tag/v5.0.1<script>"'
+        not in resp.data
+    )

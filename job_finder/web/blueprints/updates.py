@@ -4,6 +4,7 @@ Routes:
     POST /updates/dismiss/<version>  -- Append version to dismissed_versions
                                         in update_check.json. HTMX-only.
 """
+
 import logging
 
 from flask import Blueprint, redirect, request, url_for

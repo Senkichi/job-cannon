@@ -11,19 +11,18 @@ Covers:
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
 from job_finder.web.migrations.m077_normalize_timestamps_to_utc import (
+    _TZ_SUFFIX_RE,
     MIGRATION,
     _compute_local_to_utc_offset_hours,
     _normalize_tz_aware_to_naive_utc,
     _shift_naive_local_to_naive_utc,
-    _TZ_SUFFIX_RE,
 )
 from job_finder.web.migrations.types import MigrationContext
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for the helpers
@@ -47,25 +46,16 @@ def test_tz_suffix_detection(value, expected_has_tz):
 
 
 def test_phase_a_strips_utc_offset():
-    assert (
-        _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00+00:00")
-        == "2026-05-29T15:00:00"
-    )
+    assert _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00+00:00") == "2026-05-29T15:00:00"
 
 
 def test_phase_a_converts_negative_offset_to_utc():
     # -08:00 means local clock = UTC - 8h, so UTC = local + 8h
-    assert (
-        _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00-08:00")
-        == "2026-05-29T23:00:00"
-    )
+    assert _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00-08:00") == "2026-05-29T23:00:00"
 
 
 def test_phase_a_handles_z_suffix():
-    assert (
-        _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00Z")
-        == "2026-05-29T15:00:00"
-    )
+    assert _normalize_tz_aware_to_naive_utc("2026-05-29T15:00:00Z") == "2026-05-29T15:00:00"
 
 
 def test_phase_a_returns_none_for_naive():
@@ -74,10 +64,7 @@ def test_phase_a_returns_none_for_naive():
 
 
 def test_phase_b_shifts_naive_local_forward():
-    assert (
-        _shift_naive_local_to_naive_utc("2026-05-29T08:00:00", 8.0)
-        == "2026-05-29T16:00:00"
-    )
+    assert _shift_naive_local_to_naive_utc("2026-05-29T08:00:00", 8.0) == "2026-05-29T16:00:00"
 
 
 def test_phase_b_returns_none_for_aware():
@@ -87,10 +74,7 @@ def test_phase_b_returns_none_for_aware():
 
 def test_phase_b_handles_negative_offset():
     """A positive UTC offset (e.g. UTC+9 Japan) shifts local backwards to UTC."""
-    assert (
-        _shift_naive_local_to_naive_utc("2026-05-29T15:00:00", -9.0)
-        == "2026-05-29T06:00:00"
-    )
+    assert _shift_naive_local_to_naive_utc("2026-05-29T15:00:00", -9.0) == "2026-05-29T06:00:00"
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +190,7 @@ def test_migration_phase_b_only_on_designated_columns(tmp_path):
     # specific timezone. Use the same helper the migration uses so DST
     # decisions match exactly.
     offset = _compute_local_to_utc_offset_hours()
-    shifted_expected = (
-        datetime.fromisoformat(naive) + timedelta(hours=offset)
-    ).isoformat()
+    shifted_expected = (datetime.fromisoformat(naive) + timedelta(hours=offset)).isoformat()
 
     MIGRATION.py(_make_ctx(tmp_path, conn))  # type: ignore[misc]
 
@@ -244,17 +226,13 @@ def test_migration_idempotent_on_already_normalized_data(tmp_path):
 
     # First run: Phase A converts the tz-aware row
     MIGRATION.py(_make_ctx(tmp_path, conn))  # type: ignore[misc]
-    after_first = conn.execute(
-        "SELECT first_seen FROM jobs WHERE dedup_key='j1'"
-    ).fetchone()[0]
+    after_first = conn.execute("SELECT first_seen FROM jobs WHERE dedup_key='j1'").fetchone()[0]
     assert after_first == "2026-05-29T15:00:00"
 
     # Second run: Phase A finds no tz-aware row. Because jobs.first_seen is
     # NOT in Phase B, Phase B doesn't shift it either. Stable.
     MIGRATION.py(_make_ctx(tmp_path, conn))  # type: ignore[misc]
-    after_second = conn.execute(
-        "SELECT first_seen FROM jobs WHERE dedup_key='j1'"
-    ).fetchone()[0]
+    after_second = conn.execute("SELECT first_seen FROM jobs WHERE dedup_key='j1'").fetchone()[0]
     assert after_second == after_first
 
 

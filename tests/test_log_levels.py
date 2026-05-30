@@ -66,6 +66,7 @@ class TestPipelineRunnerLogLevels:
                     f"Context:\n{context}"
                 )
 
+
 # ---------------------------------------------------------------------------
 # ats_scanner.py — INFO demotion
 # ---------------------------------------------------------------------------
@@ -195,8 +196,7 @@ class TestJobsBlueprintLogLevels:
                     f"Line:\n{line}"
                 )
                 assert "logger.info" in line, (
-                    f"jobs.py 'paste-jd: budget cap reached' must use logger.info.\n"
-                    f"Line:\n{line}"
+                    f"jobs.py 'paste-jd: budget cap reached' must use logger.info.\nLine:\n{line}"
                 )
 
     def test_rescore_budget_cap_logs_at_info(self, caplog):
@@ -217,8 +217,7 @@ class TestJobsBlueprintLogLevels:
                     f"Line:\n{line}"
                 )
                 assert "logger.info" in line, (
-                    f"jobs.py 'rescore: budget cap reached' must use logger.info.\n"
-                    f"Line:\n{line}"
+                    f"jobs.py 'rescore: budget cap reached' must use logger.info.\nLine:\n{line}"
                 )
 
 

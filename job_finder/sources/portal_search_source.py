@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 import requests
@@ -34,6 +34,7 @@ class _SerpBackend(Protocol):
     """
 
     def fetch_jobs(self, queries: list[dict]) -> list[Job]: ...
+
 
 _REQUEST_TIMEOUT = 15
 _USER_AGENT = "Mozilla/5.0 (compatible; JobCannon/1.0)"
@@ -212,9 +213,7 @@ def _fetch_himalayas(keywords: list[str]) -> list[Job]:
                     source_url=url,
                     salary_min=_safe_int(item.get("minSalary")),
                     salary_max=_safe_int(item.get("maxSalary")),
-                    description=_truncate(
-                        _strip_html(item.get("description")), max_len=8000
-                    ),
+                    description=_truncate(_strip_html(item.get("description")), max_len=8000),
                     posted_date=_unix_to_datetime(item.get("pubDate")),
                 )
             )
@@ -357,7 +356,11 @@ def _fetch_yc_workatastartup(keywords: list[str]) -> list[Job]:
                 continue
 
             slug = item.get("companySlug") or ""
-            source_url = f"https://www.workatastartup.com/companies/{slug}/jobs/{job_id}" if slug and job_id else ""
+            source_url = (
+                f"https://www.workatastartup.com/companies/{slug}/jobs/{job_id}"
+                if slug and job_id
+                else ""
+            )
 
             salary_min, salary_max = _parse_salary_string(item.get("salary") or "")
 
@@ -507,7 +510,11 @@ def _fetch_adzuna(
         for item in data.get("results", []) or []:
             title = item.get("title") or ""
             company_node = item.get("company") or {}
-            company = company_node.get("display_name") if isinstance(company_node, dict) else (company_node or "")
+            company = (
+                company_node.get("display_name")
+                if isinstance(company_node, dict)
+                else (company_node or "")
+            )
             if not title or not company:
                 continue
 
@@ -518,7 +525,9 @@ def _fetch_adzuna(
 
             location_node = item.get("location") or {}
             location_str = (
-                location_node.get("display_name") if isinstance(location_node, dict) else (location_node or "")
+                location_node.get("display_name")
+                if isinstance(location_node, dict)
+                else (location_node or "")
             ) or "Remote"
 
             all_jobs.append(
@@ -969,9 +978,7 @@ def _synthesize_yc_description(item: dict) -> str:
     if facts:
         parts.append("\n".join(facts))
 
-    parts.append(
-        "(Posted via Work at a Startup; full job description requires YC login.)"
-    )
+    parts.append("(Posted via Work at a Startup; full job description requires YC login.)")
     return "\n\n".join(parts)
 
 
@@ -986,7 +993,7 @@ def _unix_to_datetime(value) -> datetime | None:
     if ts <= 0:
         return None
     try:
-        return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+        return datetime.fromtimestamp(ts, tz=UTC).replace(tzinfo=None)
     except (OverflowError, OSError, ValueError):
         return None
 

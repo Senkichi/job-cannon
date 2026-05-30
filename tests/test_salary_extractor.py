@@ -109,9 +109,7 @@ class TestPlausibilityFilter:
         result = extract_salary_from_text(text)
         # Either (None, None) outright, or — if anything matches — it stays
         # outside the plausibility window so we treat as miss.
-        assert result == (None, None), (
-            f"Expected no match for {text!r}, got {result}"
-        )
+        assert result == (None, None), f"Expected no match for {text!r}, got {result}"
 
 
 class TestOrdering:

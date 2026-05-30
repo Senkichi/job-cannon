@@ -76,9 +76,7 @@ def _backfill_locations_structured(ctx: MigrationContext) -> None:
         logger.info("m067: jobs table not present, no-op")
         return
 
-    rows = conn.execute(
-        "SELECT dedup_key, locations_raw, jd_full, location FROM jobs"
-    ).fetchall()
+    rows = conn.execute("SELECT dedup_key, locations_raw, jd_full, location FROM jobs").fetchall()
 
     updated = 0
     skipped_empty = 0

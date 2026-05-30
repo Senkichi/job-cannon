@@ -255,9 +255,7 @@ def run_ats_scan(
     # High-score-history gate: skip companies whose past scored jobs are all
     # below the cutoff. See _high_score_history_clause for semantics.
     high_score_threshold = int(
-        config.get("ats", {}).get(
-            "high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD
-        )
+        config.get("ats", {}).get("high_score_history_threshold", _DEFAULT_HIGH_SCORE_THRESHOLD)
     )
 
     summary: dict = {
@@ -412,7 +410,12 @@ def _scan_one_company_via_ats_api(
         with standalone_connection(db_path) as scan_conn:
             for job_dict in job_dicts:
                 _upsert_one_ats_api_job(
-                    conn, scan_conn, company_name, job_dict, summary, all_new_job_keys,
+                    conn,
+                    scan_conn,
+                    company_name,
+                    job_dict,
+                    summary,
+                    all_new_job_keys,
                     company_id=company_id,
                 )
 

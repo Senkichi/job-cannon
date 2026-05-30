@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
 
 from evals.cascade_audit.adapters import rows_to_dicts
 
@@ -42,9 +41,7 @@ class ParseStructuredFieldsAdapter:
         metrics = {}
 
         # Schema validation
-        schema_valid = isinstance(candidate, dict) and all(
-            k in candidate for k in gold
-        )
+        schema_valid = isinstance(candidate, dict) and all(k in candidate for k in gold)
         metrics["schema_valid"] = schema_valid
 
         # Salary MAE if both have salary_min

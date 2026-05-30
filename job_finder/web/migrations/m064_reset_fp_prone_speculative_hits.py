@@ -90,9 +90,7 @@ def _reset(ctx: MigrationContext) -> None:
     pre_count = int(pre_count_row[0]) if pre_count_row else 0
 
     if pre_count == 0:
-        logger.info(
-            "m064: no FP-prone speculative-hit rows to reset (already clean)"
-        )
+        logger.info("m064: no FP-prone speculative-hit rows to reset (already clean)")
         return
 
     conn.execute(

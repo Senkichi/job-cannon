@@ -394,12 +394,16 @@ def _fetch_portal_usajobs(cfg: dict, target_titles: list[str]) -> list[Job]:
     from job_finder.secrets import get_secret
     from job_finder.sources.portal_search_source import _fetch_usajobs
 
-    user_agent_email = get_secret(
-        "sources.portal_search.usajobs.user_agent_email", config=cfg
-    ) or portal_cfg.get("user_agent_email", "") or ""
-    authorization_key = get_secret(
-        "sources.portal_search.usajobs.authorization_key", config=cfg
-    ) or portal_cfg.get("authorization_key", "") or ""
+    user_agent_email = (
+        get_secret("sources.portal_search.usajobs.user_agent_email", config=cfg)
+        or portal_cfg.get("user_agent_email", "")
+        or ""
+    )
+    authorization_key = (
+        get_secret("sources.portal_search.usajobs.authorization_key", config=cfg)
+        or portal_cfg.get("authorization_key", "")
+        or ""
+    )
     return _fetch_usajobs(
         _portal_keywords(cfg, target_titles),
         user_agent_email=user_agent_email,
@@ -414,12 +418,16 @@ def _fetch_portal_adzuna(cfg: dict, target_titles: list[str]) -> list[Job]:
     from job_finder.secrets import get_secret
     from job_finder.sources.portal_search_source import _fetch_adzuna
 
-    app_id = get_secret(
-        "sources.portal_search.adzuna.app_id", config=cfg
-    ) or portal_cfg.get("app_id", "") or ""
-    app_key = get_secret(
-        "sources.portal_search.adzuna.app_key", config=cfg
-    ) or portal_cfg.get("app_key", "") or ""
+    app_id = (
+        get_secret("sources.portal_search.adzuna.app_id", config=cfg)
+        or portal_cfg.get("app_id", "")
+        or ""
+    )
+    app_key = (
+        get_secret("sources.portal_search.adzuna.app_key", config=cfg)
+        or portal_cfg.get("app_key", "")
+        or ""
+    )
     return _fetch_adzuna(
         _portal_keywords(cfg, target_titles),
         app_id=app_id,
@@ -435,9 +443,11 @@ def _fetch_portal_jooble(cfg: dict, target_titles: list[str]) -> list[Job]:
     from job_finder.secrets import get_secret
     from job_finder.sources.portal_search_source import _fetch_jooble
 
-    api_key = get_secret(
-        "sources.portal_search.jooble.api_key", config=cfg
-    ) or portal_cfg.get("api_key", "") or ""
+    api_key = (
+        get_secret("sources.portal_search.jooble.api_key", config=cfg)
+        or portal_cfg.get("api_key", "")
+        or ""
+    )
     return _fetch_jooble(_portal_keywords(cfg, target_titles), api_key=api_key)
 
 

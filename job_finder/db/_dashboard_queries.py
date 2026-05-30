@@ -157,8 +157,7 @@ def get_distinct_locations(conn: sqlite3.Connection) -> list[str]:
     from job_finder.web.location_normalizer import normalize_for_display, normalize_location
 
     rows = conn.execute(
-        "SELECT locations_raw FROM jobs "
-        "WHERE locations_raw IS NOT NULL AND locations_raw != ''"
+        "SELECT locations_raw FROM jobs WHERE locations_raw IS NOT NULL AND locations_raw != ''"
     ).fetchall()
 
     by_lower_key: dict[str, str] = {}

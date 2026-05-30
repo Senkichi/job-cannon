@@ -91,9 +91,7 @@ def _canonical_key(name: str | None) -> str:
     return key
 
 
-def _repoint_and_delete(
-    conn: sqlite3.Connection, orphan_id: int, canonical_id: int
-) -> None:
+def _repoint_and_delete(conn: sqlite3.Connection, orphan_id: int, canonical_id: int) -> None:
     conn.execute(
         "UPDATE jobs SET company_id = ? WHERE company_id = ?",
         (canonical_id, orphan_id),

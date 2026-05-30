@@ -111,17 +111,13 @@ class TestPreserves:
 
     def test_non_glassdoor_unknown_preserved(self, migrated_db):
         path, conn = migrated_db
-        _insert(
-            conn, dedup_key="keep|d", company="Unknown", sources_json='["serpapi"]'
-        )
+        _insert(conn, dedup_key="keep|d", company="Unknown", sources_json='["serpapi"]')
         _run(path, conn)
         assert _exists(conn, "keep|d")
 
     def test_glassdoor_real_company_preserved(self, migrated_db):
         path, conn = migrated_db
-        _insert(
-            conn, dedup_key="keep|e", company="Acme Corp", sources_json='["glassdoor"]'
-        )
+        _insert(conn, dedup_key="keep|e", company="Acme Corp", sources_json='["glassdoor"]')
         _run(path, conn)
         assert _exists(conn, "keep|e")
 

@@ -25,7 +25,6 @@ import requests
 from bs4 import BeautifulSoup
 
 from job_finder.web.claude_client import call_claude
-from job_finder.web.db_helpers import standalone_connection
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
 logger = logging.getLogger(__name__)

@@ -239,7 +239,11 @@ class TestCallSiteIntegration:
             config={
                 "TESTING": True,
                 "db": {"path": db_path},
-                "scoring": {"min_score": 5.0, "candidate_score_threshold": 55, "daily_budget_usd": 25.0},
+                "scoring": {
+                    "min_score": 5.0,
+                    "candidate_score_threshold": 55,
+                    "daily_budget_usd": 25.0,
+                },
                 "polling": {"interval_minutes": 30},
             }
         )

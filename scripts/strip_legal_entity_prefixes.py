@@ -14,6 +14,7 @@ Idempotent: rows already clean are skipped.
 Usage:
     uv run python scripts/strip_legal_entity_prefixes.py [--dry-run] [--db jobs.db]
 """
+
 from __future__ import annotations
 
 import argparse

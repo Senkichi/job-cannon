@@ -1,8 +1,7 @@
 """Test schema_valid telemetry population for Phase 35."""
 
-import pytest
-from job_finder.web.model_provider import ModelResult, _maybe_record_cost
 from job_finder.web.claude_client import record_cost
+from job_finder.web.model_provider import ModelResult, _maybe_record_cost
 
 
 def test_maybe_record_cost_includes_schema_valid(migrated_db):
@@ -18,10 +17,9 @@ def test_maybe_record_cost_includes_schema_valid(migrated_db):
         schema_valid=True,
     )
     _maybe_record_cost(result, conn, job_id="test-job", purpose="test-purpose")
-    
+
     row = conn.execute(
-        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?",
-        ("test-purpose",)
+        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?", ("test-purpose",)
     ).fetchone()
     assert row is not None
     assert row[0] == 1  # True as integer
@@ -40,10 +38,9 @@ def test_maybe_record_cost_schema_valid_false(migrated_db):
         schema_valid=False,
     )
     _maybe_record_cost(result, conn, job_id="test-job", purpose="test-purpose")
-    
+
     row = conn.execute(
-        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?",
-        ("test-purpose",)
+        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?", ("test-purpose",)
     ).fetchone()
     assert row is not None
     assert row[0] == 0  # False as integer
@@ -62,10 +59,9 @@ def test_record_cost_includes_schema_valid(migrated_db):
         provider="anthropic",
         schema_valid=True,
     )
-    
+
     row = conn.execute(
-        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?",
-        ("test-purpose",)
+        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?", ("test-purpose",)
     ).fetchone()
     assert row is not None
     assert row[0] == 1
@@ -84,10 +80,9 @@ def test_record_cost_schema_valid_false(migrated_db):
         provider="anthropic",
         schema_valid=False,
     )
-    
+
     row = conn.execute(
-        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?",
-        ("test-purpose",)
+        "SELECT schema_valid FROM scoring_costs WHERE purpose = ?", ("test-purpose",)
     ).fetchone()
     assert row is not None
     assert row[0] == 0

@@ -94,9 +94,7 @@ class TestMigrateSecretsNothingToMigrate:
 
 
 class TestMigrateSecretsLiveRun:
-    def test_writes_secret_to_keyring_and_clears_config(
-        self, isolated_user_data, capsys
-    ):
+    def test_writes_secret_to_keyring_and_clears_config(self, isolated_user_data, capsys):
         import keyring as keyring_lib
 
         from job_finder import migrate_secrets
@@ -124,8 +122,7 @@ class TestMigrateSecretsLiveRun:
 
         # Keyring populated.
         assert (
-            keyring_lib.get_password("job-cannon", "sources.serpapi.api_key")
-            == "sk-live-secret"
+            keyring_lib.get_password("job-cannon", "sources.serpapi.api_key") == "sk-live-secret"
         )
         assert (
             keyring_lib.get_password("job-cannon", "sources.imap.app_password")
@@ -170,15 +167,14 @@ class TestMigrateSecretsErrors:
         err = capsys.readouterr().err
         assert "config.yaml" in err
 
-    def test_force_proceeds_when_probe_fails(
-        self, isolated_user_data, monkeypatch, capsys
-    ):
+    def test_force_proceeds_when_probe_fails(self, isolated_user_data, monkeypatch, capsys):
         """Simulate a flaky probe by patching probe_keyring_backend to False;
         --force should still let set_secret() proceed (in-memory backend writes
         succeed regardless of the flag)."""
         import keyring as keyring_lib
 
-        from job_finder import migrate_secrets, secrets as jf_secrets
+        from job_finder import migrate_secrets
+        from job_finder import secrets as jf_secrets
 
         _seed_config(
             isolated_user_data,
@@ -191,15 +187,11 @@ class TestMigrateSecretsErrors:
 
         rc = migrate_secrets.main(["--force"])
         assert rc == 0
-        assert (
-            keyring_lib.get_password("job-cannon", "sources.serpapi.api_key")
-            == "sk-force"
-        )
+        assert keyring_lib.get_password("job-cannon", "sources.serpapi.api_key") == "sk-force"
 
-    def test_no_force_with_failed_probe_exits_one(
-        self, isolated_user_data, monkeypatch, capsys
-    ):
-        from job_finder import migrate_secrets, secrets as jf_secrets
+    def test_no_force_with_failed_probe_exits_one(self, isolated_user_data, monkeypatch, capsys):
+        from job_finder import migrate_secrets
+        from job_finder import secrets as jf_secrets
 
         _seed_config(
             isolated_user_data,

@@ -23,7 +23,6 @@ from job_finder.web.location_canonical import (
 )
 from job_finder.web.location_parser import parse_locations
 
-
 # ─── Anchor corpus (SPEC must-pass) ──────────────────────────────────
 
 
@@ -182,8 +181,7 @@ def test_springfield_with_state_resolves() -> None:
     assert locations[0].city == "Springfield"
 
 
-def test_springfield_bare_no_anchors_us_default(
-) -> None:
+def test_springfield_bare_no_anchors_us_default() -> None:
     """SPEC Q1: ``Springfield`` alone (no country signal) → US default.
 
     User-confirmed (2026-05-27): when the location string carries no

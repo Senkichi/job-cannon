@@ -39,7 +39,9 @@ def _fetch_postings(slug: str) -> list[dict]:
     return jobs if isinstance(jobs, list) else []
 
 
-def _address_to_loc(addr: dict | None, workplace_type: WorkplaceType, fallback_raw: str) -> JobLocation | None:
+def _address_to_loc(
+    addr: dict | None, workplace_type: WorkplaceType, fallback_raw: str
+) -> JobLocation | None:
     """Map an Ashby address (``postalAddress.*`` shape) to a JobLocation.
 
     Returns None when the address has no usable fields and the caller has
@@ -57,7 +59,18 @@ def _address_to_loc(addr: dict | None, workplace_type: WorkplaceType, fallback_r
     city = (postal.get("addressLocality") or "").strip() or None
     region = (postal.get("addressRegion") or "").strip() or None
     country = (postal.get("addressCountry") or "").strip() or None
-    raw = ", ".join(p for p in [postal.get("addressLocality"), postal.get("addressRegion"), postal.get("addressCountry")] if p) or fallback_raw
+    raw = (
+        ", ".join(
+            p
+            for p in [
+                postal.get("addressLocality"),
+                postal.get("addressRegion"),
+                postal.get("addressCountry"),
+            ]
+            if p
+        )
+        or fallback_raw
+    )
     if not any((city, region, country)):
         if not raw:
             return None
@@ -105,7 +118,11 @@ def _to_canonical(posting: dict) -> list[JobLocation]:
             out.append(loc)
     # Fallback path: pure-remote posting with no structured address.
     if not out and wt == "REMOTE":
-        out.append(JobLocation.unresolved_from_raw(posting.get("location") or "Remote", workplace_type="REMOTE"))
+        out.append(
+            JobLocation.unresolved_from_raw(
+                posting.get("location") or "Remote", workplace_type="REMOTE"
+            )
+        )
     return dedupe_locations(out)
 
 

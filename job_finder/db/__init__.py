@@ -38,13 +38,13 @@ from __future__ import annotations
 from ._classification import _SUB_SCORE_KEYS as _SUB_SCORE_KEYS
 from ._classification import JobAssessment as JobAssessment
 from ._classification import derive_classification as derive_classification
-
-# DB write paths — runs log + per-row persistence + pipeline state machine.
-from ._persistence import log_run as log_run
-from ._persistence import persist_job_archetype as persist_job_archetype
-from ._persistence import persist_job_assessment as persist_job_assessment
-from ._persistence import persist_job_expiry_state as persist_job_expiry_state
-from ._persistence import update_pipeline_status as update_pipeline_status
+from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
+from ._dashboard_queries import get_distinct_locations as get_distinct_locations
+from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status
+from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
+from ._dashboard_queries import get_recent_activity as get_recent_activity
+from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events
+from ._dashboard_queries import get_recent_runs as get_recent_runs
 
 # Job CRUD + the JOBS_ALL_COLUMNS projection.
 from ._jobs import JOBS_ALL_COLUMNS as JOBS_ALL_COLUMNS
@@ -53,11 +53,12 @@ from ._jobs import load_job_context as load_job_context
 from ._jobs import merge_description as merge_description
 from ._jobs import upsert_job as upsert_job
 
-# Read-only filter queries — sort_by allowlist invariant lives here.
-from ._queries import get_distinct_country_codes as get_distinct_country_codes
-from ._queries import get_distinct_sources as get_distinct_sources
-from ._queries import get_distinct_workplace_types as get_distinct_workplace_types
-from ._queries import get_filtered_jobs as get_filtered_jobs
+# DB write paths — runs log + per-row persistence + pipeline state machine.
+from ._persistence import log_run as log_run
+from ._persistence import persist_job_archetype as persist_job_archetype
+from ._persistence import persist_job_assessment as persist_job_assessment
+from ._persistence import persist_job_expiry_state as persist_job_expiry_state
+from ._persistence import update_pipeline_status as update_pipeline_status
 
 # Pipeline-detection + dashboard read queries (formerly job_finder/db_pipeline.py
 # + db_queries.py at the package root; moved into db/ in the polish-review
@@ -65,10 +66,9 @@ from ._queries import get_filtered_jobs as get_filtered_jobs
 from ._pipeline_queries import get_pending_detections as get_pending_detections
 from ._pipeline_queries import get_pipeline_events as get_pipeline_events
 from ._pipeline_queries import resolve_detection as resolve_detection
-from ._dashboard_queries import get_dashboard_stats as get_dashboard_stats
-from ._dashboard_queries import get_distinct_locations as get_distinct_locations
-from ._dashboard_queries import get_jobs_by_status as get_jobs_by_status
-from ._dashboard_queries import get_pipeline_summary as get_pipeline_summary
-from ._dashboard_queries import get_recent_activity as get_recent_activity
-from ._dashboard_queries import get_recent_pipeline_events as get_recent_pipeline_events
-from ._dashboard_queries import get_recent_runs as get_recent_runs
+
+# Read-only filter queries — sort_by allowlist invariant lives here.
+from ._queries import get_distinct_country_codes as get_distinct_country_codes
+from ._queries import get_distinct_sources as get_distinct_sources
+from ._queries import get_distinct_workplace_types as get_distinct_workplace_types
+from ._queries import get_filtered_jobs as get_filtered_jobs

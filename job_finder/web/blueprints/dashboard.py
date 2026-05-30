@@ -227,11 +227,19 @@ def _get_inbox_banner(config: dict, conn):
 
         if result.status == "red" or any_auth_failed:
             if any_auth_failed and result.status != "red":
-                failed = result.gmail_auth if (result.gmail_auth and not result.gmail_auth.ok) else result.imap_auth
-                source_name = "Gmail" if (result.gmail_auth and not result.gmail_auth.ok) else "IMAP"
+                failed = (
+                    result.gmail_auth
+                    if (result.gmail_auth and not result.gmail_auth.ok)
+                    else result.imap_auth
+                )
+                source_name = (
+                    "Gmail" if (result.gmail_auth and not result.gmail_auth.ok) else "IMAP"
+                )
                 return {
                     "summary": f"{source_name} authentication failed",
-                    "reason": failed.message if failed else "Auth probe returned not-ok with no message.",
+                    "reason": failed.message
+                    if failed
+                    else "Auth probe returned not-ok with no message.",
                 }
             return {
                 "summary": result.summary,

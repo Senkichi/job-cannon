@@ -4,12 +4,10 @@ import email
 import email.mime.multipart
 import email.mime.text
 import email.policy
-from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from job_finder.models import Job
 from job_finder.sources.imap_source import ImapSource
 
 
@@ -42,9 +40,7 @@ def test_fetch_jobs_searches_unseen_and_fetches_rfc822(mock_imap_client):
     }
 
     # Execute
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="test_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="test_password")
     jobs, uids = source.fetch_jobs()
 
     # Verify
@@ -67,9 +63,7 @@ def test_fetch_jobs_marks_seen_after_fetch(mock_imap_client):
         2: {b"RFC822": b"From: test2@example.com\r\n\r\nBody2"},
     }
 
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="test_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="test_password")
     source.fetch_jobs()
 
     # Both messages should be marked seen
@@ -85,9 +79,7 @@ def test_fetch_jobs_returns_empty_for_no_unseen_messages(mock_imap_client):
 
     mock_client_instance.search.return_value = []
 
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="test_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="test_password")
     jobs, uids = source.fetch_jobs()
 
     assert jobs == []
@@ -103,9 +95,7 @@ def test_login_failure_does_not_expose_password(mock_imap_client):
     # Make login raise an exception
     mock_client_instance.login.side_effect = Exception("Authentication failed")
 
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="secret_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="secret_password")
 
     with pytest.raises(Exception) as exc_info:
         source.fetch_jobs()
@@ -205,9 +195,7 @@ Sample LinkedIn job alert body"""
     mock_client_instance.search.return_value = [1]
     mock_client_instance.fetch.return_value = {1: {b"RFC822": rfc822_bytes}}
 
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="test_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="test_password")
     jobs, uids = source.fetch_jobs()
 
     # Should have attempted to parse (even if parser returns empty list)
@@ -226,9 +214,7 @@ def test_processed_message_ids_argument_ignored(mock_imap_client):
         1: {b"RFC822": b"From: test@example.com\r\n\r\nBody"}
     }
 
-    source = ImapSource(
-        email_address="test@gmail.com", app_password="test_password"
-    )
+    source = ImapSource(email_address="test@gmail.com", app_password="test_password")
     # Pass processed_message_ids - should be ignored
     jobs, uids = source.fetch_jobs(processed_message_ids={"msg1", "msg2"})
 

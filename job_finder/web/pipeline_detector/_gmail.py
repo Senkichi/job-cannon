@@ -165,12 +165,21 @@ def _fetch_pipeline_emails(service, lookback_days: int = 3) -> list[dict]:
             try:
                 from email.utils import parsedate_to_datetime
 
-                email_date = parsedate_to_datetime(date_str).astimezone(UTC).replace(tzinfo=None).isoformat()
+                email_date = (
+                    parsedate_to_datetime(date_str)
+                    .astimezone(UTC)
+                    .replace(tzinfo=None)
+                    .isoformat()
+                )
             except Exception:
                 logger.debug("email date parse failed, using internalDate", exc_info=True)
                 internal = msg.get("internalDate")
                 if internal:
-                    email_date = datetime.fromtimestamp(int(internal) / 1000, tz=UTC).replace(tzinfo=None).isoformat()
+                    email_date = (
+                        datetime.fromtimestamp(int(internal) / 1000, tz=UTC)
+                        .replace(tzinfo=None)
+                        .isoformat()
+                    )
                 else:
                     email_date = utc_now_iso()
 

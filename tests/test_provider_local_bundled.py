@@ -46,6 +46,7 @@ def test_module_imports_without_llama_cpp_installed():
 
 def test_local_bundled_provider_is_base_provider_subclass():
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     assert issubclass(LocalBundledProvider, BaseProvider)
 
 
@@ -57,11 +58,13 @@ def test_init_raises_import_error_when_llama_cpp_absent():
     # __init__ must raise ImportError.
     try:
         import llama_cpp  # noqa: F401
+
         pytest.skip("llama_cpp is installed; this test only runs without it")
     except ImportError:
         pass
 
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     with pytest.raises(ImportError, match="llama-cpp-python is required"):
         LocalBundledProvider(model_path="/fake.gguf")
 
@@ -108,6 +111,7 @@ def fake_llama_cpp(monkeypatch):
 def _make_provider(model_path: str = "/fake/model.gguf"):
     """Construct LocalBundledProvider with mocked Llama + mocked path existence."""
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     with patch("pathlib.Path.exists", return_value=True):
         return LocalBundledProvider(model_path=model_path)
 
@@ -119,12 +123,14 @@ def _make_provider(model_path: str = "/fake/model.gguf"):
 
 def test_init_raises_file_not_found_when_model_path_empty(fake_llama_cpp):
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     with pytest.raises(FileNotFoundError, match="not configured"):
         LocalBundledProvider(model_path="")
 
 
 def test_init_raises_file_not_found_when_gguf_missing(fake_llama_cpp):
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     with patch("pathlib.Path.exists", return_value=False):
         with pytest.raises(FileNotFoundError, match="GGUF model not found"):
             LocalBundledProvider(model_path="/nope.gguf")
@@ -141,6 +147,7 @@ def test_init_constructs_llama_with_expected_kwargs(fake_llama_cpp):
 
 def test_init_accepts_custom_n_ctx(fake_llama_cpp):
     from job_finder.web.providers.local_bundled import LocalBundledProvider
+
     with patch("pathlib.Path.exists", return_value=True):
         LocalBundledProvider(model_path="/m.gguf", n_ctx=8192)
     assert _FakeLlama.last_init_kwargs["n_ctx"] == 8192

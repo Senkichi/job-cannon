@@ -60,6 +60,7 @@ _NO_CREDS_PROVIDERS: Final[frozenset[str]] = frozenset({"claude_code_cli", "gemi
 
 # --- Helpers ---
 
+
 def _db():
     return get_db()
 
@@ -69,9 +70,7 @@ def _wizard():
     return state.read_wizard_data(_db())
 
 
-def _move_secret_or_warn(
-    config_slice: dict, path: tuple[str, ...], canonical: str
-) -> None:
+def _move_secret_or_warn(config_slice: dict, path: tuple[str, ...], canonical: str) -> None:
     """Move a secret out of `config_slice` into the OS keyring.
 
     Walks `path`; if a non-empty string is at the leaf, writes it under
@@ -103,6 +102,7 @@ def _move_secret_or_warn(
 
 
 # --- Routes (8 total) ---
+
 
 @onboarding_bp.route("/welcome", methods=["GET", "POST"], strict_slashes=False)
 def welcome():
@@ -227,7 +227,10 @@ def resume_upload():
                     config=current_app.config.get("JF_CONFIG", {}),
                 )
             except ValueError as e:
-                logger.info("resume_parser rejected file (extension already screened?): %s", type(e).__name__)
+                logger.info(
+                    "resume_parser rejected file (extension already screened?): %s",
+                    type(e).__name__,
+                )
                 profile = {}
             except Exception as e:
                 logger.warning("resume_parser failed: %s", type(e).__name__)
@@ -299,22 +302,27 @@ def imap_credentials():
 
     if request.method == "POST":
         email = request.form.get("email", "").strip()
-        app_password = request.form.get("app_password", "")  # do NOT strip - app passwords may include spaces
+        app_password = request.form.get(
+            "app_password", ""
+        )  # do NOT strip - app passwords may include spaces
         skip = bool(request.form.get("skip"))
 
         if skip:
             # D-08 escape hatch: save credentials anyway (even if test would fail), mark not-verified
-            state.write_wizard_data(_db(), {
-                "imap": {
-                    "host": "imap.gmail.com",
-                    "port": 993,
-                    "email": email,
-                    "app_password": app_password,
-                    "folder": "INBOX",
-                    "enabled": True,
-                    "verified": False,
-                }
-            })
+            state.write_wizard_data(
+                _db(),
+                {
+                    "imap": {
+                        "host": "imap.gmail.com",
+                        "port": 993,
+                        "email": email,
+                        "app_password": app_password,
+                        "folder": "INBOX",
+                        "enabled": True,
+                        "verified": False,
+                    }
+                },
+            )
             return redirect(url_for("onboarding.schedule"))
 
         if not email or not app_password:
@@ -326,7 +334,9 @@ def imap_credentials():
                 step_label="Gmail",
             )
 
-        result = imap_test.check_imap(host="imap.gmail.com", port=993, email=email, app_password=app_password)
+        result = imap_test.check_imap(
+            host="imap.gmail.com", port=993, email=email, app_password=app_password
+        )
         if not result.ok:
             # D-08: re-render with error + preserved email; HTTP 200 (NOT 302)
             return render_template(
@@ -337,17 +347,20 @@ def imap_credentials():
                 step_label="Gmail",
             )
 
-        state.write_wizard_data(_db(), {
-            "imap": {
-                "host": "imap.gmail.com",
-                "port": 993,
-                "email": email,
-                "app_password": app_password,
-                "folder": "INBOX",
-                "enabled": True,
-                "verified": True,
-            }
-        })
+        state.write_wizard_data(
+            _db(),
+            {
+                "imap": {
+                    "host": "imap.gmail.com",
+                    "port": 993,
+                    "email": email,
+                    "app_password": app_password,
+                    "folder": "INBOX",
+                    "enabled": True,
+                    "verified": True,
+                }
+            },
+        )
         return redirect(url_for("onboarding.schedule"))
 
     return render_template(
@@ -446,7 +459,9 @@ def done():
             config_slice["profile"]["min_salary"] = profile_edit["min_salary"]
         if provider_block.get("api_key"):
             # API key only attached for BYO-key providers (D-04)
-            config_slice["providers"]["api_keys"] = {provider_block["name"]: provider_block["api_key"]}
+            config_slice["providers"]["api_keys"] = {
+                provider_block["name"]: provider_block["api_key"]
+            }
 
         # --- Commit 3.6: route wizard secrets through the OS keyring ---
         # Per locked decision (Phase 1 #5a): plaintext lives in wizard_data
@@ -456,7 +471,8 @@ def done():
         # through to config.yaml as a fallback so the user doesn't lose the
         # secret — a flash warning informs them of the degradation.
         _move_secret_or_warn(
-            config_slice, ("sources", "imap", "app_password"),
+            config_slice,
+            ("sources", "imap", "app_password"),
             "sources.imap.app_password",
         )
         provider_name = provider_block.get("name", "")
@@ -464,7 +480,9 @@ def done():
             canonical = f"providers.api_keys.{provider_name}"
             if canonical in jf_secrets.SECRET_ENV_VARS:
                 _move_secret_or_warn(
-                    config_slice, ("providers", "api_keys", provider_name), canonical,
+                    config_slice,
+                    ("providers", "api_keys", provider_name),
+                    canonical,
                 )
 
         # --- Side effect 1: atomic config.yaml write (D-15) ---
@@ -570,7 +588,9 @@ def done():
                 # Do NOT fail the redirect if scheduling fails - user can manually trigger from Settings
                 logger.warning("onboarding done: scheduler.add_job failed: %s", type(e).__name__)
         else:
-            logger.info("onboarding done: get_scheduler() returned None (likely TESTING=True) — skipping first ingest kickoff")
+            logger.info(
+                "onboarding done: get_scheduler() returned None (likely TESTING=True) — skipping first ingest kickoff"
+            )
 
         # --- Side effect 5: flash + redirect to /jobs (T-42-05: internal only) ---
         flash("First ingest in progress — check back in a minute.", "success")
