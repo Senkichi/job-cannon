@@ -132,7 +132,14 @@ def test_parse_resume_dispatches_through_call_model_to_provider_seam(
 
     # Patch the provider seam, not call_model. Patch the bound method on the
     # OllamaProvider class so any instance call_model constructs gets the stub.
+    # Also stub the health check — Ollama isn't running on CI runners, and the
+    # __init__ probe would raise RuntimeError before our `call` patch ever
+    # runs.
     with (
+        patch(
+            "job_finder.web.providers.ollama_provider.OllamaProvider._check_health",
+            lambda self: None,
+        ),
         patch(
             "job_finder.web.providers.ollama_provider.OllamaProvider.call",
             fake_provider_call,
@@ -194,6 +201,10 @@ def test_parse_resume_records_cost_via_call_model(
         )
 
     with (
+        patch(
+            "job_finder.web.providers.ollama_provider.OllamaProvider._check_health",
+            lambda self: None,
+        ),
         patch(
             "job_finder.web.providers.ollama_provider.OllamaProvider.call",
             fake_provider_call,
