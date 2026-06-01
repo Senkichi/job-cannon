@@ -28,6 +28,12 @@ from job_finder.web.job_scorer import (
 )
 from job_finder.web.model_provider import ModelResult
 
+# Minimal stub context for unit tests of score_job — these tests cover
+# the scorer's plumbing (call_model dispatch, schema validation, skip
+# preconditions) rather than rubric-context interaction, so any non-empty
+# block satisfies the required-arg contract.
+_TEST_CTX = "## Candidate context\n\n### Targeting\n- Target titles: Test Role"
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -104,7 +110,7 @@ class TestSkipPrecondition:
         job = _good_job()
         job["jd_full"] = ""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
-            result = score_job(job, mock_conn, config)
+            result = score_job(job, mock_conn, config, _TEST_CTX)
         assert result.status == "skipped"
         assert result.data is None
         assert result.provider is None
@@ -115,7 +121,7 @@ class TestSkipPrecondition:
         job = _good_job()
         job["jd_full"] = None
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
-            result = score_job(job, mock_conn, config)
+            result = score_job(job, mock_conn, config, _TEST_CTX)
         assert result.status == "skipped"
         assert result.data is None
         mock_call.assert_not_called()
@@ -125,7 +131,7 @@ class TestSkipPrecondition:
         job = _good_job()
         del job["jd_full"]
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
-            result = score_job(job, mock_conn, config)
+            result = score_job(job, mock_conn, config, _TEST_CTX)
         assert result.status == "skipped"
         mock_call.assert_not_called()
 
@@ -142,7 +148,7 @@ class TestHappyPath:
         """Valid job + valid model result -> status='ok' with populated JobAssessment."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result(provider="ollama")
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.status == "ok"
         assert isinstance(result.data, JobAssessment)
@@ -153,7 +159,7 @@ class TestHappyPath:
         """JobAssessment.sub_scores has all 6 D-05 keys as integers."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.data is not None
         for key in (
@@ -171,7 +177,7 @@ class TestHappyPath:
         """JobAssessment.rationale has all 4 keys from the v3 schema."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.data is not None
         rationale = result.data.rationale
@@ -182,7 +188,7 @@ class TestHappyPath:
         """score_job leaves classification='' — persist_job_assessment derives it."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.data is not None
         # The classification field is a sentinel; real value is derived at persist time.
@@ -192,7 +198,7 @@ class TestHappyPath:
         """call_model is called with tier='score' (renamed from 'scoring' in commit abeecf9)."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            score_job(_good_job(), mock_conn, config)
+            score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert mock_call.call_count == 1
         kwargs = mock_call.call_args.kwargs
@@ -202,7 +208,7 @@ class TestHappyPath:
         """call_model receives output_schema=JOB_ASSESSMENT_SCHEMA (identity-equal)."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            score_job(_good_job(), mock_conn, config)
+            score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs.get("output_schema") is JOB_ASSESSMENT_SCHEMA
@@ -211,7 +217,7 @@ class TestHappyPath:
         """The system arg passed to call_model contains v3 prompt + fewshots + reinforcement."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            score_job(_good_job(), mock_conn, config)
+            score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         kwargs = mock_call.call_args.kwargs
         system = kwargs.get("system", "")
@@ -224,7 +230,7 @@ class TestHappyPath:
         """The user message includes title, company, location, and jd_full."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            score_job(_good_job(), mock_conn, config)
+            score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         kwargs = mock_call.call_args.kwargs
         messages = kwargs.get("messages") or []
@@ -239,7 +245,7 @@ class TestHappyPath:
         """job_id passed to call_model is the job's dedup_key (str)."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.return_value = _good_model_result()
-            score_job(_good_job(), mock_conn, config)
+            score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs.get("job_id") == "acme|senior-ml-engineer"
@@ -257,7 +263,7 @@ class TestErrorPaths:
         """Exception in call_model -> ScoringResult(status='error') with reason."""
         with patch("job_finder.web.job_scorer.call_model") as mock_call:
             mock_call.side_effect = RuntimeError("ollama timeout")
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.status == "error"
         assert result.data is None
@@ -277,7 +283,7 @@ class TestErrorPaths:
                 schema_valid=False,
             )
             mock_call.return_value = bad
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.status == "error"
         assert result.provider == "ollama"
@@ -295,7 +301,7 @@ class TestErrorPaths:
                 schema_valid=True,
             )
             mock_call.return_value = empty
-            result = score_job(_good_job(), mock_conn, config)
+            result = score_job(_good_job(), mock_conn, config, _TEST_CTX)
 
         assert result.status == "error"
 
