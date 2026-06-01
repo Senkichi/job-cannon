@@ -139,7 +139,7 @@ def _scan_one_company_via_html(
                     job = Job(
                         title=scraped_job["title"],
                         company=miss_company_name,
-                        location="",
+                        location=scraped_job.get("location", ""),
                         source="careers_page",
                         source_url=scraped_job.get("url") or "",
                         salary_min=None,

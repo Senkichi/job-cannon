@@ -47,6 +47,9 @@ _MAX_JD_CHARS = 8000  # cap extracted JD text
 
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
 
+# Class names that suggest a child element contains a location (city/region)
+_LOCATION_CLASSES = {"location", "city", "geo", "place", "region", "department-location"}
+
 _AUTH_WALL_SIGNATURES = [
     "we're signing you in",
     "sign in or join",
@@ -598,7 +601,11 @@ def scrape_careers_page(
 
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
-        title = tag.get_text(strip=True)
+
+        # Whitespace-normalize the title: join each text fragment with a space
+        # to prevent adjacent-text-node concatenation (e.g. Blue State shape
+        # "Principal Analyst (Evergreen)NY, DC, Oakland" → properly spaced).
+        title = " ".join(tag.stripped_strings)
 
         # Skip empty links, navigation-only links without text
         if not href or not title:
@@ -616,10 +623,40 @@ def scrape_careers_page(
             continue
         seen_urls.add(absolute_url)
 
+        # Extract location from the same DOM area as the title.
+        # Priority 1: child element with a location-indicative class or <small>.
+        # Priority 2: sibling text/elements in the parent container.
+        location = ""
+        loc_tag = tag.find(
+            lambda t: (  # noqa: B023
+                t.name in ("span", "small", "div", "p", "em", "strong")
+                and bool(set(t.get("class") or []) & _LOCATION_CLASSES)
+            )
+        )
+        if loc_tag:
+            location = loc_tag.get_text(strip=True)
+        else:
+            parent = tag.parent
+            if parent is not None:
+                sibling_texts = []
+                for child in parent.children:
+                    if child is tag:
+                        continue
+                    if hasattr(child, "get_text"):
+                        text = child.get_text(strip=True)
+                        if text:
+                            sibling_texts.append(text)
+                    else:
+                        text = str(child).strip()
+                        if text:
+                            sibling_texts.append(text)
+                location = " ".join(sibling_texts)
+
         results.append(
             {
                 "title": title,
                 "url": absolute_url,
+                "location": location,
             }
         )
 
