@@ -302,11 +302,19 @@ def run_scoring_backfill(
     scored_count = 0
     model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
+    # Resolve candidate context once for the whole backfill. Build it from
+    # the original config (provider-agnostic) so the rubric sees the user's
+    # actual target_locations / floor / titles regardless of which provider
+    # _offline_config pins below.
+    from job_finder.web.scoring_orchestrator import _resolve_candidate_context
+
+    candidate_context = _resolve_candidate_context(config)
+
     for i, row in enumerate(rows, start=1):
         job_row = dict(row)
         dedup_key = job_row["dedup_key"]
 
-        sr = score_job(job_row, conn, _offline_config(config))
+        sr = score_job(job_row, conn, _offline_config(config), candidate_context)
         if sr.status != "ok" or sr.data is None:
             logger.debug(
                 "score_job returned %s for '%s' (%s)",

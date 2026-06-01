@@ -106,7 +106,7 @@ def _resolve_schema(config: dict | None) -> dict:
 
 
 def _build_system_prompt(
-    candidate_context: str | None = None,
+    candidate_context: str,
     config: dict | None = None,
 ) -> str:
     """Assemble the full system prompt from the resolved variant module.
@@ -117,27 +117,33 @@ def _build_system_prompt(
     must export V3_SCORING_PROMPT, FIELD_REINFORCEMENT, FEWSHOT_EXAMPLES,
     and JOB_ASSESSMENT_SCHEMA (V3_SCORING_PROMPT_HEADER is optional).
 
-    When ``candidate_context`` is provided (Phase 2a, spec D-2.1), splices
-    it between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES so the model reads:
+    Always splices candidate_context between FIELD_REINFORCEMENT and
+    FEWSHOT_EXAMPLES so the model reads:
         rubric/dimensions header -> field reinforcement -> candidate context
         -> few-shot calibration examples.
 
-    When ``candidate_context`` is None, falls back to the variant's legacy
-    aggregate ordering (V3_SCORING_PROMPT + FEWSHOT + FIELD_REINFORCEMENT)
-    preserving byte-for-byte the pre-Phase-2a system prompt for the
-    baseline module (no context callers).
+    candidate_context is REQUIRED — the v3 location_fit / comp_fit / etc.
+    anchors are unscorable without knowing the candidate's target locations,
+    floor, and background. The orchestrator's
+    ``_resolve_candidate_context(config)`` is the single source of truth in
+    production; tests inject a stub. The pre-Phase-2a no-context fallback
+    was removed in this refactor — it silently produced wrong scores (e.g.
+    rating an on-site Bangalore role as a 'feasible hybrid' = 4 for a
+    Remote/SF-only candidate) and existed only because the wiring across
+    six of seven call sites had never been completed.
     """
+    if not candidate_context:
+        raise ValueError(
+            "_build_system_prompt: candidate_context is required. "
+            "Use scoring_orchestrator._resolve_candidate_context(config) "
+            "in production, or pass an explicit test stub."
+        )
     mod = _resolve_variant_module(_variant_name(config))
     header = getattr(mod, "V3_SCORING_PROMPT_HEADER", None) or mod.V3_SCORING_PROMPT
     field_reinforcement = mod.FIELD_REINFORCEMENT
     fewshot = mod.FEWSHOT_EXAMPLES
 
-    if candidate_context:
-        return (
-            header + "\n\n" + field_reinforcement + "\n\n" + candidate_context + "\n\n" + fewshot
-        )
-    aggregate = mod.V3_SCORING_PROMPT
-    return aggregate + "\n\n" + fewshot + "\n\n" + field_reinforcement
+    return header + "\n\n" + field_reinforcement + "\n\n" + candidate_context + "\n\n" + fewshot
 
 
 def _build_user_message(job: dict) -> str:
@@ -207,7 +213,7 @@ def score_job(
     job: dict,
     conn: sqlite3.Connection,
     config: dict,
-    candidate_context: str | None = None,
+    candidate_context: str,
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
 
@@ -224,12 +230,16 @@ def score_job(
         conn: Open sqlite3 connection (used by call_model for cost recording
             and rate-limit bootstrap).
         config: Application config dict.
-        candidate_context: Optional prompt-ready candidate-context block built
-            by ``scoring_orchestrator.build_candidate_context``. When provided,
-            the system prompt is assembled with the context spliced between
-            FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES per spec D-2.1. When None,
-            the legacy aggregate prompt is used (preserves pre-Phase-2a bytes
-            for callers not yet wired to pass profile data).
+        candidate_context: REQUIRED prompt-ready candidate-context block. The
+            v3 rubric anchors (location_fit, comp_fit, etc.) reference
+            candidate-specific facts (target locations, comp floor, target
+            titles) — scoring without this block silently produces wrong
+            scores. Production callers route through
+            ``scoring_orchestrator.score_and_persist_job``, which resolves
+            this from config via the memoized
+            ``_resolve_candidate_context(config)``. Direct callers (eval
+            harness, tests) must build it explicitly via
+            ``build_candidate_context(config, profile)``.
 
     Returns:
         ScoringResult envelope.

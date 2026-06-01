@@ -37,9 +37,12 @@ def test_baseline_variant_resolves_to_v3_module():
     assert mod is v3
 
 
+_TEST_CTX = "## Candidate context\n\n### Targeting\n- Target titles: Test Analyst"
+
+
 def test_missing_variant_name_defaults_to_baseline():
     """An empty/None config picks baseline so existing callers are unaffected."""
-    prompt = _build_system_prompt(candidate_context=None, config=None)
+    prompt = _build_system_prompt(candidate_context=_TEST_CTX, config=None)
     # Baseline header signature
     assert "Six dimensions — 1-5 integer scale" in prompt
     assert "STRICT FIELD NAMES" in prompt
@@ -48,9 +51,10 @@ def test_missing_variant_name_defaults_to_baseline():
 def test_named_variant_module_loaded(monkeypatch):
     """A planted variant module is resolved when named in config.
 
-    Verifies both prompt paths: the no-context aggregate path (uses
-    V3_SCORING_PROMPT) and the candidate-context splice path (uses
-    V3_SCORING_PROMPT_HEADER). Also verifies schema swap.
+    Verifies the splice path (uses V3_SCORING_PROMPT_HEADER + ctx) and the
+    schema swap. The no-context aggregate path was removed when
+    candidate_context became required — the rubric is unscorable without
+    candidate facts (target locations, comp floor, etc.).
     """
     fake_mod = types.ModuleType("job_finder.web.scoring_prompts.variants.fixture_variant_v4test")
     fake_mod.V3_SCORING_PROMPT = "FIXTURE_PROMPT_MARKER"
@@ -66,13 +70,6 @@ def test_named_variant_module_loaded(monkeypatch):
 
     config = {"scoring": {"prompt_variant": "fixture_variant_v4test"}}
 
-    # No-context path: V3_SCORING_PROMPT aggregate is used.
-    no_ctx = _build_system_prompt(candidate_context=None, config=config)
-    assert "FIXTURE_PROMPT_MARKER" in no_ctx
-    assert "FIXTURE_FIELD_MARKER" in no_ctx
-    assert "FIXTURE_FEWSHOT_MARKER" in no_ctx
-
-    # Splice path: V3_SCORING_PROMPT_HEADER is used.
     spliced = _build_system_prompt(candidate_context="CTX_MARKER", config=config)
     assert "FIXTURE_HEADER_MARKER" in spliced
     assert "FIXTURE_FIELD_MARKER" in spliced
@@ -87,17 +84,25 @@ def test_unknown_variant_raises_clear_error():
     """An ImportError naming the variant — never a silent fallback to baseline."""
     config = {"scoring": {"prompt_variant": "does_not_exist_v4xxx"}}
     with pytest.raises(ImportError, match="does_not_exist_v4xxx"):
-        _build_system_prompt(candidate_context=None, config=config)
+        _build_system_prompt(candidate_context=_TEST_CTX, config=config)
     with pytest.raises(ImportError, match="does_not_exist_v4xxx"):
         _resolve_schema(config)
 
 
+def test_missing_candidate_context_raises():
+    """The orchestrator MUST resolve a context; an empty string is a bug."""
+    with pytest.raises(ValueError, match="candidate_context is required"):
+        _build_system_prompt(candidate_context="", config=None)
+    with pytest.raises(ValueError, match="candidate_context is required"):
+        _build_system_prompt(candidate_context=None, config=None)  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
-# Backward compatibility — Phase 2a candidate_context path still works
+# Splice ordering under the baseline variant
 # ---------------------------------------------------------------------------
 
 
-def test_candidate_context_splice_still_works_with_baseline_variant():
+def test_candidate_context_splice_ordering_under_baseline_variant():
     """The Phase 2a splice (FIELD -> ctx -> FEWSHOT) is preserved under baseline."""
     ctx = "## Candidate context\n\n### Targeting\n- Target titles: Foo Analyst"
     prompt = _build_system_prompt(

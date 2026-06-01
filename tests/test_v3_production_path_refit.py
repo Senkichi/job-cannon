@@ -169,7 +169,7 @@ def test_g4_score_job_production_wiring():
     config = {"providers": {"scoring": {"provider": "ollama", "model": "qwen2.5:14b"}}}
 
     with patch("job_finder.web.job_scorer.call_model", return_value=fake_result):
-        sr = score_job(sample_row, conn, config)
+        sr = score_job(sample_row, conn, config, "## Candidate context\n- stub")
 
     assert sr.status == "ok", f"score_job returned status={sr.status} (error={sr.error})"
     assert sr.data is not None
@@ -209,13 +209,20 @@ def test_g4_refit_live_ollama():
         "legitimacy_note TEXT)"
     )
 
+    # Live refit must use the same context the production scorer builds —
+    # eval/refit drift if the test invokes the rubric without the context
+    # it ships with.
+    from job_finder.web.scoring_orchestrator import _resolve_candidate_context
+
+    ctx = _resolve_candidate_context(config)
+
     candidate_map: dict[str, dict] = {}
     for row in sample:
         conn.execute(
             "INSERT INTO jobs (dedup_key, jd_full, title) VALUES (?, ?, ?)",
             (row["dedup_key"], row.get("jd_full"), row.get("title")),
         )
-        sr = score_job(row, conn, config)
+        sr = score_job(row, conn, config, ctx)
         if sr.status == "ok" and sr.data:
             candidate_map[row["dedup_key"]] = {"sub_scores": dict(sr.data.sub_scores)}
 

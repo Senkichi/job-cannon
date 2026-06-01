@@ -1,12 +1,16 @@
-"""Tests for candidate-context splicing in job_scorer (Phase 2a sub-fixes 2/3 and 3/3).
+"""Tests for candidate-context splicing in job_scorer + orchestrator.
 
-Sub-fix 2/3: _build_system_prompt() accepts a candidate_context arg and splices
-it between FIELD_REINFORCEMENT and FEWSHOT_EXAMPLES per spec D-2.1; score_job()
-threads the parameter through to call_model.
+Originally Phase 2a sub-fixes 2/3 and 3/3. The single-point-of-enforcement
+refactor (June 2026) made ``candidate_context`` required at every layer:
 
-Sub-fix 3/3 (integration): the orchestrator's score_and_persist_job accepts and
-forwards candidate_context, and end-to-end the profile loaded from disk reaches
-the scorer's system prompt.
+    - _build_system_prompt: candidate_context REQUIRED — empty raises.
+    - score_job: candidate_context REQUIRED in signature.
+    - score_and_persist_job: callers do NOT pass candidate_context; the
+      orchestrator resolves it from config via _resolve_candidate_context.
+
+The end-to-end test below covers the production path: an in-memory profile
++ config produces a fingerprint, the orchestrator builds + memoizes the
+context, and that context lands in the scorer's system prompt.
 """
 
 from __future__ import annotations
@@ -34,12 +38,20 @@ def test_build_system_prompt_includes_candidate_context_when_provided():
     )
 
 
-def test_build_system_prompt_omits_section_when_no_context():
-    prompt = _build_system_prompt(candidate_context=None)
-    assert "## Candidate context" not in prompt
-    # Sanity: existing prompt content still present
-    assert "STRICT FIELD NAMES" in prompt
-    assert "Fewshot calibration examples" in prompt
+def test_build_system_prompt_rejects_empty_candidate_context():
+    """The no-context fallback was removed — empty context is a programming bug.
+
+    Before this refactor, six of seven scoring call sites passed ``None`` (the
+    fallback) and produced wrong scores (e.g. Bangalore on-site rated 4/5
+    for a Remote/SF candidate). Hard-failing here is the trip-wire that
+    catches any future caller who forgets to thread the context.
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="candidate_context is required"):
+        _build_system_prompt(candidate_context="")
+    with pytest.raises(ValueError, match="candidate_context is required"):
+        _build_system_prompt(candidate_context=None)  # type: ignore[arg-type]
 
 
 def test_score_job_threads_candidate_context_into_call_model(monkeypatch):
@@ -152,13 +164,13 @@ def test_orchestrator_passes_candidate_context_through(monkeypatch, tmp_path):
     monkeypatch.setattr("job_finder.web.job_scorer.call_model", fake_call_model)
 
     from job_finder.web.scoring_orchestrator import (
-        build_candidate_context,
-        load_scoring_profile,
+        clear_candidate_context_cache,
         score_and_persist_job,
     )
 
-    profile = load_scoring_profile(config)
-    ctx = build_candidate_context(config, profile)
+    # Force the resolver to rebuild against this test's tmp profile path
+    # (otherwise an unrelated prior test could leave a cached entry).
+    clear_candidate_context_cache()
 
     # Minimal in-memory jobs schema that satisfies persist_job_assessment's
     # UPDATE-by-dedup-key contract. The UPDATE is a no-op when the row is
@@ -200,7 +212,7 @@ def test_orchestrator_passes_candidate_context_through(monkeypatch, tmp_path):
         "location": "Remote",
         "jd_full": "Long " * 100,
     }
-    score_and_persist_job(job, conn, config, candidate_context=ctx)
+    score_and_persist_job(job, conn, config)
 
     assert "Lead Analyst" in captured["system"]
     assert "BigQuery" in captured["system"]

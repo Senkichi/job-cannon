@@ -322,13 +322,12 @@ def run(
     try:
         conn.row_factory = sqlite3.Row
 
-        from job_finder.web.scoring_orchestrator import (
-            build_candidate_context,
-            load_scoring_profile,
-        )
+        from job_finder.web.scoring_orchestrator import _resolve_candidate_context
 
-        profile = load_scoring_profile(config)
-        candidate_context = build_candidate_context(config, profile)
+        # Use the production resolver so eval runs see the exact same
+        # context the live scorer sees (and pay the same memoization
+        # cost — one disk read per unique config fingerprint).
+        candidate_context = _resolve_candidate_context(config)
 
         per_job_runs: dict[str, list[dict]] = defaultdict(list)
         for row in gold_rows:

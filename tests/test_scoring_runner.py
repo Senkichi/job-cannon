@@ -248,7 +248,7 @@ class TestRunScoring:
         from job_finder.db import JobAssessment
         from job_finder.web.job_scorer import ScoringResult
 
-        def fake_inner_scorer(job, conn, cfg, client=None, candidate_context=None):
+        def fake_inner_scorer(job, conn, cfg, candidate_context):
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(
@@ -422,7 +422,7 @@ class TestRunScoring:
         from job_finder.db import JobAssessment
         from job_finder.web.job_scorer import ScoringResult
 
-        def fake_inner(job, conn, cfg, client=None, candidate_context=None):
+        def fake_inner(job, conn, cfg, candidate_context):
             return ScoringResult(
                 status="ok",
                 data=JobAssessment(

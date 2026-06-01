@@ -23,13 +23,26 @@ scoring function, which preserves mock injection in tests (tests patch the
 name in the caller's module namespace).
 """
 
+import hashlib
+import json
 import logging
+import os
 import sqlite3
+import threading
 from collections.abc import Callable
 
 from job_finder.db import persist_job_assessment
 
 logger = logging.getLogger(__name__)
+
+# Memoized candidate context. The cache lives at module scope (one slot is
+# enough for a single-user local app, but the dict structure leaves room for
+# multi-config eval runs). Invalidation is automatic — the fingerprint hashes
+# the relevant config slice plus the experience-profile file mtime, so any
+# settings save or profile edit produces a new key.
+_CONTEXT_CACHE: dict[str, str] = {}
+_CONTEXT_CACHE_LOCK = threading.Lock()
+_CONTEXT_CACHE_MAX = 8  # cap to avoid unbounded growth in eval sweeps
 
 
 def load_scoring_profile(config: dict) -> dict:
@@ -56,6 +69,78 @@ def load_scoring_profile(config: dict) -> dict:
     return load_profile(profile_path)
 
 
+def _profile_path(config: dict) -> str:
+    """Single source of truth for the profile file path."""
+    return (
+        config.get("scoring", {}).get("profile_path")
+        or config.get("profile_path")
+        or "experience_profile.json"
+    )
+
+
+def _context_fingerprint(config: dict) -> str:
+    """Stable fingerprint of all inputs that affect the candidate context.
+
+    Hashes the ``config["profile"]`` block (target titles / locations / floor
+    / industries / exclusions) together with the experience-profile file's
+    mtime. Settings saves rebuild config["profile"], so the JSON content
+    changes; profile-file edits change the mtime. Either invalidates the
+    cache automatically — no manual flush required.
+    """
+    cfg_profile = config.get("profile") or {}
+    path = _profile_path(config)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0.0
+    blob = json.dumps(
+        {"profile": cfg_profile, "mtime": mtime, "path": path},
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def _resolve_candidate_context(config: dict) -> str:
+    """Return the prompt-ready candidate-context block for this config.
+
+    Memoized by ``_context_fingerprint(config)``. Cache invalidates when
+    the relevant config slice changes or the profile file is rewritten.
+    This is the production-path entry point; tests can still call
+    ``build_candidate_context`` directly for unit-level assertions.
+    """
+    key = _context_fingerprint(config)
+    with _CONTEXT_CACHE_LOCK:
+        cached = _CONTEXT_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+    # Load + build OUTSIDE the lock — load_profile does file I/O, and we
+    # don't want to serialize unrelated scorers behind a slow disk read.
+    profile = load_scoring_profile(config)
+    ctx = build_candidate_context(config, profile)
+
+    with _CONTEXT_CACHE_LOCK:
+        # Evict-oldest if we're at the cap. dict insertion order is the
+        # FIFO we want; pop the first key.
+        if len(_CONTEXT_CACHE) >= _CONTEXT_CACHE_MAX and key not in _CONTEXT_CACHE:
+            oldest = next(iter(_CONTEXT_CACHE))
+            _CONTEXT_CACHE.pop(oldest, None)
+        _CONTEXT_CACHE[key] = ctx
+    return ctx
+
+
+def clear_candidate_context_cache() -> None:
+    """Drop all memoized candidate contexts.
+
+    Test seam and an escape hatch for callers that need to force a rebuild
+    after mutating config in place (the normal path — settings save or
+    profile-file rewrite — invalidates automatically via fingerprint).
+    """
+    with _CONTEXT_CACHE_LOCK:
+        _CONTEXT_CACHE.clear()
+
+
 def _resolve_scoring_model(config: dict, provider: str | None) -> str | None:
     """Pull the active model ID for the scoring tier from config.
 
@@ -73,18 +158,17 @@ def score_and_persist_job(
     conn: sqlite3.Connection,
     config: dict,
     scorer_fn: Callable | None = None,
-    candidate_context: str | None = None,
 ):
     """Unified v3.0 scoring entry point.
 
     - scorer_fn: defaults to job_scorer.score_job. Injection point preserved
       for tests — pass your own reference to support mock injection.
-    - candidate_context: Optional prompt-ready candidate-context block built
-      by ``build_candidate_context``. Forwarded to scorer_fn so the scoring
-      system prompt can splice it per spec D-2.1. Defaults to None for
-      callers that have not yet been wired (Phase 2a sub-fix 3/3 wires
-      batch_scoring; other call sites remain default-safe pending the
-      relevant blueprint update).
+    - The candidate-context block is resolved INTERNALLY via
+      ``_resolve_candidate_context(config)`` — callers cannot bypass it.
+      Single-point-of-enforcement: every scoring call sees the candidate's
+      target locations / titles / floor / background, so the v3 rubric
+      anchors (e.g. "on-site in a location candidate cannot relocate to")
+      can be applied correctly. Spec D-2.1 / D-2.2.
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model.
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
@@ -104,6 +188,7 @@ def score_and_persist_job(
         scorer_fn = _default_scorer
 
     dedup_key = job.get("dedup_key")
+    candidate_context = _resolve_candidate_context(config)
     result = scorer_fn(job, conn, config, candidate_context=candidate_context)
 
     if result is None:
