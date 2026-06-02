@@ -112,9 +112,9 @@ class TestDenylistRejects:
         ],
     )
     def test_denylisted_company_drops_at_boundary(self, conn: sqlite3.Connection, name: str):
-        is_new = upsert_job(conn, _make_job(title="x", company=name))
+        result = upsert_job(conn, _make_job(title="x", company=name))
         # No insert.
-        assert is_new is False
+        assert result.kind != "inserted"
         # Verify no row landed.
         assert not _job_exists(conn, Job.normalized_dedup_key(name, "x"))
 

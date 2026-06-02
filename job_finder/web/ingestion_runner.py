@@ -665,11 +665,11 @@ def _score_and_persist(
             summary["jobs_scored"] += 1
 
         # Persist (upsert handles dedup by dedup_key)
-        is_new = upsert_job(conn, job)
-        if is_new:
+        result = upsert_job(conn, job)
+        if result.kind == "inserted":
             summary["jobs_new"] += 1
             new_job_keys.append(job.dedup_key)
-        else:
+        elif result.kind == "updated":
             summary["jobs_updated"] += 1
 
         # Company auto-population: create/update company record for every job

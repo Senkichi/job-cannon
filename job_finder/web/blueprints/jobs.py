@@ -437,7 +437,7 @@ def add_from_listing():
         )
 
     try:
-        upsert_job(conn, job)
+        upsert_result = upsert_job(conn, job)
     except Exception as e:
         logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
         return (
@@ -446,6 +446,13 @@ def add_from_listing():
                 error="Could not save the job. Check logs for details.",
             ),
             200,
+        )
+
+    if upsert_result.unresolved_reasons:
+        logger.info(
+            "add_from_listing: job %s saved with unresolved reasons: %s",
+            job.dedup_key,
+            upsert_result.unresolved_reasons,
         )
 
     dedup_key = job.dedup_key

@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
 
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.models import Job
@@ -21,6 +23,9 @@ from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
 from ._persistence import update_pipeline_status
+
+if TYPE_CHECKING:
+    from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 
 # Explicit column lists for high-traffic queries. Avoids SELECT * so that
 # schema changes don't silently alter what callers receive.
@@ -39,10 +44,68 @@ JOBS_ALL_COLUMNS = (
     "opus_score, expiry_status, eval_blocks, job_archetype"
 )
 
-# Columns read by upsert_job() for merge logic — only what the UPDATE branch needs.
+# Columns read by upsert_job() for merge logic — only what the UPDATE branch
+# needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
-    "sources, source_urls, locations_raw, description, jd_full, pipeline_status"
+    "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
+    "salary_min, salary_max"
 )
+
+
+# ---------------------------------------------------------------------------
+# UpsertResult — return type for upsert_job (Phase 47.02)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class UpsertResult:
+    """Result of an upsert_job call.
+
+    ``kind`` is one of:
+    - ``"inserted"``  — a new row was created.
+    - ``"updated"``   — an existing dedup_key matched and at least one column changed.
+    - ``"unchanged"`` — an existing dedup_key matched and no column changed.
+
+    D-19: ``__bool__`` is intentionally overridden to raise ``TypeError``.
+    Boolean truthiness would silently break callers using ``if is_new:``
+    (every ``UpsertResult`` is truthy regardless of kind, so updates would be
+    counted as inserts). Callers MUST use ``result.kind``.
+    """
+
+    kind: Literal["inserted", "updated", "unchanged"]
+    dedup_key: str
+    unresolved_reasons: list[str] = field(default_factory=list)
+
+    def __bool__(self) -> bool:  # type: ignore[override]
+        raise TypeError(
+            "UpsertResult is not bool-testable. "
+            "Use result.kind to determine the outcome: "
+            "'inserted', 'updated', or 'unchanged'."
+        )
+
+
+# ---------------------------------------------------------------------------
+# IngestionRejected — scaffolding (activates in Phase 47.04 after m078)
+# ---------------------------------------------------------------------------
+
+
+class IngestionRejected(Exception):
+    """Raised when a DB constraint trigger rejects a write.
+
+    TODO Phase 47.04: activate when m078 DB triggers land.  At that point,
+    sqlite3.IntegrityError from trigger-generated constraint violations is
+    caught in upsert_job and re-raised as IngestionRejected carrying the
+    invariant name parsed from the error message.
+    """
+
+    def __init__(self, invariant: str) -> None:
+        self.invariant = invariant
+        super().__init__(f"Ingestion rejected: invariant {invariant!r} violated")
+
+
+# ---------------------------------------------------------------------------
+# Salary normalizer
+# ---------------------------------------------------------------------------
 
 
 def _normalize_salary(
@@ -105,82 +168,138 @@ def merge_description(existing: str | None, new: str | None) -> str | None:
 
 def upsert_job(
     conn: sqlite3.Connection,
-    job: Job,
+    parsed: "ParsedJob | UnresolvedParsedJob | Job",
     *,
-    locations_structured: list[JobLocation] | None = None,
+    locations_structured: list[JobLocation] | None = None,  # SHIM — removed in Phase 48.07
     company_id: int | None = None,
-) -> bool:
-    """Insert or update a job. Returns True if new, False if existing.
+) -> UpsertResult:
+    """Insert or update a job. Returns UpsertResult with kind in {"inserted","updated","unchanged"}.
+
+    Accepts ParsedJob, UnresolvedParsedJob, or Job (via shim).
+
+    The Job shim is removed in Phase 48.07 — at that point callers must
+    pass ParsedJob/UnresolvedParsedJob directly.  The ``locations_structured``
+    kwarg exists only for the shim period; it is forwarded to
+    ``ParsedJob.from_job`` via ``source_meta`` and has no meaning for
+    direct ParsedJob callers.
 
     Merges sources, locations (Remote/Hybrid first), and descriptions
     (keep longer; append divergent content with separator). Keeps first_seen
     from the original row. Initializes locations_raw as JSON array.
 
-    When ``locations_structured`` is provided, the scanner emitted Layer-1
-    canonical data — used verbatim. When ``None``, parse_locations
-    (Layer 2) derives it from ``job.location``. Both branches write the
-    three m066 columns: ``locations_structured`` (JSON list[JobLocation]),
-    ``workplace_type`` and ``primary_country_code`` (denormalized from
-    ``locations_structured[0]`` per SPEC §Schema).
+    Returns:
+        UpsertResult with:
+          - kind="inserted"  when a new row was created.
+          - kind="updated"   when existing dedup_key matched and ≥1 column changed.
+          - kind="unchanged" when existing dedup_key matched but no column changed.
 
-    When ``company_id`` is provided, the caller already resolved the
-    company FK (ATS scanner / careers crawler — both iterate companies
-    rows directly). It's written at INSERT/UPDATE so the row is linked
-    immediately rather than waiting for the daily linkage backfill.
-    Returns False without writing if the normalized company name is in
-    COMPANY_DENYLIST — boundary defense against aggregator names like
-    "Jobgether" / "Mercor" / "RemoteHunter" that have no real ATS
-    presence but appear in source feeds (linkedin, dataforseo, etc.).
+    ``UpsertResult.__bool__`` raises TypeError — callers must use result.kind.
+
+    Phase 47.04 TODO: catch sqlite3.IntegrityError and re-raise as
+    IngestionRejected once m078 triggers are live.
     """
-    from job_finder.config import COMPANY_DENYLIST
-    from job_finder.normalizers import normalize_company as _norm_company
+    from job_finder.parsed_job import (
+        DenylistedCompanyError as _DenylistedCompanyError,
+        ParsedJob as _ParsedJob,
+    )
 
-    if _norm_company(job.company).lower() in COMPANY_DENYLIST:
-        return False
+    # ── SHIM — removed in Phase 48.07 ───────────────────────────────────────
+    # Accept legacy Job objects by converting them to ParsedJob internally.
+    # Score / score_breakdown are not parser-owned fields so they are
+    # extracted here before the conversion and applied to the SQL writes.
+    _score: float = 0.0
+    _score_breakdown: dict = {}
+    if isinstance(parsed, Job):
+        _score = parsed.score
+        _score_breakdown = parsed.score_breakdown
 
-    if locations_structured is None:
+        # Denylist guard — preserve the exact early-return boundary that
+        # existed before Phase 47.02.
+        from job_finder.config import COMPANY_DENYLIST
+        from job_finder.normalizers import normalize_company as _norm_company
+
+        if _norm_company(parsed.company).lower() in COMPANY_DENYLIST:
+            return UpsertResult(
+                kind="unchanged",
+                dedup_key=parsed.dedup_key,
+                unresolved_reasons=[],
+            )
+
+        _source_meta: dict | None = (
+            {"locations_structured": locations_structured}
+            if locations_structured is not None
+            else None
+        )
+        try:
+            parsed = _ParsedJob.from_job(parsed, source_meta=_source_meta)
+        except _DenylistedCompanyError:
+            # from_job re-checks denylist; catch the redundant raise.
+            return UpsertResult(
+                kind="unchanged",
+                dedup_key=parsed.dedup_key,  # type: ignore[union-attr]
+                unresolved_reasons=[],
+            )
+        locations_structured = None  # already embedded in parsed.locations_structured
+    # ── End shim ─────────────────────────────────────────────────────────────
+
+    # Resolve structured locations:
+    # - Direct ParsedJob path: parsed.locations_structured was set by the caller.
+    # - Shim path (Job → ParsedJob via from_job): locations_structured was forwarded
+    #   through source_meta, so parsed.locations_structured is populated.
+    # If still empty, fall back to Layer 2 (parse_locations).
+    _locs_structured: list[JobLocation] = parsed.locations_structured
+    if not _locs_structured:
         from job_finder.web.location_parser import parse_locations
 
-        # SPEC Q3: pass job.description as jd_full so the parser can use
-        # ``#LI-Remote`` / ``#LI-Hybrid`` / ``#LI-Onsite`` body hashtags as
-        # a workplace_type fallback when the location string is silent.
-        # job.description IS the pre-enrichment jd_full for ATS-API and
-        # email-parser sources; the m067 backfill will re-parse with the
-        # post-enrichment jd_full where available.
-        locations_structured = parse_locations(
-            job.location or None,
-            jd_full=job.description,
+        # SPEC Q3: pass description as jd_full proxy so the parser can use
+        # #LI-Remote / #LI-Hybrid / #LI-Onsite body hashtags as a
+        # workplace_type fallback when the location string is silent.
+        _locs_structured = parse_locations(
+            parsed.location or None,
+            jd_full=parsed.description,
         )
-    locations_json = _locations_to_json(locations_structured) if locations_structured else None
-    # When location parsing fails entirely, every row should still carry the
-    # 'UNSPECIFIED' sentinel rather than NULL so consumers can rely on the
-    # column being populated for filter logic and rollups. UPDATE-branch
-    # coalesces below so 'UNSPECIFIED' from a re-ingestion never downgrades
-    # a real value like 'REMOTE' that an earlier scan extracted.
+
+    locations_json = _locations_to_json(_locs_structured) if _locs_structured else None
     workplace_type_col = (
-        locations_structured[0].workplace_type if locations_structured else "UNSPECIFIED"
+        _locs_structured[0].workplace_type if _locs_structured else "UNSPECIFIED"
     )
-    primary_country_code = locations_structured[0].country_code if locations_structured else None
+    primary_country_code = _locs_structured[0].country_code if _locs_structured else None
+
+    # Incoming locations_raw: use ParsedJob field if populated, otherwise
+    # derive from the location string (shim path or callers that omit it).
+    _incoming_locs_raw: list[str] = list(parsed.locations_raw) if parsed.locations_raw else []
+    if not _incoming_locs_raw:
+        from job_finder.web.location_normalizer import split_multi_locations
+
+        _incoming_locs_raw = split_multi_locations(parsed.location or "")
+
     existing = conn.execute(
         f"SELECT {_UPSERT_MERGE_COLUMNS} FROM jobs WHERE dedup_key = ?",
-        (job.dedup_key,),
+        (parsed.dedup_key,),
     ).fetchone()
 
     now = utc_now_iso()
-    pd_str = job.posted_date.isoformat() if job.posted_date else None
+    pd_str = parsed.posted_date.isoformat() if parsed.posted_date else None
 
     if existing:
-        # Merge sources
+        # ── UPDATE branch ────────────────────────────────────────────────────
+        # Track whether any meaningful column changed so we can return the
+        # correct UpsertResult.kind ("updated" vs "unchanged").
+        changed = False
+
+        # Merge sources (ParsedJob carries a list; shim preserves it).
         sources = safe_json_load(existing["sources"], default=[])
         urls = safe_json_load(existing["source_urls"], default=[])
-        if job.source not in sources:
-            sources.append(job.source)
-        if job.source_url and job.source_url not in urls:
-            urls.append(job.source_url)
+        for src in parsed.sources:
+            if src not in sources:
+                sources.append(src)
+                changed = True
+        for url in parsed.source_urls:
+            if url and url not in urls:
+                urls.append(url)
+                changed = True
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
-        from job_finder.web.location_normalizer import split_multi_locations
-
         existing_locs_raw = existing["locations_raw"]
         try:
             locs_list = json.loads(existing_locs_raw) if existing_locs_raw else []
@@ -189,39 +308,42 @@ def upsert_job(
         if not isinstance(locs_list, list):
             locs_list = [locs_list] if locs_list else []
 
-        # Case-insensitive dedup key to avoid case-variant pollution
-        # ("Remote" vs "remote" vs "REMOTE" as separate entries).
         seen_keys = {loc.lower() for loc in locs_list if loc}
-
-        # Split multi-location parser output on unambiguous separators
-        # (`|`, `;`, ` / `, ` & `, ` or `). Each split entry is normalized.
-        # Parsers that emit a single "City, State" value pass through as
-        # a single entry — plain commas are not split (would mangle pairs).
-        for normalized in split_multi_locations(job.location or ""):
+        for normalized in _incoming_locs_raw:
             key = normalized.lower()
             if key in seen_keys:
                 continue
             seen_keys.add(key)
+            changed = True
             if re.search(r"\b(remote|hybrid)\b", normalized, re.IGNORECASE):
                 locs_list.insert(0, normalized)
             else:
                 locs_list.append(normalized)
 
-        # Build merged location string: ordered, deduplicated
         merged_location = ", ".join(dict.fromkeys(locs_list))
 
-        # Smart description merge: keep longer; append different content
-        merged_description = merge_description(existing["description"], job.description)
+        # Smart description merge
+        merged_description = merge_description(existing["description"], parsed.description)
+        if merged_description != existing["description"]:
+            changed = True
 
-        # Eager promotion: if jd_full is NULL and merged description is
-        # substantial, promote it so enrichment has a baseline to beat.
+        # Eager jd_full promotion
         jd_full_clause = ""
         jd_full_value: tuple = ()
         if not existing["jd_full"] and merged_description and len(merged_description) > 200:
             jd_full_clause = ", jd_full = ?"
             jd_full_value = (merged_description[:8000],)
+            changed = True
 
-        norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
+        # Salary change detection (COALESCE writes new value when non-NULL)
+        norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
+        existing_smin = existing["salary_min"]
+        existing_smax = existing["salary_max"]
+        if norm_salary_min is not None and norm_salary_min != existing_smin:
+            changed = True
+        if norm_salary_max is not None and norm_salary_max != existing_smax:
+            changed = True
+
         conn.execute(
             f"""UPDATE jobs SET
                 sources = ?, source_urls = ?, last_seen = ?,
@@ -241,8 +363,8 @@ def upsert_job(
                 json.dumps(sources),
                 json.dumps(urls),
                 now,
-                job.score,
-                json.dumps(job.score_breakdown),
+                _score,
+                json.dumps(_score_breakdown),
                 norm_salary_min,
                 norm_salary_max,
                 merged_description,
@@ -254,54 +376,46 @@ def upsert_job(
                 company_id,
                 pd_str,
                 *jd_full_value,
-                job.dedup_key,
+                parsed.dedup_key,
             ),
         )
         conn.commit()
+
         # Auto-reopen: if an archived job re-appears in ingestion, treat
-        # re-appearance as proof the job is live again (per CONTEXT.md decision)
+        # re-appearance as proof the job is live again.
         if existing["pipeline_status"] == "archived":
             update_pipeline_status(
                 conn,
-                job.dedup_key,
+                parsed.dedup_key,
                 "discovered",
                 source="ingestion",
                 evidence="re_appeared",
             )
-        return False
-    else:
-        # Use the email date as first_seen when available (Gmail-sourced jobs).
-        # SerpAPI jobs have no email date, so they use the current ingestion time.
-        # pd_str was computed above (shared with the UPDATE branch); reuse it here.
-        first_seen = pd_str or now
-        # Initialize locations_raw as a JSON array. Split on unambiguous
-        # multi-location separators and drop placeholder values
-        # ("Unknown", "TBD", ...) at the ingestion boundary so they never
-        # pollute the filter dropdown.
-        from job_finder.web.location_normalizer import split_multi_locations
 
-        initial_locs = split_multi_locations(job.location or "")
-        # location column mirrors the merged form for backward compat with
-        # the LIKE-against-substring filter in get_filtered_jobs.
-        initial_location_col = ", ".join(initial_locs)
-        # Eager promotion: if description is substantial, set jd_full immediately
-        # so enrichment always has a quality baseline to beat.
+        # TODO Phase 47.04: catch sqlite3.IntegrityError here (after m078 triggers land)
+        # and re-raise as IngestionRejected(invariant=_parse_invariant(e))
+
+        return UpsertResult(
+            kind="updated" if changed else "unchanged",
+            dedup_key=parsed.dedup_key,
+            unresolved_reasons=list(parsed.unresolved_reasons),
+        )
+
+    else:
+        # ── INSERT branch ────────────────────────────────────────────────────
+        # Use the email/post date as first_seen when available.
+        first_seen = pd_str or now
+
+        initial_location_col = ", ".join(_incoming_locs_raw)
         initial_jd_full = None
-        if job.description and len(job.description) > 200:
-            initial_jd_full = job.description[:8000]
-        # Initial scoring_provider tag. JobScorer (heuristic, fuzzy-match
-        # title + seniority + location + salary range) always runs at the
-        # ingestion boundary and populates job.score before this INSERT,
-        # so tag as 'heuristic' to be explicit about what produced the
-        # `score` column. persist_job_assessment runs LATER on the v3.0
-        # LLM path and overwrites scoring_provider + scoring_model via
-        # COALESCE when the LLM actually scores the row. A row that
-        # survives with scoring_provider='heuristic' is a row the LLM
-        # never reached (sub-threshold, filter dismissed, etc.). The
-        # discriminator for "LLM ran" remains scoring_model IS NOT NULL.
-        # NB: explicit value also overrides migration 20's column DEFAULT
-        # of 'anthropic', which was a legacy artifact pre-cascade.
-        norm_salary_min, norm_salary_max = _normalize_salary(job.salary_min, job.salary_max)
+        if parsed.description and len(parsed.description) > 200:
+            initial_jd_full = parsed.description[:8000]
+
+        # Note: parsed.jd_full is not yet written to the DB (column lands in
+        # Phase 47.04 / m078). The eager promotion above covers the common case.
+        # TODO Phase 47.04: write parsed.jd_full to jd_full column directly.
+
+        norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, sources, source_urls,
@@ -312,21 +426,21 @@ def upsert_job(
                  company_id, posted_date)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                job.dedup_key,
-                job.title,
-                job.company,
+                parsed.dedup_key,
+                parsed.title,
+                parsed.company,
                 initial_location_col,
-                json.dumps([job.source]),
-                json.dumps([job.source_url]),
-                job.source_id,
+                json.dumps(list(parsed.sources)),
+                json.dumps(list(parsed.source_urls)),
+                parsed.source_id,
                 norm_salary_min,
                 norm_salary_max,
-                job.description,
+                parsed.description,
                 first_seen,
                 now,
-                job.score,
-                json.dumps(job.score_breakdown),
-                json.dumps(initial_locs),
+                _score,
+                json.dumps(_score_breakdown),
+                json.dumps(_incoming_locs_raw),
                 initial_jd_full,
                 "heuristic",
                 locations_json,
@@ -337,7 +451,15 @@ def upsert_job(
             ),
         )
         conn.commit()
-        return True
+
+        # TODO Phase 47.04: catch sqlite3.IntegrityError here (after m078 triggers land)
+        # and re-raise as IngestionRejected(invariant=_parse_invariant(e))
+
+        return UpsertResult(
+            kind="inserted",
+            dedup_key=parsed.dedup_key,
+            unresolved_reasons=list(parsed.unresolved_reasons),
+        )
 
 
 def get_job(conn: sqlite3.Connection, dedup_key: str) -> dict | None:

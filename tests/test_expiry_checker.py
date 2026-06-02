@@ -684,8 +684,8 @@ class TestAutoReopen:
         conn.commit()
 
         # Re-ingest the same job (simulates re-appearance in Gmail/SerpAPI)
-        is_new = upsert_job(conn, job)
-        assert is_new is False  # existing job, not new
+        result = upsert_job(conn, job)
+        assert result.kind != "inserted"  # existing job, not new
 
         row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",

@@ -83,9 +83,9 @@ def test_layer1_provided_list_written_verbatim_and_denormalized(conn: sqlite3.Co
         )
     ]
     job = _make_job(location="San Francisco, CA")
-    is_new = upsert_job(conn, job, locations_structured=structured)
+    result = upsert_job(conn, job, locations_structured=structured)
 
-    assert is_new is True
+    assert result.kind == "inserted"
     row = _select_loc_cols(conn, job.dedup_key)
     decoded = json.loads(row["locations_structured"])
     assert len(decoded) == 1
@@ -224,8 +224,8 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
             unresolved=False,
         )
     ]
-    is_new = upsert_job(conn, job, locations_structured=second)
-    assert is_new is False  # update branch
+    result = upsert_job(conn, job, locations_structured=second)
+    assert result.kind != "inserted"  # update branch
     row_after = _select_loc_cols(conn, job.dedup_key)
     assert row_after["primary_country_code"] == "US"
     assert row_after["workplace_type"] == "REMOTE"

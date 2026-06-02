@@ -48,6 +48,8 @@ from ._dashboard_queries import get_recent_runs as get_recent_runs
 
 # Job CRUD + the JOBS_ALL_COLUMNS projection.
 from ._jobs import JOBS_ALL_COLUMNS as JOBS_ALL_COLUMNS
+from ._jobs import IngestionRejected as IngestionRejected
+from ._jobs import UpsertResult as UpsertResult
 from ._jobs import get_job as get_job
 from ._jobs import load_job_context as load_job_context
 from ._jobs import merge_description as merge_description

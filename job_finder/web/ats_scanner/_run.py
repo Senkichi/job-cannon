@@ -508,7 +508,7 @@ def _upsert_one_ats_api_job(
         )
         from job_finder.db import upsert_job
 
-        is_new = upsert_job(
+        result = upsert_job(
             scan_conn,
             job,
             locations_structured=job_dict.get("locations_structured"),
@@ -533,7 +533,7 @@ def _upsert_one_ats_api_job(
                     e,
                 )
 
-        if is_new:
+        if result.kind == "inserted":
             summary["jobs_new"] += 1
             all_new_job_keys.append(job.dedup_key)
 

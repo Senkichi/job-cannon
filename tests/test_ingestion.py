@@ -224,11 +224,13 @@ class TestJobErrorIsolation:
         call_count = 0
 
         def mock_upsert(conn, job):
+            from job_finder.db._jobs import UpsertResult
+
             nonlocal call_count
             call_count += 1
             if call_count == 2:  # second job fails
                 raise sqlite3.OperationalError("disk full")
-            return True
+            return UpsertResult(kind="inserted", dedup_key=job.dedup_key)
 
         with (
             patch("job_finder.web.ingestion_runner.GmailSource") as MockGmail,
@@ -428,10 +430,10 @@ class TestFirstSeenEmailDate:
 
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
-            is_new = upsert_job(conn, job)
+            result = upsert_job(conn, job)
             conn.close()
 
-            assert is_new is True
+            assert result.kind == "inserted"
 
             conn2 = sqlite3.connect(path)
             row = conn2.execute(
@@ -1769,8 +1771,8 @@ class TestUpsertScoringProviderNotLeaked:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         try:
-            is_new = upsert_job(conn, job)
-            assert is_new is True
+            result = upsert_job(conn, job)
+            assert result.kind == "inserted"
             row = conn.execute(
                 "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
                 (job.dedup_key,),

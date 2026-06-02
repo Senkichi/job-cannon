@@ -55,8 +55,8 @@ def _upsert_and_log(
                     salary_max=None,
                     description=scraped_job.get("description", ""),
                 )
-                is_new = upsert_job(upsert_conn, job, company_id=company_id)
-                if is_new:
+                result = upsert_job(upsert_conn, job, company_id=company_id)
+                if result.kind == "inserted":
                     summary["jobs_new"] += 1
                     company_jobs_new += 1
                     all_new_job_keys.append(job.dedup_key)
