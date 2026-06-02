@@ -503,7 +503,11 @@ class TestCostViewExcludesFreeProviders:
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        # Real current instant, NOT noon on the UTC date: get_cost_stats' "today"
+        # window is the LOCAL day expressed in UTC, so a UTC-noon timestamp falls
+        # outside it whenever local date != UTC date (evenings in negative-offset
+        # TZs). datetime.now(UTC) is always inside today's (and this month's) window.
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         _insert_rows_with_provider(
             conn,
             [
@@ -616,7 +620,9 @@ class TestGetUsageStats:
         from job_finder.web.claude_client import get_usage_stats
 
         _, conn = migrated_db
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")
+        # Real current instant (see test_get_cost_stats_excludes_free_providers):
+        # the "today" window is the local day in UTC, so noon-on-UTC-date is flaky.
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         _insert_rows_with_provider(
             conn,
             [

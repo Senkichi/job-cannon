@@ -176,7 +176,7 @@ class GoogleCSESource:
             try:
                 row = conn.execute(
                     """SELECT COUNT(*) FROM scoring_costs
-                       WHERE provider=? AND DATE(timestamp)=DATE('now', 'localtime')""",
+                       WHERE provider=? AND DATE(timestamp, 'localtime')=DATE('now', 'localtime')""",
                     (_PROVIDER_NAME,),
                 ).fetchone()
                 return int(row[0]) if row and row[0] is not None else 0
