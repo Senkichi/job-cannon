@@ -745,6 +745,30 @@ class TestTryStaticExtract:
 
 
 class TestCrawlCareersBatch:
+    @pytest.fixture(autouse=True)
+    def _no_op_http_tiers(self):
+        """Neutralize the two crawl tiers that hit the real network when unmocked.
+
+        crawl_careers_batch escalates sitemap -> static -> url_param -> playwright
+        -> ai_nav. Two pre-playwright tiers issue real HTTP to the (fake) careers
+        URL, so tests that mocked only static still paid a DNS/connect timeout:
+          - _try_sitemap_extract (Tier 0.5): the dominant 8-31s.
+          - probe_url_params (Tier 2, imported from careers_page_interactions):
+            the residual 3-6s on tests that fall through static with non-empty
+            target_titles (search_keywords).
+        The playwright/ai_nav tiers run on the per-test mocked sync_playwright
+        browser, so they do no real I/O and are left alone. Tests that assert on
+        either tier here patch it themselves (their @patch overrides this).
+        """
+        with (
+            patch("job_finder.web.careers_crawler._try_sitemap_extract", return_value=[]),
+            patch(
+                "job_finder.web.careers_page_interactions.probe_url_params",
+                return_value=[],
+            ),
+        ):
+            yield
+
     def test_testing_guard(self, tmp_db_path):
         result = crawl_careers_batch(tmp_db_path, {"TESTING": True})
         assert result["companies_crawled"] == 0
