@@ -510,25 +510,29 @@ def block_claude_cli_subprocess():
 
     job_finder.web.claude_enricher.enrich_companies_via_claude() shells out to
     `claude -p` (subprocess.run, timeout=120) for "Tier 3" homepage discovery.
-    It is reached from homepage_discoverer._try_claude_enricher(), which is
-    called UNCONDITIONALLY by discover_homepage() and (transitively) by
-    run_homepage_discovery() — the ATS-scan pre-step.
+    Its ONLY production caller is homepage_discoverer._try_claude_enricher()
+    (lazily imported at homepage_discoverer.py:378), which discover_homepage()
+    and run_homepage_discovery() call UNCONDITIONALLY. Without this fixture,
+    tests that reach Tier 3 invoke the real CLI: 12-63s each, and pass/fail
+    depends on what the live CLI returns (a documented flake — see
+    test_homepage_discoverer.py:158). The _run_oneshot mock does NOT cover this
+    path (separate subprocess, not the claude_client._run_oneshot envelope).
 
-    The conftest _run_oneshot mock does NOT cover this path (it's a separate
-    subprocess, not the claude_client._run_oneshot envelope). Without this
-    fixture, tests that reach Tier 3 invoke the real CLI: 12-63s each, and
-    their pass/fail depends on what the live CLI returns (a documented flake —
-    see test_homepage_discoverer.py:158).
-
-    We raise FileNotFoundError to mirror the CI/no-CLI environment: the
-    function's own `except FileNotFoundError` handler then returns [] cleanly,
-    exercising real error-handling rather than distorting it. No test validates
-    the CLI's real output, so this is safe suite-wide. A future test of
-    claude_enricher internals can override this with its own patch.
+    We block at the FUNCTION boundary (return []) — NOT by patching
+    claude_enricher.subprocess.run. claude_enricher does ``import subprocess``,
+    so claude_enricher.subprocess IS the shared subprocess module singleton;
+    patching claude_enricher.subprocess.run would replace subprocess.run
+    GLOBALLY and break every test that legitimately spawns a process (the CLI
+    smoke tests, scheduler pidfile self-release, etc.). [] is exactly what the
+    real path returns when the CLI is absent (its own ``except FileNotFoundError``
+    handler returns []), so callers see identical behavior. No test validates the
+    enricher's real output, so this is safe suite-wide. Patched at the source
+    module so the lazy import in _try_claude_enricher is covered; a future test
+    of claude_enricher internals can override it with its own patch.
     """
     with patch(
-        "job_finder.web.claude_enricher.subprocess.run",
-        side_effect=FileNotFoundError("claude CLI blocked in tests"),
+        "job_finder.web.claude_enricher.enrich_companies_via_claude",
+        return_value=[],
     ) as mock:
         yield mock
 
