@@ -297,12 +297,17 @@ class TestDiscoverHomepage:
 
         assert result is None
 
-    def test_no_api_key_skips_tier3(self):
-        """api_key=None — Tier 3 not called, SerpAPI requests.get not called."""
+    def test_no_api_key_skips_serpapi_tier4(self):
+        """api_key=None -> Tier 4 (SerpAPI) is skipped; no SerpAPI GET is issued.
+
+        Tier 3 (the $0 claude CLI) is NOT gated by api_key and runs regardless;
+        it is neutralized suite-wide by the block_claude_cli_subprocess autouse
+        fixture (conftest), so this test asserts only the api_key-gated behavior:
+        the SerpAPI Tier 4 must not fire when there is no key.
+        """
         from job_finder.web.homepage_discoverer import discover_homepage
 
         head_resp = _mock_head_response("https://acme-corp.com", 404)
-        # Slug heuristic now also does GET (fallback from HEAD). Return 404.
         domain_get_resp = _mock_response("https://acme-corp.com", "", status_code=404)
 
         with (
@@ -314,7 +319,7 @@ class TestDiscoverHomepage:
             result = discover_homepage("Acme Corp", None, "acme-corp", [], api_key=None)
 
         assert result is None
-        # GET is called for domain probe, but NOT for SerpAPI
+        # No SerpAPI request was issued (Tier 4 gated off by missing api_key).
         for c in mock_get.call_args_list:
             assert "serpapi" not in c.args[0].lower()
 

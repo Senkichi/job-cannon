@@ -480,6 +480,35 @@ def mock_liveness_check():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def block_claude_cli_subprocess():
+    """Prevent any test from spawning the real `claude -p` CLI subprocess.
+
+    job_finder.web.claude_enricher.enrich_companies_via_claude() shells out to
+    `claude -p` (subprocess.run, timeout=120) for "Tier 3" homepage discovery.
+    It is reached from homepage_discoverer._try_claude_enricher(), which is
+    called UNCONDITIONALLY by discover_homepage() and (transitively) by
+    run_homepage_discovery() — the ATS-scan pre-step.
+
+    The conftest _run_oneshot mock does NOT cover this path (it's a separate
+    subprocess, not the claude_client._run_oneshot envelope). Without this
+    fixture, tests that reach Tier 3 invoke the real CLI: 12-63s each, and
+    their pass/fail depends on what the live CLI returns (a documented flake —
+    see test_homepage_discoverer.py:158).
+
+    We raise FileNotFoundError to mirror the CI/no-CLI environment: the
+    function's own `except FileNotFoundError` handler then returns [] cleanly,
+    exercising real error-handling rather than distorting it. No test validates
+    the CLI's real output, so this is safe suite-wide. A future test of
+    claude_enricher internals can override this with its own patch.
+    """
+    with patch(
+        "job_finder.web.claude_enricher.subprocess.run",
+        side_effect=FileNotFoundError("claude CLI blocked in tests"),
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture
 def cascade_config_low():
     """Config with Ollama primary + Anthropic CLI fallback for the low tier.

@@ -27,6 +27,47 @@ from job_finder.web.db_migrate import run_migrations
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_op_homepage_discovery_in_ats():
+    """Neutralize the run_homepage_discovery pre-step for all ats_scan tests.
+
+    run_ats_scan() calls run_homepage_discovery() before scanning. That pre-step
+    does real HTTP (homepage_discoverer.requests.*) and, absent the conftest
+    block_claude_cli_subprocess fixture, the claude CLI. Most ats tests don't
+    care about discovery and forgot to patch it (inconsistent: see the tests
+    that DO patch it around line 1426 / 3191). This makes the pre-step a no-op
+    by default. The handful of tests that specifically assert on the pre-step
+    (TestRunAtsScanHomepageDiscovery* around line 3186) patch it themselves
+    inside their own ``with`` block, which takes precedence over this autouse
+    default.
+    """
+    with patch("job_finder.web.ats_scanner._run.run_homepage_discovery") as m:
+        m.return_value = {"companies_checked": 0, "homepages_found": 0, "errors": []}
+        yield m
+
+
+@pytest.fixture(autouse=True)
+def _no_op_enrich_job_in_ats():
+    """Neutralize the Phase-D pre-score enrich_job() call for all ats_scan tests.
+
+    run_ats_scan()'s Phase D (_score_new_ats_jobs) calls
+    data_enricher.enrich_job() on every newly-discovered job that lacks
+    jd_full/salary/location BEFORE scoring it. enrich_job runs the real
+    cost-ordered network cascade (direct fetch, DDG, SerpAPI) — the same
+    live-I/O seam that makes the data_enricher tests slow. ATS tests that
+    create shell jobs (HTML-fallback / scoring classes) hit this and paid
+    20-50s each, even when they patched score_and_persist_job.
+
+    No ats test asserts on enrich_job's real output; the one test that cares
+    about its no-op effect (TestAtsScanSkipsJdFullForShort... at line ~3180)
+    patches it to {} itself, which overrides this autouse default. _score_new_ats_jobs
+    does a lazy ``from job_finder.web.data_enricher import enrich_job`` inside the
+    function, so we patch at the source module to catch it.
+    """
+    with patch("job_finder.web.data_enricher.enrich_job", return_value={}) as m:
+        yield m
+
+
 @pytest.fixture
 def migrated_db_path():
     """Create a fully migrated temp DB, yield path only, clean up after.
