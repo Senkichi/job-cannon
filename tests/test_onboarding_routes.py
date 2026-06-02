@@ -7,8 +7,35 @@ IMAP failure re-render (D-08), and wizard_data write semantics (D-13).
 
 import io
 import sqlite3
+from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_live_provider_detection():
+    """Stop onboarding routes from spawning real CLI liveness probes.
+
+    GET /onboarding/provider_select (and the welcome system-check) call
+    providers.detection.detect_available_providers(), which runs
+    `claude -p ping` / `gemini -p ping` / `ollama list` subprocesses with a 10s
+    timeout each — ~15s on a machine where those CLIs are installed, and
+    environment-dependent. These route tests only need the page + its marker;
+    the detection logic itself is covered by tests/test_provider_detection.py.
+    Patch the names bound in each onboarding module that imports it; return [].
+    """
+    with (
+        patch(
+            "job_finder.web.onboarding.blueprint.detect_available_providers",
+            return_value=[],
+        ),
+        patch(
+            "job_finder.web.providers.detection.detect_available_providers",
+            return_value=[],
+        ),
+    ):
+        yield
+
 
 # The 8 routes + their marker strings (success criterion 2)
 _ROUTE_TO_MARKER = [

@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Tests: SmartRecruiters URL detection
 # ---------------------------------------------------------------------------
@@ -124,6 +126,21 @@ class TestScanSmartRecruiters:
     behavior stays focused and test run hermetic. A separate class
     (TestFetchSmartRecruitersDescription) covers the detail fetch itself.
     """
+
+    @pytest.fixture(autouse=True)
+    def _no_detail_fetch_sleep(self):
+        """Zero the per-posting pacing sleep in _posting_to_job.
+
+        _posting_to_job does time.sleep(_DETAIL_FETCH_SLEEP_S) after each posting;
+        with 150 postings (test_scan_paginates) that was ~15s of pure wall-clock.
+        Patch the constant to 0 (not time.sleep) to avoid touching the shared time
+        module. No test asserts on the pacing.
+        """
+        with patch(
+            "job_finder.web.ats_platforms._platforms_smartrecruiters._DETAIL_FETCH_SLEEP_S",
+            0,
+        ):
+            yield
 
     def _make_posting(self, title, city="Austin", region="TX", country="US", posting_id="12345"):
         return {
