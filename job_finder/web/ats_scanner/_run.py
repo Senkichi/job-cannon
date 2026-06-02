@@ -500,9 +500,11 @@ def _upsert_one_ats_api_job(
             location=job_dict.get("location") or "",
             source=job_dict["company_source"],  # 'Lever', 'Greenhouse', 'Ashby'
             source_url=job_dict.get("source_url") or "",
+            source_id=job_dict.get("source_id") or "",
             salary_min=salary_min,
             salary_max=salary_max,
             description=job_dict.get("description") or "",
+            posted_date=job_dict.get("posted_date"),
         )
         from job_finder.db import upsert_job
 
