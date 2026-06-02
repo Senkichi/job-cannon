@@ -178,3 +178,82 @@ Each fix = one atomic commit. Re-run probe in `PROBE_FROM_DB=1` after each to is
 - Manual users of `parse_locations` outside upsert_job (round-12 carry).
 - Lever freeform strings — keep `unresolved=True` forever? (round-12 carry).
 - Ollama prompt-length / JSON-parse correlation (round-15 carry).
+
+---
+
+# FOLLOWUPS — 2026-06-01 test-suite remediation (out-of-scope finds)
+
+Discovered during the test-suite-remediation work (live-I/O leak fixes). NOT
+fixed there — out of that plan's scope; one is a test-semantics change my rules
+say to surface, not silently make.
+
+## [TEST BUG — time-of-day flaky] test_costs.py "today" tests fail in the evening (negative-offset TZ)
+
+**Status:** Pre-existing. Confirmed: fails on the pristine tree too (stashed all
+remediation changes → still fails). NOT caused by the m1 migrated_db template.
+
+**Failing now (2026-06-01 evening, Pacific):**
+- `tests/test_costs.py::TestGetUsageStats::test_sums_tokens_across_providers`
+  (`stats["today"]["calls"] == 3` → got 0)
+- `tests/test_costs.py::TestCostViewExcludesFreeProviders::test_get_cost_stats_excludes_free_providers`
+  (`stats["today"] - 0.50` → got 0.0), plus a Windows `PermissionError` teardown
+  on that test (`tmp_db_path` removal — a connection/app handle not closed;
+  likely a separate Windows-only fixture-teardown nit).
+
+**Root cause (verified by repro):** production `get_usage_stats`/`get_cost_stats`
+define "today" via `local_day_utc_window()` — the **local** calendar day in UTC
+(correct per the locked "Store UTC, render local" decision). The tests build the
+row timestamp from `datetime.now(UTC).strftime("%Y-%m-%dT12:00:00Z")` — the
+**UTC** date at noon UTC. When local date ≠ UTC date (any evening in a
+negative-offset TZ; right now UTC is already 2026-06-02 while local is
+2026-06-01), the row (`2026-06-02T12:00:00Z`) lands in *tomorrow's* local-day
+window (`today_end = 2026-06-02T07:00`) → "today" aggregates to 0. Green in the
+morning, red in the evening — same "passes by accident" class as the remediation,
+but the seam is date/TZ, not live I/O.
+
+**Proposed fix (needs sign-off — a test change):** build the cost rows from the
+window production actually queries (`local_day_utc_window()[0]` + a few hours, or
+local-noon→UTC), not from the UTC date. Apply to every "today"/current-month
+assertion in `test_costs.py` (check `test_scoped_to_current_month` too — today is
+also a month boundary, so it may share the latent issue). Don't hardcode a UTC
+noon string. Production code is correct; the test is wrong.
+
+## [LINT — pre-existing] 2 ruff errors + 1 format diff in careers_page files
+
+**Status:** Pre-existing (in files this remediation never touched; from the
+HEAD commit "fix(careers_page): extract location and prevent Blue State title
+bleed"). The plan assumed "ruff-clean today" — it is not. All files this
+remediation touched ARE ruff-clean.
+
+- `job_finder/web/careers_scraper.py:631` — `RUF100` unused `# noqa: B023`
+  directive (B023 no longer triggers there; the noqa can be removed).
+- `tests/test_careers_page_extraction.py:15` — `I001` unsorted import block +
+  would be reformatted by `ruff format`.
+
+All three are `ruff --fix`/`ruff format` autofixes. NOT fixed here: careers_page
+is the user's active work area (parallel commits) and editing those files from
+this worktree risks a merge collision; the fixes are unrelated to the test-suite
+remediation. Recommend the user run, on the careers_page branch:
+`uvx ruff check --fix job_finder/web/careers_scraper.py tests/test_careers_page_extraction.py`
+`uvx ruff format tests/test_careers_page_extraction.py`
+
+## [SLOW TESTS — same I/O-leak class, out of this plan's scope] other 10-30s unit tests
+
+The final full-suite slowest-20 no longer contains ANY homepage_discoverer /
+ats_scanner / data_enricher / agentic_enricher entry (the plan's targets — all
+fixed). But it surfaced other slow tests in files the plan never enumerated,
+likely the same "live I/O not blocked" root cause:
+
+- `test_careers_crawler.py::TestCrawlCareersBatch::*` — 4-31s each (the
+  `test_falls_back_to_playwright_active` 31s one almost certainly drives a real
+  Playwright/network fallback).
+- `test_smartrecruiters_scanner.py::...::test_scan_paginates` — ~15s (likely real
+  paginated HTTP).
+- `test_onboarding_routes.py::test_each_step_renders[...provider_select...]` — ~15s.
+- `test_model_provider.py::test_cascade_429_marks_exhausted` — ~6s.
+- `test_speculative_probe_consistency.py::*` — ~3.3s each.
+
+NOT fixed here — out of the remediation plan's enumerated findings (C1/M1/M2/M3/
+M3b/m1/m2/m3/nit). Recommend a follow-up remediation pass applying the same
+seam-blocking approach (and/or the Phase-5 `pytest-socket` kill-switch, which
+would surface all remaining real-I/O tests at once).
