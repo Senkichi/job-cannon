@@ -118,4 +118,7 @@ class TestIdempotence:
 class TestEmptyDatabase:
     def test_no_companies_is_noop(self, migrated_db):
         path, conn = migrated_db
+        before = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
         _run(path, conn)
+        after = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+        assert before == after == 0

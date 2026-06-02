@@ -135,6 +135,7 @@ class TestIdempotence:
 class TestEmptyDatabase:
     def test_no_jobs_is_noop(self, migrated_db):
         path, conn = migrated_db
-        # No inserts.
+        before = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         _run(path, conn)
-        # No assertion — just shouldn't raise.
+        after = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        assert before == after == 0

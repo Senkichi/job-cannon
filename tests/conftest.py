@@ -247,19 +247,48 @@ def app_unconfigured(tmp_db_path):
     return application
 
 
-@pytest.fixture
-def migrated_db():
-    """Create a temp DB, run ALL migrations (including Migration 2), yield (path, conn).
+@pytest.fixture(scope="session")
+def _migrated_template_db(tmp_path_factory):
+    """Build the fully-migrated schema ONCE per test session.
 
-    This is the standard fixture for all Phase 2 AI scoring tests.
-    Closes connection and removes file on teardown.
+    Per-test fixtures get private copies via the sqlite3 backup API (~1-5ms)
+    instead of re-running all migrations (~141ms each ≈ ~50s of pure setup
+    across the ~388 tests that use migrated_db*). Isolation is identical: every
+    test still operates on its own private file. The template is read-only —
+    never write to the path this returns. The backup API (not a raw file copy)
+    is used so the clone is correct regardless of the template's WAL/journal
+    state — no -wal/-shm sidecar handling needed.
     """
     from job_finder.web.db_migrate import run_migrations
 
+    path = tmp_path_factory.mktemp("template") / "migrated_template.db"
+    run_migrations(str(path))
+    return str(path)
+
+
+def _clone_template(template_path: str) -> str:
+    """Create a private on-disk copy of the migrated template; return its path."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
+    src = sqlite3.connect(template_path)
+    dst = sqlite3.connect(path)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    return path
 
-    run_migrations(path)
+
+@pytest.fixture
+def migrated_db(_migrated_template_db):
+    """Create a temp DB, run ALL migrations (including Migration 2), yield (path, conn).
+
+    This is the standard fixture for all Phase 2 AI scoring tests. The schema is
+    built once per session (_migrated_template_db) and cloned per-test; closes
+    connection and removes file on teardown.
+    """
+    path = _clone_template(_migrated_template_db)
 
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
@@ -305,19 +334,14 @@ def migrated_db_class():
 
 
 @pytest.fixture
-def migrated_db_with_jobs():
+def migrated_db_with_jobs(_migrated_template_db):
     """Create a temp DB, run ALL migrations (including Migration 3), insert 3 sample jobs.
 
     Extends migrated_db with pre-inserted jobs that have pipeline_status so
     pipeline_detector integration tests have realistic data to work with.
     Yields (path, conn). Closes and removes file on teardown.
     """
-    from job_finder.web.db_migrate import run_migrations
-
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-
-    run_migrations(path)
+    path = _clone_template(_migrated_template_db)
 
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

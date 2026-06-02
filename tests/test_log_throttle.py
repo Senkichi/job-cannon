@@ -1,7 +1,7 @@
 """Tests for log_throttle.py — rate-limited logging for scheduled jobs."""
 
 import logging
-import time
+from unittest.mock import patch
 
 from job_finder.web.log_throttle import _lock, _seen, throttled_log
 
@@ -50,15 +50,21 @@ class TestThrottledLog:
 
     def test_cooldown_expiry_relogs_at_full_level(self, caplog):
         """After cooldown expires, next occurrence logs at full level again."""
-        logger = logging.getLogger("test.expiry")
+        import job_finder.web.log_throttle as lt
 
-        with caplog.at_level(logging.DEBUG, logger="test.expiry"):
+        logger = logging.getLogger("test.expiry")
+        clock = {"t": 1000.0}
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="test.expiry"),
+            patch.object(lt.time, "monotonic", lambda: clock["t"]),
+        ):
             throttled_log(logger, logging.ERROR, "token expired", cooldown=1)
             # Suppress one
             throttled_log(logger, logging.ERROR, "token expired", cooldown=1)
 
-            # Wait for cooldown to expire
-            time.sleep(1.1)
+            # Advance past the 1s cooldown without sleeping
+            clock["t"] += 1.1
 
             # Should log at full level again
             throttled_log(logger, logging.ERROR, "token expired", cooldown=1)

@@ -122,7 +122,9 @@ def test_email_fixtures_do_not_contain_obvious_pii():
     if not fixtures_dir.exists():
         pytest.skip("Fixtures directory not found")
 
-    for fixture_path in fixtures_dir.glob("*.eml"):
+    scanned = list(fixtures_dir.glob("*.eml"))
+    assert scanned, "No .eml fixtures found to scan — PII guard would pass vacuously."
+    for fixture_path in scanned:
         with open(fixture_path, encoding="utf-8") as f:
             content = f.read()
 
