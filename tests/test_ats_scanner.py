@@ -1154,7 +1154,12 @@ class TestScanGreenhouse:
         assert results[0]["title"] == "Senior Data Scientist"
 
     def test_scan_greenhouse_converts_cents_to_dollars(self):
-        """scan_greenhouse divides pay_input_ranges cents by 100 for dollar values."""
+        """scan_greenhouse divides pay_input_ranges cents by 100 when unit='year'.
+
+        Phase 48.03 (D-07): division is conditional on the unit signal.
+        Without unit='year', values > 1_000 are stored as-is (ambiguous).
+        This fixture supplies unit='year' to exercise the cents→dollars path.
+        """
         from job_finder.web.ats_scanner import scan_greenhouse
 
         gh_jobs = [
@@ -1164,7 +1169,11 @@ class TestScanGreenhouse:
                 "content": "<p>Lead data science.</p>",
                 "location": {"name": "Mountain View, CA"},
                 "pay_input_ranges": [
-                    {"min_cents": 20000000, "max_cents": 28000000}  # $200k - $280k
+                    {
+                        "min_cents": 20000000,
+                        "max_cents": 28000000,
+                        "unit": "year",  # required signal: cents ÷ 100 → dollars
+                    }
                 ],
             }
         ]
@@ -1178,8 +1187,8 @@ class TestScanGreenhouse:
             )
 
         assert len(results) == 1
-        assert results[0]["salary_min"] == 200000  # 20000000 / 100
-        assert results[0]["salary_max"] == 280000  # 28000000 / 100
+        assert results[0]["salary_min"] == 200000  # 20000000 cents ÷ 100 = $200k
+        assert results[0]["salary_max"] == 280000  # 28000000 cents ÷ 100 = $280k
 
     def test_scan_greenhouse_returns_empty_list_on_non_200(self):
         """scan_greenhouse returns empty list on non-200 response."""
