@@ -858,18 +858,42 @@ class TestEnrichOneJob:
         assert result == {}
 
     def test_returns_empty_dict_when_ollama_unreachable(self):
-        """When OllamaProvider raises RuntimeError, returns empty dict cleanly."""
+        """When OllamaProvider raises RuntimeError, returns empty dict cleanly.
+
+        Speed/correctness note: _search_ddg and _fetch_page_text are mocked so
+        the flow reaches the Ollama-backed validation step WITHOUT running a real
+        DuckDuckGo search + 1.5s inter-query sleeps (was 19-20s). The search must
+        yield a URL and the fetch must yield company-matching text, otherwise
+        enrich_single_job returns None before ever constructing OllamaProvider —
+        a false-confidence trap. This test asserts the integration-level
+        never-raises/{} contract; the discriminating handler test (fails if the
+        error handler is removed) is
+        TestValidatePage.test_call_model_exception_returns_false_zero.
+        """
         from job_finder.web.agentic_enricher import enrich_one_job
 
         mock_ollama_mod = MagicMock()
         mock_ollama_mod.OllamaProvider.side_effect = RuntimeError("Ollama unreachable")
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "job_finder.web.providers.ollama_provider": mock_ollama_mod,
-                "playwright.sync_api": MagicMock(),
-            },
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "job_finder.web.providers.ollama_provider": mock_ollama_mod,
+                    "playwright.sync_api": MagicMock(),
+                },
+            ),
+            patch(
+                "job_finder.web.agentic_enricher._search_ddg",
+                return_value=[{"href": "https://acme.com/jobs/ds", "title": "DS @ Acme"}],
+            ),
+            patch(
+                "job_finder.web.agentic_enricher._fetch_page_text",
+                return_value="Data Scientist at Acme. Build models. " * 20,
+            ),
+            # Heuristic fallback yields 4 queries; the search loop sleeps
+            # _SEARCH_DELAY_S (1.5s) between each. Skip the real sleeps.
+            patch("job_finder.web.agentic_enricher.time.sleep"),
         ):
             result = enrich_one_job({"title": "DS", "company": "Acme"}, conn=None, config={})
 

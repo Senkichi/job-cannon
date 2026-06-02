@@ -29,6 +29,81 @@ import pytest
 
 
 @pytest.fixture
+def stub_enrichment_network():
+    """Neutralize all outbound-I/O enrichment tiers at the data_enricher seam.
+
+    enrich_job() runs a cost-ordered network cascade (direct fetch, ATS API,
+    careers scrape, DDG, SerpAPI). Tests that call enrich_job only to verify
+    DB-side behavior (description->jd_full promotion, never-raises, signature
+    compat) don't need real network and were paying 5-27s each plus inheriting
+    network flakiness. This stubs every tier to its real "no result" shape so
+    enrich_job proceeds to its DB logic immediately. Individual tests may still
+    override a specific tier inside their own ``with patch(...)``.
+
+    Mock at the data_enricher import site (not enrichment_tiers) because
+    data_enricher does ``from enrichment_tiers import <fn>`` — the names are
+    bound in the data_enricher namespace. Classes that test the tier functions
+    DIRECTLY (TestSearchSerpapi/TestSearchDuckDuckGo) call them via
+    enrichment_tiers.* and are unaffected.
+
+    Return shapes are the verified per-function "miss" values (see
+    enrichment_tiers.py signatures + data_enricher.py call sites):
+      - fetch_direct_jd  -> str | None              (caller truthiness-checks)
+      - query_ats_api    -> dict                     (caller truthiness-checks)
+      - scrape_careers   -> dict                     (caller truthiness-checks)
+      - search_ddg_web   -> dict                     (caller does .get(...))
+      - fetch_ddg_jds    -> tuple[str|None, str|None] (caller unpacks 2)
+      - search_duckduckgo-> str | None              (caller filters falsy)
+      - search_serpapi   -> tuple[dict|None, list]   (caller unpacks 2)
+
+    The deepest tier (agentic) is neutralized file-wide by the
+    _neutralize_agentic_tier autouse below — when every cheaper tier misses (as
+    they do here), enrich_job would otherwise escalate into the live agentic
+    seam (Playwright + Ollama + real DDG), which made these tests SLOWER, not
+    faster.
+    """
+    targets = {
+        "fetch_direct_jd": None,
+        "query_ats_api": {},
+        "scrape_careers": {},
+        "search_ddg_web": {},
+        "fetch_ddg_jds": (None, None),
+        "search_duckduckgo": None,
+        "search_serpapi": (None, []),
+    }
+    patchers = [
+        patch(f"job_finder.web.data_enricher.{name}", return_value=ret)
+        for name, ret in targets.items()
+    ]
+    mocks = [p.start() for p in patchers]
+    try:
+        yield dict(zip(targets.keys(), mocks, strict=True))
+    finally:
+        for p in patchers:
+            p.stop()
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_agentic_tier():
+    """Block enrich_job's deepest tier (agentic) for every test in this file.
+
+    enrich_job's cost cascade ends in agentic_enricher.enrich_one_job (TIER_ORDER
+    index 'agentic'), which launches Playwright + Ollama + real DuckDuckGo. Any
+    test where the cheaper tiers miss and jd_full stays missing escalates into it
+    — the TierOrder/TierPersistence escalation tests paid 40-65s each this way.
+
+    enrich_job imports it lazily (``from job_finder.web.agentic_enricher import
+    enrich_one_job`` inside the function), so we patch at the source module.
+    Returns {} — its real no-result shape — so escalation still occurs (call-order
+    assertions hold) but no live I/O fires. No test in this file patches or asserts
+    on the real enrich_one_job, so an agentic-only autouse cannot mask a cheap-tier
+    call-order assertion (which is why the cheap-tier stub is opt-in, not autouse).
+    """
+    with patch("job_finder.web.agentic_enricher.enrich_one_job", return_value={}) as m:
+        yield m
+
+
+@pytest.fixture
 def sparse_job_row():
     """A job row missing jd_full and salary data (needs enrichment)."""
     return {
@@ -323,10 +398,17 @@ class TestEnrichJobTierOrder:
 
         with (
             patch("job_finder.web.data_enricher.fetch_direct_jd") as mock_fetch,
+            patch("job_finder.web.data_enricher.search_ddg_web") as mock_ddg_web,
+            patch("job_finder.web.data_enricher.fetch_ddg_jds") as mock_ddg_jds,
             patch("job_finder.web.data_enricher.search_duckduckgo") as mock_ddg,
             patch("job_finder.web.data_enricher.search_serpapi") as mock_serp,
         ):
             mock_fetch.return_value = None
+            # search_ddg_web/fetch_ddg_jds were unpatched here -> real DuckDuckGo
+            # web search (~4s + flaky). Stub them to their no-result shapes; the
+            # assertion below is on search_duckduckgo, which is unaffected.
+            mock_ddg_web.return_value = {"ddg_urls": [], "ddg_snippet": ""}
+            mock_ddg_jds.return_value = (None, None)
             mock_ddg.return_value = "Some DDG text about the job."
             mock_serp.return_value = None
 
@@ -578,6 +660,7 @@ class TestEnrichmentTierPersistence:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("stub_enrichment_network")
 class TestEnrichJobBackwardCompat:
     """Old call patterns and error handling still work."""
 
@@ -1272,6 +1355,7 @@ class TestMigration15:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("stub_enrichment_network")
 class TestDescriptionPromotion:
     """Verify enrich_job auto-promotes long descriptions to jd_full.
 
