@@ -183,9 +183,24 @@ Each fix = one atomic commit. Re-run probe in `PROBE_FROM_DB=1` after each to is
 
 # FOLLOWUPS — 2026-06-01 test-suite remediation (out-of-scope finds)
 
-Discovered during the test-suite-remediation work (live-I/O leak fixes). NOT
-fixed there — out of that plan's scope; one is a test-semantics change my rules
-say to surface, not silently make.
+Discovered during the test-suite-remediation work (live-I/O leak fixes).
+
+**UPDATE (same session): all three items below were subsequently fixed at the
+user's request** — see commits `fix(quota): count CSE quota by local day…`
+(date tests + the google_cse production bug), `style: clear ruff errors…`
+(careers_page + scoring_orchestrator lint), and the
+`test: …careers_crawler / smartrecruiters / onboarding / model_provider /
+speculative-probe / workday` commits (the slow live-I/O tests). The full suite
+is now **3780 passed, 0 failed, 0 errors in 3:34** (was 18:10). They are kept
+below as a record of the findings and their root causes.
+
+Genuinely still open (NOT addressed — small/optional):
+- **~12 `tests/test_scheduler.py` tests sit at ~2.0s each** (~24s total). Not in
+  the enumerated slow-test list; 2s is within the "a few seconds" bar. Likely a
+  real APScheduler-startup wait per test. Candidate for a future pass.
+- **Phase 5 of the source plan — a global `pytest-socket` kill-switch** — remains
+  the gold-standard prevention (surfaces every remaining real-I/O test at once);
+  deliberately deferred as a separate, larger effort.
 
 ## [TEST BUG — time-of-day flaky] test_costs.py "today" tests fail in the evening (negative-offset TZ)
 
