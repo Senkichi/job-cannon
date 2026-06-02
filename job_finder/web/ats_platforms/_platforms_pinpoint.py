@@ -14,6 +14,7 @@ from job_finder.web.ats_platforms._registry import (
     _http_get_json,
 )
 from job_finder.web.description_formatter import strip_html_to_text
+from job_finder.web.location_canonical import JobLocation, normalize_workplace_type
 
 
 def _fetch_postings(slug: str) -> list[dict]:
@@ -29,6 +30,48 @@ def _fetch_postings(slug: str) -> list[dict]:
         return []
     # Filter out non-dict items defensively (matches historical scan_pinpoint).
     return [p for p in postings if isinstance(p, dict)]
+
+
+def _to_canonical(posting: dict) -> list[JobLocation]:
+    """Layer-1 mapping for Pinpoint posting → list[JobLocation].
+
+    Pinpoint exposes a structured ``location`` dict with ``city``, ``province``
+    (region), and ``name`` (country name). We construct a ``JobLocation``
+    directly from these fields — no Layer-2 parser required.
+
+    Returns ``[]`` when the location field is absent or all sub-fields are blank.
+    """
+    loc_obj = posting.get("location")
+    if not isinstance(loc_obj, dict):
+        return []
+
+    city = (loc_obj.get("city") or "").strip() or None
+    region = (loc_obj.get("province") or "").strip() or None
+    country = (loc_obj.get("name") or "").strip() or None
+
+    # Require at least one geographic field to emit a structured location.
+    if not any([city, region, country]):
+        return []
+
+    # Reconstruct a raw string from the available parts for audit/display.
+    raw_parts = [p for p in [city, region, country] if p]
+    raw = ", ".join(raw_parts)
+
+    # Pinpoint exposes a workplace_type field at the posting level.
+    workplace_type = normalize_workplace_type(posting.get("workplace_type"))
+
+    return [
+        JobLocation(
+            city=city,
+            region=region,
+            region_code=None,  # Pinpoint does not expose ISO 3166-2 codes
+            country=country,
+            country_code=None,  # Pinpoint does not expose ISO 3166-1 codes
+            workplace_type=workplace_type,
+            raw=raw,
+            unresolved=False,
+        )
+    ]
 
 
 def _posting_to_job(posting: dict, _slug: str) -> dict:
@@ -54,15 +97,24 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     salary_min = posting.get("compensation_minimum")
     salary_max = posting.get("compensation_maximum")
 
+    # ── source_id (Layer-1, Phase 48.04) ────────────────────────────────────
+    posting_id = posting.get("id")
+    source_id = str(posting_id) if posting_id is not None else None
+
+    # ── locations_structured (Layer-1, Phase 48.04) ──────────────────────────
+    locations_structured = _to_canonical(posting)
+
     return {
         "title": posting.get("title") or "",
         "company_source": "Pinpoint",
         "location": location,
+        "locations_structured": locations_structured,
         "description": description,
         "source_url": source_url,
         "salary_min": salary_min if isinstance(salary_min, (int, float)) else None,
         "salary_max": salary_max if isinstance(salary_max, (int, float)) else None,
         "comp_json": None,
+        "source_id": source_id,
     }
 
 
