@@ -15,7 +15,6 @@ After the fix:
 import re
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -152,9 +151,7 @@ class TestCareersPageLocationExtraction:
                 f"Title contains consecutive spaces (not normalised): {title!r}"
             )
             # Title is not just whitespace
-            assert title.strip() == title, (
-                f"Title has leading/trailing whitespace: {title!r}"
-            )
+            assert title.strip() == title, f"Title has leading/trailing whitespace: {title!r}"
 
     # ------------------------------------------------------------------
     # Result dict shape
@@ -177,8 +174,7 @@ class TestCareersPageLocationExtraction:
         assert results, "Expected at least one job to be returned"
         job = results[0]
         assert job.get("location"), (
-            f"Expected non-empty location from parent sibling text; "
-            f"got {job.get('location')!r}"
+            f"Expected non-empty location from parent sibling text; got {job.get('location')!r}"
         )
 
     def test_sibling_text_title_no_bleed(self):

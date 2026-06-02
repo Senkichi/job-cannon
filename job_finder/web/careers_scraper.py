@@ -628,7 +628,7 @@ def scrape_careers_page(
         # Priority 2: sibling text/elements in the parent container.
         location = ""
         loc_tag = tag.find(
-            lambda t: (  # noqa: B023
+            lambda t: (
                 t.name in ("span", "small", "div", "p", "em", "strong")
                 and bool(set(t.get("class") or []) & _LOCATION_CLASSES)
             )

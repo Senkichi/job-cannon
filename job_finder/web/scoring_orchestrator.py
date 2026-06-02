@@ -98,7 +98,7 @@ def _context_fingerprint(config: dict) -> str:
         sort_keys=True,
         default=str,
     )
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+    return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _resolve_candidate_context(config: dict) -> str:
