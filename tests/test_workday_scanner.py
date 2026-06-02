@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Tests: Workday URL detection in ats_detection.py
 # ---------------------------------------------------------------------------
@@ -119,6 +121,21 @@ class TestScanWorkday:
     stay hermetic and focused on list-endpoint behavior. A separate test
     class (TestFetchWorkdayDescription) exercises the detail fetch itself.
     """
+
+    @pytest.fixture(autouse=True)
+    def _no_scan_sleeps(self):
+        """Zero scan_workday's per-page and per-posting pacing sleeps.
+
+        _fetch_postings sleeps _PAGE_FETCH_SLEEP_S between pages and
+        _DETAIL_FETCH_SLEEP_S per matched posting; test_scan_paginates_correctly
+        (2 pages, 25 postings) paid ~2.6s. Patch the constants to 0 (not
+        time.sleep — avoids the shared-time-module trap). No test asserts pacing.
+        """
+        with (
+            patch("job_finder.web.ats_platforms._platforms_workday._PAGE_FETCH_SLEEP_S", 0),
+            patch("job_finder.web.ats_platforms._platforms_workday._DETAIL_FETCH_SLEEP_S", 0),
+        ):
+            yield
 
     @patch("job_finder.web.ats_platforms.requests.post")
     def test_scan_returns_matched_jobs(self, mock_post, _mock_detail):
