@@ -167,6 +167,7 @@ def upsert_job(
     ).fetchone()
 
     now = utc_now_iso()
+    pd_str = job.posted_date.isoformat() if job.posted_date else None
 
     if existing:
         # Merge sources
@@ -233,7 +234,8 @@ def upsert_job(
                 locations_structured = ?,
                 workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
                 primary_country_code = COALESCE(?, primary_country_code),
-                company_id = COALESCE(?, company_id){jd_full_clause}
+                company_id = COALESCE(?, company_id),
+                posted_date = COALESCE(?, posted_date){jd_full_clause}
             WHERE dedup_key = ?""",
             (
                 json.dumps(sources),
@@ -250,6 +252,7 @@ def upsert_job(
                 workplace_type_col,
                 primary_country_code,
                 company_id,
+                pd_str,
                 *jd_full_value,
                 job.dedup_key,
             ),
@@ -269,7 +272,8 @@ def upsert_job(
     else:
         # Use the email date as first_seen when available (Gmail-sourced jobs).
         # SerpAPI jobs have no email date, so they use the current ingestion time.
-        first_seen = job.posted_date.isoformat() if job.posted_date else now
+        # pd_str was computed above (shared with the UPDATE branch); reuse it here.
+        first_seen = pd_str or now
         # Initialize locations_raw as a JSON array. Split on unambiguous
         # multi-location separators and drop placeholder values
         # ("Unknown", "TBD", ...) at the ingestion boundary so they never
@@ -305,8 +309,8 @@ def upsert_job(
                  first_seen, last_seen, score, score_breakdown, locations_raw,
                  jd_full, scoring_provider,
                  locations_structured, workplace_type, primary_country_code,
-                 company_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 company_id, posted_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.dedup_key,
                 job.title,
@@ -329,6 +333,7 @@ def upsert_job(
                 workplace_type_col,
                 primary_country_code,
                 company_id,
+                pd_str,
             ),
         )
         conn.commit()
