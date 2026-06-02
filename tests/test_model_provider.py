@@ -785,6 +785,9 @@ def test_cascade_429_marks_exhausted(tmp_path, _reset_daily_state):
         patch("job_finder.web.model_provider._ensure_usage_current"),
         patch("job_finder.web.model_provider.cost_gate", return_value=True),
         patch("job_finder.web.model_provider.record_cost"),
+        # The 429 path retries with a 2s+4s backoff (time.sleep) before cascading;
+        # this test asserts the cascade outcome, not the wait, so skip the sleeps.
+        patch("job_finder.web.model_provider.time.sleep"),
     ):
         result = call_model(
             "score", "sys", [{"role": "user", "content": "hi"}], conn, _CASCADE_CONFIG

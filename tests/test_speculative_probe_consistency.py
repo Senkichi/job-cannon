@@ -63,6 +63,25 @@ def migrated_db_path():
         os.remove(path)
 
 
+@pytest.fixture
+def _no_live_probe_http():
+    """Block the real HTTP the speculative probe ladder issues to fake slugs.
+
+    The _PROBES ladder (ats_scanner._probe) captures the ats_prober._probe_X
+    function objects at import, so these tests' ``patch("...ats_prober._probe_X")``
+    don't actually take effect — the real probes run and each does
+    requests.get(slug_url, timeout=_PROBE_TIMEOUT) against a non-existent slug,
+    costing ~3-4s of connect timeouts per test (the outcome is unchanged: a fake
+    slug 404s -> probe returns False -> miss). Patch ats_prober.requests.get to a
+    fast 404 so every probe misses instantly, preserving the all-miss outcome.
+    Tests that force a hit do so by patching _probe._PROBES / _probe._probe_X
+    (the by-name fast-path dispatch), which is unaffected by this. Applied via
+    usefixtures only to the all-miss probe classes.
+    """
+    with patch("job_finder.web.ats_prober.requests.get", new=_make_get(404)):
+        yield
+
+
 def _insert_pending_company(
     conn: sqlite3.Connection,
     name: str,
@@ -498,6 +517,7 @@ class TestProbeHitConsistentOrDeadUrl:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_no_live_probe_http")
 class TestMigrationScenario:
     """End-to-end: a company with a stale (404) careers_url should still get
     promoted when the live probe rediscovers the new ATS — F6 narrow's
@@ -597,6 +617,7 @@ class TestMigrationScenario:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_no_live_probe_http")
 class TestSpeculativeProbeFpExclusion:
     """The 2026-05-27 ATS coverage audit (v2) found that the speculative probe
     had a 100% false-positive rate for bamboohr / personio / recruitee /
@@ -697,6 +718,7 @@ class TestSpeculativeProbeFpExclusion:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_no_live_probe_http")
 class TestCareersUrlFastPath:
     """When careers_url unambiguously identifies a supported ATS, the probe
     bypasses speculative slug derivation, verifies via the platform probe,
@@ -948,6 +970,7 @@ class TestCareersUrlFastPath:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_no_live_probe_http")
 class TestSpeculativeMissCategorization:
     """probe_ats_slugs now writes a categorical miss_reason for every miss it
     creates. Audit B4: 2563/2568 legacy miss rows have NULL miss_reason,
