@@ -128,8 +128,18 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     else:
         location = ""
 
-    posting_id = posting.get("id", "")
+    posting_id = posting.get("id") or None
     source_url = f"https://jobs.smartrecruiters.com/{slug}/{posting_id}" if posting_id else ""
+
+    # ── source_id (F-04: was missing on 100% of rows) ────────────────────────
+    source_id = str(posting_id) if posting_id is not None else None
+
+    # ── posted_date (F-02: optional, cheap key lookup) ────────────────────────
+    # SmartRecruiters exposes ``releasedDate`` (ISO-8601) on list-endpoint
+    # results; fall back to ``postingStatusUpdatedOn`` if absent.
+    posted_date: str | None = (
+        posting.get("releasedDate") or posting.get("postingStatusUpdatedOn") or None
+    )
 
     description = _fetch_smartrecruiters_description(slug, posting_id) if posting_id else ""
 
@@ -146,6 +156,8 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "salary_min": None,
         "salary_max": None,
         "comp_json": None,
+        "source_id": source_id,
+        "posted_date": posted_date,
     }
 
 
