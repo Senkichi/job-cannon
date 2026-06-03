@@ -140,13 +140,15 @@ dev = [
     "pytest>=8,<10",
     "pytest-cov~=7.1",
     "pytest-playwright~=0.7",
-    # pytest-xdist parallelizes the test suite. Used by (a) the bhokaral
-    # worker self-test loop and (b) the GitHub Actions Test job (-n auto
-    # --dist loadscope). The bhokaral queue MERGE GATE (cfg.merge.test_cmd)
-    # remains serial — it passes no -n. Pinned <4 because xdist may change
-    # distribution-mode defaults on a major bump and our fixture-isolation
-    # relies on --dist loadscope keeping same-module tests on one worker
-    # (heavy DB-fixture suites like test_ats_scanner.py).
+    # pytest-xdist parallelizes the worker self-test path used by external
+    # tools (e.g. bhokaral's per-issue worker iteration loop), invoked only
+    # when the caller passes -n. GitHub CI runs SERIAL (xdist was tried in CI
+    # via #72 and reverted — net-slower on the 2-core Windows runner due to
+    # spawn-based per-worker import overhead). The bhokaral queue merge gate
+    # is serial too. Pinned <4 because xdist may change distribution-mode
+    # defaults on a major bump and our fixture-isolation relies on --dist
+    # loadscope keeping same-module tests on one worker (heavy DB-fixture
+    # suites like test_ats_scanner.py).
     "pytest-xdist>=3.8,<4",
     "mypy>=1.13,<3.0",
     "pyright~=1.1",
