@@ -32,7 +32,6 @@ from job_finder.db import (
     update_pipeline_status,
     upsert_job,
 )
-from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.models import Job
 from job_finder.secrets import get_secret
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
