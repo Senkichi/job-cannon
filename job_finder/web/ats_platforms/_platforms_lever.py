@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
@@ -76,9 +76,7 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     created_at_ms = posting.get("createdAt")
     posted_date: str | None = None
     if created_at_ms is not None:
-        posted_date = datetime.fromtimestamp(
-            created_at_ms / 1000, tz=timezone.utc
-        ).isoformat()
+        posted_date = datetime.fromtimestamp(created_at_ms / 1000, tz=UTC).isoformat()
 
     return {
         "title": posting.get("text", ""),
