@@ -1503,9 +1503,14 @@ class TestDashboardRefreshFragments:
         data = response.data.decode()
         assert 'id="dashboard-stats"' in data
         assert 'id="dashboard-quick-actions"' in data
-        assert 'hx-trigger="dashboard-refresh from:body"' in data
+        # Stat cards subscribe to dashboard-refresh AND self-poll so they stay
+        # live regardless of which action mutated the underlying counts.
+        assert 'hx-trigger="dashboard-refresh from:body, every 30s"' in data
         # Quick actions wrapper uses a 5s delay so backend session state settles
         assert 'hx-trigger="dashboard-refresh from:body delay:5s"' in data
+        # History block (pipeline summary + activity tables) live-updates too.
+        assert 'id="dashboard-history"' in data
+        assert 'hx-get="/dashboard/history"' in data
 
 
 # ---------------------------------------------------------------------------

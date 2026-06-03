@@ -33,7 +33,7 @@
   <section aria-label="Key metrics">
     <div id="dashboard-stats"
          hx-get="{{ url_for('dashboard.stats_fragment') }}"
-         hx-trigger="dashboard-refresh from:body"
+         hx-trigger="dashboard-refresh from:body, every 30s"
          hx-swap="innerHTML">
       {% include "dashboard/_stats_cards.html" %}
     </div>
@@ -143,175 +143,16 @@
     </div>
   </section>
 
-  <!-- ── Pipeline Summary ── -->
-  <section aria-label="Pipeline summary">
-    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Pipeline Summary</h2>
-    {% if pipeline_summary %}
-      <div class="flex flex-wrap gap-3">
-        {% for status, count in pipeline_summary.items() %}
-          <div class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 flex flex-col items-center min-w-[90px]">
-            <span class="text-2xl font-bold text-slate-100">{{ count }}</span>
-            <span class="text-xs text-slate-400 mt-1 text-center">{{ status | replace('_', ' ') | title }}</span>
-          </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="text-slate-500 text-sm">No pipeline data yet — jobs will appear here once ingestion runs.</p>
-    {% endif %}
-  </section>
-
-  <!-- ── Recent Activity Feed ── -->
-  <section aria-label="Recent activity">
-    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Recent Activity</h2>
-    {% if recent_runs %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-slate-700 text-left">
-              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Source</th>
-              <th class="px-4 py-3 text-slate-400 font-medium text-right">Fetched</th>
-              <th class="px-4 py-3 text-slate-400 font-medium text-right">New</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for run in recent_runs %}
-              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ run.timestamp[:19] | replace('T', ' ') }}
-                </td>
-                <td class="px-4 py-3 text-slate-200">{{ run.source }}</td>
-                <td class="px-4 py-3 text-slate-300 text-right">{{ run.jobs_fetched }}</td>
-                <td class="px-4 py-3 text-right">
-                  <span class="{% if run.jobs_new > 0 %}text-emerald-400 font-semibold{% else %}text-slate-500{% endif %}">
-                    {{ run.jobs_new }}
-                  </span>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-10 text-center">
-        <p class="text-slate-500 text-sm">No ingestion runs yet. Click "Sync Now" to trigger your first run.</p>
-      </div>
-    {% endif %}
-  </section>
-
-  <!-- ── User Activity ── -->
-  <section aria-label="User activity">
-    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">User Activity</h2>
-    {% if user_activity %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-slate-700 text-left">
-              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Action</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Entity</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in user_activity %}
-              {% set meta = item.metadata | from_json if item.metadata else {} %}
-              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ item.occurred_at[:19] | replace('T', ' ') }}
-                </td>
-                <td class="px-4 py-3 text-slate-200">
-                  {{ item.action | replace('_', ' ') | title }}
-                </td>
-                <td class="px-4 py-3 text-slate-400 text-xs">
-                  {{ item.entity_id or '' }}
-                </td>
-                <td class="px-4 py-3 text-slate-400 text-xs">
-                  {% if meta.jobs_new is defined %}
-                    {{ meta.jobs_new }} new jobs
-                  {% elif meta.scored is defined %}
-                    {{ meta.scored }}/{{ meta.total }} scored
-                  {% elif meta.status is defined %}
-                    {{ meta.status }}
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-8 text-center">
-        <p class="text-slate-500 text-sm">No user activity recorded yet.</p>
-      </div>
-    {% endif %}
-  </section>
-
-  <!-- ── Pipeline Changes ── -->
-  <section aria-label="Pipeline changes">
-    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Pipeline Changes</h2>
-    {% if pipeline_events %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-slate-700 text-left">
-              <th class="px-4 py-3 text-slate-400 font-medium">Timestamp</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Job</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Change</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for event in pipeline_events %}
-              <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                <td class="px-4 py-3 text-slate-300 font-mono text-xs">
-                  {{ event.timestamp[:19] | replace('T', ' ') }}
-                </td>
-                <td class="px-4 py-3 text-slate-200 text-xs max-w-[200px] truncate">
-                  {% if event.job_title %}
-                    {{ event.job_title }}
-                    {% if event.job_company %}
-                      <span class="text-slate-500">— {{ event.job_company }}</span>
-                    {% endif %}
-                  {% else %}
-                    <span class="text-slate-500">{{ event.job_id }}</span>
-                  {% endif %}
-                </td>
-                <td class="px-4 py-3 text-xs">
-                  <span class="text-slate-400">{{ event.from_status | replace('_', ' ') | title }}</span>
-                  <span class="text-slate-600 mx-1">&rarr;</span>
-                  <span class="text-slate-200 font-medium">{{ event.to_status | replace('_', ' ') | title }}</span>
-                </td>
-                <td class="px-4 py-3 text-xs">
-                  {% if event.source == 'auto-detected' %}
-                    <span class="bg-amber-900/40 text-amber-400 border border-amber-700/50 rounded px-2 py-0.5">
-                      auto-detected
-                    </span>
-                  {% elif event.source == 'email' %}
-                    <span class="bg-blue-900/40 text-blue-400 border border-blue-700/50 rounded px-2 py-0.5">
-                      email
-                    </span>
-                  {% elif event.source == 'kanban drag' %}
-                    <span class="bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 rounded px-2 py-0.5">
-                      kanban drag
-                    </span>
-                  {% else %}
-                    <span class="bg-slate-700/60 text-slate-400 border border-slate-600/50 rounded px-2 py-0.5">
-                      {{ event.source or 'manual' }}
-                    </span>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <div class="bg-slate-800 rounded-xl border border-slate-700 px-6 py-8 text-center">
-        <p class="text-slate-500 text-sm">No pipeline changes yet — status updates will appear here.</p>
-      </div>
-    {% endif %}
-  </section>
+  {# ── History block (pipeline summary + activity tables) — live-updates ── #}
+  {# Polls every 30s and re-fetches on dashboard-refresh so these tables stay #}
+  {# current without a full page reload. Partial is shared with the full-page #}
+  {# render above (dashboard.index) and the dashboard.history_fragment route. #}
+  <div id="dashboard-history"
+       hx-get="{{ url_for('dashboard.history_fragment') }}"
+       hx-trigger="dashboard-refresh from:body, every 30s"
+       hx-swap="innerHTML">
+    {% include "dashboard/_dashboard_history.html" %}
+  </div>
 
 </div>
 {% endblock %}

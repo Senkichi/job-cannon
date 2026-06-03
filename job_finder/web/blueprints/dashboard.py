@@ -263,6 +263,26 @@ def stats_fragment():
     return render_template("dashboard/_stats_cards.html", **ctx)
 
 
+@dashboard_bp.route("/history", strict_slashes=False)
+def history_fragment():
+    """HTMX fragment — pipeline summary + the activity/history tables.
+
+    Polled every 30s by the ``#dashboard-history`` wrapper (and re-fetched on
+    ``dashboard-refresh`` after sync/scoring/ATS runs) so Pipeline Summary,
+    Recent Activity, User Activity, and Pipeline Changes live-update without a
+    full page reload. Reuses the same query helpers + partial as the full-page
+    render in ``index()`` so the two never drift.
+    """
+    conn = get_db()
+    return render_template(
+        "dashboard/_dashboard_history.html",
+        recent_runs=get_recent_runs(conn, limit=10),
+        user_activity=get_recent_activity(conn, limit=15),
+        pipeline_summary=get_pipeline_summary(conn),
+        pipeline_events=get_recent_pipeline_events(conn, limit=10),
+    )
+
+
 @dashboard_bp.route("/quick-actions", strict_slashes=False)
 def quick_actions_fragment():
     """HTMX fragment — returns refreshed quick actions with active session detection.
