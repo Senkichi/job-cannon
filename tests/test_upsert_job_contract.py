@@ -27,7 +27,6 @@ from job_finder.normalizers import normalize_company, normalize_title
 from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -62,9 +61,7 @@ def _make_parsed_job(
 
 
 def _row_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     return row is not None
 
 
@@ -75,7 +72,7 @@ def _row_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
 
 @pytest.fixture()
 def conn() -> Iterator[sqlite3.Connection]:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115 — delete=False path reused across fixture; closed below, unlinked in finally
     tmp.close()
     path = Path(tmp.name)
     try:

@@ -168,7 +168,7 @@ def merge_description(existing: str | None, new: str | None) -> str | None:
 
 def upsert_job(
     conn: sqlite3.Connection,
-    parsed: "ParsedJob | UnresolvedParsedJob | Job",
+    parsed: ParsedJob | UnresolvedParsedJob | Job,
     *,
     locations_structured: list[JobLocation] | None = None,  # SHIM — removed in Phase 48.07
     company_id: int | None = None,
@@ -200,6 +200,8 @@ def upsert_job(
     """
     from job_finder.parsed_job import (
         DenylistedCompanyError as _DenylistedCompanyError,
+    )
+    from job_finder.parsed_job import (
         ParsedJob as _ParsedJob,
     )
 
@@ -260,9 +262,7 @@ def upsert_job(
         )
 
     locations_json = _locations_to_json(_locs_structured) if _locs_structured else None
-    workplace_type_col = (
-        _locs_structured[0].workplace_type if _locs_structured else "UNSPECIFIED"
-    )
+    workplace_type_col = _locs_structured[0].workplace_type if _locs_structured else "UNSPECIFIED"
     primary_country_code = _locs_structured[0].country_code if _locs_structured else None
 
     # Incoming locations_raw: use ParsedJob field if populated, otherwise

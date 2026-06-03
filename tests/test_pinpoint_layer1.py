@@ -18,8 +18,6 @@ Coverage:
 
 from __future__ import annotations
 
-import pytest
-
 from job_finder.web.ats_platforms._platforms_pinpoint import (
     _posting_to_job,
     _to_canonical,

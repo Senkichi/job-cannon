@@ -83,7 +83,9 @@ def _to_canonical(posting: dict) -> list:
     try:
         return parse_locations(location_name)
     except Exception as exc:
-        logger.debug("greenhouse _to_canonical: parse_locations failed for %r: %s", location_name, exc)
+        logger.debug(
+            "greenhouse _to_canonical: parse_locations failed for %r: %s", location_name, exc
+        )
         return []
 
 

@@ -11,15 +11,12 @@ Three documented salary fixtures from the issue:
 
 from __future__ import annotations
 
-import pytest
-
 from job_finder.web.ats_platforms._platforms_greenhouse import (
     _posting_to_job,
     _resolve_salary,
     _to_canonical,
 )
 from job_finder.web.location_canonical import JobLocation
-
 
 # ---------------------------------------------------------------------------
 # _resolve_salary: pure unit tests

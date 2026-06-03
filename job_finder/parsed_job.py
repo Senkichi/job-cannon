@@ -254,10 +254,10 @@ class ParsedJob:
     @classmethod
     def from_job(
         cls,
-        job: "Job",
+        job: Job,
         *,
         source_meta: dict | None = None,
-    ) -> "ParsedJob | UnresolvedParsedJob":
+    ) -> ParsedJob | UnresolvedParsedJob:
         """Construct a ParsedJob (or UnresolvedParsedJob) from a Job instance.
 
         ``source_meta`` is an optional dict carrying fields that the Job model
@@ -308,9 +308,7 @@ class ParsedJob:
         config = load_config()
         denylist = get_company_denylist(config)
         if job.company.lower().strip() in denylist:
-            raise DenylistedCompanyError(
-                f"Company {job.company!r} is in the configured denylist"
-            )
+            raise DenylistedCompanyError(f"Company {job.company!r} is in the configured denylist")
 
         # I-07: location shape — raises LocationShapeError
         if locations_raw and not locations_structured:
@@ -339,26 +337,26 @@ class ParsedJob:
         # source_id: Job stores "" as the empty sentinel; convert to None
         source_id: str | None = job.source_id if job.source_id else None
 
-        common_kwargs: dict = dict(
-            title=job.title,
-            company=job.company,
-            dedup_key=dedup_key,
-            location=job.location,
-            locations_raw=locations_raw,
-            locations_structured=locations_structured,
-            workplace_type=workplace_type,
-            primary_country_code=primary_country_code,
-            sources=sources,
-            source_urls=source_urls,
-            source_urls_raw=source_urls_raw,
-            source_id=source_id,
-            salary_min=job.salary_min,
-            salary_max=job.salary_max,
-            description=job.description,
-            jd_full=clean_jd_full,
-            posted_date=job.posted_date,
-            unresolved_reasons=unresolved_reasons,
-        )
+        common_kwargs: dict = {
+            "title": job.title,
+            "company": job.company,
+            "dedup_key": dedup_key,
+            "location": job.location,
+            "locations_raw": locations_raw,
+            "locations_structured": locations_structured,
+            "workplace_type": workplace_type,
+            "primary_country_code": primary_country_code,
+            "sources": sources,
+            "source_urls": source_urls,
+            "source_urls_raw": source_urls_raw,
+            "source_id": source_id,
+            "salary_min": job.salary_min,
+            "salary_max": job.salary_max,
+            "description": job.description,
+            "jd_full": clean_jd_full,
+            "posted_date": job.posted_date,
+            "unresolved_reasons": unresolved_reasons,
+        }
 
         if unresolved_reasons:
             return UnresolvedParsedJob(raw_title=raw_title, **common_kwargs)
