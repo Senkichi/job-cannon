@@ -47,6 +47,25 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
+      # Windows-only I/O speedup. GitHub's Windows runners ship Defender with
+      # real-time monitoring ON, which scans every file op. This suite is
+      # I/O-heavy (thousands of SQLite temp-DB fixtures created/written/deleted
+      # per run), so Defender scanning is a prime suspect for both the ~5x
+      # ubuntu-vs-Windows gap and the run-to-run variance. The runner is an
+      # ephemeral throwaway VM, so disabling real-time monitoring for the job
+      # has no security implication. Best-effort (tamper protection may refuse
+      # DisableRealtimeMonitoring on some images) — the ExclusionPath calls are
+      # the durable part; everything is wrapped so a failure never fails the job.
+      - name: Speed up Windows I/O (Defender exclusions)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          try { Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop } catch { Write-Host "DisableRealtimeMonitoring refused: $_" }
+          foreach ($p in @($env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP)) {
+            if ($p) { try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop } catch { Write-Host "ExclusionPath $p refused: $_" } }
+          }
+          try { Add-MpPreference -ExclusionProcess "python.exe" -ErrorAction Stop } catch { Write-Host "ExclusionProcess refused: $_" }
+
       # `uv sync` resolves against pyproject.toml + uv.lock and installs
       # into a uv-managed .venv/ — no system Python 3.13 needed. The
       # --extra flags pull in dev (pytest, pytest-cov, pytest-playwright,
