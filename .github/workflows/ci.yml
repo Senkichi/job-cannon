@@ -33,12 +33,25 @@ jobs:
 
   # ── Tests ────────────────────────────────────────────────────
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}${{ matrix.name_suffix }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # ubuntu runs the full suite in one job (~4 min). The Windows leg was the
+      # ~24 min wall-clock long pole, so it's SHARDED 4 ways via pytest-split:
+      # each runner runs ~1/4 of the tests serially (separate machines — none
+      # of the in-process xdist spawn overhead that made #72 slower), cutting
+      # Windows wall-clock to ~6-8 min with zero coverage loss (every test still
+      # runs). Individual job names change (e.g. "Test (windows-latest 1/4)"),
+      # so branch protection gates on the aggregate "Tests passed" job below
+      # rather than these matrix legs.
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-latest, name_suffix: "", pytest_args: "" }
+          - { os: windows-latest, name_suffix: " 1/4", pytest_args: "--splits 4 --group 1" }
+          - { os: windows-latest, name_suffix: " 2/4", pytest_args: "--splits 4 --group 2" }
+          - { os: windows-latest, name_suffix: " 3/4", pytest_args: "--splits 4 --group 3" }
+          - { os: windows-latest, name_suffix: " 4/4", pytest_args: "--splits 4 --group 4" }
     steps:
       - uses: actions/checkout@v6
 
@@ -74,17 +87,36 @@ jobs:
         shell: bash
         run: uv run python -c "import shutil; from pathlib import Path; from job_finder.web import user_data_dirs; user_data_dirs.ensure_user_data_dir(); dst=Path(user_data_dirs.config_path()); shutil.copyfile('config.example.yaml', dst); print('seeded config ->', dst)"
 
-      # SERIAL on purpose. xdist (-n auto --dist loadscope) was tried in #72
-      # and reverted here: on GitHub's 2-core Windows runner, spawn-based
-      # workers re-import the heavy stack (numpy/scipy/playwright) per worker,
-      # so the Windows leg got SLOWER (run step 25m26s -> 40m47s) while only
-      # helping ubuntu (4m -> 2m). Windows is the wall-clock long pole, so
-      # parallelizing here was net-negative. (Coverage upload stays removed —
-      # Codecov app/token absent, the step was a no-op.) --durations=25
-      # surfaces the slowest tests so a Windows-specific speedup can target
-      # them; the run step is ~all of the job's time (install/setup is ~40s).
+      # Serial WITHIN each runner (in-process xdist made Windows slower — see
+      # #72). Cross-runner parallelism comes from pytest-split sharding
+      # (matrix.pytest_args = "--splits 4 --group K" on Windows; empty on
+      # ubuntu = full suite). Coverage upload stays removed (Codecov app/token
+      # absent, the step was a no-op).
       - name: Run tests
-        run: uv run pytest -q --tb=short --durations=25
+        run: uv run pytest -q --tb=short ${{ matrix.pytest_args }}
+
+
+  # ── Aggregate test gate ──────────────────────────────────────
+  # ONE stable required-status-check context for branch protection. The Test
+  # matrix is sharded (job names like "Test (windows-latest 1/4)"), so pinning
+  # protection to individual legs would break whenever the shard count changes.
+  # This job succeeds iff EVERY Test matrix leg succeeded; branch protection
+  # requires "Tests passed" instead of the individual legs. `if: always()`
+  # ensures it runs (and reports a concrete pass/fail) even when a shard fails,
+  # rather than being skipped — a skipped required check would wedge merges.
+  tests-passed:
+    name: Tests passed
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all test shards passed
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Test matrix result: ${{ needs.test.result }} (a shard failed or was cancelled)"
+            exit 1
+          fi
+          echo "All test shards passed."
 
 
   # ── Pre-commit Validation ────────────────────────────────────
