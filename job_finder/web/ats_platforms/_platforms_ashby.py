@@ -146,6 +146,13 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
 
     description = posting.get("descriptionPlain") or posting.get("descriptionHtml") or ""
 
+    # ── source_id (F-04: was missing on 98.4% of Ashby rows) ─────────────────
+    posting_id = posting.get("id")
+    source_id: str | None = str(posting_id) if posting_id is not None else None
+
+    # ── posted_date (from publishedAt ISO-8601 string) ────────────────────────
+    posted_date: str | None = posting.get("publishedAt") or None
+
     return {
         "title": posting.get("title", ""),
         "company_source": "Ashby",
@@ -156,6 +163,8 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "comp_json": comp_json,
+        "source_id": source_id,
+        "posted_date": posted_date,
     }
 
 
