@@ -60,17 +60,13 @@ _HYBRID_RE = re.compile(r"\bhybrid\b", re.IGNORECASE)
 # "City Name, XX" where XX is a 2-letter code (US state or CA province).
 # Anchored so "Hybrid - San Francisco, CA" doesn't match the raw text;
 # callers strip workplace-type prefixes before applying this pattern.
-_US_CITY_STATE_RE = re.compile(
-    r"^([A-Za-z][A-Za-z\s\-\.\']+),\s*([A-Z]{2})\s*$"
-)
+_US_CITY_STATE_RE = re.compile(r"^([A-Za-z][A-Za-z\s\-\.\']+),\s*([A-Z]{2})\s*$")
 
 # Tokens that are purely workplace-type keywords (handled specially).
 _WORKPLACE_ONLY_TOKENS: frozenset[str] = frozenset({"remote", "hybrid", "onsite", "on-site"})
 
 # Prefixes that Workday sometimes prepends to a city ("Hybrid - City, ST").
-_WORKPLACE_PREFIX_RE = re.compile(
-    r"^(?:remote|hybrid|onsite|on-site)\s*[-–—]\s*", re.IGNORECASE
-)
+_WORKPLACE_PREFIX_RE = re.compile(r"^(?:remote|hybrid|onsite|on-site)\s*[-–—]\s*", re.IGNORECASE)
 
 
 def _detect_workplace_type(text: str) -> WorkplaceType:

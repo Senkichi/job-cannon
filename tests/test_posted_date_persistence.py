@@ -14,7 +14,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,6 @@ import pytest
 from job_finder.db import upsert_job
 from job_finder.models import Job
 from job_finder.web.db_migrate import run_migrations
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -48,8 +47,8 @@ def conn() -> Iterator[sqlite3.Connection]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_DT_A = datetime(2026, 5, 15, 10, 0, 0, tzinfo=timezone.utc)
-_DT_B = datetime(2026, 5, 20, 10, 0, 0, tzinfo=timezone.utc)
+_DT_A = datetime(2026, 5, 15, 10, 0, 0, tzinfo=UTC)
+_DT_B = datetime(2026, 5, 20, 10, 0, 0, tzinfo=UTC)
 
 
 def _make_job(title: str, posted_date: datetime | None) -> Job:
@@ -65,9 +64,7 @@ def _make_job(title: str, posted_date: datetime | None) -> Job:
 
 
 def _read_pd(conn: sqlite3.Connection, dedup_key: str) -> str | None:
-    row = conn.execute(
-        "SELECT posted_date FROM jobs WHERE dedup_key = ?", (dedup_key,)
-    ).fetchone()
+    row = conn.execute("SELECT posted_date FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     assert row is not None, f"No job found with dedup_key={dedup_key!r}"
     return row["posted_date"]
 

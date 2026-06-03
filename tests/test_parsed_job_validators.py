@@ -13,12 +13,13 @@ Patch surface:
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
-from datetime import datetime
+
+import pytest
 
 from job_finder.models import Job
 from job_finder.parsed_job import (
+    _TITLE_LOCATION_BLEED_RE,
     DenylistedCompanyError,
     LocationShapeError,
     ParsedJob,
@@ -26,10 +27,8 @@ from job_finder.parsed_job import (
     UnresolvedParsedJob,
     _has_title_cross_field_bleed,
     _is_jd_junk,
-    _TITLE_LOCATION_BLEED_RE,
 )
 from job_finder.web.location_canonical import JobLocation
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -86,8 +85,9 @@ def _clean_patches():
 
     @contextlib.contextmanager
     def ctx():
-        with patch("job_finder.parsed_job.load_config", return_value={}), patch(
-            "job_finder.parsed_job.get_company_denylist", return_value=frozenset()
+        with (
+            patch("job_finder.parsed_job.load_config", return_value={}),
+            patch("job_finder.parsed_job.get_company_denylist", return_value=frozenset()),
         ):
             yield
 
@@ -174,15 +174,11 @@ class TestI09TitleCrossFieldBleed:
 
     def test_no_paren_no_bleed(self):
         """Titles without a paren-close never trigger I-09."""
-        assert not _has_title_cross_field_bleed(
-            "Software Engineer", ["San Francisco, CA"]
-        )
+        assert not _has_title_cross_field_bleed("Software Engineer", ["San Francisco, CA"])
 
     def test_paren_but_no_location_token_after(self):
         """Paren-close with non-location text after it does not trigger."""
-        assert not _has_title_cross_field_bleed(
-            "Software Engineer (Backend)", ["Seattle, WA"]
-        )
+        assert not _has_title_cross_field_bleed("Software Engineer (Backend)", ["Seattle, WA"])
 
     def test_location_token_after_paren_triggers(self):
         """Location token appearing after paren-close triggers I-09."""

@@ -13,10 +13,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from job_finder.web.ats_platforms._platforms_smartrecruiters import _posting_to_job
-
 
 # ---------------------------------------------------------------------------
 # Helpers
