@@ -81,6 +81,17 @@ def init_scheduler(app) -> None:
         if not _acquire_scheduler_pidfile(app):
             return
 
+        # We now own the pidfile — any prior scheduler process is dead, so any
+        # batch_score_sessions row still at 'running'/'cancelling' was orphaned
+        # by that dead process (its daemon worker thread died with it). Reap them
+        # to 'error' so phantom scan/sync banners aren't re-mounted on page load.
+        try:
+            from job_finder.web.db_helpers import reap_orphan_sessions
+
+            reap_orphan_sessions(app.config["DB_PATH"])
+        except Exception as exc:
+            logger.warning("Orphan-session reaper raised unexpectedly: %s", exc)
+
         # Eagerly start Ollama so the nightly agentic backfill (3:30 AM) has
         # a live service to talk to. Best-effort; never raises.
         try:

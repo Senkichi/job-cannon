@@ -33,6 +33,7 @@ from job_finder.json_utils import utc_now_iso
 from job_finder.web.ats_prober import probe_single_company
 from job_finder.web.ats_scanner import probe_ats_slugs, run_ats_scan
 from job_finder.web.db_helpers import (
+    _POLLING_TIMEOUT_MINUTES,
     PollingSessionConfig,
     get_db,
     render_polling_status,
@@ -408,20 +409,31 @@ _SESSION_TYPE_ATS_SCAN = "ats_scan"
 
 
 def _find_running_scan_session(conn):
-    """Return the most recent in-flight ats_scan session row, or None.
+    """Return the most recent *live* in-flight ats_scan session row, or None.
 
     Used by index() so the polling progress fragment auto-mounts when the
-    user navigates back to /companies during a scan. The bg-thread writes
-    terminal status='done'|'error' at end-of-scan, so any row still at
-    status='running' is genuinely in flight (with one edge case: if the
-    Flask process crashed mid-scan, an orphan 'running' row would linger,
-    but the polling endpoint's 30-min timeout handles that naturally —
-    see render_polling_status).
+    user navigates back to /companies during a scan.
+
+    Liveness is defined by heartbeat freshness, NOT by status='running' alone.
+    The bg thread's daemon dies with the Flask process, so a process that
+    crashes mid-scan leaves an orphan 'running' row behind. Returning such a
+    row would re-mount a phantom progress banner that the poller immediately
+    flips to "No progress in >30 min". We therefore apply the SAME staleness
+    predicate render_polling_status uses (COALESCE(last_tick_at, started_at)
+    within _POLLING_TIMEOUT_MINUTES of now) so a dead orphan is never surfaced
+    as in flight. A startup reaper (db_helpers.reap_orphan_sessions) also flips
+    these to 'error', but this predicate is the defense that matters per-request.
+
+    SQLite ``datetime()`` normalizes the stored naive-UTC ISO timestamps
+    (with 'T' separator + fractional seconds) so the string comparison against
+    ``datetime('now', ...)`` — also naive UTC — is valid. No timezone mismatch.
     """
     try:
         return conn.execute(
             "SELECT id, total, scored FROM batch_score_sessions "
             "WHERE session_type = ? AND status = 'running' "
+            "AND datetime(COALESCE(last_tick_at, started_at)) "
+            f"    > datetime('now', '-{_POLLING_TIMEOUT_MINUTES} minutes') "
             "ORDER BY id DESC LIMIT 1",
             (_SESSION_TYPE_ATS_SCAN,),
         ).fetchone()

@@ -130,6 +130,13 @@ def get_config_snapshot(app) -> dict:
 
 _POLLING_TERMINAL_STATES: tuple[str, ...] = ("done", "error", "cancelled")
 
+# Heartbeat-staleness threshold (minutes). A non-terminal session that hasn't
+# ticked within this window is treated as dead: render_polling_status flips it
+# to status='error', and any "is a scan in flight?" lookup (e.g.
+# companies._find_running_scan_session) must use the SAME threshold so it never
+# re-mounts a session the poller would immediately fail. Single source of truth.
+_POLLING_TIMEOUT_MINUTES: int = 30
+
 
 @dataclass(frozen=True, slots=True)
 class PollingSessionConfig:
@@ -161,7 +168,7 @@ class PollingSessionConfig:
     done_ctx: Callable[[sqlite3.Row, str, str | None], dict]
     not_found_ctx: dict = field(default_factory=dict)
     hx_trigger_after_settle: dict | None = None
-    timeout_minutes: int = 30
+    timeout_minutes: int = _POLLING_TIMEOUT_MINUTES
     session_label: str = "session"
 
 
@@ -275,3 +282,42 @@ def render_polling_status(
 
     ctx = cfg.progress_ctx(session)
     return render_template(cfg.progress_template, **ctx)
+
+
+def reap_orphan_sessions(db_path: str) -> int:
+    """Flip non-terminal ``batch_score_sessions`` rows to ``'error'`` at startup.
+
+    Sync / batch-scoring / ATS-scan sessions run in daemon threads that die with
+    the process. Any row still at ``status='running'`` (or ``'cancelling'``) when
+    a fresh process boots was orphaned by a previous, now-dead process — its
+    worker thread no longer exists, so it can never reach a terminal state on its
+    own. Left untouched, such a row gets re-mounted as in-flight by progress
+    lookups (``companies._find_running_scan_session``), surfacing a phantom scan
+    banner that the poller then flips to a confusing "No progress in >N min"
+    error on the first poll.
+
+    Reaping here makes the invalid "running-but-dead" state unrepresentable
+    across restarts. MUST be called only from the scheduler-owning process
+    (after the pidfile lock is acquired), so a live session from a concurrent
+    process is never clobbered.
+
+    Returns the number of rows reaped.
+    """
+    try:
+        with standalone_connection(db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE batch_score_sessions "
+                "SET status='error', "
+                "    error_msg=COALESCE(error_msg, 'Interrupted by app restart'), "
+                "    finished_at=? "
+                "WHERE status NOT IN ('done', 'error', 'cancelled')",
+                (utc_now_iso(),),
+            )
+            conn.commit()
+            reaped = cursor.rowcount
+        if reaped:
+            logger.info("Reaped %d orphan session row(s) at startup", reaped)
+        return reaped
+    except Exception:
+        logger.warning("Failed to reap orphan sessions at startup", exc_info=True)
+        return 0
