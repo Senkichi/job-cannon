@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
@@ -67,6 +68,18 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
     categories = posting.get("categories") or {}
     location = categories.get("location") or categories.get("team") or ""
 
+    # ── source_id (F-04: was missing on 98.6% of Lever rows) ─────────────────
+    posting_id = posting.get("id")
+    source_id: str | None = str(posting_id) if posting_id is not None else None
+
+    # ── posted_date (from createdAt — Lever emits epoch-ms integer) ───────────
+    created_at_ms = posting.get("createdAt")
+    posted_date: str | None = None
+    if created_at_ms is not None:
+        posted_date = datetime.fromtimestamp(
+            created_at_ms / 1000, tz=timezone.utc
+        ).isoformat()
+
     return {
         "title": posting.get("text", ""),
         "company_source": "Lever",
@@ -77,6 +90,8 @@ def _posting_to_job(posting: dict, slug: str) -> dict:
         "salary_min": salary_min,
         "salary_max": salary_max,
         "comp_json": comp_json,
+        "source_id": source_id,
+        "posted_date": posted_date,
     }
 
 
