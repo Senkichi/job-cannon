@@ -63,6 +63,17 @@ jobs:
       - name: Install Playwright browsers
         run: uv run playwright install chromium
 
+      # Many tests load the job_finder config from the user-data dir
+      # (resolution order: explicit path -> $JOB_CANNON_CONFIG -> user-data
+      # dir). A clean CI runner has no config there, so ~25+ unit tests fail
+      # with ConfigNotFoundError (the dev machine has one, which is why the
+      # local gate is green but CI was red). Seed the committed example config
+      # into the resolved user-data path (cross-platform via the package's own
+      # resolver) so the suite is hermetic.
+      - name: Seed default config
+        shell: bash
+        run: uv run python -c "import shutil; from pathlib import Path; from job_finder.web import user_data_dirs; user_data_dirs.ensure_user_data_dir(); dst=Path(user_data_dirs.config_path()); shutil.copyfile('config.example.yaml', dst); print('seeded config ->', dst)"
+
       - name: Run tests
         run: uv run pytest --cov=job_finder --cov-report=xml -q --tb=short
 
