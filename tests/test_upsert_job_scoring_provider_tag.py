@@ -76,9 +76,13 @@ class TestUpdateLeavesProviderAlone:
     def test_reinsert_preserves_llm_tag(self, conn: sqlite3.Connection):
         # First insert: heuristic tag lands.
         upsert_job(conn, _make_job(title="c"))
-        # Simulate LLM persist_job_assessment marking the row.
+        # Simulate LLM persist_job_assessment marking the row. The real writer
+        # co-writes sub_scores_json + classification alongside the model tag
+        # (m078 I-04/I-05 require them when scoring_model is set).
         conn.execute(
-            "UPDATE jobs SET scoring_provider = 'ollama', scoring_model = 'qwen2.5:14b' WHERE dedup_key = ?",
+            "UPDATE jobs SET scoring_provider = 'ollama', scoring_model = 'qwen2.5:14b', "
+            "sub_scores_json = '{\"title_fit\": 3}', classification = 'consider' "
+            "WHERE dedup_key = ?",
             ("testco|c",),
         )
         conn.commit()

@@ -70,7 +70,10 @@ def seeded_job(db_conn):
             0.0,
             "{}",
             "unreviewed",
-            "Full JD body text.",
+            "About the role you will design build and operate data and ML systems at scale "
+            "partnering with cross functional teams to ship reliable features end to end "
+            "Requirements strong Python and SQL plus hands on cloud infrastructure testing "
+            "and production observability experience",
         ),
     )
     conn.commit()
@@ -79,7 +82,7 @@ def seeded_job(db_conn):
         "title": "Senior Data Scientist",
         "company": "Acme",
         "location": "Remote",
-        "jd_full": "Full JD body text.",
+        "jd_full": "About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
     }
 
 

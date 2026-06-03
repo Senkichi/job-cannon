@@ -21,13 +21,15 @@ import tempfile
 
 import pytest
 
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations.m061_reconcile_semantic_company_dupes import (
     MIGRATION,
     _canonical_key,
     _reconcile,
 )
 from job_finder.web.migrations.types import MigrationContext
+from tests.helpers.contract_triggers import (
+    run_migrations_without_contract as run_migrations,
+)
 
 
 @pytest.fixture

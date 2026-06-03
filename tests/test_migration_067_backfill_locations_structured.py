@@ -13,9 +13,12 @@ from contextlib import closing
 
 import pytest
 
-from job_finder.web.db_migrate import MIGRATIONS, run_migrations
+from job_finder.web.db_migrate import MIGRATIONS
 from job_finder.web.migrations import Migration
 from job_finder.web.migrations.types import MigrationContext
+from tests.helpers.contract_triggers import (
+    run_migrations_without_contract as run_migrations,
+)
 
 
 def _get(version: int) -> Migration:

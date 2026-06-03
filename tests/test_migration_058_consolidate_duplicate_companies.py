@@ -18,12 +18,14 @@ import tempfile
 
 import pytest
 
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations.m058_consolidate_duplicate_companies import (
     MIGRATION,
     _consolidate,
 )
 from job_finder.web.migrations.types import MigrationContext
+from tests.helpers.contract_triggers import (
+    run_migrations_without_contract as run_migrations,
+)
 
 
 @pytest.fixture

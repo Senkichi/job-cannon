@@ -794,7 +794,9 @@ class TestPipelineIntegration:
 
     def test_enrichment_tier_column_exists_after_migration(self, tmp_db_path):
         """Migration 8 adds enrichment_tier column to jobs table."""
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
@@ -815,7 +817,9 @@ class TestPipelineIntegration:
         'company|title' format (lowercase, location dropped). We query by the
         normalized key after migration.
         """
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         conn = sqlite3.connect(tmp_db_path)
         # Create minimal schema with jd_full column (simulates pre-migration DB)
@@ -875,7 +879,9 @@ class TestPipelineIntegration:
 
         Note: retroactive dedup normalizes dedup_keys to 'company|title' format.
         """
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         conn = sqlite3.connect(tmp_db_path)
         # Create minimal schema without enrichment_tier (pre-migration state)
@@ -1209,7 +1215,9 @@ class TestMigration15:
 
     def test_migration_15_nullifies_poison_jd_full(self, tmp_db_path):
         """Poison jd_full with LinkedIn login text is nullified."""
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         # Create a pre-migration DB with poison data
         conn = sqlite3.connect(tmp_db_path)
@@ -1261,7 +1269,9 @@ class TestMigration15:
 
     def test_migration_15_deletes_notification_rows(self, tmp_db_path):
         """Garbage rows with notification text in title are deleted."""
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         conn = sqlite3.connect(tmp_db_path)
         conn.execute("""
@@ -1304,7 +1314,9 @@ class TestMigration15:
 
     def test_migration_15_promotes_descriptions(self, tmp_db_path):
         """Long descriptions are promoted to jd_full where jd_full is NULL."""
-        from job_finder.web.db_migrate import run_migrations
+        from tests.helpers.contract_triggers import (
+            run_migrations_without_contract as run_migrations,
+        )
 
         long_desc = "A" * 300  # > 200 chars
 

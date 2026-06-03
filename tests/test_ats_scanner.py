@@ -3112,7 +3112,12 @@ class TestAtsJdFullStorage:
         self._insert_hit_company(conn, "Acme", "lever", "acme")
 
         # Pre-insert a job with existing jd_full
-        existing_jd = "Existing high-quality job description already stored by a prior source."
+        existing_jd = (
+            "Existing high-quality job description already stored by a prior source. "
+            "It covers responsibilities, requirements, and team context in enough "
+            "detail to clear the m078 content-density floor so this test can verify "
+            "that a later ATS scan does not overwrite an already-populated jd_full."
+        )
         dedup_key = Job.normalized_dedup_key("Acme", "Staff Engineer")
         conn.execute(
             """INSERT INTO jobs (dedup_key, title, company, location, sources, source_urls,
