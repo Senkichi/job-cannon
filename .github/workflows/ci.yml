@@ -74,14 +74,17 @@ jobs:
         shell: bash
         run: uv run python -c "import shutil; from pathlib import Path; from job_finder.web import user_data_dirs; user_data_dirs.ensure_user_data_dir(); dst=Path(user_data_dirs.config_path()); shutil.copyfile('config.example.yaml', dst); print('seeded config ->', dst)"
 
-      # Parallelized with pytest-xdist (in the dev extra). --dist loadscope
-      # keeps same-module tests on one worker so module-scoped fixtures
-      # (DB tempfiles, autouse mocks) stay isolated — the same mode the
-      # bhokaral worker self-test uses, proven flake-free vs the serial
-      # baseline. Coverage upload removed (Codecov app not installed, token
-      # absent → the step was a no-op; dropping --cov also speeds both legs).
+      # SERIAL on purpose. xdist (-n auto --dist loadscope) was tried in #72
+      # and reverted here: on GitHub's 2-core Windows runner, spawn-based
+      # workers re-import the heavy stack (numpy/scipy/playwright) per worker,
+      # so the Windows leg got SLOWER (run step 25m26s -> 40m47s) while only
+      # helping ubuntu (4m -> 2m). Windows is the wall-clock long pole, so
+      # parallelizing here was net-negative. (Coverage upload stays removed —
+      # Codecov app/token absent, the step was a no-op.) --durations=25
+      # surfaces the slowest tests so a Windows-specific speedup can target
+      # them; the run step is ~all of the job's time (install/setup is ~40s).
       - name: Run tests
-        run: uv run pytest -n auto --dist loadscope -q --tb=short
+        run: uv run pytest -q --tb=short --durations=25
 
 
   # ── Pre-commit Validation ────────────────────────────────────
