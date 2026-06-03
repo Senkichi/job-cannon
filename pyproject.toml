@@ -150,6 +150,14 @@ dev = [
     # loadscope keeping same-module tests on one worker (heavy DB-fixture
     # suites like test_ats_scanner.py).
     "pytest-xdist>=3.8,<4",
+    # pytest-split shards the suite across SEPARATE CI runners (not in-process
+    # workers like xdist) via --splits N --group K. The Windows Test leg is
+    # sharded 4 ways in ci.yml — each runner runs ~1/4 of the tests serially,
+    # cutting the ~24min Windows wall-clock to ~6-8min with NO coverage loss
+    # and none of the xdist spawn-overhead that made #72 slower. Splits by test
+    # count when no .test_durations file is present (fine here — the Windows
+    # cost is long-tail/uniform per test, so count-based balances well).
+    "pytest-split>=0.9,<1",
     "mypy>=1.13,<3.0",
     "pyright~=1.1",
     # Pinned at R5.1 (2026-05-06). See block comment above.
