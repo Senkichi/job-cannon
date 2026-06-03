@@ -127,7 +127,11 @@ class TestRunScoring:
         score_and_persist_job for each surviving row."""
         db_path, setup_conn = migrated_db
         for k in ("sk-1", "sk-2", "sk-3"):
-            _insert_job(setup_conn, k, jd_full="body")
+            _insert_job(
+                setup_conn,
+                k,
+                jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+            )
         setup_conn.commit()
 
         import job_finder.web.scoring_runner as sr
@@ -180,8 +184,16 @@ class TestRunScoring:
         BEFORE calling score_and_persist_job. Expired keys never hit the
         scorer."""
         db_path, setup_conn = migrated_db
-        _insert_job(setup_conn, "live-1", jd_full="body")
-        _insert_job(setup_conn, "dead-1", jd_full="body")
+        _insert_job(
+            setup_conn,
+            "live-1",
+            jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        )
+        _insert_job(
+            setup_conn,
+            "dead-1",
+            jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        )
         setup_conn.commit()
 
         import job_finder.web.scoring_runner as sr
@@ -239,7 +251,11 @@ class TestRunScoring:
         """Behavior 9: When scorer returns provider='groq' (simulated cascade
         fallback), scoring_provider column reflects that."""
         db_path, setup_conn = migrated_db
-        _insert_job(setup_conn, "cascade-1", jd_full="body")
+        _insert_job(
+            setup_conn,
+            "cascade-1",
+            jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        )
         setup_conn.commit()
 
         # Do NOT patch score_and_persist_job; we want the real dual-write
@@ -315,7 +331,11 @@ class TestRunScoring:
     def test_missing_key_skipped(self, migrated_db):
         """A dedup_key not in the DB is silently skipped without raising."""
         db_path, setup_conn = migrated_db
-        _insert_job(setup_conn, "present-1", jd_full="body")
+        _insert_job(
+            setup_conn,
+            "present-1",
+            jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        )
         setup_conn.commit()
 
         import job_finder.web.scoring_runner as sr
@@ -383,7 +403,11 @@ class TestRunScoring:
     def test_error_scorer_status_counts_errors(self, migrated_db):
         """ScoringResult(status='error') -> summary['errors'] += 1."""
         db_path, setup_conn = migrated_db
-        _insert_job(setup_conn, "err-1", jd_full="body")
+        _insert_job(
+            setup_conn,
+            "err-1",
+            jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        )
         setup_conn.commit()
 
         import job_finder.web.scoring_runner as sr
@@ -414,7 +438,11 @@ class TestRunScoring:
         output."""
         db_path, setup_conn = migrated_db
         for k in ("ca-1", "ca-2"):
-            _insert_job(setup_conn, k, jd_full="body")
+            _insert_job(
+                setup_conn,
+                k,
+                jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+            )
         setup_conn.commit()
 
         import job_finder.web.job_scorer as js

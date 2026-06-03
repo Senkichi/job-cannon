@@ -1815,10 +1815,13 @@ class TestUpsertScoringProviderNotLeaked:
         try:
             # INSERT (scoring_provider=NULL via 7.7 fix)
             upsert_job(conn, job)
-            # Simulate a real scoring attribution via the legitimate writer path
+            # Simulate a real scoring attribution via the legitimate writer path.
+            # The real LLM writer co-writes sub_scores_json + classification with
+            # the model tag (m078 I-04/I-05 require them when scoring_model is set).
             conn.execute(
-                "UPDATE jobs SET scoring_provider = ?, scoring_model = ? WHERE dedup_key = ?",
-                ("ollama", "qwen2.5:14b", job.dedup_key),
+                "UPDATE jobs SET scoring_provider = ?, scoring_model = ?, "
+                "sub_scores_json = ?, classification = ? WHERE dedup_key = ?",
+                ("ollama", "qwen2.5:14b", '{"title_fit": 3}', "consider", job.dedup_key),
             )
             conn.commit()
             # Re-upsert (UPDATE branch fires because the row exists)

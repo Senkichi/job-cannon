@@ -56,7 +56,14 @@ def _insert_unscored_job(conn, dedup_key, title="Engineer", company="Acme"):
         "INSERT OR IGNORE INTO jobs "
         "(dedup_key, title, company, location, jd_full, first_seen, last_seen) "
         "VALUES (?, ?, ?, 'Remote', ?, ?, ?)",
-        (dedup_key, title, company, "Placeholder JD body for test scorable predicate.", now, now),
+        (
+            dedup_key,
+            title,
+            company,
+            "About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+            now,
+            now,
+        ),
     )
     conn.commit()
 
@@ -434,7 +441,7 @@ def _insert_unscored_job_with_jd(
     dedup_key,
     title="Engineer",
     company="Acme",
-    jd_full="Required: SQL, Python. Build dashboards.",
+    jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
 ):
     """Insert a job with classification IS NULL AND jd_full populated.
 
@@ -512,7 +519,7 @@ class TestBatchScoringEndToEnd:
                 conn,
                 "job-e2e-1",
                 title="Senior Data Engineer",
-                jd_full="Build pipelines. Required: Python, SQL, AWS. 5+ years experience.",
+                jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
             )
             session_id = _insert_session(
                 conn,

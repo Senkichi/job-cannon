@@ -92,15 +92,38 @@ class UpsertResult:
 class IngestionRejected(Exception):
     """Raised when a DB constraint trigger rejects a write.
 
-    TODO Phase 47.04: activate when m078 DB triggers land.  At that point,
-    sqlite3.IntegrityError from trigger-generated constraint violations is
-    caught in upsert_job and re-raised as IngestionRejected carrying the
+    Activated in Phase 47.04: a ``sqlite3.IntegrityError`` from an m078
+    trigger ``RAISE(ABORT, 'I-NN: ...')`` (or the I-11 UNIQUE index) is caught
+    in ``upsert_job`` and re-raised as ``IngestionRejected`` carrying the
     invariant name parsed from the error message.
     """
 
-    def __init__(self, invariant: str) -> None:
+    def __init__(self, invariant: str, message: str | None = None) -> None:
         self.invariant = invariant
-        super().__init__(f"Ingestion rejected: invariant {invariant!r} violated")
+        self.db_message = message
+        detail = f": {message}" if message else ""
+        super().__init__(f"Ingestion rejected: invariant {invariant!r} violated{detail}")
+
+
+# Matches the invariant code an m078 trigger embeds in its RAISE(ABORT) message,
+# e.g. "I-01: salary_min must be > 0 when not NULL".
+_INVARIANT_CODE_RE = re.compile(r"\b(I-\d{2})\b")
+
+
+def _parse_invariant(err: sqlite3.IntegrityError) -> str:
+    """Extract the I-NN invariant code from a trigger-raised IntegrityError.
+
+    Falls back to ``"I-11"`` for the UNIQUE-index collision (whose message is
+    SQLite's stock ``UNIQUE constraint failed: jobs.company_id, jobs.source_id``),
+    and to the raw message text for anything unrecognized.
+    """
+    msg = str(err)
+    m = _INVARIANT_CODE_RE.search(msg)
+    if m:
+        return m.group(1)
+    if "unique constraint failed" in msg.lower() and "source_id" in msg.lower():
+        return "I-11"
+    return msg
 
 
 # ---------------------------------------------------------------------------
@@ -344,42 +367,50 @@ def upsert_job(
         if norm_salary_max is not None and norm_salary_max != existing_smax:
             changed = True
 
-        conn.execute(
-            f"""UPDATE jobs SET
-                sources = ?, source_urls = ?, last_seen = ?,
-                score = ?, score_breakdown = ?,
-                salary_min = COALESCE(?, salary_min),
-                salary_max = COALESCE(?, salary_max),
-                description = ?,
-                locations_raw = ?,
-                location = ?,
-                locations_structured = ?,
-                workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
-                primary_country_code = COALESCE(?, primary_country_code),
-                company_id = COALESCE(?, company_id),
-                posted_date = COALESCE(?, posted_date){jd_full_clause}
-            WHERE dedup_key = ?""",
-            (
-                json.dumps(sources),
-                json.dumps(urls),
-                now,
-                _score,
-                json.dumps(_score_breakdown),
-                norm_salary_min,
-                norm_salary_max,
-                merged_description,
-                json.dumps(locs_list),
-                merged_location,
-                locations_json,
-                workplace_type_col,
-                primary_country_code,
-                company_id,
-                pd_str,
-                *jd_full_value,
-                parsed.dedup_key,
-            ),
-        )
-        conn.commit()
+        try:
+            conn.execute(
+                f"""UPDATE jobs SET
+                    sources = ?, source_urls = ?, last_seen = ?,
+                    score = ?, score_breakdown = ?,
+                    salary_min = COALESCE(?, salary_min),
+                    salary_max = COALESCE(?, salary_max),
+                    description = ?,
+                    locations_raw = ?,
+                    location = ?,
+                    locations_structured = ?,
+                    workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
+                    primary_country_code = COALESCE(?, primary_country_code),
+                    company_id = COALESCE(?, company_id),
+                    posted_date = COALESCE(?, posted_date),
+                    unresolved_reasons = ?{jd_full_clause}
+                WHERE dedup_key = ?""",
+                (
+                    json.dumps(sources),
+                    json.dumps(urls),
+                    now,
+                    _score,
+                    json.dumps(_score_breakdown),
+                    norm_salary_min,
+                    norm_salary_max,
+                    merged_description,
+                    json.dumps(locs_list),
+                    merged_location,
+                    locations_json,
+                    workplace_type_col,
+                    primary_country_code,
+                    company_id,
+                    pd_str,
+                    json.dumps(list(parsed.unresolved_reasons)),
+                    *jd_full_value,
+                    parsed.dedup_key,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            # An m078 contract trigger (or the I-11 unique index) rejected the
+            # write. Surface it as IngestionRejected carrying the invariant code.
+            conn.rollback()
+            raise IngestionRejected(_parse_invariant(e), str(e)) from e
 
         # Auto-reopen: if an archived job re-appears in ingestion, treat
         # re-appearance as proof the job is live again.
@@ -391,9 +422,6 @@ def upsert_job(
                 source="ingestion",
                 evidence="re_appeared",
             )
-
-        # TODO Phase 47.04: catch sqlite3.IntegrityError here (after m078 triggers land)
-        # and re-raise as IngestionRejected(invariant=_parse_invariant(e))
 
         return UpsertResult(
             kind="updated" if changed else "unchanged",
@@ -411,49 +439,53 @@ def upsert_job(
         if parsed.description and len(parsed.description) > 200:
             initial_jd_full = parsed.description[:8000]
 
-        # Note: parsed.jd_full is not yet written to the DB (column lands in
-        # Phase 47.04 / m078). The eager promotion above covers the common case.
-        # TODO Phase 47.04: write parsed.jd_full to jd_full column directly.
+        # Note: parsed.jd_full is not yet written to the DB directly (the eager
+        # promotion above covers the common case; a dedicated jd_full write path
+        # lands in a later phase). The m078 I-13 trigger backstops any write.
 
         norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
-        conn.execute(
-            """INSERT INTO jobs
-                (dedup_key, title, company, location, sources, source_urls,
-                 source_id, salary_min, salary_max, description,
-                 first_seen, last_seen, score, score_breakdown, locations_raw,
-                 jd_full, scoring_provider,
-                 locations_structured, workplace_type, primary_country_code,
-                 company_id, posted_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                parsed.dedup_key,
-                parsed.title,
-                parsed.company,
-                initial_location_col,
-                json.dumps(list(parsed.sources)),
-                json.dumps(list(parsed.source_urls)),
-                parsed.source_id,
-                norm_salary_min,
-                norm_salary_max,
-                parsed.description,
-                first_seen,
-                now,
-                _score,
-                json.dumps(_score_breakdown),
-                json.dumps(_incoming_locs_raw),
-                initial_jd_full,
-                "heuristic",
-                locations_json,
-                workplace_type_col,
-                primary_country_code,
-                company_id,
-                pd_str,
-            ),
-        )
-        conn.commit()
-
-        # TODO Phase 47.04: catch sqlite3.IntegrityError here (after m078 triggers land)
-        # and re-raise as IngestionRejected(invariant=_parse_invariant(e))
+        try:
+            conn.execute(
+                """INSERT INTO jobs
+                    (dedup_key, title, company, location, sources, source_urls,
+                     source_id, salary_min, salary_max, description,
+                     first_seen, last_seen, score, score_breakdown, locations_raw,
+                     jd_full, scoring_provider,
+                     locations_structured, workplace_type, primary_country_code,
+                     company_id, posted_date, unresolved_reasons)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    parsed.dedup_key,
+                    parsed.title,
+                    parsed.company,
+                    initial_location_col,
+                    json.dumps(list(parsed.sources)),
+                    json.dumps(list(parsed.source_urls)),
+                    parsed.source_id,
+                    norm_salary_min,
+                    norm_salary_max,
+                    parsed.description,
+                    first_seen,
+                    now,
+                    _score,
+                    json.dumps(_score_breakdown),
+                    json.dumps(_incoming_locs_raw),
+                    initial_jd_full,
+                    "heuristic",
+                    locations_json,
+                    workplace_type_col,
+                    primary_country_code,
+                    company_id,
+                    pd_str,
+                    json.dumps(list(parsed.unresolved_reasons)),
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            # An m078 contract trigger (or the I-11 unique index) rejected the
+            # write. Surface it as IngestionRejected carrying the invariant code.
+            conn.rollback()
+            raise IngestionRejected(_parse_invariant(e), str(e)) from e
 
         return UpsertResult(
             kind="inserted",

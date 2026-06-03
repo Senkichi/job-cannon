@@ -11,8 +11,10 @@ atomically via COALESCE).
 
 import sqlite3
 
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations.m056_clear_anthropic_default_leak import MIGRATION
+from tests.helpers.contract_triggers import (
+    run_migrations_without_contract as run_migrations,
+)
 
 
 def test_migration_version_is_56():

@@ -27,12 +27,14 @@ import tempfile
 
 import pytest
 
-from job_finder.web.db_migrate import run_migrations
 from job_finder.web.migrations.m068_reheal_ats_slug_collisions import (
     MIGRATION,
     _heal,
 )
 from job_finder.web.migrations.types import MigrationContext
+from tests.helpers.contract_triggers import (
+    run_migrations_without_contract as run_migrations,
+)
 
 
 @pytest.fixture

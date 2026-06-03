@@ -214,7 +214,17 @@ class TestCountScorable:
     """
 
     def _insert_job(self, conn, dedup_key: str, **fields):
-        """Insert a minimal job row. Defaults yield a scorable row."""
+        """Insert a minimal job row. Defaults yield a scorable row.
+
+        This class verifies count_scorable's defensive exclusion of legacy
+        rows with empty / whitespace / sub-floor jd_full — shapes the m078
+        I-13 trigger now forbids at the write boundary but that can still
+        exist in pre-m078 history. Drop the contract triggers so those
+        legacy shapes can be staged.
+        """
+        from tests.helpers.contract_triggers import drop_contract_triggers
+
+        drop_contract_triggers(conn)
         defaults = {
             "title": "Data Scientist",
             "company": "Acme",

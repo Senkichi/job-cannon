@@ -265,9 +265,24 @@ def test_scoring_backfill_classifies_unscored_jobs(migrated_db):
 
     path, conn = migrated_db
 
-    insert_job(conn, "job1", jd_full="Full JD for job 1", sonnet_score=None)
-    insert_job(conn, "job2", jd_full="Full JD for job 2", sonnet_score=None)
-    insert_job(conn, "job3", jd_full="Full JD for job 3", sonnet_score=None)
+    insert_job(
+        conn,
+        "job1",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
+    insert_job(
+        conn,
+        "job2",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
+    insert_job(
+        conn,
+        "job3",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
 
     assessment = JobAssessment(
         sub_scores={
@@ -315,10 +330,20 @@ def test_scoring_backfill_skips_already_classified(migrated_db):
 
     path, conn = migrated_db
 
-    insert_job(conn, "already_scored", jd_full="Full JD", sonnet_score=None)
+    insert_job(
+        conn,
+        "already_scored",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
     conn.execute("UPDATE jobs SET classification = 'apply' WHERE dedup_key = 'already_scored'")
     conn.commit()
-    insert_job(conn, "needs_scoring", jd_full="Full JD 2", sonnet_score=None)
+    insert_job(
+        conn,
+        "needs_scoring",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
 
     assessment = JobAssessment(
         sub_scores={
@@ -448,7 +473,12 @@ def test_scoring_backfill_writes_fit_analysis(migrated_db):
     from job_finder.web.job_scorer import ScoringResult as JSResult
 
     path, conn = migrated_db
-    insert_job(conn, "job_with_jd", jd_full="Full job description here", sonnet_score=None)
+    insert_job(
+        conn,
+        "job_with_jd",
+        jd_full="About the role you will design build and operate data and ML systems at scale partnering with cross functional teams to ship reliable features end to end Requirements strong Python and SQL plus hands on cloud infrastructure testing and production observability experience",
+        sonnet_score=None,
+    )
 
     rationale = {
         "strengths": ["Python", "ML"],
