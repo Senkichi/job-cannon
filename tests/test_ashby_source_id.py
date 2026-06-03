@@ -78,9 +78,7 @@ class TestPostedDate:
 
     def test_posted_date_from_published_at(self):
         """publishedAt present → posted_date matches it exactly."""
-        result = _posting_to_job(
-            _minimal_posting(publishedAt="2024-03-15T09:00:00.000Z"), _SLUG
-        )
+        result = _posting_to_job(_minimal_posting(publishedAt="2024-03-15T09:00:00.000Z"), _SLUG)
         assert result["posted_date"] == "2024-03-15T09:00:00.000Z"
 
     def test_posted_date_none_when_published_at_absent(self):
