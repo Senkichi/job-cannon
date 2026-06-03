@@ -74,13 +74,14 @@ jobs:
         shell: bash
         run: uv run python -c "import shutil; from pathlib import Path; from job_finder.web import user_data_dirs; user_data_dirs.ensure_user_data_dir(); dst=Path(user_data_dirs.config_path()); shutil.copyfile('config.example.yaml', dst); print('seeded config ->', dst)"
 
+      # Parallelized with pytest-xdist (in the dev extra). --dist loadscope
+      # keeps same-module tests on one worker so module-scoped fixtures
+      # (DB tempfiles, autouse mocks) stay isolated — the same mode the
+      # bhokaral worker self-test uses, proven flake-free vs the serial
+      # baseline. Coverage upload removed (Codecov app not installed, token
+      # absent → the step was a no-op; dropping --cov also speeds both legs).
       - name: Run tests
-        run: uv run pytest --cov=job_finder --cov-report=xml -q --tb=short
-
-      - uses: codecov/codecov-action@v6
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
+        run: uv run pytest -n auto --dist loadscope -q --tb=short
 
 
   # ── Pre-commit Validation ────────────────────────────────────
