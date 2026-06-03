@@ -19,6 +19,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db import derive_classification
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
@@ -523,7 +524,7 @@ def _upsert_one_ats_api_job(
             try:
                 conn.execute(
                     "UPDATE jobs SET jd_full = COALESCE(jd_full, ?) WHERE dedup_key = ?",
-                    (clean_desc[:8000], job.dedup_key),
+                    (clean_desc[:JD_STORAGE_MAX_CHARS], job.dedup_key),
                 )
                 conn.commit()
             except Exception as e:

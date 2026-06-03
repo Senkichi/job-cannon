@@ -998,14 +998,19 @@ class TestFetchDirectJd:
         assert "Site Header" not in result
         assert "Footer content" not in result
 
-    def test_caps_result_at_8000_characters(self):
-        """_fetch_direct_jd() caps returned text at 8000 characters."""
+    def test_caps_result_at_storage_limit(self):
+        """_fetch_direct_jd() caps returned text at the shared JD storage limit.
+
+        The cap is JD_STORAGE_MAX_CHARS (a storage bound well above the scorer's
+        own prompt cap), not the old hard-coded 8000 that chopped readable JDs.
+        """
         from unittest.mock import MagicMock, patch
 
+        from job_finder.config import JD_STORAGE_MAX_CHARS
         from job_finder.web.enrichment_tiers import fetch_direct_jd as _fetch_direct_jd
 
-        # Create a page with content much longer than 8000 chars
-        long_content = "A" * 20_000
+        # Create a page with content longer than the cap so truncation triggers.
+        long_content = "A" * (JD_STORAGE_MAX_CHARS + 10_000)
         html = f"<html><body><p>{long_content}</p></body></html>"
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -1016,7 +1021,7 @@ class TestFetchDirectJd:
             result = _fetch_direct_jd("https://example.com/jobs/789")
 
         assert result is not None
-        assert len(result) <= 8000
+        assert len(result) <= JD_STORAGE_MAX_CHARS
 
     def test_returns_none_on_timeout(self):
         """_fetch_direct_jd() returns None when requests.get raises Timeout."""
@@ -1536,8 +1541,10 @@ class TestDescriptionPromotion:
 
         assert row is not None, "Job row not found in DB"
         assert row["jd_full"] is not None, "Expected jd_full to be set in DB after promotion"
-        assert row["jd_full"] == long_desc[:8000], (
-            f"Expected jd_full in DB to match description (truncated to 8000), "
+        from job_finder.config import JD_STORAGE_MAX_CHARS
+
+        assert row["jd_full"] == long_desc[:JD_STORAGE_MAX_CHARS], (
+            f"Expected jd_full in DB to match description (capped at JD_STORAGE_MAX_CHARS), "
             f"got: {row['jd_full']!r}"
         )
 

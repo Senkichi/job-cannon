@@ -298,7 +298,9 @@ class TestEnrichSingleJob:
             result = enrich_single_job(job_row, page, conn=None, config={})
 
         assert result is not None
-        assert len(result) <= 8000  # trimmed to _MAX_JD_CHARS
+        from job_finder.web.agentic_enricher import _MAX_JD_CHARS
+
+        assert len(result) <= _MAX_JD_CHARS  # trimmed to the JD storage cap
 
     def test_returns_none_when_no_urls_found(self):
         """When DDG returns no URLs, returns None immediately."""

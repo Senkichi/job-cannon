@@ -21,6 +21,7 @@ import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
 from job_finder.web.model_provider import call_model
 
@@ -45,7 +46,7 @@ from job_finder.web._http_constants import _HEADERS, _TIMEOUT
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
 
 # Maximum characters to return from direct JD fetch
-_MAX_JD_CHARS = 8000
+_MAX_JD_CHARS = JD_STORAGE_MAX_CHARS
 
 # Auth-wall signatures: if page text contains any of these (case-insensitive),
 # the fetched page is a login/CAPTCHA wall, not a real JD. Return None.
