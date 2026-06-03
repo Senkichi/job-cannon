@@ -537,6 +537,29 @@ def block_claude_cli_subprocess():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_ensure_ollama_running():
+    """Auto-mock the scheduler's Ollama auto-start probe.
+
+    ``init_scheduler()`` calls ``_ensure_ollama_running()``, which constructs
+    an ``OllamaProvider`` (HTTP health-probe of a local Ollama service) and, on
+    failure, SPAWNS ``ollama serve`` (subprocess.Popen) and polls up to 30s.
+    Tests exercising the scheduler-start path (``TESTING=False`` with
+    ``BackgroundScheduler`` patched) don't mock it, so it ran for real: a fixed
+    ~2s/test locally (HTTP probe + spawn) and ~4s on the CI Windows runner
+    across ~23 scheduler tests — and on a runner with Ollama installed it would
+    spawn stray ``ollama serve`` processes. No test validates the auto-start
+    behavior, so no-op it suite-wide. Mirrors the ``_run_oneshot`` /
+    ``mock_liveness_check`` / ``block_claude_cli_subprocess`` autouse mocks that
+    already fence off the other accidental real-service side-effects.
+    """
+    with patch(
+        "job_finder.web.scheduler._ensure_ollama_running",
+        return_value=None,
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture
 def cascade_config_low():
     """Config with Ollama primary + Anthropic CLI fallback for the low tier.
