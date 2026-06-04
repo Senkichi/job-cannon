@@ -1,0 +1,33 @@
+{# Pipeline health metrics (5 read-only stat cards).
+
+   Extracted from companies/index.html so the SSE-driven
+   companies.health_fragment route can re-render it live when a background
+   ATS scan / slug probe / linkage / hygiene job changes the underlying
+   counts. Required context: health (dict) — see _compute_health_metrics.
+#}
+{% if health %}
+<div class="grid grid-cols-5 gap-3">
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+    <div class="text-2xl font-bold {% if health.pending_probe > 50 %}text-amber-400{% else %}text-emerald-400{% endif %}">{{ health.pending_probe }}</div>
+    <div class="text-xs text-slate-400 mt-1">Pending Probe</div>
+  </div>
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+    <div class="text-2xl font-bold text-slate-200">{{ health.homepage_pct }}%</div>
+    <div class="text-xs text-slate-400 mt-1">Have Homepage</div>
+  </div>
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+    <div class="text-2xl font-bold text-slate-200">{{ health.enrichment_pct }}%</div>
+    <div class="text-xs text-slate-400 mt-1">Enriched</div>
+  </div>
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+    <div class="text-2xl font-bold {% if health.unlinked_jobs > 0 %}text-amber-400{% else %}text-emerald-400{% endif %}">{{ health.unlinked_jobs }}</div>
+    <div class="text-xs text-slate-400 mt-1">Unlinked Jobs</div>
+  </div>
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
+    <div class="text-2xl font-bold {% if health.last_scan_age_days is not none and health.last_scan_age_days > 7 %}text-red-400{% elif health.last_scan_at %}text-emerald-400{% else %}text-slate-500{% endif %}">
+      {% if health.last_scan_age_days is not none %}{{ health.last_scan_age_days }}d{% else %}—{% endif %}
+    </div>
+    <div class="text-xs text-slate-400 mt-1">Since Last Scan</div>
+  </div>
+</div>
+{% endif %}

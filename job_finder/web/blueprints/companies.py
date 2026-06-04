@@ -39,6 +39,8 @@ from job_finder.web.db_helpers import (
     render_polling_status,
     standalone_connection,
 )
+from job_finder.web.live_events import COMPANIES_CHANGED, JOBS_CHANGED
+from job_finder.web.live_events import publish as publish_live
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +151,19 @@ def index():
         health=health,
         running_scan=running_scan,
     )
+
+
+@companies_bp.route("/health", strict_slashes=False)
+def health_fragment():
+    """HTMX fragment — the 5 pipeline-health stat cards.
+
+    Refetched on ``sse:companies-changed`` / ``sse:jobs-changed`` so the cards
+    reflect background ATS scan / slug probe / linkage / hygiene runs live.
+    Reuses ``_compute_health_metrics`` + the ``_health_metrics.html`` partial
+    shared with the full-page render so the two never drift.
+    """
+    conn = get_db()
+    return render_template("companies/_health_metrics.html", health=_compute_health_metrics(conn))
 
 
 @companies_bp.route("/<int:company_id>/expand", strict_slashes=False)
@@ -638,6 +653,12 @@ def _run_ats_scan_bg(db_path: str, session_id: int, config: dict) -> None:
                 ),
             )
             conn.commit()
+
+        # ATS scan discovered jobs and updated company ATS state — push live
+        # events so the companies health cards, dashboard, and job board reflect
+        # it on every open page (the polling tab also gets HX-Trigger).
+        for _ev in (COMPANIES_CHANGED, JOBS_CHANGED):
+            publish_live(_ev)
     except Exception as e:
         logger.error("ATS scan background thread failed: %s", e)
         try:

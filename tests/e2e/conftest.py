@@ -201,6 +201,10 @@ def live_server(e2e_db_path):
     }
     app = create_app(config=test_config)
     app.config["TESTING"] = True
+    # Disable the SSE live-update stream for E2E: a long-lived /events
+    # connection never reaches Playwright's networkidle and would wedge the
+    # single-threaded test server. Live updates are unit-tested separately.
+    app.config["LIVE_UPDATES_ENABLED"] = False
 
     server_thread = threading.Thread(
         target=app.run,

@@ -22,15 +22,15 @@ DYNAMIC_COLUMNS = ["technical", "onsite", "offer", "accepted"]
 HIDDEN_COLUMNS = ["archived", "withdrawn"]
 
 
-@pipeline_bp.route("/", strict_slashes=False)
-def index():
-    """Kanban pipeline view — jobs grouped by pipeline stage."""
-    conn = get_db()
+def _build_columns(conn) -> list[dict]:
+    """Build the ordered Kanban column list.
 
+    Core columns are always present (even if empty); dynamic columns appear
+    only when populated. Shared by the full-page render and the SSE board
+    fragment so the two never drift.
+    """
     jobs_by_status = get_jobs_by_status(conn)
 
-    # Build the ordered column list for the template.
-    # Core columns always present (even if empty); dynamic columns only when populated.
     columns = []
     for status in CORE_COLUMNS:
         columns.append(
@@ -54,11 +54,28 @@ def index():
                     "collapsed": False,
                 }
             )
+    return columns
 
-    return render_template(
-        "pipeline/index.html",
-        columns=columns,
-    )
+
+@pipeline_bp.route("/", strict_slashes=False)
+def index():
+    """Kanban pipeline view — jobs grouped by pipeline stage."""
+    conn = get_db()
+    return render_template("pipeline/index.html", columns=_build_columns(conn))
+
+
+@pipeline_bp.route("/board", strict_slashes=False)
+def board_fragment():
+    """HTMX fragment — the inner Kanban columns.
+
+    Refetched on ``sse:pipeline-changed`` / ``sse:jobs-changed`` so cards that
+    move via the background pipeline-detection job (or get archived by the
+    nightly staleness check) re-flow live. The page re-initialises SortableJS
+    on ``htmx:afterSettle`` (see pipeline/index.html); a drag-in-progress guard
+    on the trigger keeps a background refresh from yanking a card mid-drag.
+    """
+    conn = get_db()
+    return render_template("pipeline/_board_columns.html", columns=_build_columns(conn))
 
 
 @pipeline_bp.route("/move", methods=["POST"], strict_slashes=False)

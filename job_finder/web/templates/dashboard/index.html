@@ -25,15 +25,18 @@
   </div>
   {% endif %}
 
-  {# ── Stat Cards (incl. budget banner) — auto-refresh on dashboard-refresh ── #}
-  {# After a sync or batch scoring run the polling helper emits           #}
-  {# HX-Trigger: {"dashboard-refresh": null}; this wrapper re-fetches the #}
-  {# stats partial so counts (and the budget banner) update without a    #}
-  {# full page reload. See _BATCH_HX_TRIGGER in blueprints/batch_scoring. #}
+  {# ── Stat Cards (incl. budget banner) — live-update ── #}
+  {# Two refresh sources, no polling:                                          #}
+  {#   • dashboard-refresh (from:body) — fired by sync/batch-scoring/scan      #}
+  {#     completion in THIS tab (see _BATCH_HX_TRIGGER in batch_scoring).      #}
+  {#   • sse:* — pushed by the /events stream when a background scheduler job  #}
+  {#     mutates the underlying data (see job_finder/web/live_events.py).      #}
+  {# Covers every datum on the cards: counts (jobs), today's cost (costs),     #}
+  {# in-review (pipeline), pending-review (detections).                        #}
   <section aria-label="Key metrics">
     <div id="dashboard-stats"
          hx-get="{{ url_for('dashboard.stats_fragment') }}"
-         hx-trigger="dashboard-refresh from:body, every 30s"
+         hx-trigger="dashboard-refresh from:body, sse:jobs-changed, sse:costs-changed, sse:pipeline-changed, sse:detections-changed"
          hx-swap="innerHTML">
       {% include "dashboard/_stats_cards.html" %}
     </div>
@@ -136,20 +139,29 @@
   </dialog>
 
   <!-- ── Pipeline Review Queue ── -->
+  {# The container refetches on sse:detections-changed so detections surfaced  #}
+  {# by the background pipeline-detection job appear live. It deliberately     #}
+  {# does NOT listen to dashboard-refresh: user confirm/dismiss has its own    #}
+  {# card-level swap + "confirmed!" animation (see blueprints/detections.py),  #}
+  {# and a competing innerHTML refetch would blow that animation away. The     #}
+  {# fragment also OOB-refreshes the header badge below.                       #}
   <section aria-label="Pipeline review queue">
     {% include "dashboard/_pipeline_review_header.html" %}
-    <div id="review-queue-container">
+    <div id="review-queue-container"
+         hx-get="{{ url_for('dashboard.review_queue_fragment') }}"
+         hx-trigger="sse:detections-changed"
+         hx-swap="innerHTML">
       {% include "dashboard/_review_queue.html" %}
     </div>
   </section>
 
-  {# ── History block (pipeline summary + activity tables) — live-updates ── #}
-  {# Polls every 30s and re-fetches on dashboard-refresh so these tables stay #}
-  {# current without a full page reload. Partial is shared with the full-page #}
-  {# render above (dashboard.index) and the dashboard.history_fragment route. #}
+  {# ── History block (pipeline summary + activity tables) — live-update ── #}
+  {# Re-fetches on dashboard-refresh (this tab's sync/scoring/scan runs) and   #}
+  {# on the SSE events whose data these tables surface — no polling. Partial   #}
+  {# is shared with the full-page render above and dashboard.history_fragment. #}
   <div id="dashboard-history"
        hx-get="{{ url_for('dashboard.history_fragment') }}"
-       hx-trigger="dashboard-refresh from:body, every 30s"
+       hx-trigger="dashboard-refresh from:body, sse:jobs-changed, sse:pipeline-changed, sse:detections-changed"
        hx-swap="innerHTML">
     {% include "dashboard/_dashboard_history.html" %}
   </div>

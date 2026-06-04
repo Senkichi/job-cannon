@@ -19,6 +19,14 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from job_finder.web.db_helpers import get_config_snapshot
+from job_finder.web.live_events import (
+    COMPANIES_CHANGED,
+    COSTS_CHANGED,
+    DETECTIONS_CHANGED,
+    JOBS_CHANGED,
+    PIPELINE_CHANGED,
+)
+from job_finder.web.live_events import publish as publish_live
 from job_finder.web.scheduler._factories import _make_simple_job, _make_tracked_job
 
 logger = logging.getLogger(__name__)
@@ -82,6 +90,10 @@ def register_ingestion(scheduler, app) -> None:
                     ):
                         metadata[k] = v
                 log_activity(db_path, ACTION_SCHEDULED_SYNC, metadata=metadata)
+                # New rows, fresh scores/costs, and pipeline-status churn — nudge
+                # every live widget that reflects them.
+                for _ev in (JOBS_CHANGED, COSTS_CHANGED, PIPELINE_CHANGED):
+                    publish_live(_ev)
             except Exception as e:
                 logger.error("Scheduled ingestion failed: %s", e)
                 log_activity(
@@ -152,6 +164,7 @@ def register_staleness(scheduler, app) -> None:
                 "enabled",
                 config.get("expiry", {}).get("enabled", True),
             ),
+            publish_events=(JOBS_CHANGED, PIPELINE_CHANGED),
         ),
         trigger=CronTrigger(hour=2, minute=0),
         id="staleness_check",
@@ -191,6 +204,7 @@ def register_pipeline_detection(scheduler, app) -> None:
                 "queued": r.get("queued", 0),
                 "errors": r.get("errors", []),
             },
+            publish_events=(PIPELINE_CHANGED, DETECTIONS_CHANGED, JOBS_CHANGED),
         ),
         trigger=IntervalTrigger(minutes=30),
         id="pipeline_detection",
@@ -230,6 +244,7 @@ def register_ats_scan(scheduler, app) -> None:
                 "jobs_new": r.get("jobs_new", 0),
             },
             guard=lambda config: config.get("ats", {}).get("scan_enabled", True),
+            publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
         ),
         trigger=CronTrigger(hour=7, minute=0),
         id="ats_scan",
@@ -253,7 +268,9 @@ def register_ats_slug_probe(scheduler, app) -> None:
         return probe_ats_slugs
 
     scheduler.add_job(
-        _make_simple_job(app, "ATS slug probe", _import_slug_probe),
+        _make_simple_job(
+            app, "ATS slug probe", _import_slug_probe, publish_events=(COMPANIES_CHANGED,)
+        ),
         trigger=CronTrigger(hour=7, minute=30),
         id="ats_slug_probe",
         replace_existing=True,
@@ -276,7 +293,12 @@ def register_ats_promote(scheduler, app) -> None:
         return promote_ats_from_source_urls
 
     scheduler.add_job(
-        _make_simple_job(app, "ATS source-URL promotion", _import_ats_promote),
+        _make_simple_job(
+            app,
+            "ATS source-URL promotion",
+            _import_ats_promote,
+            publish_events=(COMPANIES_CHANGED, JOBS_CHANGED),
+        ),
         trigger=CronTrigger(hour=4, minute=45),
         id="ats_source_url_promote",
         replace_existing=True,
@@ -316,6 +338,7 @@ def register_careers_crawl(scheduler, app) -> None:
                 "playwright_rendered": r.get("playwright_rendered", 0),
             },
             guard=lambda config: config.get("careers_crawl", {}).get("enabled", True),
+            publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
         ),
         trigger=CronTrigger(hour=5, minute=0),
         id="careers_crawl",
@@ -339,7 +362,12 @@ def register_company_linkage(scheduler, app) -> None:
         return run_company_linkage
 
     scheduler.add_job(
-        _make_simple_job(app, "Company linkage", _import_company_linkage),
+        _make_simple_job(
+            app,
+            "Company linkage",
+            _import_company_linkage,
+            publish_events=(COMPANIES_CHANGED, JOBS_CHANGED),
+        ),
         trigger=CronTrigger(hour=5, minute=0),
         id="company_linkage",
         replace_existing=True,
@@ -362,7 +390,9 @@ def register_orphan_cleanup(scheduler, app) -> None:
         return run_orphan_cleanup
 
     scheduler.add_job(
-        _make_simple_job(app, "Orphan cleanup", _import_orphan_cleanup),
+        _make_simple_job(
+            app, "Orphan cleanup", _import_orphan_cleanup, publish_events=(COMPANIES_CHANGED,)
+        ),
         trigger=CronTrigger(day=1, hour=3, minute=0),
         id="orphan_cleanup",
         replace_existing=True,
@@ -385,7 +415,12 @@ def register_homepage_discovery(scheduler, app) -> None:
         return run_homepage_discovery
 
     scheduler.add_job(
-        _make_simple_job(app, "Homepage discovery", _import_homepage_discovery),
+        _make_simple_job(
+            app,
+            "Homepage discovery",
+            _import_homepage_discovery,
+            publish_events=(JOBS_CHANGED, COMPANIES_CHANGED),
+        ),
         trigger=CronTrigger(hour=6, minute=30),
         id="homepage_discovery",
         replace_existing=True,
@@ -410,7 +445,9 @@ def register_registry_hygiene(scheduler, app) -> None:
         return run_registry_hygiene
 
     scheduler.add_job(
-        _make_simple_job(app, "Registry hygiene", _import_registry_hygiene),
+        _make_simple_job(
+            app, "Registry hygiene", _import_registry_hygiene, publish_events=(COMPANIES_CHANGED,)
+        ),
         trigger=CronTrigger(day=1, hour=3, minute=30),
         id="registry_hygiene",
         replace_existing=True,
@@ -457,6 +494,7 @@ def register_enrichment_backfill(scheduler, app) -> None:
                 "classified_reject": r.get("classified_reject", 0),
                 "errors": r.get("errors", []),
             },
+            publish_events=(JOBS_CHANGED, COSTS_CHANGED),
         ),
         trigger=CronTrigger(hour="1,9,17"),
         id="enrichment_backfill",
@@ -503,6 +541,7 @@ def register_agentic_backfill(scheduler, app) -> None:
             # "jobs_enriched" matches naming convention used by other tracked jobs
             # (jobs_found, jobs_new, jobs_scanned) for consistent dashboard display.
             extract_metadata=lambda r: {"jobs_enriched": r if isinstance(r, int) else 0},
+            publish_events=(JOBS_CHANGED, COSTS_CHANGED),
         ),
         trigger=CronTrigger(hour=4, minute=15),
         id="agentic_backfill",
