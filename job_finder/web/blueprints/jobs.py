@@ -19,6 +19,7 @@ from flask import (
     url_for,
 )
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db import (
     get_distinct_country_codes,
     get_distinct_locations,
@@ -710,8 +711,9 @@ def paste_jd(dedup_key: str):
             error="Please provide a job description.",
         )
 
-    # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
-    jd_text = jd_text[:8000]
+    # Cap at the shared storage limit — same bound applied by upsert_job during
+    # ingestion (JD_STORAGE_MAX_CHARS; well above the scorer's own prompt cap).
+    jd_text = jd_text[:JD_STORAGE_MAX_CHARS]
 
     # Store the JD text
     conn.execute(
@@ -910,8 +912,9 @@ def save_jd(dedup_key: str):
             error="Please provide a job description.",
         )
 
-    # Cap at 8000 chars — same limit applied by upsert_job during ingestion.
-    jd_text = jd_text[:8000]
+    # Cap at the shared storage limit — same bound applied by upsert_job during
+    # ingestion (JD_STORAGE_MAX_CHARS; well above the scorer's own prompt cap).
+    jd_text = jd_text[:JD_STORAGE_MAX_CHARS]
 
     conn.execute(
         "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",

@@ -64,6 +64,17 @@ DEFAULT_LOOKBACK_DAYS = 7
 # --- Output ---
 DEFAULT_MAX_RESULTS = 50
 
+# --- Job-description storage cap ---
+# Maximum characters of job-description text persisted to jobs.jd_full /
+# jobs.description. This is a STORAGE bound (DB size + a guard against
+# pathological multi-hundred-KB postings), NOT a scoring bound — the scorer
+# applies its own independent prompt cap (job_scorer._MAX_JD_CHARS) when it
+# builds the model input. It must therefore stay comfortably ABOVE that prompt
+# cap so the stored JD is never the limiting factor for either scoring or the
+# full-JD display on job-row expand. Was 8000 (which truncated readable JDs
+# mid-token and sat below the 10k the scorer would have accepted).
+JD_STORAGE_MAX_CHARS = 50_000
+
 # --- Profile ---
 DEFAULT_PROFILE_PATH = "experience_profile.json"
 

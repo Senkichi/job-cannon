@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.json_utils import safe_json_load, utc_now_iso
 from job_finder.models import Job
 from job_finder.web.location_canonical import JobLocation
@@ -358,7 +359,7 @@ def upsert_job(
         jd_full_value: tuple = ()
         if not existing["jd_full"] and merged_description and len(merged_description) > 200:
             jd_full_clause = ", jd_full = ?"
-            jd_full_value = (merged_description[:8000],)
+            jd_full_value = (merged_description[:JD_STORAGE_MAX_CHARS],)
             changed = True
 
         # Salary change detection (COALESCE writes new value when non-NULL)
@@ -440,7 +441,7 @@ def upsert_job(
         initial_location_col = ", ".join(_incoming_locs_raw)
         initial_jd_full = None
         if parsed.description and len(parsed.description) > 200:
-            initial_jd_full = parsed.description[:8000]
+            initial_jd_full = parsed.description[:JD_STORAGE_MAX_CHARS]
 
         # Note: parsed.jd_full is not yet written to the DB directly (the eager
         # promotion above covers the common case; a dedicated jd_full write path

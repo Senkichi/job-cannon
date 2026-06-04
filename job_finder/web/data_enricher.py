@@ -41,6 +41,7 @@ import json
 import logging
 from typing import Any
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.enrichment_sources import merge_apply_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
@@ -171,7 +172,7 @@ def enrich_job(
                 try:
                     conn.execute(
                         "UPDATE jobs SET jd_full = ? WHERE dedup_key = ? AND jd_full IS NULL",
-                        (job_row["description"][:8000], job_row.get("dedup_key")),
+                        (job_row["description"][:JD_STORAGE_MAX_CHARS], job_row.get("dedup_key")),
                     )
                     conn.commit()
                 except Exception as e:

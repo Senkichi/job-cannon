@@ -210,6 +210,12 @@
       {% endif %}
 
       <!-- Full Job Description card (collapsible, when jd_full is present) -->
+      {# Render the fullest JD available: jd_full is capped at write time and the
+         raw `description` column is sometimes longer, so show whichever is longer
+         (jd_full is NOT always a superset). #}
+      {% set _jdf = job.jd_full or '' %}
+      {% set _desc = job.description or '' %}
+      {% set jd_display = _desc if (_desc | length) > (_jdf | length) else _jdf %}
       {% if job.jd_full %}
       <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-3">
         <details>
@@ -217,7 +223,7 @@
             Full Job Description
           </summary>
           <div class="mt-2 max-h-96 overflow-y-auto">
-            <div class="text-sm text-slate-300 leading-relaxed">{{ job.jd_full | format_description }}</div>
+            <div class="text-sm text-slate-300 leading-relaxed">{{ jd_display | format_description }}</div>
           </div>
         </details>
       </div>

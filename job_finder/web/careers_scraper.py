@@ -24,6 +24,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.claude_client import call_claude
 from job_finder.web.model_provider import ProviderCascadeExhaustedError, call_model
 
@@ -43,7 +44,7 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; JobFinder/1.0)"}
 _TIMEOUT = 10
 
 _JD_DELAY = 1.0  # seconds between job page fetches (rate limiting)
-_MAX_JD_CHARS = 8000  # cap extracted JD text
+_MAX_JD_CHARS = JD_STORAGE_MAX_CHARS  # cap extracted JD text
 
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
 

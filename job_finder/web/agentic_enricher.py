@@ -26,13 +26,15 @@ import re
 import time
 from typing import Any
 
+from job_finder.config import JD_STORAGE_MAX_CHARS
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_MAX_JD_CHARS = 8000
+_MAX_JD_CHARS = JD_STORAGE_MAX_CHARS
 _MAX_SEARCH_QUERIES = 4
 _MAX_URLS_PER_QUERY = 3
 _MAX_FETCH_ATTEMPTS = 6  # Total URLs to try before giving up

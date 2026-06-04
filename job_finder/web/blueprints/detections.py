@@ -2,7 +2,7 @@
 
 import logging
 
-from flask import Blueprint, render_template
+from flask import Blueprint, make_response, render_template
 
 from job_finder.db import get_dashboard_stats, resolve_detection, update_pipeline_status
 from job_finder.web.db_helpers import get_db
@@ -39,6 +39,20 @@ def _render_pipeline_review_header_oob(conn) -> str:
         pending_count=pending_count,
         oob=True,
     )
+
+
+def _with_dashboard_refresh(html: str):
+    """Wrap an HTMX fragment in a response that fires the ``dashboard-refresh`` event.
+
+    The OOB swap in ``_render_pipeline_review_header_oob`` only refreshes the
+    in-section h2 badge. The top-right "Pending Review" stat card lives inside
+    ``#dashboard-stats``, which re-fetches on ``dashboard-refresh from:body`` —
+    the same event sync/batch-scoring emit on completion. Without this header
+    the stat card stays frozen at its page-load value until a full reload.
+    """
+    resp = make_response(html)
+    resp.headers["HX-Trigger"] = "dashboard-refresh"
+    return resp
 
 
 @detections_bp.route("/<int:detection_id>/confirm", methods=["POST"], strict_slashes=False)
@@ -102,7 +116,7 @@ def confirm(detection_id: int):
         company=company,
         new_status=new_status,
     )
-    return primary + _render_pipeline_review_header_oob(conn)
+    return _with_dashboard_refresh(primary + _render_pipeline_review_header_oob(conn))
 
 
 @detections_bp.route("/<int:detection_id>/dismiss", methods=["POST"], strict_slashes=False)
@@ -130,5 +144,6 @@ def dismiss(detection_id: int):
 
     logger.info("Detection %d dismissed", detection_id)
     # Empty primary swap removes the card; OOB header re-renders the badge
-    # with the decremented count so the dashboard counter doesn't lie.
-    return _render_pipeline_review_header_oob(conn), 200
+    # with the decremented count so the dashboard counter doesn't lie. The
+    # dashboard-refresh trigger also re-fetches the top-right stat card.
+    return _with_dashboard_refresh(_render_pipeline_review_header_oob(conn))
