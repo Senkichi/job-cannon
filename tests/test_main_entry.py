@@ -47,7 +47,9 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer") as mock_timer,
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        # --terminal forces terminal mode so this test exercises the terminal path,
+        # not the tray path which would require a display / pystray backend.
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
     ):
         main_mod.main()
 
@@ -59,7 +61,8 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
 
 
 def test_main_default_schedules_browser_open(monkeypatch, capsys):
-    """Without the opt-out, main() prints the banner AND schedules the timer."""
+    """Without the opt-out, main() in terminal mode prints the banner AND
+    schedules the timer."""
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
     fake_app = MagicMock()
@@ -69,7 +72,9 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        # --terminal forces terminal mode so Timer logic is exercised; default
+        # (tray) mode dispatches to TrayApp which owns the browser-open.
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
     ):
         main_mod.main()
 
@@ -96,7 +101,9 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
     with (
         patch("job_finder.config.load_config", return_value=cfg),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        # --terminal keeps this test in the terminal-mode path so app.run() args
+        # can be asserted directly; tray mode wraps app in TrayApp.
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
     ):
         main_mod.main()
 
@@ -116,7 +123,8 @@ def test_main_passes_use_reloader_false(monkeypatch):
     with (
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
-        patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        # --terminal so app.run() call_args are directly observable.
+        patch("job_finder.__main__.sys.argv", ["job-cannon", "--terminal"]),
     ):
         main_mod.main()
 
