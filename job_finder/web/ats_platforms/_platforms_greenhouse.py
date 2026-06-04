@@ -27,6 +27,7 @@ from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.description_formatter import html_to_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +118,18 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     # Greenhouse returns ISO-8601 strings (e.g. "2024-01-15T10:30:00Z").
     posted_date: str | None = posting.get("updated_at") or posting.get("created_at") or None
 
+    # ── Description (JD Layer 2 step 2a) ─────────────────────────────────────
+    # Greenhouse `content` is entity-escaped HTML (&lt;p&gt;…). Stored verbatim
+    # it would send raw HTML to the scorer. Convert losslessly to plain text —
+    # no tags, no entities, no dropped sections.
+    description = html_to_plain_text(posting.get("content") or "")
+
     return {
         "title": posting.get("title", ""),
         "company_source": "Greenhouse",
         "location": location,
         "locations_structured": _to_canonical(posting),
-        "description": posting.get("content") or "",
+        "description": description,
         "source_url": posting.get("absolute_url") or "",
         "salary_min": salary_min,
         "salary_max": salary_max,

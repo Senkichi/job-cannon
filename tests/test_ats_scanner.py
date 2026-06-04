@@ -1153,6 +1153,48 @@ class TestScanGreenhouse:
         assert len(results) == 1
         assert results[0]["title"] == "Senior Data Scientist"
 
+    def test_scan_greenhouse_cleans_escaped_html_content(self):
+        """Greenhouse `content` (entity-escaped HTML) is stored as clean text.
+
+        JD Layer 2 step 2a: Greenhouse returns `content` as entity-escaped HTML
+        (&lt;p&gt;…). Storing it verbatim sends raw HTML to the scorer. The
+        scanner must losslessly convert it to plain text — no tags, no entities,
+        and NO dropped sections (Requirements survives).
+        """
+        from job_finder.web.ats_scanner import scan_greenhouse
+
+        gh_jobs = [
+            {
+                "title": "Senior Data Scientist",
+                "absolute_url": "https://boards.greenhouse.io/toast/jobs/55",
+                "content": (
+                    "&lt;p&gt;Build ML systems at Toast to help restaurants "
+                    "succeed.&lt;/p&gt;&lt;h3&gt;Requirements&lt;/h3&gt;&lt;ul&gt;"
+                    "&lt;li&gt;Five years of applied ML experience.&lt;/li&gt;"
+                    "&lt;/ul&gt;"
+                ),
+                "location": {"name": "Boston, MA"},
+                "pay_input_ranges": [],
+            }
+        ]
+        mock_resp = self._make_greenhouse_response(gh_jobs)
+
+        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
+            results = scan_greenhouse(
+                board_token="toast",
+                target_titles=["data scientist"],
+                exclusions=[],
+            )
+
+        assert len(results) == 1
+        desc = results[0]["description"]
+        # No HTML tags or entity-encoded tags survive.
+        assert "<p>" not in desc and "&lt;" not in desc
+        # All sections preserved (no silent section drop).
+        assert "Build ML systems at Toast" in desc
+        assert "Requirements" in desc
+        assert "Five years of applied ML experience" in desc
+
     def test_scan_greenhouse_converts_cents_to_dollars(self):
         """scan_greenhouse divides pay_input_ranges cents by 100 when unit='year'.
 
@@ -1278,6 +1320,71 @@ class TestScanAshby:
 
         assert len(results) == 1
         assert results[0]["title"] == "Senior Data Scientist"
+
+    def test_scan_ashby_cleans_description_html_fallback(self):
+        """Ashby descriptionHtml fallback is converted to clean plain text.
+
+        JD Layer 2 step 2b: when descriptionPlain is absent, Ashby supplies
+        descriptionHtml (raw HTML). That fallback must be stripped to plain
+        text rather than stored verbatim. descriptionPlain (when present) is
+        already clean and used as-is.
+        """
+        from job_finder.web.ats_scanner import scan_ashby
+
+        ashby_jobs = [
+            {
+                "title": "Senior Data Scientist",
+                "jobUrl": "https://jobs.ashbyhq.com/OpenAI/xyz-uuid",
+                "descriptionHtml": (
+                    "<p>Train foundation models at scale.</p>"
+                    "<h3>Requirements</h3><ul><li>PhD or equivalent.</li></ul>"
+                ),
+                "location": "San Francisco, CA",
+                "isRemote": False,
+                "compensation": None,
+            }
+        ]
+        mock_resp = self._make_ashby_response(ashby_jobs)
+
+        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
+            results = scan_ashby(
+                job_board_name="OpenAI",
+                target_titles=["data scientist"],
+                exclusions=[],
+            )
+
+        assert len(results) == 1
+        desc = results[0]["description"]
+        assert "<p>" not in desc and "<h3>" not in desc
+        assert "Train foundation models at scale" in desc
+        assert "Requirements" in desc
+        assert "PhD or equivalent" in desc
+
+    def test_scan_ashby_uses_description_plain_verbatim(self):
+        """descriptionPlain (already clean) is preferred over descriptionHtml."""
+        from job_finder.web.ats_scanner import scan_ashby
+
+        ashby_jobs = [
+            {
+                "title": "Senior Data Scientist",
+                "jobUrl": "https://jobs.ashbyhq.com/OpenAI/p-uuid",
+                "descriptionPlain": "Train foundation models. Requirements: PhD.",
+                "descriptionHtml": "<p>ignored when plain present</p>",
+                "location": "Remote",
+                "isRemote": True,
+                "compensation": None,
+            }
+        ]
+        mock_resp = self._make_ashby_response(ashby_jobs)
+
+        with patch("job_finder.web.ats_scanner.requests.get", return_value=mock_resp):
+            results = scan_ashby(
+                job_board_name="OpenAI",
+                target_titles=["data scientist"],
+                exclusions=[],
+            )
+
+        assert results[0]["description"] == "Train foundation models. Requirements: PhD."
 
     def test_scan_ashby_preserves_case_sensitive_slug_in_url(self):
         """scan_ashby uses exact slug casing in API URL (Research Pitfall 3)."""
