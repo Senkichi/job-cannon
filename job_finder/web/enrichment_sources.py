@@ -170,30 +170,33 @@ def merge_apply_urls(conn: Any, dedup_key: str, apply_urls: list) -> None:
         return
     try:
         existing_row = conn.execute(
-            "SELECT source_urls FROM jobs WHERE dedup_key = ?", (dedup_key,)
+            "SELECT title, company FROM jobs WHERE dedup_key = ?", (dedup_key,)
         ).fetchone()
-        existing_json = existing_row["source_urls"] if existing_row else None
-        try:
-            existing_list = json.loads(existing_json) if existing_json else []
-            if not isinstance(existing_list, list):
-                existing_list = []
-        except (json.JSONDecodeError, TypeError):
-            existing_list = []
-        merged = existing_list + [u for u in apply_urls if u not in existing_list]
-        url_cursor = conn.execute(
-            "UPDATE jobs SET source_urls = ? WHERE dedup_key = ?",
-            (json.dumps(merged), dedup_key),
-        )
-        if url_cursor.rowcount == 0:
+        if existing_row is None:
             logger.warning(
-                "source_urls UPDATE matched 0 rows for dedup_key=%s "
+                "source_urls merge skipped: no row for dedup_key=%s "
                 "(job deleted between enrich_job start and write?)",
                 dedup_key,
             )
-        conn.commit()
+            return
+        # Route through upsert_job (D-15): source_urls is a parser-owned column,
+        # so its merge must pass the typed contract rather than a raw UPDATE
+        # bypass. upsert_job set-unions source_urls against the existing list and
+        # returns kind="touched" (no canonical change), leaving scoring,
+        # pipeline_status and unresolved_reasons untouched.
+        from job_finder.db import upsert_job
+        from job_finder.parsed_job import ParsedJob
+
+        parsed = ParsedJob(
+            title=existing_row["title"],
+            company=existing_row["company"],
+            dedup_key=dedup_key,
+            source_urls=[u for u in apply_urls if u],
+        )
+        upsert_job(conn, parsed)
         logger.debug(
-            "source_urls: merged %d new ATS URL(s) for dedup_key=%s",
-            len(merged) - len(existing_list),
+            "source_urls: merged up to %d candidate ATS URL(s) for dedup_key=%s",
+            len(apply_urls),
             dedup_key,
         )
     except Exception as exc:
