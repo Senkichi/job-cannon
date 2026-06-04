@@ -239,11 +239,14 @@ def upsert_job(
         _score_breakdown = parsed.score_breakdown
 
         # Denylist guard — preserve the exact early-return boundary that
-        # existed before Phase 47.02.
-        from job_finder.config import COMPANY_DENYLIST
+        # existed before Phase 47.02. Read the denylist from config so
+        # user-added `filters.company_denylist` entries are honored here, not
+        # just the hardcoded defaults (F-08). Single source: the same
+        # get_company_denylist(load_config()) the I-10 ParsedJob validator uses.
+        from job_finder.config import get_company_denylist, load_config
         from job_finder.normalizers import normalize_company as _norm_company
 
-        if _norm_company(parsed.company).lower() in COMPANY_DENYLIST:
+        if _norm_company(parsed.company).lower() in get_company_denylist(load_config()):
             return UpsertResult(
                 kind="unchanged",
                 dedup_key=parsed.dedup_key,
