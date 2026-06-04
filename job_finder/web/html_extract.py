@@ -45,10 +45,15 @@ _TRAFILATURA_MIN_CHARS = 25
 def _trafilatura_extract(html: str) -> str | None:
     """Primary extraction via trafilatura → markdown. None on any failure.
 
-    ``favor_precision`` biases toward dropping boilerplate over keeping it, which
-    is correct for JDs: a missed marketing blurb costs nothing, a kept nav menu
-    pollutes every downstream score. Verified not to strip terse signal lines
-    (e.g. "Compensation: $X").
+    ``favor_recall=True`` is deliberate: completeness is the JD-extraction
+    goal ("no dropped sections / default-keep"). trafilatura's
+    ``favor_precision`` (and its default) discard lower-confidence in-content
+    blocks — verified to drop a posting's Requirements section + bullets on
+    sparse pages, the exact failure this effort exists to prevent. Recall mode
+    keeps those sections while STILL structurally stripping page nav/header/
+    footer boilerplate. Extra peripheral boilerplate it may retain is bounded
+    downstream by _dedupe_blocks + the scorer's char cap and is far cheaper
+    than a starved scoring axis.
     """
     try:
         import trafilatura
@@ -60,7 +65,7 @@ def _trafilatura_extract(html: str) -> str | None:
             html,
             output_format="markdown",
             include_comments=False,
-            favor_precision=True,
+            favor_recall=True,
         )
     except Exception as exc:  # trafilatura raises on some malformed trees
         logger.debug("trafilatura.extract failed: %s", exc)

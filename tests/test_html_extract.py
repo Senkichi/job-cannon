@@ -106,6 +106,29 @@ performance, and the capital improvement project portfolio.</p>
     assert len(out) < 2000
 
 
+def test_preserves_all_sections_no_silent_drop():
+    # Regression guard: favor_precision/default drop lower-confidence in-content
+    # blocks (a posting's Requirements section + bullets). The extractor must use
+    # favor_recall so NO section is silently dropped — the failure mode the whole
+    # JD-extraction effort exists to prevent.
+    html = """<html><body><main>
+<p>We are hiring a Staff Engineer to lead our platform team. You will own
+reliability for a high-traffic API used by millions of users every day.</p>
+<h3>Requirements</h3>
+<ul>
+<li>Eight or more years building distributed systems at real scale.</li>
+<li>Deep Python and Go experience in production environments.</li>
+</ul>
+<p>Compensation: $200,000 - $240,000 plus meaningful equity.</p>
+</main></body></html>"""
+    out = html_to_clean_text(html)
+    assert out is not None
+    assert "Requirements" in out
+    assert "distributed systems at real scale" in out
+    assert "Deep Python and Go experience" in out
+    assert "$200,000" in out
+
+
 def test_falls_back_to_beautifulsoup_when_trafilatura_returns_none():
     # trafilatura returns None on bare fragments with no article structure.
     # The BeautifulSoup fallback must still recover the visible text so we
