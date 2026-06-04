@@ -120,8 +120,15 @@ def _score_one(job, conn, config, candidate_context):
     different names. Patch ``job_finder.eval.harness._score_one`` instead.
     """
     from job_finder.web.job_scorer import score_job
+    from job_finder.web.scoring_orchestrator import _resolve_profile_skills
 
-    return score_job(job, conn, config, candidate_context=candidate_context)
+    return score_job(
+        job,
+        conn,
+        config,
+        candidate_context=candidate_context,
+        profile_skills=_resolve_profile_skills(config),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -134,6 +134,17 @@ def run_batch(
     failures = 0
     model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
+    # candidate_context is a REQUIRED score_job arg (Phase 2a). Resolve it —
+    # plus the skill list used for oversized-JD compression — once for the
+    # whole batch via the same orchestrator path the production scorer uses.
+    from job_finder.web.scoring_orchestrator import (
+        _resolve_candidate_context,
+        _resolve_profile_skills,
+    )
+
+    candidate_context = _resolve_candidate_context(config)
+    profile_skills = _resolve_profile_skills(config)
+
     for i, key in enumerate(dedup_keys, 1):
         row = conn.execute("SELECT * FROM jobs WHERE dedup_key = ?", (key,)).fetchone()
         if row is None:
@@ -153,7 +164,13 @@ def run_batch(
             continue
 
         try:
-            sr = score_job(job, conn, config)
+            sr = score_job(
+                job,
+                conn,
+                config,
+                candidate_context,
+                profile_skills=profile_skills,
+            )
         except Exception as exc:  # pragma: no cover - defensive
             failures += 1
             results.append(
