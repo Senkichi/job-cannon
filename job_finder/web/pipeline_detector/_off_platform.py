@@ -47,7 +47,6 @@ import re
 import sqlite3
 import time
 
-from job_finder.json_utils import utc_now_iso
 from job_finder.web.pipeline_detector._constants import ATS_DOMAINS
 
 logger = logging.getLogger(__name__)
@@ -244,27 +243,25 @@ def _try_create_stub_job(email: dict, conn: sqlite3.Connection) -> dict | None:
             "attributed_existing": True,
         }
 
-    now = utc_now_iso()
     dedup_key = f"{candidate.lower()}|off-platform|{int(time.time() * 1000)}"
-    conn.execute(
-        """INSERT INTO jobs
-           (dedup_key, title, company, location, sources, source_urls,
-            first_seen, last_seen, pipeline_status, jd_full)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            dedup_key,
-            "(off-platform — title TBD)",
-            candidate,
-            "",
-            '["off_platform_email"]',
-            "[]",
-            now,
-            now,
-            "discovered",
-            None,
-        ),
+    # Route the stub through upsert_job so it passes the same typed contract as
+    # every other write (D-15) instead of a raw INSERT bypass. The synthetic
+    # dedup_key encodes the email path's own uniqueness rule, so we build a
+    # ParsedJob directly rather than via from_job (which would re-derive the
+    # key from company|title). pipeline_status defaults to 'discovered' on
+    # INSERT — matching the prior raw-INSERT value.
+    from job_finder.db import upsert_job
+    from job_finder.parsed_job import ParsedJob
+
+    parsed = ParsedJob(
+        title="(off-platform — title TBD)",
+        company=candidate,
+        dedup_key=dedup_key,
+        location="",
+        sources=["off_platform_email"],
+        source_urls=[],
     )
-    conn.commit()
+    upsert_job(conn, parsed)
     logger.info(
         "off-platform stub created for %s (dedup_key=%s)",
         candidate,

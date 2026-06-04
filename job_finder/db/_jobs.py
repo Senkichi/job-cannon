@@ -49,7 +49,7 @@ JOBS_ALL_COLUMNS = (
 # needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
     "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
-    "salary_min, salary_max"
+    "salary_min, salary_max, posted_date"
 )
 
 
@@ -64,8 +64,15 @@ class UpsertResult:
 
     ``kind`` is one of:
     - ``"inserted"``  — a new row was created.
-    - ``"updated"``   — an existing dedup_key matched and at least one column changed.
-    - ``"unchanged"`` — an existing dedup_key matched and no column changed.
+    - ``"updated"``   — an existing dedup_key matched and a parser-owned canonical
+                        field (salary, posted_date, locations, description, jd_full)
+                        gained new content.
+    - ``"touched"``   — an existing dedup_key matched, no canonical field changed,
+                        but the sources / source_urls set grew (a fresh sighting of
+                        a known job from another feed). last_seen is refreshed; the
+                        touch path leaves scoring + unresolved_reasons untouched
+                        (D-15 / §8.4 — survives /admin/review approvals).
+    - ``"unchanged"`` — an existing dedup_key matched and nothing new arrived.
 
     D-19: ``__bool__`` is intentionally overridden to raise ``TypeError``.
     Boolean truthiness would silently break callers using ``if is_new:``
@@ -73,7 +80,7 @@ class UpsertResult:
     counted as inserts). Callers MUST use ``result.kind``.
     """
 
-    kind: Literal["inserted", "updated", "unchanged"]
+    kind: Literal["inserted", "updated", "unchanged", "touched"]
     dedup_key: str
     unresolved_reasons: list[str] = field(default_factory=list)
 
@@ -81,7 +88,7 @@ class UpsertResult:
         raise TypeError(
             "UpsertResult is not bool-testable. "
             "Use result.kind to determine the outcome: "
-            "'inserted', 'updated', or 'unchanged'."
+            "'inserted', 'updated', 'touched', or 'unchanged'."
         )
 
 
@@ -310,21 +317,32 @@ def upsert_job(
 
     if existing:
         # ── UPDATE branch ────────────────────────────────────────────────────
-        # Track whether any meaningful column changed so we can return the
-        # correct UpsertResult.kind ("updated" vs "unchanged").
-        changed = False
+        # Two independent signals decide the UpsertResult.kind:
+        #   canonical_changed — a parser-owned canonical field (salary, posted
+        #       date, locations, description, jd_full) gained new content. Runs
+        #       the full merge UPDATE → "updated".
+        #   source_merged     — only the sources / source_urls set grew (a fresh
+        #       sighting of a known job from another feed). With no canonical
+        #       change this is the touch path → "touched".
+        # Neither → "unchanged". Per D-15 + §8.4, the touch/unchanged path is a
+        # lightweight UPDATE (last_seen + source union only) that MUST NOT touch
+        # unresolved_reasons (preserves /admin/review approvals across re-ingest),
+        # score, scoring_provider, pipeline_status, or company_id. This also
+        # folds in the former ingestion-runner touch-path bypass (D-15).
+        canonical_changed = False
+        source_merged = False
 
-        # Merge sources (ParsedJob carries a list; shim preserves it).
+        # Merge sources / source_urls (set-union; ParsedJob carries lists).
         sources = safe_json_load(existing["sources"], default=[])
         urls = safe_json_load(existing["source_urls"], default=[])
         for src in parsed.sources:
             if src not in sources:
                 sources.append(src)
-                changed = True
+                source_merged = True
         for url in parsed.source_urls:
             if url and url not in urls:
                 urls.append(url)
-                changed = True
+                source_merged = True
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
         existing_locs_raw = existing["locations_raw"]
@@ -341,7 +359,7 @@ def upsert_job(
             if key in seen_keys:
                 continue
             seen_keys.add(key)
-            changed = True
+            canonical_changed = True
             if re.search(r"\b(remote|hybrid)\b", normalized, re.IGNORECASE):
                 locs_list.insert(0, normalized)
             else:
@@ -352,7 +370,7 @@ def upsert_job(
         # Smart description merge
         merged_description = merge_description(existing["description"], parsed.description)
         if merged_description != existing["description"]:
-            changed = True
+            canonical_changed = True
 
         # Eager jd_full promotion
         jd_full_clause = ""
@@ -360,16 +378,31 @@ def upsert_job(
         if not existing["jd_full"] and merged_description and len(merged_description) > 200:
             jd_full_clause = ", jd_full = ?"
             jd_full_value = (merged_description[:JD_STORAGE_MAX_CHARS],)
-            changed = True
+            canonical_changed = True
 
         # Salary change detection (COALESCE writes new value when non-NULL)
         norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
-        existing_smin = existing["salary_min"]
-        existing_smax = existing["salary_max"]
-        if norm_salary_min is not None and norm_salary_min != existing_smin:
-            changed = True
-        if norm_salary_max is not None and norm_salary_max != existing_smax:
-            changed = True
+        if norm_salary_min is not None and norm_salary_min != existing["salary_min"]:
+            canonical_changed = True
+        if norm_salary_max is not None and norm_salary_max != existing["salary_max"]:
+            canonical_changed = True
+
+        # Posted-date arrival / change
+        if pd_str is not None and pd_str != existing["posted_date"]:
+            canonical_changed = True
+
+        # Preserve unresolved_reasons unless a canonical field changed. A touch
+        # / re-sighting (or a no-op re-ingest) MUST NOT clobber an /admin/review
+        # approval (§8.4) — only a genuine canonical update re-applies the parser
+        # contract's reason codes. The remaining COALESCE fills (company_id,
+        # workplace_type, country, salary, posted_date) still run on every
+        # existing-row write, preserving the long-standing null-fill behavior.
+        if canonical_changed:
+            unresolved_clause = ", unresolved_reasons = ?"
+            unresolved_value: tuple = (json.dumps(list(parsed.unresolved_reasons)),)
+        else:
+            unresolved_clause = ""
+            unresolved_value = ()
 
         try:
             conn.execute(
@@ -385,8 +418,7 @@ def upsert_job(
                     workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
                     primary_country_code = COALESCE(?, primary_country_code),
                     company_id = COALESCE(?, company_id),
-                    posted_date = COALESCE(?, posted_date),
-                    unresolved_reasons = ?{jd_full_clause}
+                    posted_date = COALESCE(?, posted_date){unresolved_clause}{jd_full_clause}
                 WHERE dedup_key = ?""",
                 (
                     json.dumps(sources),
@@ -404,7 +436,7 @@ def upsert_job(
                     primary_country_code,
                     company_id,
                     pd_str,
-                    json.dumps(list(parsed.unresolved_reasons)),
+                    *unresolved_value,
                     *jd_full_value,
                     parsed.dedup_key,
                 ),
@@ -427,8 +459,14 @@ def upsert_job(
                 evidence="re_appeared",
             )
 
+        if canonical_changed:
+            kind: Literal["updated", "touched", "unchanged"] = "updated"
+        elif source_merged:
+            kind = "touched"
+        else:
+            kind = "unchanged"
         return UpsertResult(
-            kind="updated" if changed else "unchanged",
+            kind=kind,
             dedup_key=parsed.dedup_key,
             unresolved_reasons=list(parsed.unresolved_reasons),
         )

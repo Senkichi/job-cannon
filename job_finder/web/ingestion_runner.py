@@ -671,6 +671,10 @@ def _score_and_persist(
             new_job_keys.append(job.dedup_key)
         elif result.kind == "updated":
             summary["jobs_updated"] += 1
+        elif result.kind == "touched":
+            # Re-sighting of a known job from another feed: last_seen + source
+            # union only (D-15 folded the former touch-path helper into upsert).
+            summary["jobs_touch_only"] = summary.get("jobs_touch_only", 0) + 1
 
         # Company auto-population: create/update company record for every job
         _upsert_job_company(conn, job)
@@ -679,49 +683,6 @@ def _score_and_persist(
         error_msg = f"{job.title} @ {job.company}: {e}"
         summary["job_errors"].append(error_msg)
         logger.warning("Failed to score/persist job '%s' at '%s': %s", job.title, job.company, e)
-
-
-def _touch_existing_job(job: Job, conn: sqlite3.Connection, summary: dict) -> None:
-    """Lightweight update for already-known jobs: touch last_seen and merge source/source_url.
-
-    Skips scoring, full upsert merge logic, and company upsert for jobs whose
-    dedup_key already exists in the DB and whose incoming data carries no new
-    salary information worth merging. Updates last_seen timestamp and merges
-    the incoming job.source and job.source_url into the existing JSON columns
-    without duplicates.
-
-    Args:
-        job: Incoming Job with a dedup_key already present in DB.
-        conn: Open sqlite3 connection.
-        summary: Mutable summary dict — increments ``jobs_touch_only``.
-    """
-    conn.execute(
-        """UPDATE jobs
-           SET last_seen = ?,
-               sources = (
-                   SELECT json_group_array(value)
-                   FROM (
-                       -- UNION (not UNION ALL) provides set-semantics, deduplicating sources
-                       SELECT value FROM json_each(sources)
-                       UNION
-                       SELECT value FROM json_each(json_array(?))
-                   )
-               ),
-               source_urls = (
-                   SELECT json_group_array(value)
-                   FROM (
-                       -- UNION (not UNION ALL) provides set-semantics, deduplicating URLs
-                       -- CASE WHEN handles empty source_url: both ? bind job.source_url
-                       SELECT value FROM json_each(source_urls)
-                       UNION
-                       SELECT value FROM json_each(CASE WHEN ? != '' THEN json_array(?) ELSE '[]' END)
-                   )
-               )
-           WHERE dedup_key = ?""",
-        (utc_now_iso(), job.source, job.source_url, job.source_url, job.dedup_key),
-    )
-    conn.commit()
-    summary["jobs_touch_only"] += 1
 
 
 def _upsert_job_company(conn, job: Job) -> None:

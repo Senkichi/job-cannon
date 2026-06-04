@@ -157,8 +157,12 @@ def test_job_shim_insert(conn: sqlite3.Connection) -> None:
     assert _row_exists(conn, job.dedup_key)
 
 
-def test_job_shim_update(conn: sqlite3.Connection) -> None:
-    """Shim path: re-ingesting the same Job with a new source returns kind='updated'."""
+def test_job_shim_touch(conn: sqlite3.Connection) -> None:
+    """Shim path: re-ingesting the same Job with only a new source returns kind='touched'.
+
+    Per D-15 (Phase 47.09), a re-sighting that adds a source but changes no
+    canonical field is the touch path, not an update.
+    """
     job = Job(
         title="ML Engineer",
         company="ShimUpdateCo",
@@ -173,11 +177,11 @@ def test_job_shim_update(conn: sqlite3.Connection) -> None:
         title="ML Engineer",
         company="ShimUpdateCo",
         location="Remote",
-        source="dataforseo",  # new source → triggers "updated"
+        source="dataforseo",  # new source only, no canonical change → "touched"
         source_url="https://dataforseo.com/jobs/shim-update",
     )
     r2 = upsert_job(conn, job2)
-    assert r2.kind == "updated"
+    assert r2.kind == "touched"
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,6 @@ from job_finder.web.ingestion_runner import (  # noqa: F401
     _prune_stale_data,
     _score_and_persist,
     _submit_dataforseo_tasks,
-    _touch_existing_job,
     _upsert_job_company,
 )
 
@@ -112,6 +111,7 @@ def run_ingestion(
         "portal_search_errors": [],
         "jobs_new": 0,
         "jobs_updated": 0,
+        "jobs_touch_only": 0,
         "jobs_scored": 0,
         "job_errors": [],
         "scored": 0,
