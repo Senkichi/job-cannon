@@ -219,3 +219,94 @@ def test_banner_context_returns_dict_when_update_available_not_dismissed(tmp_pat
     update_check._write_cache_atomic(cache, update_check.update_check_path())
     result = update_check.banner_context()
     assert result == {"latest_version": "v5.0.1", "current_version": "v5.0.0"}
+
+
+# --- Issue #105: checked_at must be stamped on every attempt (gate-closure guarantee) ---
+
+
+def test_network_error_stamps_checked_at(tmp_path, monkeypatch):
+    """Test 17: network error still stamps checked_at so the 24h gate closes (issue #105)."""
+    import requests as req
+
+    def raise_connection_error(*args, **kwargs):
+        raise req.exceptions.ConnectionError("simulated network failure")
+
+    monkeypatch.setattr("job_finder.web.update_check.requests.get", raise_connection_error)
+    result = update_check._fetch_and_persist()
+    assert result is None  # return contract unchanged
+    cache = update_check.read_cache()
+    assert cache is not None, "cache file must be written even on network error"
+    assert cache["checked_at"] is not None, "checked_at must be stamped to close the 24h gate"
+    assert cache["latest_version"] is None
+
+
+def test_non_200_stamps_checked_at(tmp_path, monkeypatch):
+    """Test 18: non-200 response stamps checked_at so the 24h gate closes (issue #105)."""
+    mock_response = type("MockResponse", (), {"status_code": 403})()
+    monkeypatch.setattr(
+        "job_finder.web.update_check.requests.get",
+        lambda *args, **kwargs: mock_response,
+    )
+    result = update_check._fetch_and_persist()
+    assert result is None  # return contract unchanged
+    cache = update_check.read_cache()
+    assert cache is not None, "cache file must be written even on non-200"
+    assert cache["checked_at"] is not None, "checked_at must be stamped to close the 24h gate"
+    assert cache["latest_version"] is None
+
+
+def test_404_stamps_checked_at_no_latest(tmp_path, monkeypatch):
+    """Test 19: 404 is treated as 'no releases published', stamps checked_at with latest=None (issue #105)."""
+    mock_response = type("MockResponse", (), {"status_code": 404})()
+    monkeypatch.setattr(
+        "job_finder.web.update_check.requests.get",
+        lambda *args, **kwargs: mock_response,
+    )
+    result = update_check._fetch_and_persist()
+    assert result is None  # no latest version → no banner
+    cache = update_check.read_cache()
+    assert cache is not None, "cache file must be written on 404"
+    assert cache["checked_at"] is not None, "checked_at must be stamped to close the 24h gate"
+    assert cache["latest_version"] is None, "404 means no releases, not a retriable error"
+
+
+def test_bad_json_stamps_checked_at(tmp_path, monkeypatch):
+    """Test 20: bad JSON response stamps checked_at so the 24h gate closes (issue #105)."""
+
+    class MockResponse:
+        status_code = 200
+
+        def json(self):
+            raise ValueError("bad json")
+
+    monkeypatch.setattr(
+        "job_finder.web.update_check.requests.get",
+        lambda *args, **kwargs: MockResponse(),
+    )
+    result = update_check._fetch_and_persist()
+    assert result is None
+    cache = update_check.read_cache()
+    assert cache is not None, "cache file must be written even on parse error"
+    assert cache["checked_at"] is not None, "checked_at must be stamped to close the 24h gate"
+
+
+def test_kick_off_does_not_spawn_thread_after_failure_stamps_checked_at(tmp_path, monkeypatch):
+    """Test 21: after a failure stamps checked_at, kick_off spawns no further threads (gate closed)."""
+    mock_response = type("MockResponse", (), {"status_code": 404})()
+    monkeypatch.setattr(
+        "job_finder.web.update_check.requests.get",
+        lambda *args, **kwargs: mock_response,
+    )
+    # Simulate a failed fetch that stamps checked_at
+    update_check._fetch_and_persist()
+
+    # Now the gate should be closed — kick_off must not spawn a thread
+    spawned = []
+    monkeypatch.setattr(
+        "threading.Thread",
+        lambda target, daemon: (
+            spawned.append(target) or type("T", (), {"start": lambda self: None})()
+        ),
+    )
+    update_check.kick_off_background_check_if_due({})
+    assert len(spawned) == 0, "gate should be closed after checked_at is stamped"

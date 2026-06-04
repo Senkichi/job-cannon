@@ -109,7 +109,15 @@ def append_dismissed_version(version_str: str) -> None:
 
 
 def _fetch_and_persist() -> dict | None:
-    """GET GitHub releases/latest, parse tag_name, persist cache. Silent-fail (D-04)."""
+    """GET GitHub releases/latest, parse tag_name, persist cache. Silent-fail (D-04).
+
+    Always stamps ``checked_at`` — success *or* failure — so the 24h staleness gate
+    closes regardless of outcome and per-request fetch storms cannot occur (issue #105).
+    Returns the written cache dict on success (latest_version found), else None.
+    """
+    prior = read_cache() or _empty_cache()
+    latest: str | None = None  # overwritten only on a clean successful fetch
+
     try:
         response = requests.get(
             _GITHUB_RELEASES_LATEST_URL,
@@ -121,24 +129,29 @@ def _fetch_and_persist() -> dict | None:
         )
     except requests.RequestException as e:
         logger.info("Update check network error (non-fatal): %s", e)
-        return None
-    if response.status_code != 200:
-        logger.info("Update check non-200 (non-fatal): status=%s", response.status_code)
-        return None
-    try:
-        payload = response.json()
-        latest = payload.get("tag_name")
-    except (ValueError, AttributeError) as e:
-        logger.info("Update check JSON parse error (non-fatal): %s", e)
-        return None
-    if not isinstance(latest, str) or not latest or len(latest) > _MAX_VERSION_LEN:
-        logger.info("Update check tag_name shape invalid (non-fatal): %r", latest)
-        return None
-    # Whitelist allowed chars to defuse response-injection (alphanumeric, dot, hyphen, plus, leading v)
-    if not all(c.isalnum() or c in ".-+v" for c in latest):
-        logger.info("Update check tag_name has disallowed chars (non-fatal): %r", latest)
-        return None
-    prior = read_cache() or _empty_cache()
+        # Fall through; latest stays None; checked_at is stamped below.
+    else:
+        if response.status_code == 200:
+            try:
+                payload = response.json()
+                tag = payload.get("tag_name")
+            except (ValueError, AttributeError) as e:
+                logger.info("Update check JSON parse error (non-fatal): %s", e)
+            else:
+                if not isinstance(tag, str) or not tag or len(tag) > _MAX_VERSION_LEN:
+                    logger.info("Update check tag_name shape invalid (non-fatal): %r", tag)
+                # Whitelist allowed chars to defuse response-injection (alphanumeric, dot, hyphen, plus, leading v)
+                elif not all(c.isalnum() or c in ".-+v" for c in tag):
+                    logger.info("Update check tag_name has disallowed chars (non-fatal): %r", tag)
+                else:
+                    latest = tag
+        elif response.status_code == 404:
+            # Repo has no published GitHub Releases — not an error, banner just won't show.
+            logger.info("Update check: no GitHub releases published (404) — no banner will show")
+        else:
+            logger.info("Update check non-200 (non-fatal): status=%s", response.status_code)
+
+    # Always stamp checked_at so the 24h gate closes regardless of outcome.
     cache = {
         "checked_at": datetime.now(UTC).isoformat(),
         "latest_version": latest,
@@ -151,7 +164,7 @@ def _fetch_and_persist() -> dict | None:
     except OSError as e:
         logger.info("Update check cache write failed (non-fatal): %s", e)
         return None
-    return cache
+    return cache if latest else None
 
 
 def kick_off_background_check_if_due(config: dict) -> None:
