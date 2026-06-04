@@ -32,6 +32,7 @@ import threading
 from collections.abc import Callable
 
 from job_finder.db import persist_job_assessment
+from job_finder.web.legitimacy_scanner import scan_legitimacy
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,26 @@ def score_and_persist_job(
     # real-config path (providers.overrides.<name>.score) writes scoring_model
     # NULL because _resolve_scoring_model reads providers.scoring.model only.
     model = getattr(result, "model", None) or _resolve_scoring_model(config, provider)
+
+    # Legitimacy scan: write legitimacy_note BEFORE persist_job_assessment reads
+    # it. persist_job_assessment SELECTs legitimacy_note from the row and passes
+    # it to derive_classification, so the note must be persisted first for the
+    # `if legitimacy_note: reject` branch to fire (Phase 49.07 / D-12).
+    # Only writes when a pattern is detected — never clears an existing value
+    # (admin overrides via /admin/review are preserved).
+    jd_full = job.get("jd_full") or ""
+    legitimacy_note = scan_legitimacy(jd_full)
+    if legitimacy_note and dedup_key:
+        conn.execute(
+            "UPDATE jobs SET legitimacy_note = ? WHERE dedup_key = ?",
+            (legitimacy_note, dedup_key),
+        )
+        conn.commit()
+        logger.debug(
+            "score_and_persist_job: flagged dedup_key=%s legitimacy_note=%r",
+            dedup_key,
+            legitimacy_note,
+        )
 
     persist_job_assessment(
         conn,
