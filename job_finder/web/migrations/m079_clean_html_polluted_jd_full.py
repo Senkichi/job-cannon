@@ -56,9 +56,10 @@ _HTML_SIGNAL_SQL = (
 def _clean(ctx: MigrationContext) -> None:
     conn: sqlite3.Connection = ctx.conn
 
-    if conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'"
-    ).fetchone() is None:
+    if (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = 'jobs'").fetchone()
+        is None
+    ):
         logger.info("m079: jobs table not present, no-op")
         return
 

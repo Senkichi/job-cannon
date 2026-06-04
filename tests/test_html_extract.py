@@ -95,8 +95,10 @@ performance, and the capital improvement project portfolio.</p>
 <ul><li>Manage leasing, renewals, and resident relations day to day.</li>
 <li>Own the property budget and monthly financial reporting cadence.</li></ul>
 <p>Compensation: $90,000 - $110,000 plus an annual performance bonus.</p>"""
-    html = f"<html><body><nav>Home Careers</nav><main>{block * 20}</main>" \
-           f"<footer>EOE Copyright 2026</footer></body></html>"
+    html = (
+        f"<html><body><nav>Home Careers</nav><main>{block * 20}</main>"
+        f"<footer>EOE Copyright 2026</footer></body></html>"
+    )
     out = html_to_clean_text(html)
     assert out is not None
     # Content present exactly once, not twenty times.
