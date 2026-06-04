@@ -1173,7 +1173,12 @@ class TestAuthWallGuard:
             result = _fetch_direct_jd("https://example.com/jobs/data-scientist")
 
         assert result is not None, "Expected text returned for normal JD page"
-        assert "Data Scientist" in result
+        # Assert the JD *body* survived (auth-wall guard did not block it).
+        # Not the <h1> "Data Scientist" — structure-aware extraction routes a
+        # leading h1 to title-metadata (carried separately as job.title), so
+        # the title heading is intentionally absent from the jd_full body.
+        assert "ML models" in result
+        assert "talented data scientist" in result.lower()
 
     def test_auth_wall_check_is_case_insensitive(self):
         """Auth wall detection is case-insensitive: 'WE'RE SIGNING YOU IN' -> None."""
