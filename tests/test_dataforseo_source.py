@@ -57,7 +57,6 @@ def _make_item(**overrides) -> dict:
         "employer_image_url": None,
         "location": "San Francisco, CA",
         "source_name": "via LinkedIn",
-        "source_url": "https://linkedin.com/jobs/view/12345",
         "salary": None,
         "contract_type": "Full-time",
         "timestamp": _ts_days_ago(2),  # 2 days ago — within max_age_days=7
@@ -65,6 +64,9 @@ def _make_item(**overrides) -> dict:
         "rectangle": None,
     }
     base.update(overrides)
+    # Within-run dedup keys on source_url (the per-listing URL), so derive a
+    # distinct default URL from job_id unless a test sets one explicitly.
+    base.setdefault("source_url", f"https://linkedin.com/jobs/view/{base['job_id']}")
     return base
 
 
@@ -124,10 +126,12 @@ class TestParseItem:
         assert job is not None
         assert job.location == "New York, NY"
 
-    def test_extracts_source_id(self, source):
+    def test_source_id_not_persisted(self, source):
+        # DataForSEO's job_id is a search-result token, not a per-job-stable
+        # platform ID, so no source_id is persisted (I-11 contract).
         job = source._parse_item(_make_item(job_id="abc123=="))
         assert job is not None
-        assert job.source_id == "abc123=="
+        assert not job.source_id
 
     def test_extracts_source_url(self, source):
         url = "https://greenhouse.io/jobs/456"
@@ -525,7 +529,7 @@ class TestFetchTaskResults:
         with patch("job_finder.sources.dataforseo_source.requests.get", return_value=mock_resp):
             jobs = source._fetch_task_results("task-uuid-001")
         assert len(jobs) == 1
-        assert jobs[0].source_id == "new-job"
+        assert "new-job" in jobs[0].source_url
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +647,7 @@ class TestFetchJobs:
         assert jobs == []
 
     def test_deduplicates_within_run(self, source):
-        """Two tasks returning the same job_id → only 1 Job in output."""
+        """Two tasks returning the same listing (source_url) → only 1 Job in output."""
         same_item = _make_item(job_id="duplicate-id")
         task_post_resp = _make_mock_response(
             {
@@ -673,7 +677,7 @@ class TestFetchJobs:
             )
 
         assert len(jobs) == 1
-        assert jobs[0].source_id == "duplicate-id"
+        assert "duplicate-id" in jobs[0].source_url
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +735,10 @@ class TestSubmitAndCollect:
         with patch("job_finder.sources.dataforseo_source.requests.get", get_call):
             jobs = source.collect_results(["id-001", "id-002"])
         assert len(jobs) == 2
-        assert {j.source_id for j in jobs} == {"job-001", "job-002"}
+        assert {j.source_url for j in jobs} == {
+            "https://linkedin.com/jobs/view/job-001",
+            "https://linkedin.com/jobs/view/job-002",
+        }
 
     def test_fetch_jobs_equivalent_to_submit_then_collect(self, source):
         """fetch_jobs(queries) produces same result as submit_tasks+collect_results."""
@@ -783,7 +790,8 @@ class TestSubmitAndCollect:
             split_jobs = source.collect_results(task_ids)
 
         assert len(combined_jobs) == len(split_jobs) == 1
-        assert combined_jobs[0].source_id == split_jobs[0].source_id == "job-001"
+        assert "job-001" in combined_jobs[0].source_url
+        assert "job-001" in split_jobs[0].source_url
 
     def test_fetch_jobs_sleeps_initial_delay_before_first_poll(self):
         """fetch_jobs() sleeps _POLL_INITIAL_DELAY_SECONDS once; collect_results uses uniform poll_interval."""
@@ -830,7 +838,7 @@ class TestSubmitAndCollect:
             jobs = slow_source.fetch_jobs([{"query": "DS", "location": "SF"}])
 
         assert len(jobs) == 1
-        assert jobs[0].source_id == "job-001"
+        assert "job-001" in jobs[0].source_url
 
         # Two sleeps: initial delay (from fetch_jobs) + uniform poll_interval (from collect_results)
         assert mock_sleep.call_count == 2
@@ -878,7 +886,7 @@ class TestSubmitAndCollect:
             jobs = slow_source.collect_results(["id-001"])
 
         assert len(jobs) == 1
-        assert jobs[0].source_id == "job-001"
+        assert "job-001" in jobs[0].source_url
 
         # Both sleeps use the uniform poll_interval — no initial delay in collect_results
         assert mock_sleep.call_count == 2

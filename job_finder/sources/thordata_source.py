@@ -8,7 +8,6 @@ Does NOT return description or job_highlights — enrichment pipeline fills thos
 
 import logging
 import re
-from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -140,7 +139,6 @@ class ThordataSource:
             return None
 
         link = result.get("link", "")
-        source_id = self._extract_docid(link)
         salary_min, salary_max = self._extract_salary_from_extensions(extensions)
 
         return Job(
@@ -149,7 +147,8 @@ class ThordataSource:
             location=result.get("location", ""),
             source="thordata",
             source_url=link,
-            source_id=source_id,
+            # No source_id: the Thordata Google-Jobs docid is a search-result
+            # token, not a per-job-stable platform ID (I-11).
             salary_min=salary_min,
             salary_max=salary_max,
             description=None,  # enrichment pipeline fills this
@@ -188,25 +187,6 @@ class ThordataSource:
             if "month" in unit:
                 return count * 30
         return None
-
-    def _extract_docid(self, link: str) -> str:
-        """Extract the stable docid from the URL fragment of a Thordata Google Jobs link.
-
-        Thordata embeds the job ID in the URL fragment as:
-          #vhid=vt%3D20/docid%3D<ID>%3D%3D&vssid=jobs-detail-viewer
-        After URL-decoding: docid=<ID>==
-        """
-        if not link:
-            return ""
-        try:
-            fragment = urlparse(link).fragment
-            if not fragment:
-                return ""
-            decoded = unquote(fragment)
-            m = re.search(r"docid=([^&/]+)", decoded)
-            return m.group(1) if m else ""
-        except Exception:
-            return ""
 
     def _extract_salary_from_extensions(
         self, extensions: list[str]
