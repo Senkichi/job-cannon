@@ -103,7 +103,7 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "http://0.0.0.0:8080" in captured.out
     fake_app.run.assert_called_once_with(
-        host="0.0.0.0", port=8080, debug=False, use_reloader=False
+        host="0.0.0.0", port=8080, debug=False, use_reloader=False, threaded=True
     )
 
 
@@ -122,3 +122,6 @@ def test_main_passes_use_reloader_false(monkeypatch):
 
     fake_app.run.assert_called_once()
     assert fake_app.run.call_args.kwargs["use_reloader"] is False
+    # threaded=True is load-bearing for the SSE live-update stream: a single
+    # held-open /events connection would otherwise block every other request.
+    assert fake_app.run.call_args.kwargs["threaded"] is True

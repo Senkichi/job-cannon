@@ -8,6 +8,14 @@
   <!-- HTMX 2.0.8 -->
   <script src="https://unpkg.com/htmx.org@2.0.8/dist/htmx.min.js"></script>
 
+  {% if live_updates_enabled %}
+  <!-- HTMX SSE extension 2.2.4 — powers live updates via the /events stream.
+       Widgets opt in with hx-trigger="sse:<event>" (see job_finder/web/live_events.py).
+       Gated by LIVE_UPDATES_ENABLED so the e2e harness can disable the
+       long-lived connection (it otherwise defeats Playwright's networkidle). -->
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.4/dist/sse.js"></script>
+  {% endif %}
+
   <!-- Tailwind v4.0.6 -->
   <script src="https://unpkg.com/@tailwindcss/browser@4.0.6"></script>
 
@@ -33,7 +41,8 @@
     }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden">
+<body class="bg-slate-900 text-slate-100 h-screen flex overflow-hidden"
+      {% if live_updates_enabled %}hx-ext="sse" sse-connect="/events"{% endif %}>
 
   <!-- Sidebar -->
   {% include "components/_sidebar.html" %}

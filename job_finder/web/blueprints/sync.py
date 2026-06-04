@@ -12,6 +12,8 @@ from job_finder.web.db_helpers import (
     render_polling_status,
     standalone_connection,
 )
+from job_finder.web.live_events import COSTS_CHANGED, JOBS_CHANGED, PIPELINE_CHANGED
+from job_finder.web.live_events import publish as publish_live
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +178,12 @@ def _run_sync_bg(db_path: str, session_id: int, app) -> None:
                 (jobs_new, total_fetched, error_count, utc_now_iso(), session_id),
             )
             conn.commit()
+
+        # Push live-update events so pages OTHER than the one polling this sync
+        # (which already gets HX-Trigger: dashboard-refresh/jobs-updated) also
+        # reflect the new rows / scores / pipeline churn.
+        for _ev in (JOBS_CHANGED, COSTS_CHANGED, PIPELINE_CHANGED):
+            publish_live(_ev)
 
         try:
             metadata = {

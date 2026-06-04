@@ -13,11 +13,18 @@ rather than at scheduler-setup time inside ``init_scheduler``.
 import logging
 
 from job_finder.web.db_helpers import get_config_snapshot
+from job_finder.web.live_events import publish as _publish_live
 
 logger = logging.getLogger(__name__)
 
 
-def _make_simple_job(app, name, import_func):
+def _publish_all(events) -> None:
+    """Fan a job's semantic events onto the live bus (best-effort)."""
+    for event in events or ():
+        _publish_live(event)
+
+
+def _make_simple_job(app, name, import_func, *, publish_events=()):
     """Factory for scheduler jobs that need only config + db_path + try/except.
 
     Args:
@@ -26,6 +33,8 @@ def _make_simple_job(app, name, import_func):
         import_func: No-arg callable that returns the job function.
             Called lazily inside the closure to defer imports.
             The returned function must accept (db_path, config).
+        publish_events: Live-bus event names emitted after a successful run so
+            subscribed widgets refetch (see job_finder.web.live_events).
     """
 
     def wrapper():
@@ -35,13 +44,16 @@ def _make_simple_job(app, name, import_func):
             try:
                 result = import_func()(db_path, config)
                 logger.info("%s: %s", name, result)
+                _publish_all(publish_events)
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
 
     return wrapper
 
 
-def _make_tracked_job(app, name, import_func, import_action, extract_metadata, *, guard=None):
+def _make_tracked_job(
+    app, name, import_func, import_action, extract_metadata, *, guard=None, publish_events=()
+):
     """Factory for scheduler jobs with timing and activity logging.
 
     Returns a zero-arg ``wrapper`` closure suitable for ``scheduler.add_job``.
@@ -59,6 +71,9 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata, *
             added automatically.
         guard: Optional callable(config) -> bool. If provided and returns
             False, the job exits early without running.
+        publish_events: Live-bus event names emitted after a completed run
+            (success or degraded) so subscribed widgets refetch (see
+            job_finder.web.live_events).
     """
 
     def wrapper():
@@ -86,6 +101,10 @@ def _make_tracked_job(app, name, import_func, import_action, extract_metadata, *
                 # "ran clean" from "ran but produced nothing useful".
                 metadata["status"] = "degraded" if metadata.get("errors") else "success"
                 log_activity(db_path, action, metadata=metadata)
+                # A completed run (even degraded) may have mutated rows; tell
+                # live widgets to refetch. Failures fall through to the except
+                # branch and intentionally publish nothing.
+                _publish_all(publish_events)
             except Exception as e:
                 logger.error("%s failed: %s", name, e)
                 log_activity(

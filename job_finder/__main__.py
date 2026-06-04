@@ -116,6 +116,11 @@ def main() -> None:
         port=port,
         debug=debug,
         use_reloader=False,
+        # threaded=True is required for the SSE live-update stream (/events):
+        # each open EventSource holds one worker thread for the life of the
+        # connection, and the single-threaded default would let one stream
+        # block every other request. Safe at single-user/local scale.
+        threaded=True,
     )
 
 

@@ -58,33 +58,17 @@
     <div id="scan-result"></div>
   {% endif %}
 
-  <!-- Pipeline health metrics -->
-  {% if health %}
-  <div class="grid grid-cols-5 gap-3">
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold {% if health.pending_probe > 50 %}text-amber-400{% else %}text-emerald-400{% endif %}">{{ health.pending_probe }}</div>
-      <div class="text-xs text-slate-400 mt-1">Pending Probe</div>
-    </div>
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold text-slate-200">{{ health.homepage_pct }}%</div>
-      <div class="text-xs text-slate-400 mt-1">Have Homepage</div>
-    </div>
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold text-slate-200">{{ health.enrichment_pct }}%</div>
-      <div class="text-xs text-slate-400 mt-1">Enriched</div>
-    </div>
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold {% if health.unlinked_jobs > 0 %}text-amber-400{% else %}text-emerald-400{% endif %}">{{ health.unlinked_jobs }}</div>
-      <div class="text-xs text-slate-400 mt-1">Unlinked Jobs</div>
-    </div>
-    <div class="bg-slate-800 rounded-lg border border-slate-700 p-3 text-center">
-      <div class="text-2xl font-bold {% if health.last_scan_age_days is not none and health.last_scan_age_days > 7 %}text-red-400{% elif health.last_scan_at %}text-emerald-400{% else %}text-slate-500{% endif %}">
-        {% if health.last_scan_age_days is not none %}{{ health.last_scan_age_days }}d{% else %}—{% endif %}
-      </div>
-      <div class="text-xs text-slate-400 mt-1">Since Last Scan</div>
-    </div>
+  <!-- Pipeline health metrics — live-refresh on background company changes -->
+  {# Read-only stat cards, so an SSE-driven innerHTML swap is non-disruptive   #}
+  {# (nothing here holds focus/scroll). The companies TABLE below is           #}
+  {# deliberately NOT wired to SSE: it has search + infinite-scroll            #}
+  {# pagination, and an auto-refetch would reset the user's scroll position.   #}
+  <div id="companies-health"
+       hx-get="{{ url_for('companies.health_fragment') }}"
+       hx-trigger="sse:companies-changed, sse:jobs-changed"
+       hx-swap="innerHTML">
+    {% include "companies/_health_metrics.html" %}
   </div>
-  {% endif %}
 
   <!-- Add company form (hidden by default) -->
   <div id="add-company-form" class="hidden bg-slate-800 rounded-xl border border-slate-700 p-5">

@@ -18,6 +18,8 @@ from job_finder.web.db_helpers import (
     standalone_connection,
 )
 from job_finder.web.exclusion_filter import count_scorable, should_exclude
+from job_finder.web.live_events import COSTS_CHANGED, JOBS_CHANGED, PIPELINE_CHANGED
+from job_finder.web.live_events import publish as publish_live
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +336,12 @@ def _finish_session(conn, db_path: str, session_id: int, status: str, session_ty
         )
     except Exception:
         pass
+
+    # Scoring rewrote classification/score and may have auto-dismissed excluded
+    # rows — push live-update events so every subscribed widget (this tab's job
+    # table already gets jobs-updated; other tabs/pages get these) refreshes.
+    for _ev in (JOBS_CHANGED, COSTS_CHANGED, PIPELINE_CHANGED):
+        publish_live(_ev)
 
 
 def _mark_session_error(db_path: str, session_id: int, error_msg: str) -> None:
