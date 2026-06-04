@@ -12,10 +12,11 @@ serves the request -- which is also the only worker (single-process app).
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, render_template, request
 
 from job_finder.web.scheduler import get_scheduler
 
@@ -131,3 +132,130 @@ def run_job_now(job_id: str):
     job.modify(next_run_time=datetime.now(UTC))
     logger.warning("Admin: triggered immediate run of %s", job_id)
     return jsonify({"id": job_id, "triggered": True})
+
+
+# ---------------------------------------------------------------------------
+# Unresolved-job triage (Phase 47.06 / 47.07)
+#
+# /admin/review surfaces rows flagged for manual review — those carrying
+# non-empty unresolved_reasons (m078 column) or an unresolved structured
+# location. A reviewer either approves (clears the flags, row re-enters the
+# normal listing) or drops (sets pipeline_status='rejected'). Both append a
+# brief audit line to the existing notes field; a dedicated audit table is a
+# future phase (§8.4).
+# ---------------------------------------------------------------------------
+
+
+def _clear_location_unresolved(raw: str | None) -> str | None:
+    """Return locations_structured JSON with every ``unresolved`` flag cleared.
+
+    Falsy / unparseable / non-list input is returned unchanged — there is
+    nothing to clear and we never want to corrupt an existing value.
+    """
+    if not raw:
+        return raw
+    try:
+        locs = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    if not isinstance(locs, list):
+        return raw
+    cleared = []
+    for loc in locs:
+        if isinstance(loc, dict):
+            cleared.append({**loc, "unresolved": False})
+        else:
+            cleared.append(loc)
+    return json.dumps(cleared)
+
+
+def _append_note(existing: str | None, line: str) -> str:
+    """Append an audit line to the notes field, newline-separated."""
+    existing = (existing or "").rstrip()
+    return f"{existing}\n{line}".lstrip() if existing else line
+
+
+def _audit_line(action: str, reasons_json: str) -> str:
+    """Compose a timestamped audit line for the notes field."""
+    from job_finder.json_utils import utc_now_iso
+
+    try:
+        reasons = json.loads(reasons_json) if reasons_json else []
+    except (json.JSONDecodeError, TypeError):
+        reasons = []
+    summary = ", ".join(reasons) if reasons else "(none)"
+    return f"{utc_now_iso()} {action}: {summary}"
+
+
+@admin_bp.route("/review", methods=["GET"], strict_slashes=False)
+def review():
+    """Triage page listing rows flagged for manual review.
+
+    Direct browser GET returns the full page; an HTMX GET returns just the
+    table fragment (per CLAUDE.md HX-Request convention). show_hidden=True so
+    already-dropped (rejected) rows aren't silently excluded before the
+    reviewer sees them; the unresolved="only" filter does the real scoping.
+    """
+    from job_finder.db import get_filtered_jobs
+    from job_finder.web.db_helpers import get_db
+
+    conn = get_db()
+    jobs = get_filtered_jobs(
+        conn,
+        unresolved="only",
+        show_hidden=True,
+        sort_by="first_seen",
+        sort_dir="DESC",
+        limit=500,
+    )
+    if request.headers.get("HX-Request"):
+        return render_template("admin/_review_rows.html", jobs=jobs)
+    return render_template("admin/review.html", jobs=jobs)
+
+
+@admin_bp.route("/review/<dedup_key>/approve", methods=["POST"], strict_slashes=False)
+def approve_review(dedup_key: str):
+    """Clear a row's unresolved flags so it re-enters the normal listing."""
+    from job_finder.web.db_helpers import get_db
+
+    conn = get_db()
+    row = conn.execute(
+        "SELECT unresolved_reasons, locations_structured, notes FROM jobs WHERE dedup_key = ?",
+        (dedup_key,),
+    ).fetchone()
+    if row is None:
+        return ("", 404)
+    cleared_locs = _clear_location_unresolved(row["locations_structured"])
+    notes = _append_note(row["notes"], _audit_line("approved", row["unresolved_reasons"]))
+    conn.execute(
+        "UPDATE jobs SET unresolved_reasons = '[]', locations_structured = ?, notes = ? "
+        "WHERE dedup_key = ?",
+        (cleared_locs, notes, dedup_key),
+    )
+    conn.commit()
+    logger.info("Admin review: approved %s", dedup_key)
+    # 200 (not 204) so HTMX performs the outerHTML swap with an empty body,
+    # removing the row from the triage table (per CLAUDE.md).
+    return ("", 200)
+
+
+@admin_bp.route("/review/<dedup_key>/drop", methods=["POST"], strict_slashes=False)
+def drop_review(dedup_key: str):
+    """Reject a flagged row (pipeline_status='rejected')."""
+    from job_finder.web.db_helpers import get_db
+
+    conn = get_db()
+    row = conn.execute(
+        "SELECT unresolved_reasons, notes FROM jobs WHERE dedup_key = ?",
+        (dedup_key,),
+    ).fetchone()
+    if row is None:
+        return ("", 404)
+    notes = _append_note(row["notes"], _audit_line("dropped", row["unresolved_reasons"]))
+    conn.execute(
+        "UPDATE jobs SET pipeline_status = 'rejected', notes = ? WHERE dedup_key = ?",
+        (notes, dedup_key),
+    )
+    conn.commit()
+    logger.info("Admin review: dropped %s", dedup_key)
+    return ("", 200)

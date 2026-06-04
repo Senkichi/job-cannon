@@ -117,6 +117,24 @@ _CLASSIFICATION_RANK_CASE = (
     "ELSE 0 END"
 )
 
+# ---------------------------------------------------------------------------
+# Phase 47.06 — "unresolved" review filter
+# ---------------------------------------------------------------------------
+# A row is "unresolved" if it carries non-empty unresolved_reasons (the m078
+# JSON column, default '[]') OR any structured location is flagged
+# unresolved=true. json_valid() guards the json_each() call: locations_structured
+# defaults to NULL (json_each(NULL) yields no rows — safe) but a malformed/empty
+# '' value would raise "malformed JSON", so non-JSON is treated as "no unresolved
+# location" rather than crashing the listing query. These are static SQL strings
+# (no user input interpolated) — safe to compose into the WHERE clause.
+_LOCATION_UNRESOLVED_SQL = (
+    "(json_valid(locations_structured) = 1 AND EXISTS ("
+    "SELECT 1 FROM json_each(locations_structured) "
+    "WHERE json_extract(value, '$.unresolved') = 1))"
+)
+_UNRESOLVED_HIDE_SQL = f"(unresolved_reasons = '[]' AND NOT {_LOCATION_UNRESOLVED_SQL})"
+_UNRESOLVED_ONLY_SQL = f"(unresolved_reasons != '[]' OR {_LOCATION_UNRESOLVED_SQL})"
+
 # Sum of the 6 sub-scores pulled from sub_scores_json — used as tiebreak within
 # a classification bucket. Each sub-score is 1-5, so the sum is 6-30 (or 0 if JSON
 # is NULL). COALESCE-wrapped so NULL sub_scores_json doesn't crash sort.
@@ -198,6 +216,7 @@ def get_filtered_jobs(
     classification: str | list[str] | None = None,
     country: str | None = None,
     workplace_type: str | None = None,
+    unresolved: str = "hide",
 ) -> list[dict]:
     """Return jobs matching the given filters, sorted and limited.
 
@@ -379,6 +398,15 @@ def get_filtered_jobs(
         if normalized_wt in {"REMOTE", "HYBRID", "ONSITE", "UNSPECIFIED"}:
             conditions.append("workplace_type = ?")
             params.append(normalized_wt)
+
+    # Phase 47.06 — unresolved review filter. Default "hide" keeps unresolved
+    # rows out of the standard listing; "only" surfaces them for /admin/review;
+    # "all" applies no filter. Unknown values fall through to "hide" (safe
+    # default). Static SQL — no params appended.
+    if unresolved == "only":
+        conditions.append(_UNRESOLVED_ONLY_SQL)
+    elif unresolved != "all":
+        conditions.append(_UNRESOLVED_HIDE_SQL)
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"SELECT {JOBS_ALL_COLUMNS} FROM jobs {where_clause} ORDER BY {order_expr} LIMIT ?"
