@@ -87,13 +87,16 @@ jobs:
         shell: bash
         run: uv run python -c "import shutil; from pathlib import Path; from job_finder.web import user_data_dirs; user_data_dirs.ensure_user_data_dir(); dst=Path(user_data_dirs.config_path()); shutil.copyfile('config.example.yaml', dst); print('seeded config ->', dst)"
 
-      # Serial WITHIN each runner (in-process xdist made Windows slower — see
-      # #72). Cross-runner parallelism comes from pytest-split sharding
+      # Serial WITHIN each runner via an EXPLICIT `-n0` that overrides the
+      # `-n auto` default baked into pyproject's addopts. In-process xdist made
+      # the 2-core Windows runner slower (spawn-based per-worker import overhead
+      # — see #72), so CI opts out here while local/dev runs stay parallel by
+      # default. Cross-runner parallelism comes from pytest-split sharding
       # (matrix.pytest_args = "--splits 4 --group K" on Windows; empty on
       # ubuntu = full suite). Coverage upload stays removed (Codecov app/token
       # absent, the step was a no-op).
       - name: Run tests
-        run: uv run pytest -q --tb=short ${{ matrix.pytest_args }}
+        run: uv run pytest -q --tb=short -n0 ${{ matrix.pytest_args }}
 
 
   # ── Aggregate test gate ──────────────────────────────────────
