@@ -696,7 +696,8 @@ def fetch_serp_portals(
                 location=job.location,
                 source=f"portal_{portal_name}" if portal_name else "portal_serp",
                 source_url=job.source_url,
-                source_id=job.source_id,
+                # No source_id: portal aggregator IDs are search-result tokens,
+                # not per-job-stable platform IDs (I-11).
                 salary_min=job.salary_min,
                 salary_max=job.salary_max,
                 description=job.description,

@@ -179,7 +179,8 @@ def _parse_job_card(link_tag, email_date: datetime | None) -> Job | None:
         location=location,
         source="glassdoor",
         source_url=clean_url,
-        source_id=source_id,
+        # source_id not persisted: the Glassdoor listing ID is used only to build
+        # a clean URL above; it is not a per-job-stable platform ID (I-11).
         salary_min=salary_min,
         salary_max=salary_max,
         posted_date=email_date,
@@ -263,7 +264,8 @@ def _parse_job_card_positional(link_tag, email_date: datetime | None) -> Job | N
         location=location,
         source="glassdoor",
         source_url=clean_url,
-        source_id=source_id,
+        # source_id not persisted: the Glassdoor listing ID is used only to build
+        # a clean URL above; it is not a per-job-stable platform ID (I-11).
         salary_min=salary_min,
         salary_max=salary_max,
         posted_date=email_date,
@@ -317,7 +319,8 @@ def _parse_job_card_table_span(link_tag, email_date: datetime | None) -> Job | N
         location=location,
         source="glassdoor",
         source_url=clean_url,
-        source_id=source_id,
+        # source_id not persisted: the Glassdoor listing ID is used only to build
+        # a clean URL above; it is not a per-job-stable platform ID (I-11).
         salary_min=salary_min,
         salary_max=salary_max,
         posted_date=email_date,

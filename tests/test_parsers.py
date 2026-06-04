@@ -48,9 +48,12 @@ class TestGlassdoorParser:
         assert jobs[0].salary_min == 178000
         assert jobs[0].salary_max == 250000
 
-    def test_listing_id_extraction(self):
+    def test_listing_id_used_for_clean_url_not_persisted_as_source_id(self):
+        # The listing ID is still extracted to build a clean URL, but is not a
+        # per-job-stable platform ID so it is not persisted as source_id (I-11).
         jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_HTML)
-        assert jobs[0].source_id == "1010057550349"
+        assert "1010057550349" in jobs[0].source_url
+        assert not jobs[0].source_id
 
     def test_empty_html(self):
         assert parse_glassdoor_alert("") == []
@@ -162,9 +165,11 @@ class TestGlassdoorPositionalParser:
         assert jobs[1].location == "Unknown"
         assert jobs[1].salary_min == 139000
 
-    def test_positional_source_id(self):
+    def test_positional_listing_id_used_for_clean_url_not_persisted(self):
+        # Listing ID feeds the clean URL but is not persisted as source_id (I-11).
         jobs = parse_glassdoor_alert(SAMPLE_GLASSDOOR_POSITIONAL_HTML)
-        assert jobs[0].source_id == "1010075022007"
+        assert "1010075022007" in jobs[0].source_url
+        assert not jobs[0].source_id
 
     def test_old_css_format_still_works(self):
         """Backward compat: CSS-class format still produces jobs."""
@@ -1452,8 +1457,8 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
             f"Expected CSS drift warning. Got log records: {[r.message for r in caplog.records]}"
         )
 
-    def test_audit_glassdoor_source_id_extracted(self):
-        """Glassdoor jobListingId is correctly extracted into source_id."""
+    def test_audit_glassdoor_listing_id_feeds_clean_url(self):
+        """Glassdoor jobListingId feeds the clean URL but is not persisted as source_id (I-11)."""
         html = """
 <html><body>
 <a href="https://www.glassdoor.com/partner/jobListing.htm?pos=101&jobListingId=7777777">
@@ -1466,7 +1471,8 @@ View job: https://www.linkedin.com/comm/jobs/view/6666666666/?trackingId=meta1
 """
         jobs = parse_glassdoor_alert(html)
         assert len(jobs) == 1
-        assert jobs[0].source_id == "7777777"
+        assert "7777777" in jobs[0].source_url
+        assert not jobs[0].source_id
         assert jobs[0].salary_min == 250000
         assert jobs[0].salary_max == 350000
 

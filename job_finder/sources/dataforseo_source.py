@@ -231,15 +231,19 @@ class DataForSEOSource:
                 list(pending),
             )
 
-        # Deduplicate by job_id within this run — two queries can return the same listing
-        seen_ids: set[str] = set()
+        # Deduplicate by source_url within this run — two queries can return the
+        # same listing. (Previously keyed on job_id, but DataForSEO's job_id is
+        # not per-job-stable and silently dropped distinct postings — I-11.)
+        seen_urls: set[str] = set()
         deduped: list[Job] = []
         for job in collected:
-            if job.source_id and job.source_id in seen_ids:
-                logger.debug("DataForSEO: dropping duplicate job_id %s within run", job.source_id)
+            if job.source_url and job.source_url in seen_urls:
+                logger.debug(
+                    "DataForSEO: dropping duplicate listing %s within run", job.source_url
+                )
                 continue
-            if job.source_id:
-                seen_ids.add(job.source_id)
+            if job.source_url:
+                seen_urls.add(job.source_url)
             deduped.append(job)
         return deduped
 
@@ -353,7 +357,6 @@ class DataForSEOSource:
 
         location = item.get("location", "")
         source_url = item.get("source_url", "")
-        source_id = item.get("job_id", "")
 
         posted_date = self._parse_timestamp(item.get("timestamp", ""))
 
@@ -377,7 +380,9 @@ class DataForSEOSource:
             location=location,
             source="dataforseo",
             source_url=source_url,
-            source_id=source_id,
+            # No source_id: DataForSEO's job_id is a search-result token, not a
+            # per-job-stable platform ID (it has been observed shared across
+            # distinct postings within a company) — I-11.
             salary_min=salary_min,
             salary_max=salary_max,
             description=None,  # enrichment pipeline fills this

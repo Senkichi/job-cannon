@@ -148,7 +148,8 @@ class SerpAPISource:
             location=location,
             source=self.source_name,
             source_url=source_url,
-            source_id=result.get("job_id", ""),
+            # No source_id: SerpAPI's job_id is a search-result token, not a
+            # per-job-stable platform ID (I-11).
             salary_min=salary_min,
             salary_max=salary_max,
             description=description,
