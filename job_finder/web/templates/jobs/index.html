@@ -76,6 +76,17 @@
         {% endfor %}
       </select>
 
+      <!-- Unresolved review filter (Phase 47.06) -->
+      <label for="filter-unresolved" class="sr-only">Review status</label>
+      <select name="unresolved" id="filter-unresolved"
+              title="Show rows flagged for manual review (non-empty unresolved_reasons or an unresolved location)"
+              class="appearance-auto bg-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 focus:outline-none focus:border-indigo-500">
+        {% set _unresolved = filters.get('unresolved', 'hide') %}
+        <option value="hide" {% if _unresolved == 'hide' %}selected{% endif %}>Hide review-needed</option>
+        <option value="only" {% if _unresolved == 'only' %}selected{% endif %}>Review-needed only</option>
+        <option value="all" {% if _unresolved == 'all' %}selected{% endif %}>Show all</option>
+      </select>
+
       <!-- Posted within dropdown -->
       <label for="filter-posted-within" class="sr-only">Posted within</label>
       <select name="posted_within" id="filter-posted-within"
@@ -118,7 +129,7 @@
         <input type="checkbox" name="hide_stale" value="on"
                {% if filters.get('hide_stale', 'on') == 'on' %}checked{% endif %}
                hx-get="{{ url_for('jobs.table') }}" hx-trigger="change" hx-target="#job-table-body"
-           hx-include="[name='status'],[name='location'],[name='country'],[name='workplace_type'],[name='posted_within'],[name='freshness'],[name='sort_by'],[name='sort_dir'],[name='hide_stale'],[name='show_hidden'],[name='date_from'],[name='date_to']"
+           hx-include="[name='status'],[name='location'],[name='country'],[name='workplace_type'],[name='unresolved'],[name='posted_within'],[name='freshness'],[name='sort_by'],[name='sort_dir'],[name='hide_stale'],[name='show_hidden'],[name='date_from'],[name='date_to']"
                class="w-3.5 h-3.5 accent-violet-500">
         Hide stale
         {% if stale_count > 0 %}

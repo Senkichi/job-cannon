@@ -160,6 +160,7 @@ def _get_filter_kwargs() -> dict:
         "date_to": args.get("date_to") or None,
         "country": args.get("country") or None,
         "workplace_type": args.get("workplace_type") or None,
+        "unresolved": args.get("unresolved") or "hide",
         "sort_by": args.get("sort_by", "score"),
         "sort_dir": args.get("sort_dir", "DESC"),
         "limit": 200,

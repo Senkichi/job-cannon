@@ -40,8 +40,8 @@ JOBS_ALL_COLUMNS = (
     "fit_analysis, classification, sub_scores_json, scoring_model, "
     "jd_full, is_stale, "
     "company_id, comp_data_json, enrichment_tier, "
-    "locations_raw, description_reformatted, expiry_checked_at, scoring_provider, "
-    "opus_score, expiry_status, eval_blocks, job_archetype"
+    "locations_raw, locations_structured, description_reformatted, expiry_checked_at, scoring_provider, "
+    "opus_score, expiry_status, eval_blocks, job_archetype, unresolved_reasons"
 )
 
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch
