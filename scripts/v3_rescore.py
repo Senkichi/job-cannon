@@ -134,6 +134,14 @@ def run_batch(
     failures = 0
     model = (config.get("providers", {}).get("scoring") or {}).get("model")
 
+    # candidate_context is a REQUIRED score_job arg (Phase 2a). Resolve it once
+    # for the whole batch via the same orchestrator path the production scorer
+    # uses — without it every score_job call raises TypeError and every row is
+    # recorded as an error.
+    from job_finder.web.scoring_orchestrator import _resolve_candidate_context
+
+    candidate_context = _resolve_candidate_context(config)
+
     for i, key in enumerate(dedup_keys, 1):
         row = conn.execute("SELECT * FROM jobs WHERE dedup_key = ?", (key,)).fetchone()
         if row is None:
@@ -153,7 +161,7 @@ def run_batch(
             continue
 
         try:
-            sr = score_job(job, conn, config)
+            sr = score_job(job, conn, config, candidate_context)
         except Exception as exc:  # pragma: no cover - defensive
             failures += 1
             results.append(

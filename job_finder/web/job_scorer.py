@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from job_finder.db import JobAssessment
 from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
+from job_finder.web.scoring_types import build_comp_context
 
 log = logging.getLogger(__name__)
 
@@ -47,11 +48,21 @@ _SUB_SCORE_KEYS: tuple[str, ...] = (
     "skills_match",
 )
 
-# Simple truncation guardrail. sonnet_evaluator.py uses a richer
-# build_description_snippet helper; Plan 4 (COLLAPSE-01) migrates the
-# shared helper into scoring_types.py. Plan 1 uses this simpler
-# constant to avoid coupling to haiku_scorer before it is deleted.
-_MAX_JD_CHARS = 10_000
+# Safety-net ceiling on JD size sent to the scorer. The cleaned jd_full is
+# normally sent WHOLE — real JD prose is short (~6k chars; p95 of naively
+# de-bloated postings ~18k per the 2026-06-03 JD-length investigation) and
+# the local model has ~28k tokens of context headroom after the system
+# prompt, so truncation is almost never needed. This cap only guards against
+# a pathological / poorly-cleaned posting (HTML, duplication, Word-export
+# bloat): past it we hard-truncate the tail WITH a logged warning rather
+# than silently dropping content mid-document.
+#
+# Removing genuinely-superfluous context (boilerplate, EEO, marketing) is an
+# upstream-extraction concern (trafilatura + ATS JSON — "Layer 2"), NOT the
+# scorer's job. config.JD_STORAGE_MAX_CHARS (50k) bounds what can ever reach
+# here; this 24k cap sits comfortably above real JD lengths and well below
+# that storage bound.
+_MAX_JD_CHARS = 24_000
 
 
 @dataclass(frozen=True)
@@ -147,11 +158,22 @@ def _build_system_prompt(
 
 
 def _build_user_message(job: dict) -> str:
-    """Minimal user-side assembly: title + company + location + (truncated) JD.
+    """User-side assembly: title + company + location + comp + JD.
 
-    Keeps the user message small and consistent across candidates so the
-    LLM sees a stable request shape. Plan 4 may migrate to a richer
-    helper that mirrors sonnet_evaluator.evaluate_job_sonnet's format.
+    Keeps the request shape stable across candidates so the LLM sees a
+    consistent prompt.
+
+    - JD: the cleaned ``jd_full`` is sent WHOLE. Real JD prose is short and
+      the local model has ample context headroom, so truncation is almost
+      never needed — and a silent truncation that drops the requirements /
+      location / compensation sections is far worse than a slightly larger
+      prompt. As a pure safety net against a pathological / poorly-cleaned
+      posting, anything past ``_MAX_JD_CHARS`` is hard-truncated WITH a
+      logged warning (never a silent section-drop). Removing superfluous
+      content properly is an upstream-extraction job (Layer 2).
+    - Compensation: the salary_min/max range is always shown; richer
+      ATS-sourced comp (equity / bonus / tier summary from comp_data_json)
+      is appended via ``build_comp_context`` when present.
     """
     title = job.get("title") or "(no title)"
     company = job.get("company_canonical") or job.get("company") or "(no company)"
@@ -161,7 +183,23 @@ def _build_user_message(job: dict) -> str:
     comp = ""
     if salary_min or salary_max:
         comp = f"\nSalary: {salary_min or '?'}-{salary_max or '?'}"
-    jd = (job.get("jd_full") or "")[:_MAX_JD_CHARS]
+    comp_extra = build_comp_context(job)
+    if comp_extra:
+        comp += f"\nCompensation: {comp_extra}"
+
+    jd_full = job.get("jd_full") or ""
+    if len(jd_full) > _MAX_JD_CHARS:
+        log.warning(
+            "score_job: jd_full for dedup_key=%s is %d chars (> %d cap); "
+            "hard-truncating tail. Signals upstream cleaning bloat "
+            "(HTML / duplication) — see Layer 2 extraction plan.",
+            job.get("dedup_key"),
+            len(jd_full),
+            _MAX_JD_CHARS,
+        )
+        jd = jd_full[:_MAX_JD_CHARS]
+    else:
+        jd = jd_full
     return (
         f"Title: {title}\nCompany: {company}\nLocation: {location}{comp}\n\nJob Description:\n{jd}"
     )
