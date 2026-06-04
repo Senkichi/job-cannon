@@ -14,6 +14,7 @@ Exports:
 """
 
 import logging
+import re
 import sqlite3
 
 from thefuzz import fuzz
@@ -26,10 +27,71 @@ logger = logging.getLogger(__name__)
 
 
 # Fuzzy match threshold (0–100). Score >= this means a match.
-_FUZZY_THRESHOLD = 85
+_FUZZY_THRESHOLD = 90
 
-# Minimum normalized name length for fuzzy matching (short names are unreliable)
-_MIN_NAME_LEN = 4
+# Minimum normalized name length for fuzzy matching (short names are unreliable).
+# Raised from 4 to 8 to suppress false-positive matches on short acronyms/prefixes.
+_MIN_NAME_LEN = 8
+
+# Trailing legal-entity suffixes to strip before fuzzy-scoring.
+#
+# Applied iteratively to both the candidate and stored names inside
+# fuzzy_match_company() to remove noise tokens that inflate cross-company
+# similarity.  These complement the stripping already performed by
+# normalize_company() — in particular, ", MSI" (subsidiary-type suffix) and
+# ", GmbH" / ", Pty Ltd" / ", S.A." are NOT covered by normalize_company's
+# _COMPANY_SUFFIXES list.
+#
+# Example:  "evicore healthcare msi, llc"
+#             → normalize_company strips ", llc"  → "evicore healthcare msi"
+#             → _strip_legal_entity_suffix strips " msi" → "evicore healthcare"
+_TRAILING_ENTITY_SUFFIXES_RE = re.compile(
+    r"""
+    [,\s]+                  # comma and/or whitespace separating the suffix
+    (?:
+        llc
+        | l\.l\.c\.?
+        | inc\.?
+        | incorporated
+        | ltd\.?
+        | l\.t\.d\.?
+        | gmbh
+        | g\.m\.b\.h\.?
+        | pty\s+ltd
+        | s\.a\.
+        | corp\.?
+        | corporation
+        | msi
+    )
+    \s*$                    # must appear at end of string
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _strip_legal_entity_suffix(name: str) -> str:
+    """Strip trailing legal-entity suffixes from a (possibly already-normalized) name.
+
+    Iterates until stable so multi-part suffixes such as ``"evicore healthcare
+    msi"`` (where ``, LLC`` was already removed by normalize_company) are fully
+    collapsed:
+
+        "evicore healthcare msi, llc"  →  "evicore healthcare msi"  →  "evicore healthcare"
+
+    Safe to apply to already-normalized names (lowercase, no comma before msi):
+
+        "evicore healthcare msi"  →  "evicore healthcare"
+
+    Applied to BOTH the candidate and stored company names in
+    ``fuzzy_match_company()`` before token_set_ratio scoring so that suffix
+    noise tokens do not inflate cross-company similarity.
+    """
+    while True:
+        stripped = _TRAILING_ENTITY_SUFFIXES_RE.sub("", name).strip(" ,")
+        if stripped == name:
+            break
+        name = stripped
+    return name
 
 
 def fuzzy_match_company(
@@ -39,9 +101,15 @@ def fuzzy_match_company(
 ) -> tuple[int | None, int]:
     """Fuzzy-match a raw company name against existing company records.
 
-    Normalizes raw_name via normalize_company(). If the normalized name is
-    shorter than _MIN_NAME_LEN characters, returns (None, 0) immediately
-    (short names produce too many false positives).
+    Normalizes raw_name via normalize_company(), then applies
+    _strip_legal_entity_suffix() to both the candidate and every stored company
+    name before scoring.  Threshold raised to 90 and _MIN_NAME_LEN raised to 8
+    (Phase 49.03) to reduce false-positive merges between companies that share
+    a generic token such as "healthcare".
+
+    If the normalized-then-stripped name is shorter than _MIN_NAME_LEN
+    characters, returns (None, 0) immediately (short names are too unreliable
+    for fuzzy matching; exact-match paths in upsert_company handle them).
 
     Uses fuzz.token_set_ratio() to handle word-order variations
     (e.g. "Inc Stripe" vs "Stripe Inc").
@@ -49,7 +117,7 @@ def fuzzy_match_company(
     Args:
         raw_name: Raw company name string to match.
         existing_companies: List of (company_id, normalized_name) tuples.
-        threshold: Minimum score to accept as a match (default 85).
+        threshold: Minimum score to accept as a match (default 90).
 
     Returns:
         Tuple of (best_company_id, best_score). Returns (None, 0) if no
@@ -57,15 +125,25 @@ def fuzzy_match_company(
     """
     normalized = normalize_company(raw_name)
 
-    # Guard: skip fuzzy matching for very short names (too unreliable)
+    # Guard: skip fuzzy matching for very short names (too unreliable).
     if len(normalized) < _MIN_NAME_LEN:
+        return None, 0
+
+    # Strip residual legal-entity suffixes not caught by normalize_company
+    # (e.g. " msi" remaining after ", llc" is already stripped).  Apply before
+    # scoring so suffix noise tokens don't inflate cross-company similarity.
+    candidate = _strip_legal_entity_suffix(normalized)
+
+    # Guard again: stripping may shorten a boundary-length name below the minimum.
+    if not candidate or len(candidate) < _MIN_NAME_LEN:
         return None, 0
 
     best_id: int | None = None
     best_score: int = 0
 
     for company_id, company_name in existing_companies:
-        score = fuzz.token_set_ratio(normalized, company_name)
+        stored = _strip_legal_entity_suffix(company_name)
+        score = fuzz.token_set_ratio(candidate, stored)
         if score > best_score:
             best_score = score
             best_id = company_id
