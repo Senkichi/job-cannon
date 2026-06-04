@@ -174,9 +174,15 @@
           <th class="px-2 py-2">Status</th>
         </tr>
       </thead>
+      {# Live-refresh on jobs-updated (this tab's own status/dismiss actions)  #}
+      {# and on sse:jobs-changed (background ingestion / enrichment / scoring  #}
+      {# / staleness). The current filter is re-applied via hx-include, so new #}
+      {# and rescored rows appear in place. Note: an innerHTML swap collapses  #}
+      {# any open accordion row — acceptable given background events are       #}
+      {# infrequent; revisit with a "new jobs" banner if it proves intrusive.  #}
       <tbody id="job-table-body"
              hx-get="{{ url_for('jobs.table') }}"
-             hx-trigger="jobs-updated from:body"
+             hx-trigger="jobs-updated from:body, sse:jobs-changed"
              hx-include="#filter-form"
              hx-swap="innerHTML">
         {% include "jobs/_table.html" %}

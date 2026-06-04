@@ -1503,14 +1503,28 @@ class TestDashboardRefreshFragments:
         data = response.data.decode()
         assert 'id="dashboard-stats"' in data
         assert 'id="dashboard-quick-actions"' in data
-        # Stat cards subscribe to dashboard-refresh AND self-poll so they stay
-        # live regardless of which action mutated the underlying counts.
-        assert 'hx-trigger="dashboard-refresh from:body, every 30s"' in data
+        # Stat cards refresh on dashboard-refresh (this tab's own actions) AND on
+        # the SSE events a background scheduler job publishes — no polling.
+        assert "dashboard-refresh from:body" in data
+        assert "sse:jobs-changed" in data
+        assert "sse:costs-changed" in data
+        assert "sse:detections-changed" in data
+        # The old 30s self-poll must be gone (replaced by SSE push).
+        assert "every 30s" not in data
         # Quick actions wrapper uses a 5s delay so backend session state settles
         assert 'hx-trigger="dashboard-refresh from:body delay:5s"' in data
         # History block (pipeline summary + activity tables) live-updates too.
         assert 'id="dashboard-history"' in data
         assert 'hx-get="/dashboard/history"' in data
+
+    def test_dashboard_loads_sse_extension_and_connects(self, client):
+        """base.html must load the htmx SSE extension and open the /events
+        stream on <body>, otherwise no sse:* trigger anywhere can ever fire."""
+        response = client.get("/dashboard")
+        data = response.data.decode()
+        assert "htmx-ext-sse" in data
+        assert 'hx-ext="sse"' in data
+        assert 'sse-connect="/events"' in data
 
 
 # ---------------------------------------------------------------------------

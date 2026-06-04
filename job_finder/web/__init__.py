@@ -310,6 +310,7 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.blueprints.costs import costs_bp
     from job_finder.web.blueprints.dashboard import dashboard_bp
     from job_finder.web.blueprints.detections import detections_bp
+    from job_finder.web.blueprints.events import events_bp
     from job_finder.web.blueprints.jobs import jobs_bp
     from job_finder.web.blueprints.pipeline import pipeline_bp
     from job_finder.web.blueprints.profile import profile_bp
@@ -330,6 +331,18 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     app.register_blueprint(settings_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(updates_bp)
+    app.register_blueprint(events_bp)  # SSE live-update stream (/events)
+
+    @app.context_processor
+    def _inject_live_updates_flag():
+        """Expose LIVE_UPDATES_ENABLED to every template.
+
+        Defaults True (the SSE stream + sse:* triggers render). The e2e harness
+        sets it False because a long-lived /events connection never reaches
+        Playwright's networkidle and would block the single-threaded test
+        server. Live updates are covered by unit tests instead.
+        """
+        return {"live_updates_enabled": app.config.get("LIVE_UPDATES_ENABLED", True)}
 
     # --- Update banner context (Phase 43) ---
     @app.before_request

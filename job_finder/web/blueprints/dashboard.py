@@ -283,6 +283,28 @@ def history_fragment():
     )
 
 
+@dashboard_bp.route("/review-queue", strict_slashes=False)
+def review_queue_fragment():
+    """HTMX fragment — pending-detection cards + an OOB header-badge refresh.
+
+    Refetched on ``sse:detections-changed`` so detections surfaced by the
+    background pipeline-detection job fill the review queue live, without a
+    page reload. User confirm/dismiss keeps its own card-level swap path (see
+    blueprints/detections.py) — this route only serves the background-driven
+    refresh, so the two never fight over the same DOM.
+    """
+    conn = get_db()
+    pending_detections = get_pending_detections(conn)
+    pending_count = get_dashboard_stats(conn).get("pending_detections", 0)
+    queue_html = render_template(
+        "dashboard/_review_queue.html", pending_detections=pending_detections
+    )
+    header_oob = render_template(
+        "dashboard/_pipeline_review_header.html", pending_count=pending_count, oob=True
+    )
+    return queue_html + header_oob
+
+
 @dashboard_bp.route("/quick-actions", strict_slashes=False)
 def quick_actions_fragment():
     """HTMX fragment — returns refreshed quick actions with active session detection.
