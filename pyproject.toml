@@ -92,6 +92,14 @@ dependencies = [
     # Linux Secret Service). Falls back to config.yaml plaintext when no
     # backend is reachable — see job_finder/secrets.py.
     "keyring>=24.0",
+    # System-tray icon (Issue #40). pystray owns the main thread; Flask runs
+    # in a daemon background thread. Falls back to terminal mode on platforms
+    # without a working tray backend (GNOME without AppIndicator, headless).
+    "pystray>=0.19",
+    # Pillow is required by pystray for the icon image and by the PNG-generation
+    # helper in job_finder/tray.py (_load_icon). >=10.0 for the RGBA-mode
+    # importlib.resources path that works in all Python 3.13 installs.
+    "Pillow>=10.0",
     # .env file loading at app startup. Imported unconditionally at module
     # load by job_finder/web/__init__.py:16 — so it MUST live in core
     # dependencies, not in [optional-dependencies].dev. A pipx install

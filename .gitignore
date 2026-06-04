@@ -59,6 +59,8 @@ docs/superpowers/
 
 # Screenshots from exploration/testing sessions
 *.png
+# Bundled assets that must be tracked even though *.png is otherwise ignored
+!job_finder/assets/*.png
 
 # Session artifacts / local dev outputs
 *.out.txt

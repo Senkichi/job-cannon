@@ -289,6 +289,59 @@ Opt in once: `git config core.hooksPath .githooks`. Then `uv run pre-commit inst
 
 ---
 
+## System-Tray Mode
+
+`uv run job-cannon` (no flags) launches in **tray mode** by default: Flask runs
+in a daemon background thread, and a tray icon appears in your system tray /
+notification area.
+
+### Tray menu
+
+| Item | Action |
+|---|---|
+| **Open Job Cannon** | Opens the web UI in your browser (default action on double-click) |
+| *Listening on http://…* | Non-clickable URL label |
+| **Pause scheduler** | Pauses or resumes the APScheduler background job |
+| **Open logs folder** | Opens the logs directory in your file explorer |
+| **Quit** | Graceful shutdown — stops the scheduler, closes the Werkzeug server, exits |
+
+### Terminal mode
+
+Use `--terminal` (or set `JOB_CANNON_NO_TRAY=1`) for the traditional Werkzeug
+console mode — no tray icon, `Ctrl+C` to stop:
+
+```bash
+uv run job-cannon --terminal
+# or
+JOB_CANNON_NO_TRAY=1 uv run job-cannon
+```
+
+Both paths are equivalent: the same Flask app runs, the same scheduler fires,
+and `JOB_CANNON_NO_BROWSER=1` still suppresses the auto-open timer.
+
+### Platform caveats
+
+**Linux GNOME**: Default GNOME 42+ does not render system-tray icons without the
+[AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).
+When pystray fails to construct the icon (common on stock GNOME), Job Cannon
+automatically falls back to terminal mode and logs:
+
+```
+Tray icon construction failed (…); falling back to terminal mode with existing app instance
+```
+
+No user action is required — the app is fully functional in headless mode. To
+enable the tray icon on GNOME, install the AppIndicator extension and restart
+your GNOME Shell.
+
+**macOS**: A brief Dock icon flash is visible at startup. This is acceptable for
+v1; permanent suppression requires `.app` bundling (deferred post-release).
+
+**Headless / SSH / CI**: Set `JOB_CANNON_NO_TRAY=1` to skip tray construction
+entirely and avoid the fallback-log noise.
+
+---
+
 ## Where to Next
 
 - **[README.md](../README.md)** — feature overview, architecture, cost estimates

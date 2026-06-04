@@ -5,10 +5,21 @@ Exposes :func:`main` for the ``[project.scripts]`` entry registered in
 but resolves ``config.yaml`` via :func:`job_finder.config.resolve_config_path`
 so the binary can be launched from any working directory once installed.
 
-Also (UAT 2026-05-21 F2): prints a "Job Cannon is starting on <url>" banner
-and opens the user's default browser ~1.5 s after launch, so a neophyte
-running ``uv run job-cannon`` is not stranded at the Werkzeug log line.
-Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
+Launch modes
+------------
+Default (no flags)
+    System-tray mode via :class:`job_finder.tray.TrayApp`.  Flask runs in a
+    daemon background thread; the tray icon owns the main thread.
+
+``--terminal`` / ``JOB_CANNON_NO_TRAY=1``
+    Terminal mode (existing behaviour).  Flask's dev server runs on the main
+    thread with a delayed browser-open timer and a ``Ctrl+C`` handler.
+
+Also (UAT 2026-05-21 F2): terminal mode prints a "Job Cannon is starting on
+<url>" banner and opens the user's default browser ~1.5 s after launch, so a
+neophyte running ``uv run job-cannon --terminal`` is not stranded at the
+Werkzeug log line.  Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless /
+CI use.
 """
 
 import argparse
@@ -38,6 +49,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version=f"job-cannon {_get_version()}",
+    )
+    parser.add_argument(
+        "--terminal",
+        action="store_true",
+        help=(
+            "Force terminal mode (no system tray). Default is tray mode. "
+            "Also honoured via the JOB_CANNON_NO_TRAY=1 environment variable."
+        ),
     )
     return parser
 
@@ -72,37 +91,21 @@ def _open_browser(url: str) -> None:
         logger.warning("Could not open browser at %s: %s", url, exc)
 
 
-def main() -> None:
-    """Resolve config, build the Flask app, and start the dev server."""
-    # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
-    # argparse calls sys.exit(0) on --help and --version, so we never touch
-    # load_config() if those flags are passed. This is what makes
-    # `pipx install job-cannon && job-cannon --help` work without config.yaml.
-    _build_parser().parse_args()
+def _run_terminal_mode(cfg: dict, host: str, port: int, debug: bool) -> None:
+    """Run Flask in terminal mode (existing path, no tray icon).
 
-    # Lazy imports so a --help invocation doesn't pay the Flask import cost.
-    from job_finder.config import (
-        DEFAULT_SERVER_DEBUG,
-        DEFAULT_SERVER_HOST,
-        DEFAULT_SERVER_PORT,
-        load_config,
-    )
+    Called when ``--terminal`` is passed or ``JOB_CANNON_NO_TRAY=1`` is set.
+    Creates the Flask app directly and starts ``app.run()``.
+
+    ``create_app()`` is called here (once) — this is the terminal-mode entry
+    point and it owns the app lifecycle for this path.
+    """
     from job_finder.web import create_app
 
-    cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
-    server = cfg.get("server", {})
-    host = server.get("host", DEFAULT_SERVER_HOST)
-    port = server.get("port", DEFAULT_SERVER_PORT)
-    debug = server.get("debug", DEFAULT_SERVER_DEBUG)
-
-    # F2: surface the URL before any Werkzeug noise and (unless opted out)
-    # kick off a delayed browser open. The print() lands in stdout before
-    # logging is fully attached — this is the one user-facing print in the
-    # whole project, justified because the alternative is a stranded user.
     url = f"http://{host}:{port}"
-    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
 
+    no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
     print(f"Job Cannon is starting on {url}")
     if not no_browser:
         print("Opening your browser…  (Ctrl+C to stop)")
@@ -122,6 +125,38 @@ def main() -> None:
         # block every other request. Safe at single-user/local scale.
         threaded=True,
     )
+
+
+def main() -> None:
+    """Resolve config, choose launch mode, and start the server."""
+    # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
+    # argparse calls sys.exit(0) on --help and --version, so we never touch
+    # load_config() if those flags are passed. This is what makes
+    # `pipx install job-cannon && job-cannon --help` work without config.yaml.
+    args = _build_parser().parse_args()
+
+    # Lazy imports so a --help invocation doesn't pay the Flask import cost.
+    from job_finder.config import (
+        DEFAULT_SERVER_DEBUG,
+        DEFAULT_SERVER_HOST,
+        DEFAULT_SERVER_PORT,
+        load_config,
+    )
+
+    cfg = load_config(allow_missing=True)
+    server = cfg.get("server", {})
+    host = server.get("host", DEFAULT_SERVER_HOST)
+    port = server.get("port", DEFAULT_SERVER_PORT)
+    debug = server.get("debug", DEFAULT_SERVER_DEBUG)
+
+    # Mode dispatch: --terminal flag OR JOB_CANNON_NO_TRAY env → terminal mode;
+    # default → tray mode.
+    if args.terminal or os.environ.get("JOB_CANNON_NO_TRAY"):
+        _run_terminal_mode(cfg, host, port, debug)
+    else:
+        from job_finder.tray import TrayApp
+
+        TrayApp(cfg).run()
 
 
 if __name__ == "__main__":
