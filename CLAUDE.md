@@ -23,10 +23,11 @@ uv run job-cannon                                 # Flask dev server on localhos
 uv run python -m job_finder                       # equivalent module entry
 uv run python run.py                              # legacy entry, still works (now a shim)
 
-# Tests
+# Tests — parallel by default (addopts carries `-n auto --dist loadscope`, ~4x faster; no flag needed)
 uv run --active pytest tests/                              # Full suite (use `pytest --co` for exact count; excludes e2e by default in CI docs)
 uv run --active pytest tests/test_pipeline_detector.py -v  # Specific file
 uv run --active pytest -x                                  # Stop on first failure
+uv run --active pytest -n0                                 # Force serial (override the -n auto default — bisecting flakes, readable output)
 
 # Dependencies
 uv sync --extra dev --extra eval                  # Install pyproject deps + dev/eval extras
