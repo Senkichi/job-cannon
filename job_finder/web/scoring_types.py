@@ -148,6 +148,14 @@ def build_description_snippet(
     Replaces the legacy 500-char truncation. Surfaces requirements/qualifications
     sections and skill-keyword counts from the full posting without sending the
     entire JD to the model.
+
+    DEPRECATED — do NOT wire this into the scoring path. The 2026-06-03 JD-length
+    investigation found this regex *whitelists* requirements-flavored sections and
+    so silently drops Responsibilities / Location / Compensation (starving
+    domain_match / location_fit / comp_fit). JDs are structured too variably for a
+    regex window. The scorer now sends jd_full whole (job_scorer._build_user_message);
+    superfluous-content removal belongs in upstream extraction (trafilatura + ATS
+    JSON — "Layer 2"), not here. Retained only until Layer 2 lands.
     """
     if not description:
         return ""

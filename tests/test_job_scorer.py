@@ -15,6 +15,7 @@ mock call_model() directly so they do not require Ollama/network.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -249,6 +250,75 @@ class TestHappyPath:
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs.get("job_id") == "acme|senior-ml-engineer"
+
+
+# ---------------------------------------------------------------------------
+# Tests: JD handling (Layer 1 — send jd_full whole; safety-net truncate only
+# for pathological oversized postings, never a silent section-drop). Plus
+# build_comp_context folding for ATS-sourced compensation.
+# ---------------------------------------------------------------------------
+
+
+def _user_content(job, mock_conn, config) -> str:
+    """Run score_job with call_model mocked and return the user message text."""
+    with patch("job_finder.web.job_scorer.call_model") as mock_call:
+        mock_call.return_value = _good_model_result()
+        score_job(job, mock_conn, config, _TEST_CTX)
+    return mock_call.call_args.kwargs["messages"][0]["content"]
+
+
+class TestJdHandling:
+    """_build_user_message sends jd_full whole; truncates only past the cap."""
+
+    def test_normal_jd_sent_verbatim(self, mock_conn, config):
+        """A posting under the cap is sent whole — no truncation, no dropped
+        middle section (the regression Layer 1 eliminates)."""
+        job = _good_job()
+        content = _user_content(job, mock_conn, config)
+        assert job["jd_full"] in content
+
+    def test_jd_at_cap_boundary_sent_whole(self, mock_conn, config):
+        """Exactly _MAX_JD_CHARS is still sent whole (boundary is inclusive)."""
+        from job_finder.web.job_scorer import _MAX_JD_CHARS
+
+        job = _good_job()
+        # Unique tail marker right at the cap so we can prove nothing was cut.
+        job["jd_full"] = "x" * (_MAX_JD_CHARS - 5) + "ENDXX"
+        assert len(job["jd_full"]) == _MAX_JD_CHARS
+        content = _user_content(job, mock_conn, config)
+        assert "ENDXX" in content
+
+    def test_oversized_jd_truncated_with_warning_not_silently(self, mock_conn, config, caplog):
+        """A pathological >cap posting is hard-truncated to the cap AND logs a
+        warning — the truncation is never silent."""
+        import logging
+
+        from job_finder.web.job_scorer import _MAX_JD_CHARS
+
+        job = _good_job()
+        job["jd_full"] = "y" * (_MAX_JD_CHARS + 5000) + "TAILMARKER"
+        with caplog.at_level(logging.WARNING, logger="job_finder.web.job_scorer"):
+            content = _user_content(job, mock_conn, config)
+
+        # JD portion is bounded by the cap; the far tail is dropped.
+        assert "TAILMARKER" not in content
+        # But the drop is announced, not silent.
+        assert any("hard-truncating" in r.message for r in caplog.records)
+        assert any(str(_MAX_JD_CHARS) in r.message for r in caplog.records)
+
+    def test_comp_data_json_appends_compensation_line(self, mock_conn, config):
+        """build_comp_context folds ATS-sourced comp into the user message."""
+        job = _good_job()
+        job["comp_data_json"] = json.dumps({"compensationTierSummary": "$200k base + 0.1% equity"})
+        content = _user_content(job, mock_conn, config)
+        assert "Compensation: $200k base + 0.1% equity" in content
+
+    def test_no_comp_data_json_omits_compensation_line(self, mock_conn, config):
+        """Without comp_data_json, no Compensation line is added (Salary only)."""
+        job = _good_job()
+        job.pop("comp_data_json", None)
+        content = _user_content(job, mock_conn, config)
+        assert "Compensation:" not in content
 
 
 # ---------------------------------------------------------------------------
