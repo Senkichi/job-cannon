@@ -23,6 +23,7 @@ from ddgs import DDGS
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.web.domain_policy import domain_priority, is_blocked_domain
+from job_finder.web.html_extract import html_to_clean_text
 from job_finder.web.model_provider import call_model
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,6 @@ _SERPAPI_URL = "https://serpapi.com/search.json"
 # HTTP request headers + timeout — shared with careers_crawler.py and
 # careers_page_interactions.py via the central _http_constants module.
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
-
-# Tags to strip from HTML before extracting text
-_NOISE_TAGS = ["script", "style", "nav", "footer", "header", "noscript", "aside"]
 
 # Maximum characters to return from direct JD fetch
 _MAX_JD_CHARS = JD_STORAGE_MAX_CHARS
@@ -124,13 +122,13 @@ def fetch_direct_jd(url: str) -> str | None:
         response = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Strip noisy tags
-        for tag in soup.find_all(_NOISE_TAGS):
-            tag.decompose()
-
-        text = soup.get_text(separator="\n", strip=True)
+        # Structure-aware extraction (JD Layer 2): strips boilerplate, keeps
+        # headings/lists, collapses duplicate blocks. Falls back to a plain
+        # noise-tag strip internally when the page has no article structure.
+        text = html_to_clean_text(response.text)
+        if not text:
+            logger.debug("fetch_direct_jd('%s'): no extractable text", url)
+            return None
 
         # Reject auth-wall / CAPTCHA pages that return login HTML instead of JD
         text_lower = text.lower()
@@ -629,7 +627,10 @@ def company_name_in_text(company_name: str, text: str) -> bool:
 def extract_content_from_html(html: str) -> str | None:
     """Extract cleaned text content from raw HTML.
 
-    Strips noise tags (script, style, nav, etc.) and returns cleaned text.
+    Structure-aware extraction via ``html_to_clean_text`` (JD Layer 2): strips
+    boilerplate, preserves headings/lists, collapses duplicate blocks, and
+    falls back to a plain noise-tag strip when trafilatura can't parse the page.
+    Consumed by ``agentic_enricher`` to convert fetched HTML into ``jd_full``.
 
     Args:
         html: Raw HTML string.
@@ -639,13 +640,7 @@ def extract_content_from_html(html: str) -> str | None:
     """
     if not html:
         return None
-
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(_NOISE_TAGS):
-        tag.decompose()
-
-    text = soup.get_text(separator="\n", strip=True)
-    return text if text.strip() else None
+    return html_to_clean_text(html)
 
 
 def is_chrome_or_login_page(text: str) -> bool:

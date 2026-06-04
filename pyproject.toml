@@ -47,6 +47,11 @@ dependencies = [
     "google-genai>=1.0.0",
     # Web + parsing
     "beautifulsoup4~=4.12",
+    # Structure-aware HTML→text extraction for job descriptions (JD Layer 2).
+    # Strips boilerplate/nav/footer, deduplicates repeated blocks, preserves
+    # headings — replaces naive BeautifulSoup.get_text() in the jd_full
+    # conversion path (job_finder/web/html_extract.py). Apache-2.0.
+    "trafilatura>=2.0,<3",
     "defusedxml>=0.7,<0.8",
     # Text-encoding repair for portal sources that ship pre-mangled UTF-8
     # (Himalayas + occasional YC location fields — see Stage 7.5).
