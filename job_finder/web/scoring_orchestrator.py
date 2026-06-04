@@ -214,6 +214,27 @@ def score_and_persist_job(
     # NULL because _resolve_scoring_model reads providers.scoring.model only.
     model = getattr(result, "model", None) or _resolve_scoring_model(config, provider)
 
+    # Scan jd_full for scam / MLM patterns and write legitimacy_note BEFORE
+    # persist_job_assessment reads it (§13 / D-12; Phase 49.07).
+    # The write is in the same transaction as the assessment persist below —
+    # both land atomically under persist_job_assessment's conn.commit().
+    # Only writes when a pattern is detected; never NULLs an existing note.
+    jd_full = job.get("jd_full") or ""
+    if jd_full:
+        from job_finder.web.legitimacy_scanner import scan_legitimacy
+
+        note = scan_legitimacy(jd_full)
+        if note is not None:
+            conn.execute(
+                "UPDATE jobs SET legitimacy_note = ? WHERE dedup_key = ?",
+                (note, dedup_key),
+            )
+            logger.debug(
+                "score_and_persist_job: legitimacy_note set for dedup_key=%s note=%r",
+                dedup_key,
+                note,
+            )
+
     persist_job_assessment(
         conn,
         dedup_key,
