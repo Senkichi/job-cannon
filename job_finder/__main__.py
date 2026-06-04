@@ -91,6 +91,16 @@ def main() -> None:
 
     cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
+
+    # Defense-in-depth: assign this process to a Job Object (Windows) or
+    # install atexit + signal handlers (POSIX) so any directly-spawned
+    # subprocesses (Ollama, Playwright) are reaped on forced-kill.
+    # install_kill_on_exit() returns None by design — the Job Object handle
+    # is retained in module state inside _process_lifecycle_win32.  Idempotent.
+    from job_finder.web import _process_lifecycle
+
+    _process_lifecycle.install_kill_on_exit()
+
     server = cfg.get("server", {})
     host = server.get("host", DEFAULT_SERVER_HOST)
     port = server.get("port", DEFAULT_SERVER_PORT)
