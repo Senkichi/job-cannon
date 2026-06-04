@@ -9,6 +9,14 @@ This document describes the testing approach, fixtures, and conventions used in 
 - Coverage via pytest-cov ~=7.1 (same dev extras group); config in `[tool.coverage]`
 - Config: `[tool.pytest.ini_options]` in `pyproject.toml` (testpaths, addopts, markers)
 - Run tests: `uv run pytest` (or `uv run --active pytest` from inside an active venv)
+- **Parallel by default:** `addopts` carries `-n auto --dist loadscope`, so every bare
+  `pytest` run shards across all physical cores via pytest-xdist (~4x faster locally —
+  measured 296s → 70s on an 8-physical-core box). No flag needed. `--dist loadscope`
+  keeps same-module tests on one worker, preserving DB-fixture isolation. Pass `-n0` to
+  force serial (useful when bisecting a flaky test or reading interleaved output). CI
+  opts out with an explicit `-n0` and gets cross-runner parallelism from pytest-split
+  sharding instead — the 2-core GitHub Windows runner is net-slower under in-process
+  xdist (per-worker spawn/import overhead isn't amortized across only 2 cores).
 
 **Assertion Library:**
 - Built-in `assert` statements (pytest's assertion rewriting)
@@ -16,10 +24,12 @@ This document describes the testing approach, fixtures, and conventions used in 
 
 **Run Commands:**
 ```bash
-pytest tests/                              # Run all tests
+pytest tests/                              # Run all tests (parallel by default via addopts -n auto)
 pytest tests/test_pipeline_detector.py -v  # Run specific test file with verbose output
 pytest -x                                  # Stop on first failure
 pytest tests/test_costs.py::TestGetDailyCostBreakdown::test_empty_when_no_rows  # Run single test
+pytest -n0                                 # Force serial (overrides the -n auto default)
+pytest -m integration                      # Opt into integration tests (excluded by default)
 ```
 
 ## Test File Organization
@@ -273,7 +283,12 @@ def test_costs_html_contains_canvas(self, client):
     assert b"<canvas" in response.data
 ```
 
-**E2E Tests:** Not used (no Selenium, Playwright, or similar)
+**E2E Tests:** Playwright-based, in `tests/e2e/` (`test_smoke.py`, `test_jobs_page.py`),
+marked `@pytest.mark.e2e`. They launch a real Chromium and drive the running Flask app.
+Not excluded by the default `addopts` marker filter, but `--dist loadscope` pins each
+e2e module to a single xdist worker so its tests run serially relative to each other (no
+port/browser races). CI installs the browser binaries via a dedicated `playwright install
+chromium` step before running the suite.
 
 ## Common Patterns
 
