@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from job_finder.db import JobAssessment
 from job_finder.web.model_provider import call_model
 from job_finder.web.scoring_prompts.v3_scoring_prompt import JOB_ASSESSMENT_SCHEMA
+from job_finder.web.scoring_types import build_comp_context, build_description_snippet
 
 log = logging.getLogger(__name__)
 
@@ -47,10 +48,13 @@ _SUB_SCORE_KEYS: tuple[str, ...] = (
     "skills_match",
 )
 
-# Simple truncation guardrail. sonnet_evaluator.py uses a richer
-# build_description_snippet helper; Plan 4 (COLLAPSE-01) migrates the
-# shared helper into scoring_types.py. Plan 1 uses this simpler
-# constant to avoid coupling to haiku_scorer before it is deleted.
+# Guardrail ceiling on JD size sent to the scorer. Postings within this
+# budget are sent whole (no signal loss for the common case); oversized
+# postings are compressed via scoring_types.build_description_snippet
+# (1200-char head + skill-keyword summary + requirements/qualifications
+# section) instead of a blind tail-cut that could drop the requirements
+# entirely. COLLAPSE-01 migrated the helper into scoring_types.py; this
+# completes the wiring its docstring promised.
 _MAX_JD_CHARS = 10_000
 
 
@@ -146,12 +150,22 @@ def _build_system_prompt(
     return header + "\n\n" + field_reinforcement + "\n\n" + candidate_context + "\n\n" + fewshot
 
 
-def _build_user_message(job: dict) -> str:
-    """Minimal user-side assembly: title + company + location + (truncated) JD.
+def _build_user_message(job: dict, profile_skills: list[str] | None = None) -> str:
+    """User-side assembly: title + company + location + comp + JD.
 
-    Keeps the user message small and consistent across candidates so the
-    LLM sees a stable request shape. Plan 4 may migrate to a richer
-    helper that mirrors sonnet_evaluator.evaluate_job_sonnet's format.
+    Keeps the request shape stable across candidates so the LLM sees a
+    consistent prompt. Two COLLAPSE-01 helpers do the heavy lifting:
+
+    - JD: postings at or under ``_MAX_JD_CHARS`` are sent whole — the
+      common case loses nothing. Only oversized postings are compressed
+      via ``build_description_snippet``, which surfaces a skill-keyword
+      frequency summary plus the requirements/qualifications section
+      rather than a blind tail-cut that could drop the requirements
+      entirely. ``profile_skills`` drives the keyword summary; when it is
+      absent the snippet still builds (no keyword counts).
+    - Compensation: the salary_min/max range is always shown; richer
+      ATS-sourced comp (equity / bonus / tier summary from
+      comp_data_json) is appended via ``build_comp_context`` when present.
     """
     title = job.get("title") or "(no title)"
     company = job.get("company_canonical") or job.get("company") or "(no company)"
@@ -161,7 +175,15 @@ def _build_user_message(job: dict) -> str:
     comp = ""
     if salary_min or salary_max:
         comp = f"\nSalary: {salary_min or '?'}-{salary_max or '?'}"
-    jd = (job.get("jd_full") or "")[:_MAX_JD_CHARS]
+    comp_extra = build_comp_context(job)
+    if comp_extra:
+        comp += f"\nCompensation: {comp_extra}"
+
+    jd_full = job.get("jd_full") or ""
+    if len(jd_full) <= _MAX_JD_CHARS:
+        jd = jd_full
+    else:
+        jd = build_description_snippet(jd_full, profile_skills or [], max_chars=_MAX_JD_CHARS)
     return (
         f"Title: {title}\nCompany: {company}\nLocation: {location}{comp}\n\nJob Description:\n{jd}"
     )
@@ -214,6 +236,7 @@ def score_job(
     conn: sqlite3.Connection,
     config: dict,
     candidate_context: str,
+    profile_skills: list[str] | None = None,
 ) -> ScoringResult:
     """Score a single job with the v3.0 ordinal rubric.
 
@@ -240,6 +263,13 @@ def score_job(
             ``_resolve_candidate_context(config)``. Direct callers (eval
             harness, tests) must build it explicitly via
             ``build_candidate_context(config, profile)``.
+        profile_skills: OPTIONAL candidate skill list, used only to build the
+            skill-keyword frequency summary when an oversized JD must be
+            compressed (see _build_user_message / build_description_snippet).
+            Production callers resolve it via
+            ``scoring_orchestrator._resolve_profile_skills(config)``. Absent
+            it, scoring still works — the compressed snippet just omits
+            keyword counts, and normal-length JDs are unaffected.
 
     Returns:
         ScoringResult envelope.
@@ -256,7 +286,7 @@ def score_job(
         return ScoringResult(status="skipped", data=None)
 
     system = _build_system_prompt(candidate_context=candidate_context, config=config)
-    user_content = _build_user_message(job)
+    user_content = _build_user_message(job, profile_skills)
     output_schema = _resolve_schema(config)
 
     try:

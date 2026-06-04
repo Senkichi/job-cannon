@@ -44,6 +44,12 @@ _CONTEXT_CACHE: dict[str, str] = {}
 _CONTEXT_CACHE_LOCK = threading.Lock()
 _CONTEXT_CACHE_MAX = 8  # cap to avoid unbounded growth in eval sweeps
 
+# Parallel cache for the candidate skill list (used by job_scorer to surface
+# skill-keyword counts when compressing an oversized JD). Keyed by the same
+# fingerprint as the context cache, so a settings save or profile-file edit
+# invalidates both together. Shares _CONTEXT_CACHE_LOCK / _CONTEXT_CACHE_MAX.
+_SKILLS_CACHE: dict[str, list[str]] = {}
+
 
 def load_scoring_profile(config: dict) -> dict:
     """Load experience profile from disk via the canonical loader.
@@ -130,8 +136,39 @@ def _resolve_candidate_context(config: dict) -> str:
     return ctx
 
 
+def _resolve_profile_skills(config: dict) -> list[str]:
+    """Return the candidate's skill list for keyword-based JD compression.
+
+    Memoized by the same ``_context_fingerprint(config)`` as the candidate
+    context, so a settings save or profile-file edit invalidates it
+    automatically. Resolved here — not inside job_scorer — so the
+    orchestrator stays the single source of candidate-derived inputs and
+    job_scorer keeps no reverse dependency on this module.
+
+    Returns an empty list when no profile / skills are available; callers
+    treat that as "no keyword summary" (normal-length JDs are unaffected).
+    """
+    key = _context_fingerprint(config)
+    with _CONTEXT_CACHE_LOCK:
+        cached = _SKILLS_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+    # Load OUTSIDE the lock — load_profile does file I/O (mirrors the
+    # candidate-context resolver's locking discipline).
+    profile = load_scoring_profile(config)
+    skills = [s for s in (profile.get("skills") or []) if s]
+
+    with _CONTEXT_CACHE_LOCK:
+        if len(_SKILLS_CACHE) >= _CONTEXT_CACHE_MAX and key not in _SKILLS_CACHE:
+            oldest = next(iter(_SKILLS_CACHE))
+            _SKILLS_CACHE.pop(oldest, None)
+        _SKILLS_CACHE[key] = skills
+    return skills
+
+
 def clear_candidate_context_cache() -> None:
-    """Drop all memoized candidate contexts.
+    """Drop all memoized candidate contexts and skill lists.
 
     Test seam and an escape hatch for callers that need to force a rebuild
     after mutating config in place (the normal path — settings save or
@@ -139,6 +176,7 @@ def clear_candidate_context_cache() -> None:
     """
     with _CONTEXT_CACHE_LOCK:
         _CONTEXT_CACHE.clear()
+        _SKILLS_CACHE.clear()
 
 
 def _resolve_scoring_model(config: dict, provider: str | None) -> str | None:
@@ -168,7 +206,10 @@ def score_and_persist_job(
       Single-point-of-enforcement: every scoring call sees the candidate's
       target locations / titles / floor / background, so the v3 rubric
       anchors (e.g. "on-site in a location candidate cannot relocate to")
-      can be applied correctly. Spec D-2.1 / D-2.2.
+      can be applied correctly. Spec D-2.1 / D-2.2. The candidate skill
+      list is resolved the same way via ``_resolve_profile_skills(config)``
+      and passed through so job_scorer can surface skill-keyword counts when
+      it has to compress an oversized JD.
     - Persists: classification (Python-derived), sub_scores_json,
       fit_analysis (rationale payload), scoring_provider, scoring_model.
     - Returns the underlying ScoringResult (status='ok'/'skipped'/'error')
@@ -189,7 +230,14 @@ def score_and_persist_job(
 
     dedup_key = job.get("dedup_key")
     candidate_context = _resolve_candidate_context(config)
-    result = scorer_fn(job, conn, config, candidate_context=candidate_context)
+    profile_skills = _resolve_profile_skills(config)
+    result = scorer_fn(
+        job,
+        conn,
+        config,
+        candidate_context=candidate_context,
+        profile_skills=profile_skills,
+    )
 
     if result is None:
         logger.info("score_and_persist_job: no result for dedup_key=%s", dedup_key)

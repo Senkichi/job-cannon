@@ -15,6 +15,7 @@ mock call_model() directly so they do not require Ollama/network.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -249,6 +250,85 @@ class TestHappyPath:
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs.get("job_id") == "acme|senior-ml-engineer"
+
+
+# ---------------------------------------------------------------------------
+# Tests: JD handling (COLLAPSE-01 wiring — build_description_snippet /
+# build_comp_context). Postings within _MAX_JD_CHARS go through whole;
+# oversized postings are intelligently compressed instead of tail-cut.
+# ---------------------------------------------------------------------------
+
+
+def _user_content(job, mock_conn, config, profile_skills=None) -> str:
+    """Run score_job with call_model mocked and return the user message text."""
+    with patch("job_finder.web.job_scorer.call_model") as mock_call:
+        mock_call.return_value = _good_model_result()
+        score_job(job, mock_conn, config, _TEST_CTX, profile_skills=profile_skills)
+    return mock_call.call_args.kwargs["messages"][0]["content"]
+
+
+class TestJdHandling:
+    """_build_user_message: whole JD under the cap, smart compression over it."""
+
+    def test_normal_jd_sent_verbatim(self, mock_conn, config):
+        """A posting under _MAX_JD_CHARS is sent whole — no compression, no
+        dropped middle section (the regression the cap-gated path avoids)."""
+        job = _good_job()
+        content = _user_content(job, mock_conn, config)
+        assert job["jd_full"] in content
+
+    def test_oversized_jd_is_compressed_not_tail_cut(self, mock_conn, config):
+        """An oversized posting routes through build_description_snippet:
+        the requirements section survives even though it sits past the cap,
+        and the candidate skill-keyword summary is surfaced."""
+        job = _good_job()
+        # ~15k chars of boilerplate, with the requirements buried at the end —
+        # exactly the shape a blind tail-cut would truncate away.
+        boilerplate = "Company mission and culture blurb. " * 450
+        job["jd_full"] = (
+            boilerplate + "\n\nRequirements:\n- 5 years Python\n- PyTorch and AWS experience"
+        )
+        assert len(job["jd_full"]) > 10_000
+
+        content = _user_content(job, mock_conn, config, profile_skills=["Python", "PyTorch"])
+
+        # Compressed: the full JD is no longer present verbatim.
+        assert job["jd_full"] not in content
+        # Requirements section pulled forward despite being past the cap.
+        assert "Requirements" in content
+        assert "Python" in content
+        # Skill-keyword summary surfaced from build_description_snippet.
+        assert "Skill keyword matches" in content
+        # Stays within the guardrail ceiling (plus the small header scaffold).
+        assert len(content) < 11_000
+
+    def test_oversized_jd_without_profile_skills_still_compresses(self, mock_conn, config):
+        """profile_skills is optional — absent it, compression still happens
+        (the snippet just reports no keyword matches)."""
+        job = _good_job()
+        job["jd_full"] = "Filler. " * 2000  # ~16k chars, no requirements section
+        assert len(job["jd_full"]) > 10_000
+
+        content = _user_content(job, mock_conn, config, profile_skills=None)
+        assert job["jd_full"] not in content
+        assert "No candidate skill keywords found" in content
+
+    def test_comp_data_json_appends_compensation_line(self, mock_conn, config):
+        """build_comp_context folds ATS-sourced comp into the user message."""
+        job = _good_job()
+        job["comp_data_json"] = json.dumps(
+            {"compensationTierSummary": "$200k base + 0.1% equity"}
+        )
+        content = _user_content(job, mock_conn, config)
+        assert "Compensation: $200k base + 0.1% equity" in content
+
+    def test_no_comp_data_json_omits_compensation_line(self, mock_conn, config):
+        """Without comp_data_json, no Compensation line is added (only the
+        existing Salary range)."""
+        job = _good_job()
+        job.pop("comp_data_json", None)
+        content = _user_content(job, mock_conn, config)
+        assert "Compensation:" not in content
 
 
 # ---------------------------------------------------------------------------

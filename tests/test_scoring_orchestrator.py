@@ -134,7 +134,7 @@ class TestScoreAndPersistJob:
         conn, _ = db_conn
         assessment = _make_assessment(provider="ollama")
 
-        def stub_scorer(job, conn_arg, cfg, candidate_context):
+        def stub_scorer(job, conn_arg, cfg, candidate_context, profile_skills=None):
             return ScoringResult(status="ok", data=assessment, provider="ollama")
 
         so.score_and_persist_job(
@@ -208,7 +208,7 @@ class TestScoreAndPersistJob:
         conn, _ = db_conn
         called_args = {}
 
-        def fake_score_job(job, c, cfg, candidate_context):
+        def fake_score_job(job, c, cfg, candidate_context, profile_skills=None):
             called_args["job"] = job
             called_args["config"] = cfg
             return ScoringResult(
@@ -238,7 +238,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+            scorer_fn=lambda j, c, cfg, candidate_context, profile_skills=None: ScoringResult(
                 status="skipped",
                 data=None,
             ),
@@ -265,7 +265,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+            scorer_fn=lambda j, c, cfg, candidate_context, profile_skills=None: ScoringResult(
                 status="error",
                 data=None,
                 error="synthetic failure",
@@ -288,7 +288,7 @@ class TestScoreAndPersistJob:
             {"dedup_key": "nonexistent"},
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+            scorer_fn=lambda j, c, cfg, candidate_context, profile_skills=None: ScoringResult(
                 status="ok",
                 data=_make_assessment(),
                 provider="ollama",
@@ -316,7 +316,7 @@ class TestScoreAndPersistJob:
             seeded_job,
             conn,
             base_config,
-            scorer_fn=lambda j, c, cfg, candidate_context: ScoringResult(
+            scorer_fn=lambda j, c, cfg, candidate_context, profile_skills=None: ScoringResult(
                 status="ok",
                 data=_make_assessment(),
                 provider="ollama",
@@ -374,7 +374,7 @@ class TestCascadeModelPersisted:
         }
         assessment = _make_assessment(provider="ollama")
 
-        def stub_scorer(job, conn_arg, cfg, candidate_context):
+        def stub_scorer(job, conn_arg, cfg, candidate_context, profile_skills=None):
             return ScoringResult(
                 status="ok",
                 data=assessment,
@@ -401,7 +401,7 @@ class TestCascadeModelPersisted:
         }
         assessment = _make_assessment(provider="ollama")
 
-        def stub_scorer(job, conn_arg, cfg, candidate_context):
+        def stub_scorer(job, conn_arg, cfg, candidate_context, profile_skills=None):
             # ScoringResult intentionally without model=
             return ScoringResult(status="ok", data=assessment, provider="ollama")
 
@@ -430,7 +430,7 @@ class TestCascadeModelPersisted:
         }
         assessment = _make_assessment(provider="ollama")
 
-        def stub_scorer(job, conn_arg, cfg, candidate_context):
+        def stub_scorer(job, conn_arg, cfg, candidate_context, profile_skills=None):
             return ScoringResult(
                 status="ok",
                 data=assessment,
