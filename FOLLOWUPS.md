@@ -1,3 +1,36 @@
+# FOLLOWUPS — 2026-06-03 JD Extraction Layer 2
+
+Carried out of the JD Layer 2 effort (trafilatura + ATS-source cleaning).
+
+- **Retire the LLM description reformatter (was step 4b).** The plan called
+  `description_reformatted` a "dead column", but it is a LIVE subsystem:
+  `job_finder/web/description_reformatter.py` (`reformat_description` +
+  `run_description_reformat_pass`) is started at app boot by
+  `startup_backfills.run_description_reformat_once` (daemon thread) and does
+  quick-tier LLM reformatting of descriptions. Layer 2 now produces clean,
+  section-structured text at the source (trafilatura markdown for crawled pages;
+  `html_to_plain_text` for ATS fragments), which likely makes the LLM reformatter
+  redundant. Retiring it is its own scoped effort: remove the module + the
+  `run_description_reformat_once` startup wiring, the `parsed_job.py`
+  `description_reformatted` DTO fields (2), the `db/_jobs.py` canonical SELECT
+  entry, the `column_categories.py` entry, the 357-line `test_description_reformatter.py`,
+  and add an m080 column-drop migration. Verify nothing else reads the flag and
+  re-check scoring before/after. Deferred deliberately — do NOT delete a live,
+  tested, startup-wired subsystem on a "dead column" premise.
+
+- **Unify Workday/SmartRecruiters detail fetchers on `html_to_plain_text`.**
+  `ats_platforms/_detail_fetchers.py` currently calls `strip_html_to_text`
+  directly (lossless, fine — no bloat). For consistency with the Greenhouse/Ashby
+  paths it could call `description_formatter.html_to_plain_text` (adds an
+  idempotent `unescape` pass). Cosmetic; low priority.
+
+- **Step 3 full eval re-run (MAE/bias).** Layer 2 changes JD *input* cleanliness,
+  not scoring logic, and strictly improves input (less HTML noise). A full
+  scoring-regression eval (gold set + live Ollama cascade) was not run this
+  session — see the Layer 2 report. Recommended before a wholesale rescore.
+
+---
+
 # FOLLOWUPS — 2026-05-28 round 16 (Phase F jobvite recipes: 4 shipped, 1 blocked on dead slug; goto-runner SPA fix)
 
 ## Project goal (briefly restated)
