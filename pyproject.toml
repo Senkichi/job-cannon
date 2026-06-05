@@ -87,6 +87,10 @@ dependencies = [
     # advisory pidfile which was vulnerable to PID reuse on Windows + to
     # atexit-not-firing on force-kill (2026-05-17 hotfix Fix 6).
     "portalocker>=2.10",
+    # Windows Job Object subprocess cleanup (Issue #39 Commit C). pywin32 is
+    # already a transitive dependency via portalocker on Windows; listing it
+    # explicitly because _process_lifecycle_win32.py imports it directly.
+    "pywin32>=311 ; sys_platform == 'win32'",
     # OS keyring for v5.1 secret storage. Backend is auto-selected by the
     # `keyring` package (Windows Credential Manager / macOS Keychain /
     # Linux Secret Service). Falls back to config.yaml plaintext when no
