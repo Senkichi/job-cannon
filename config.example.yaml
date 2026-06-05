@@ -224,15 +224,17 @@ scoring:
 # workload (quick / score / triage) come from _PROVIDER_DEFAULTS in
 # job_finder/web/model_provider.py unless overridden below.
 #
-# Valid provider names (must match _PROVIDER_DEFAULTS keys):
-#   ollama | anthropic | gemini | groq | cerebras | local_bundled |
-#   gemini_cli | claude_code_cli
+# Registered providers (must match _PROVIDER_DEFAULTS keys):
+#   ollama | anthropic | gemini | local_bundled |
+#   gemini_cli | claude_code_cli | openrouter
+#
+# Note: groq and cerebras adapters are aspirational / not yet shipped.
+# Including them in fallback_chain produces a ValueError warning on every
+# scoring call — omit them until the adapters are registered.
 #
 providers:
   primary: ollama              # Provider tried first for every call
   fallback_chain:              # Tried in order if primary fails / schema-invalidates / hits a daily limit
-    - groq                     # BYO API key (free tier)
-    - cerebras                 # BYO API key (free tier)
     - gemini                   # BYO API key (free tier)
     - claude_code_cli          # $0 via your Claude.ai subscription (no API key needed)
     - anthropic                # Paid SDK — final emergency only, costs real money
@@ -244,11 +246,12 @@ providers:
 #
 # Recipe 1 — Ollama-primary cascade (production default per CLAUDE.md).
 # Local qwen2.5:14b handles every call at $0; falls through free hosted
-# providers before touching paid Anthropic. Requires Ollama running locally.
+# providers before touching paid Anthropic. Requires Ollama installed
+# (auto-detected at startup — falls through gracefully if not found).
 #
 # providers:
 #   primary: ollama
-#   fallback_chain: [groq, cerebras, gemini, claude_code_cli, anthropic]
+#   fallback_chain: [gemini, claude_code_cli, anthropic]
 #   overrides:
 #     ollama:    {score: qwen2.5:14b}
 #     anthropic: {score: claude-sonnet-4-6}
@@ -264,7 +267,7 @@ providers:
 #
 # providers:
 #   primary: gemini
-#   fallback_chain: [groq, cerebras, anthropic]
+#   fallback_chain: [claude_code_cli, anthropic]
 
 # --- Output settings ---
 output:

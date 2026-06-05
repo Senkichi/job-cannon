@@ -12,23 +12,33 @@ Guards:
 3. Testing guard: scheduler is skipped when app.config["TESTING"] is True.
 """
 
+from __future__ import annotations
+
 import logging
 import os
+import subprocess
 import threading
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from job_finder.web.db_helpers import get_config_snapshot
 from job_finder.web.scheduler._jobs import register_all_jobs
-from job_finder.web.scheduler._ollama import _ensure_ollama_running
+from job_finder.web.scheduler._ollama import (
+    AlreadyRunning,
+    Installable,
+    Unavailable,
+    probe_ollama,
+    resolve_ollama_url,
+    spawn_ollama,
+)
 from job_finder.web.scheduler._pidfile import _acquire_scheduler_pidfile
 from job_finder.web.scheduler._sync import run_sync_now
 
 __all__ = [
     "_acquire_scheduler_pidfile",
-    "_ensure_ollama_running",
     "get_scheduler",
+    "get_spawned_ollama_proc",
     "init_scheduler",
+    "probe_ollama",
     "register_all_jobs",
     "reset_scheduler",
     "run_sync_now",
@@ -40,6 +50,14 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 _scheduler_lock = threading.Lock()
 
+# Popen handle for an Ollama process we spawned (None = not spawned by us)
+_spawned_ollama_proc: subprocess.Popen | None = None
+
+
+def get_spawned_ollama_proc() -> subprocess.Popen | None:
+    """Return the Popen handle for a spawned-by-us Ollama process, or None."""
+    return _spawned_ollama_proc
+
 
 def init_scheduler(app) -> None:
     """Initialize and start the background scheduler.
@@ -50,7 +68,7 @@ def init_scheduler(app) -> None:
     Args:
         app: Flask application instance (fully constructed).
     """
-    global _scheduler
+    global _scheduler, _spawned_ollama_proc
 
     # Guard 1: Skip in test mode or when caller has asked for "scheduler off,
     # but jobs themselves still do real work" (scripts/run_overnight.py pattern).
@@ -92,12 +110,43 @@ def init_scheduler(app) -> None:
         except Exception as exc:
             logger.warning("Orphan-session reaper raised unexpectedly: %s", exc)
 
-        # Eagerly start Ollama so the nightly agentic backfill (3:30 AM) has
-        # a live service to talk to. Best-effort; never raises.
+        # -------------------------------------------------------------------
+        # Smart Ollama probe (Issue #37, §6.2-§6.4)
+        #
+        # Mutate app.config["JF_CONFIG"] directly — NOT the snapshot returned
+        # by get_config_snapshot() (that's a deepcopy; mutations are no-ops for
+        # later readers). See §6.3 invariant.
+        # -------------------------------------------------------------------
         try:
-            _ensure_ollama_running(get_config_snapshot(app))
+            live_config = app.config.setdefault("JF_CONFIG", {})
+            resolved_url = resolve_ollama_url(live_config)
+
+            # Determine target model from config (fall back to default)
+            target_model = (
+                live_config.get("providers", {})
+                .get("overrides", {})
+                .get("ollama", {})
+                .get("score", "qwen2.5:14b")
+            )
+
+            state = probe_ollama(target_model, resolved_url)
+
+            if isinstance(state, (AlreadyRunning, Installable)):
+                # Store the resolved URL back into live config so that
+                # OllamaProvider picks up the correct base_url later.
+                live_config.setdefault("providers", {}).setdefault("ollama", {})["base_url"] = (
+                    resolved_url
+                )
+
+                if isinstance(state, Installable):
+                    proc = spawn_ollama(state.path)
+                    _spawned_ollama_proc = proc
+
+            elif isinstance(state, Unavailable):
+                live_config["_jf_ollama_unavailable"] = True
+
         except Exception as exc:
-            logger.warning("Ollama auto-start helper raised unexpectedly: %s", exc)
+            logger.warning("Ollama probe raised unexpectedly: %s", exc)
 
         scheduler = BackgroundScheduler(daemon=True)
         register_all_jobs(scheduler, app)
@@ -122,7 +171,7 @@ def reset_scheduler() -> None:
     Shuts down the running scheduler if one exists, then clears the singleton.
     Only call this in tests to ensure a clean state between test runs.
     """
-    global _scheduler
+    global _scheduler, _spawned_ollama_proc
     with _scheduler_lock:
         if _scheduler is not None:
             try:
@@ -130,3 +179,4 @@ def reset_scheduler() -> None:
             except Exception:
                 logger.debug("scheduler shutdown error", exc_info=True)
             _scheduler = None
+        _spawned_ollama_proc = None
