@@ -40,6 +40,7 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
     """JOB_CANNON_NO_BROWSER=1 disables both the Timer and the "Opening your
     browser…" line. The URL banner still prints; it's the only stable place
     for the user to copy the URL when running headless."""
+    monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")  # force terminal mode
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
     fake_app = MagicMock()
@@ -60,6 +61,7 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
 
 def test_main_default_schedules_browser_open(monkeypatch, capsys):
     """Without the opt-out, main() prints the banner AND schedules the timer."""
+    monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")  # force terminal mode
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
     fake_app = MagicMock()
@@ -94,6 +96,7 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
     127.0.0.1 (not 0.0.0.0 — that's not a browser URL). app.run() still
     receives the original bind_host for the actual bind.
     """
+    monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")  # force terminal mode
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")  # silence the timer
 
     cfg = {"server": {"host": "0.0.0.0", "port": 8080, "debug": False}}
@@ -117,6 +120,7 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
 def test_main_passes_use_reloader_false(monkeypatch):
     """Regression: do not regress use_reloader=False — the Werkzeug reloader
     would spawn a second process and double-fire the browser-open Timer."""
+    monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")  # force terminal mode
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")
 
     fake_app = MagicMock()

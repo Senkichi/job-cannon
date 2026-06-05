@@ -48,6 +48,7 @@ def test_timer_daemon_true():
 
 def test_main_sets_timer_daemon(monkeypatch):
     """main() must set timer.daemon = True before starting the timer."""
+    monkeypatch.setenv("JOB_CANNON_NO_TRAY", "1")  # force terminal mode
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "0")
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
