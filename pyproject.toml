@@ -78,8 +78,8 @@ dependencies = [
     # GeoNames cities1000 (~130 K cities). libpostal was rejected
     # (no Windows wheels; MSVC build fails per pypostal#23). Required
     # at app boot for ingestion + filter dropdowns — main deps, not extras.
-    "pycountry>=24.0,<25",
-    "geonamescache>=2.0,<4",
+    "pycountry>=24.0,<27",
+    "geonamescache>=2.0,<3",
     "ruamel-yaml>=0.19.1",
     # Cross-platform user data directories
     "platformdirs>=4.0",
