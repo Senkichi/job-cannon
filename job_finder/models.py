@@ -19,6 +19,10 @@ class Job:
 
     salary_min: int | None = None
     salary_max: int | None = None
+    # D-13: `description` carries parser-supplied short text (where the source
+    # only exposes a snippet or summary). `jd_full` is the canonical full body,
+    # populated later by the enrichment pipeline's direct JD fetch. Some sources
+    # supply both; others only one. Scoring requires `jd_full`.
     description: str | None = None
     posted_date: datetime | None = None
     fetched_date: datetime = field(default_factory=datetime.now)
