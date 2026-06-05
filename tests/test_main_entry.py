@@ -12,6 +12,11 @@ the URL-banner / timer-scheduling logic via patching.
 from unittest.mock import MagicMock, patch
 
 from job_finder import __main__ as main_mod
+from job_finder.web._pidfile import AcquireResult
+
+# Convenience constant: a successful lock acquisition for tests that don't
+# exercise the detection sequence itself.
+_LOCK_ACQUIRED = AcquireResult(acquired=True)
 
 
 def test_open_browser_calls_webbrowser_open():
@@ -48,6 +53,9 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer") as mock_timer,
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.web._pidfile.acquire_pidfile", return_value=_LOCK_ACQUIRED),
     ):
         main_mod.main()
 
@@ -70,6 +78,9 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.web._pidfile.acquire_pidfile", return_value=_LOCK_ACQUIRED),
     ):
         main_mod.main()
 
@@ -102,6 +113,9 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value=cfg),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.web._pidfile.acquire_pidfile", return_value=_LOCK_ACQUIRED),
     ):
         main_mod.main()
 
@@ -124,6 +138,9 @@ def test_main_passes_use_reloader_false(monkeypatch):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch("job_finder.web._pidfile.acquire_pidfile", return_value=_LOCK_ACQUIRED),
     ):
         main_mod.main()
 

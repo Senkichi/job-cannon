@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import sys
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -98,6 +99,10 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
         __name__,
         template_folder="templates",
     )
+
+    # Record startup time for /__jc_health.  Must come before any code path
+    # that could raise so the timestamp reflects the real create_app() entry.
+    app.config["_JF_START_TIME_UTC"] = datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
 
     # Single point of enforcement: the user-data root must exist before any
     # code path touches it (config_path / db_path / logs_path). Previously
@@ -399,5 +404,27 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.scheduler import init_scheduler
 
     init_scheduler(app)
+
+    # --- Health endpoint (§8.5) ---
+    # Registered directly on the app object, NOT via a blueprint, so its
+    # availability does not depend on any single blueprint's successful
+    # registration once the app is up.  The literal "app": "job-cannon" is the
+    # load-bearing identity marker checked by probe_existing_jc().
+    @app.route("/__jc_health")
+    def __jc_health():
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as _pkg_version
+
+        try:
+            ver = _pkg_version("job-cannon")
+        except PackageNotFoundError:
+            ver = "0.0.0+dev"
+
+        return {
+            "app": "job-cannon",
+            "version": ver,
+            "pid": os.getpid(),
+            "start_time_utc": app.config.get("_JF_START_TIME_UTC", ""),
+        }, 200
 
     return app
