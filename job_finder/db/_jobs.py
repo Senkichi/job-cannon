@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 # get_filtered_jobs() (`_queries.py`) which return complete row dicts to
 # templates and callers. Single source of truth for the projection contract.
 JOBS_ALL_COLUMNS = (
-    "dedup_key, title, company, location, sources, source_urls, source_id, "
+    "dedup_key, title, company, location, sources, source_urls, source_urls_raw, source_id, "
     "salary_min, salary_max, description, first_seen, last_seen, score, "
     "score_breakdown, user_interest, pipeline_status, posted_date, notes, "
     "fit_analysis, classification, sub_scores_json, scoring_model, "
@@ -50,7 +50,7 @@ JOBS_ALL_COLUMNS = (
 # Columns read by upsert_job() for merge logic — only what the UPDATE branch
 # needs plus salary_min/salary_max for "changed" detection (Phase 47.02).
 _UPSERT_MERGE_COLUMNS = (
-    "sources, source_urls, locations_raw, description, jd_full, pipeline_status, "
+    "sources, source_urls, source_urls_raw, locations_raw, description, jd_full, pipeline_status, "
     "salary_min, salary_max, posted_date"
 )
 
@@ -334,9 +334,10 @@ def upsert_job(
         canonical_changed = False
         source_merged = False
 
-        # Merge sources / source_urls (set-union; ParsedJob carries lists).
+        # Merge sources / source_urls / source_urls_raw (set-union; ParsedJob carries lists).
         sources = safe_json_load(existing["sources"], default=[])
         urls = safe_json_load(existing["source_urls"], default=[])
+        raw_urls = safe_json_load(existing["source_urls_raw"], default=[])
         for src in parsed.sources:
             if src not in sources:
                 sources.append(src)
@@ -345,6 +346,11 @@ def upsert_job(
             if url and url not in urls:
                 urls.append(url)
                 source_merged = True
+        # source_urls_raw is a forensic parallel to source_urls; union new
+        # raw entries alongside the canonical ones. Does NOT affect source_merged.
+        for raw_url in parsed.source_urls_raw:
+            if raw_url and raw_url not in raw_urls:
+                raw_urls.append(raw_url)
 
         # Smart location merge: maintain locations_raw array (Remote/Hybrid first)
         existing_locs_raw = existing["locations_raw"]
@@ -411,7 +417,7 @@ def upsert_job(
         try:
             conn.execute(
                 f"""UPDATE jobs SET
-                    sources = ?, source_urls = ?, last_seen = ?,
+                    sources = ?, source_urls = ?, source_urls_raw = ?, last_seen = ?,
                     score = ?, score_breakdown = ?,
                     salary_min = COALESCE(?, salary_min),
                     salary_max = COALESCE(?, salary_max),
@@ -427,6 +433,7 @@ def upsert_job(
                 (
                     json.dumps(sources),
                     json.dumps(urls),
+                    json.dumps(raw_urls),
                     now,
                     _score,
                     json.dumps(_score_breakdown),
@@ -498,12 +505,12 @@ def upsert_job(
             conn.execute(
                 """INSERT INTO jobs
                     (dedup_key, title, company, location, sources, source_urls,
-                     source_id, salary_min, salary_max, description,
+                     source_urls_raw, source_id, salary_min, salary_max, description,
                      first_seen, last_seen, score, score_breakdown, locations_raw,
                      jd_full, scoring_provider,
                      locations_structured, workplace_type, primary_country_code,
                      company_id, posted_date, unresolved_reasons)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     parsed.dedup_key,
                     parsed.title,
@@ -511,6 +518,7 @@ def upsert_job(
                     initial_location_col,
                     json.dumps(list(parsed.sources)),
                     json.dumps(list(parsed.source_urls)),
+                    json.dumps(list(parsed.source_urls_raw)),
                     parsed.source_id,
                     norm_salary_min,
                     norm_salary_max,
