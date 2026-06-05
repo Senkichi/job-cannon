@@ -101,6 +101,7 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - Cascade order (configurable in `config.yaml > providers.scoring.fallback_chain`): Ollama qwen2.5:14b → Groq → Cerebras → Gemini → Anthropic. Each provider can be disabled or rate-limited independently.
 - cost_gate returns bool — callers decide whether to raise BudgetExceededError. The gate excludes all members of `claude_client.FREE_PROVIDERS` (gemini, ollama, claude_cli, claude_code_cli, gemini_cli, local_bundled, google_cse) from the spend sum, so `scoring.daily_budget_usd` only trips on non-free BYO-key providers in the cascade (e.g. OpenRouter judge used by the cascade audit). The Anthropic CLI fallback is $0 via subscription and does not count. Note: groq + cerebras are *not* in FREE_PROVIDERS — they have BYO-key tiers and any spend would count against the budget. M-2 (2026-05-20).
 - Scoring requires `jd_full` (no cost without full JD); jobs lacking jd_full route to enrichment first.
+- `description` vs `jd_full` split (D-13): `description` is parser-supplied short text (snippet/summary from the source email or API); `jd_full` is the canonical full body fetched by the enrichment pipeline. Some sources supply both; others only one. Never conflate them — scorers read `jd_full`, display layer falls back to `description`.
 - Rescoring skips already-scored jobs unless `force=True` (manual rescore).
 
 **Workload-class tiers:** The system now uses workload-named tiers (`quick`/`score`/`triage`):
