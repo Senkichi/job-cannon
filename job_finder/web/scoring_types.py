@@ -42,7 +42,6 @@ class JobRow(TypedDict, total=False):
     comp_data_json: str | None
     classification: str | None
     sub_scores_json: str | None
-    opus_score: float | None
     fit_analysis: str | None
     scoring_provider: str | None
     scoring_model: str | None

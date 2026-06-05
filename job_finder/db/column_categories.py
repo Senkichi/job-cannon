@@ -83,10 +83,6 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "gold_notes": "eval",
     "gold_labeled_at": "eval",
     "gold_no_signal_axes": "eval",
-    # ── dead (Phase 49 drops these via m082) ──────────────────────────────
-    "opus_score": "dead",
-    "eval_blocks": "dead",
-    "job_archetype": "dead",
 }
 
 # ParsedJob fields that intentionally do NOT map to a parser-owned column.

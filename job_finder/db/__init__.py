@@ -4,8 +4,8 @@ Package layout:
 
 - ``_classification.py`` — JobAssessment + derive_classification +
   ``_SUB_SCORE_KEYS`` (pure scoring-rule logic, zero DB deps).
-- ``_persistence.py`` — write paths (``persist_*``,
-  ``update_pipeline_status``, ``log_run``).
+- ``_persistence.py`` — write paths (``persist_job_assessment``,
+  ``persist_job_expiry_state``, ``update_pipeline_status``, ``log_run``).
 - ``_jobs.py`` — job CRUD (``upsert_job``, ``get_job``, ``merge_description``,
   ``load_job_context``) and the canonical ``JOBS_ALL_COLUMNS`` projection.
 - ``_queries.py`` — read-only filters (``get_filtered_jobs``,
@@ -57,7 +57,6 @@ from ._jobs import upsert_job as upsert_job
 
 # DB write paths — runs log + per-row persistence + pipeline state machine.
 from ._persistence import log_run as log_run
-from ._persistence import persist_job_archetype as persist_job_archetype
 from ._persistence import persist_job_assessment as persist_job_assessment
 from ._persistence import persist_job_expiry_state as persist_job_expiry_state
 from ._persistence import update_pipeline_status as update_pipeline_status
