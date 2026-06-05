@@ -1,7 +1,7 @@
 """Single source of truth for the responsibility category of every `jobs` column.
 
 The `jobs` table mixes responsibilities — parser-supplied data, system-managed
-bookkeeping, scoring output, user actions, eval gold labels, and dead columns.
+bookkeeping, scoring output, user actions, and eval gold labels.
 The schema-correspondence test (`tests/test_schema_correspondence.py`) uses this
 mapping to enforce two invariants and so catch the "Pattern A" drift class
 (set-on-dataclass, lost-in-persistence — e.g. `posted_date`):
@@ -19,7 +19,6 @@ Categories:
   - ``scoring`` — written by the scoring pipeline (LLM or heuristic).
   - ``user``    — set via UI actions.
   - ``eval``    — gold labels set by the eval workflow.
-  - ``dead``    — vestigial; slated for removal (Phase 49 m082).
 
 Some entries below correspond to columns that do not exist yet — they are added
 in Phase 49 (``source_urls_raw``, ``salary_currency``, ``salary_period`` in m080;
@@ -83,10 +82,6 @@ COLUMN_CATEGORIES: dict[str, str] = {
     "gold_notes": "eval",
     "gold_labeled_at": "eval",
     "gold_no_signal_axes": "eval",
-    # ── dead (Phase 49 drops these via m082) ──────────────────────────────
-    "opus_score": "dead",
-    "eval_blocks": "dead",
-    "job_archetype": "dead",
 }
 
 # ParsedJob fields that intentionally do NOT map to a parser-owned column.

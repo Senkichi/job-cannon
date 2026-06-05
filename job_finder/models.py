@@ -19,6 +19,11 @@ class Job:
 
     salary_min: int | None = None
     salary_max: int | None = None
+    # D-13: `description` carries the parser-supplied short text (where the source
+    # exposes one).  The canonical full job body lives in the DB column `jd_full`,
+    # which is populated by a separate enrichment fetch and may be absent at ingest
+    # time.  Two distinct fields exist because some sources only expose short text
+    # while others provide the full body via a separate ATS API call.
     description: str | None = None
     posted_date: datetime | None = None
     fetched_date: datetime = field(default_factory=datetime.now)

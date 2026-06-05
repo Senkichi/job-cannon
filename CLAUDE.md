@@ -90,6 +90,7 @@ These decisions are documented in `.planning/STATE.md` and recur constantly:
 - `CREATE TABLE IF NOT EXISTS` for idempotent migration on both empty and populated DBs
 - Stale detector creates own sqlite3 connection (thread-safe for APScheduler, not Flask g.db)
 - sort_by validated against Python allowlist before SQL interpolation (no parameterized column names in SQLite)
+- `description` vs `jd_full` split (D-13): `description` is the parser-supplied short text (present at ingest); `jd_full` is the canonical full body, populated later by enrichment. Some sources only expose a short description; others serve the full JD via a separate ATS API fetch.
 
 **Testing**:
 - `create_app()` accepts `config=` dict for test isolation

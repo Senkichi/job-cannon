@@ -190,25 +190,6 @@ def persist_job_expiry_state(
     raise last_err
 
 
-def persist_job_archetype(
-    conn: sqlite3.Connection,
-    dedup_key: str,
-    job_archetype: str,
-) -> None:
-    """Persist the deterministic job archetype classification result.
-
-    Args:
-        conn: Open sqlite3 connection.
-        dedup_key: The job's primary key.
-        job_archetype: Archetype label (e.g. 'platform_engineering').
-    """
-    conn.execute(
-        "UPDATE jobs SET job_archetype = ? WHERE dedup_key = ?",
-        (job_archetype, dedup_key),
-    )
-    conn.commit()
-
-
 def update_pipeline_status(
     conn: sqlite3.Connection,
     dedup_key: str,

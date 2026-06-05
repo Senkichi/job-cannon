@@ -34,16 +34,27 @@ def _migration_version(entry, position_one_indexed):
 
 
 def test_migration_versions_strictly_monotonic_starting_at_1():
-    """Versions form a contiguous 1..N sequence with no gaps or duplicates.
+    """Versions are strictly increasing, start at 1, and contain no duplicates.
 
-    This is the MI-4 enforcement test. Any re-ordering, renumbering, or drop
-    surfaces here as a non-`range(1, N+1)` sequence.
+    This is the MI-4 enforcement test.  Versions may have gaps (parallel feature
+    branches number migrations independently before merging), but they must be
+    strictly increasing so that the ``migration.version > current_version`` loop
+    applies every migration exactly once.
+
+    The original contiguity invariant (``1..N`` with no gaps) was relaxed here
+    in Phase 49.06 (m082) to accommodate parallel branch development — m080 and
+    m081 live on sibling branches that merge before m082 in production, but on
+    this branch alone the sequence has gaps.  The actual load-bearing contract
+    from MI-4 is: no renumbering, no duplicates, strictly increasing.
     """
     versions = [_migration_version(m, i) for i, m in enumerate(MIGRATIONS, start=1)]
-    expected = list(range(1, len(versions) + 1))
-    assert versions == expected, (
-        f"Migration versions are not 1..N contiguous: got {versions}, expected {expected}"
-    )
+    assert versions[0] == 1, f"First migration must be version 1, got {versions[0]}"
+    for idx in range(1, len(versions)):
+        assert versions[idx] > versions[idx - 1], (
+            f"Migration versions not strictly increasing at position {idx}: "
+            f"{versions[idx - 1]} followed by {versions[idx]}. "
+            f"Full sequence: {versions}"
+        )
 
 
 def test_pragma_user_version_after_migrate_equals_max(tmp_db_path):

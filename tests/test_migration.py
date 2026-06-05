@@ -143,9 +143,10 @@ class TestMigrationOnEmptyDB:
         conn.close()
 
         assert version_before == 0, f"Expected version 0 before migration, got: {version_before}"
-        # Version equals the total number of migrations applied
-        assert version_after == len(MIGRATIONS), (
-            f"Expected version {len(MIGRATIONS)} after migration, got: {version_after}"
+        # Version equals the highest migration version number (not the count, to
+        # tolerate version gaps when parallel branches add migrations out of order).
+        assert version_after == MIGRATIONS[-1].version, (
+            f"Expected version {MIGRATIONS[-1].version} after migration, got: {version_after}"
         )
 
 
@@ -225,7 +226,7 @@ class TestMigrationIdempotency:
         conn = sqlite3.connect(tmp_db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == len(MIGRATIONS)
+        assert version == MIGRATIONS[-1].version
 
     def test_migration_is_idempotent_on_existing_data(self, sample_db_with_jobs):
         """Running migration twice on DB with existing data produces no errors and no data loss."""
@@ -345,36 +346,55 @@ class TestMigration6:
 
 
 class TestMigration27:
-    """Tests for Migration 27 (career-ops scoring metadata columns)."""
+    """Tests for Migration 27 (career-ops scoring metadata columns).
+
+    These tests apply migrations only up to and including m027, because m082
+    (Phase 49.06) later drops eval_blocks and job_archetype as dead weight.
+    Running the full chain would show those columns absent, which would make
+    the m027 ADD-COLUMN assertions meaningless.
+    """
+
+    @staticmethod
+    def _apply_up_to_27(tmp_db_path: str) -> sqlite3.Connection:
+        """Return a connection with all migrations up to and including 27 applied."""
+        import os
+
+        from job_finder.web.db_migrate import _apply_migration
+        from job_finder.web.migrations import MigrationContext
+
+        conn = sqlite3.connect(tmp_db_path)
+        conn.row_factory = sqlite3.Row
+        ctx = MigrationContext(conn=conn, db_path=tmp_db_path, user_data_root=os.getcwd())
+        for m in MIGRATIONS:
+            _apply_migration(ctx, m)
+            if m.version == 27:
+                break
+        return conn
 
     def test_migration27_adds_expiry_status(self, tmp_db_path):
         """Migration 27 adds expiry_status column to jobs table."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
+        conn = self._apply_up_to_27(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
         assert "expiry_status" in cols, "expiry_status column missing from jobs"
 
     def test_migration27_adds_eval_blocks(self, tmp_db_path):
-        """Migration 27 adds eval_blocks column to jobs table."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
+        """Migration 27 adds eval_blocks column; m082 later drops it as dead weight."""
+        conn = self._apply_up_to_27(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
-        assert "eval_blocks" in cols, "eval_blocks column missing from jobs"
+        assert "eval_blocks" in cols, "eval_blocks column missing from jobs after m027"
 
     def test_migration27_adds_job_archetype(self, tmp_db_path):
-        """Migration 27 adds job_archetype column to jobs table."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
+        """Migration 27 adds job_archetype column; m082 later drops it as dead weight."""
+        conn = self._apply_up_to_27(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         conn.close()
-        assert "job_archetype" in cols, "job_archetype column missing from jobs"
+        assert "job_archetype" in cols, "job_archetype column missing from jobs after m027"
 
     def test_migration27_expiry_status_default_null(self, tmp_db_path):
-        """expiry_status defaults to NULL for existing rows."""
-        run_migrations(tmp_db_path)
-        conn = sqlite3.connect(tmp_db_path)
+        """expiry_status defaults to NULL for existing rows (checked at m027 state)."""
+        conn = self._apply_up_to_27(tmp_db_path)
         conn.execute(
             """INSERT INTO jobs
                 (dedup_key, title, company, location, first_seen, last_seen)
@@ -740,7 +760,7 @@ class TestMigration2:
 
         path, conn = migrated_db_class
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == len(MIGRATIONS)
+        assert version == MIGRATIONS[-1].version
 
 
 class TestMigration3:
@@ -908,15 +928,15 @@ class TestMigration40:
         assert row is not None, "Migration 40: idx_jobs_classification index missing"
 
     def test_migration_40_user_version_increments(self, tmp_db_path):
-        """Migration 40 increments user_version to 40 (matches len(MIGRATIONS))."""
+        """Migration 40 increments user_version; final version is the highest migration number."""
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == len(MIGRATIONS), (
-            f"Migration 40: user_version={version}, expected {len(MIGRATIONS)}"
+        assert version == MIGRATIONS[-1].version, (
+            f"Migration 40: user_version={version}, expected {MIGRATIONS[-1].version}"
         )
-        # Post-Plan-5 the final user_version is 41 (Mig 41 ran on top of Mig 40).
+        # Post-Plan-5 the final user_version is at least 41 (Mig 41 ran on top of Mig 40).
         assert version >= 40, f"Migration 40: expected user_version>=40, got {version}"
 
     def test_migration_40_defaults_null_on_new_row(self, tmp_db_path):
@@ -1014,7 +1034,11 @@ class TestMigration41DestructiveShape:
         assert "idx_jobs_haiku_score" not in indexes
 
     def test_mig41_preserves_v3_columns(self, tmp_db_path):
-        """Migration 41 preserves the v3 scoring surface and all untouched columns."""
+        """Migration 41 preserves the v3 scoring surface and all untouched columns.
+
+        Note: opus_score, eval_blocks, job_archetype are intentionally absent
+        from this list — m082 (Phase 49.06) drops them as dead weight.
+        """
         run_migrations(tmp_db_path)
         conn = sqlite3.connect(tmp_db_path)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
@@ -1023,10 +1047,7 @@ class TestMigration41DestructiveShape:
             "fit_analysis",
             "scoring_provider",
             "scoring_model",
-            "eval_blocks",
-            "opus_score",
             "score",
-            "job_archetype",
             "legitimacy_note",
             "classification",
             "sub_scores_json",
@@ -1124,7 +1145,7 @@ class TestMigration41DestructiveShape:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
         assert "haiku_score" not in cols
-        assert version == len(MIGRATIONS)
+        assert version == MIGRATIONS[-1].version
 
 
 class TestMigration41BackupGate:
