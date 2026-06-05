@@ -19,6 +19,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.location_canonical import JobLocation
 
@@ -61,11 +62,11 @@ class TestInsertDefaults:
         # location='' → location_parser returns []; INSERT must still
         # write 'UNSPECIFIED' (not NULL) so consumers can rely on the
         # column being populated.
-        upsert_job(conn, _make_job(title="a", location=""))
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="a", location="")))
         assert _read_wt(conn, "testco|a") == "UNSPECIFIED"
 
     def test_insert_with_explicit_remote_kept(self, conn: sqlite3.Connection):
-        # Layer-1 path: caller passes locations_structured directly.
+        # Layer-1 path: caller passes locations_structured via source_meta.
         loc = JobLocation(
             city=None,
             region=None,
@@ -76,7 +77,7 @@ class TestInsertDefaults:
             raw="Remote",
             unresolved=False,
         )
-        upsert_job(conn, _make_job(title="b"), locations_structured=[loc])
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="b"), source_meta={"locations_structured": [loc]}))
         assert _read_wt(conn, "testco|b") == "REMOTE"
 
 
@@ -93,17 +94,17 @@ class TestUpdateNoDowngrade:
             raw="Remote",
             unresolved=False,
         )
-        upsert_job(conn, _make_job(title="c"), locations_structured=[loc])
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="c"), source_meta={"locations_structured": [loc]}))
         assert _read_wt(conn, "testco|c") == "REMOTE"
         # Re-ingest from a source that has no location info — the parser
         # returns [], so workplace_type_col is 'UNSPECIFIED'. UPDATE must
         # not downgrade.
-        upsert_job(conn, _make_job(title="c", location=""))
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="c", location="")))
         assert _read_wt(conn, "testco|c") == "REMOTE"
 
     def test_unspecified_upgrades_to_real_value_on_better_data(self, conn: sqlite3.Connection):
         # First ingest: no location → 'UNSPECIFIED'.
-        upsert_job(conn, _make_job(title="d", location=""))
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="d", location="")))
         assert _read_wt(conn, "testco|d") == "UNSPECIFIED"
         # Re-ingest with structured REMOTE — real value upgrades the
         # UNSPECIFIED placeholder.
@@ -117,5 +118,5 @@ class TestUpdateNoDowngrade:
             raw="Remote",
             unresolved=False,
         )
-        upsert_job(conn, _make_job(title="d"), locations_structured=[loc])
+        upsert_job(conn, ParsedJob.from_job(_make_job(title="d"), source_meta={"locations_structured": [loc]}))
         assert _read_wt(conn, "testco|d") == "REMOTE"
