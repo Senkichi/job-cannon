@@ -51,6 +51,8 @@ def test_main_sets_timer_daemon(monkeypatch):
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "0")
     monkeypatch.delenv("JOB_CANNON_NO_BROWSER", raising=False)
 
+    from job_finder.web._pidfile import AcquireResult
+
     fake_app = MagicMock()
     captured_timer: list[threading.Timer] = []
 
@@ -68,6 +70,11 @@ def test_main_sets_timer_daemon(monkeypatch):
         patch("job_finder.__main__._install_terminal_shutdown"),
         patch("job_finder.__main__.threading.Timer", side_effect=_capturing_timer),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        patch("job_finder.__main__.probe_existing_jc", return_value=None),
+        patch("job_finder.__main__._port_is_listening", return_value=False),
+        patch(
+            "job_finder.web._pidfile.acquire_pidfile", return_value=AcquireResult(acquired=True)
+        ),
     ):
         import job_finder.__main__ as main_mod
 
