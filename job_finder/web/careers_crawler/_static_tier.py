@@ -150,10 +150,12 @@ def _extract_jobs_from_soup(
         # already comes from a heading element and skips _clean_title's
         # suffix-stripping (the heading text is clean by construction).
         title = context_title or _clean_title(tag, raw_text)
-        # Reject obvious metadata blobs (titles that are actually concatenated
-        # description+location+req-ID text from aggregator-style pages). These
-        # would otherwise leak through with junk titles that pollute the UI
-        # and waste scoring spend. See FOLLOWUPS.md 2026-05-27 audit.
+        # Retained as an early-exit optimisation: skip URL dedup, keyword
+        # matching, and result-list allocation for obvious metadata blobs
+        # from aggregator-style pages.  ParsedJob.from_job() provides
+        # universal enforcement (Phase 48.01), so this check is redundant
+        # for ingestion filtering but avoids wasted work on garbage titles.
+        # See FOLLOWUPS.md 2026-05-27 audit.
         if _is_metadata_blob(title):
             continue
         if not _title_matches(title, target_titles, exclusions):
