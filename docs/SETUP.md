@@ -211,6 +211,8 @@ Set it before running `uv run job-cannon` so the app sees it at boot. Add to you
 uv run job-cannon
 ```
 
+By default this launches in **tray mode**: Job Cannon runs in the background and a system-tray icon appears near your clock. Double-click the icon (or choose **Open Job Cannon** from its menu) to open the dashboard in your browser. The tray menu also has quick access to **Pause scheduler**, **Open logs folder**, and **Quit**.
+
 Equivalent invocations:
 
 ```powershell
@@ -218,9 +220,43 @@ uv run python -m job_finder      # module entry
 uv run python run.py             # legacy entry, still works (now a shim)
 ```
 
+### Terminal mode (no tray icon)
+
+For headless servers, SSH sessions, or if you simply prefer a terminal process:
+
+```bash
+# Explicit flag
+uv run job-cannon --terminal
+
+# Or via environment variable (persists across restarts)
+JOB_CANNON_NO_TRAY=1 uv run job-cannon        # macOS / Linux / Git Bash
+$env:JOB_CANNON_NO_TRAY=1; uv run job-cannon  # Windows PowerShell
+```
+
+Terminal mode prints the server URL to stdout and blocks until `Ctrl+C`. The URL banner and optional browser-open delay work the same as they did before the tray was added.
+
+### Automatic fallback
+
+If the tray icon can't be created (e.g. no display server, missing AppIndicator on GNOME, or a locked-down session), Job Cannon falls back automatically:
+
+- **Pre-startup failure** (tray init fails before Flask starts) → falls back to terminal mode, prints a warning, and carries on normally.
+- **Post-startup failure** (tray event loop dies after Flask is already serving) → continues headless; the live server keeps serving and the scheduler keeps running. `Ctrl+C` or `SIGTERM` triggers a clean shutdown.
+
+No intervention needed in either case.
+
+### Linux / GNOME note
+
+pystray requires `libayatana-appindicator3` (Ubuntu/Debian: `sudo apt install gir1.2-ayatanaappindicator3-0.1`) or the equivalent package for your distro. Without it the tray silently falls back to terminal mode.
+
+### macOS note
+
+A brief Dock icon flash when the tray starts is expected behavior — macOS requires AppKit event-loop ownership, which pystray acquires at startup.
+
+---
+
 Open http://localhost:5000. Click **Run Pipeline** on the dashboard to fetch + score jobs for the first time. The scheduler also runs ingestion automatically per your chosen cadence (default: 3×/day at 00:00, 08:00, 16:00 local).
 
-To stop: `Ctrl+C` in the terminal. The scheduler's pidfile auto-cleans on graceful shutdown.
+To stop: use **Quit** in the tray menu (tray mode), or `Ctrl+C` in the terminal (terminal mode). The scheduler's pidfile auto-cleans on graceful shutdown.
 
 ---
 

@@ -6,10 +6,21 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.sdist]
+# Include non-VCS-tracked binary assets so the sdist tarball is self-contained.
+# The wheel is built from the sdist during `uv build`, so any file missing here
+# is also missing from the wheel.
+artifacts = ["job_finder/assets/*.png"]
+
 [tool.hatch.build.targets.wheel]
 # The project name ("job-cannon") differs from the importable package
 # ("job_finder"), so hatchling can't auto-discover. Declare it explicitly.
 packages = ["job_finder"]
+# Non-Python package data — PNG must survive wheel install even before the
+# file is VCS-tracked (first build after creation) and after (robustness
+# against accidental .gitignore exclusions). tray_icon.png is loaded at
+# runtime via importlib.resources.
+artifacts = ["job_finder/assets/*.png"]
 
 [project]
 name = "job-cannon"
@@ -91,6 +102,11 @@ dependencies = [
     # already a transitive dependency via portalocker on Windows; listing it
     # explicitly because _process_lifecycle_win32.py imports it directly.
     "pywin32>=311 ; sys_platform == 'win32'",
+    # System-tray icon (Issue #40, Commit D). pystray provides the
+    # cross-platform tray icon event loop; Pillow loads the PNG asset and
+    # renders the icon. Both are required at runtime on all platforms.
+    "pystray>=0.19",
+    "Pillow>=10.0",
     # OS keyring for v5.1 secret storage. Backend is auto-selected by the
     # `keyring` package (Windows Credential Manager / macOS Keychain /
     # Linux Secret Service). Falls back to config.yaml plaintext when no
