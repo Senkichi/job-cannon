@@ -267,8 +267,17 @@ class ParsedJob:
         locations_structured: list[JobLocation] = sm.get("locations_structured", [])
         jd_full: str | None = sm.get("jd_full")
         sources: list[str] = sm.get("sources", [job.source])
-        source_urls: list[str] = sm.get("source_urls", [job.source_url])
-        source_urls_raw: list[str] = sm.get("source_urls_raw", [job.source_url])
+
+        # Canonicalize source URLs (Phase 49.01 / D-06 / F-05).
+        # Run canonicalize_url on every incoming URL so both fields are always
+        # derived together — canonical for dedup/display, raw for forensics.
+        # NG-03: canonical URL is NOT used as a dedup key here.
+        from job_finder.web.url_canonical import canonicalize_url as _canonicalize_url
+
+        _raw_source_urls: list[str] = sm.get("source_urls", [job.source_url])
+        _url_pairs = [_canonicalize_url(u) for u in _raw_source_urls if u]
+        source_urls: list[str] = [pair[0] for pair in _url_pairs]
+        source_urls_raw: list[str] = [pair[1] for pair in _url_pairs]
 
         unresolved_reasons: list[str] = []
         raw_title: str = job.title
