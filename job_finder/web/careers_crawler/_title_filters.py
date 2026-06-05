@@ -269,3 +269,40 @@ def _strip_city_suffix_guarded(text: str) -> str:
     if len(before) >= 5 and any(c.islower() for c in before):
         return before
     return text
+
+
+def clean_title_str(raw_text: str) -> str:
+    """Apply regex-based title cleaning on a plain string (Strategy 3 only).
+
+    This is the string-only variant of ``_clean_title`` for use when the
+    BeautifulSoup tag is not available — e.g. in ``ParsedJob.from_job``
+    where ``job.title`` is already a plain string extracted by a parser tier.
+
+    Applies the same Strategy 3 sequence as ``_clean_title``:
+      - Strip trailing location-type suffixes (dash/pipe + Remote/Hybrid/...)
+      - Strip trailing city-suffixes, guarded against brand abbreviations
+      - Strip Workday-style req-ID suffixes glued to the end of the title
+      - Strip no-separator trailing ALLCAPS state/country codes
+      - Strip 1-2 leading logo-placeholder letters
+
+    Does NOT apply Strategy 1 (heading tag lookup) or Strategy 2 (first
+    child element) -- those require a live BS4 tree and only run inside
+    ``_clean_title`` at HTML-parsing time.
+
+    Per the ``_is_metadata_blob`` docstring, title cleaning should run
+    BEFORE ``_is_metadata_blob`` so that suffix-stripped short titles
+    never trip the length gate.
+
+    Args:
+        raw_text: Plain-text job title (already extracted from HTML).
+
+    Returns:
+        Cleaned title string; falls back to ``raw_text`` if all regex
+        passes leave an empty string.
+    """
+    cleaned = _LOCATION_SUFFIX_RE.sub("", raw_text)
+    cleaned = _strip_city_suffix_guarded(cleaned)
+    cleaned = _REQID_PREFIX_RE.sub("", cleaned)
+    cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)
+    cleaned = _strip_leading_logo_letters(cleaned)
+    return cleaned.strip() or raw_text
