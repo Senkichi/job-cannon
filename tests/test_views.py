@@ -2455,9 +2455,18 @@ class TestSaveJD:
     def test_save_jd_writes_jd_full_to_db(self, jobs_client, tmp_db_path):
         import sqlite3
 
+        # Must be ≥200 chars so the set_jd_full() content-density gate passes.
+        long_jd = (
+            "We are looking for a talented Data Scientist to join our team. "
+            "You will build ML models, analyse large datasets, and collaborate "
+            "with engineers and product managers to deliver impactful features. "
+            "Requirements: 3+ years experience, Python, SQL, strong statistics."
+        )
+        assert len(long_jd) >= 200, "test setup: long_jd must be ≥200 chars"
+
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
-            data={"jd_text": "Saved JD content here."},
+            data={"jd_text": long_jd},
         )
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
@@ -2466,7 +2475,7 @@ class TestSaveJD:
             ("acme|data-scientist|remote",),
         ).fetchone()
         conn.close()
-        assert row["jd_full"] == "Saved JD content here."
+        assert row["jd_full"] == long_jd
 
     def test_save_jd_empty_text_returns_error(self, jobs_client):
         response = jobs_client.post(
@@ -2486,9 +2495,18 @@ class TestSaveJD:
         """
         import sqlite3
 
+        # Must be ≥200 chars so the set_jd_full() content-density gate passes.
+        long_jd = (
+            "Seeking a Senior Data Scientist to lead our analytics initiatives. "
+            "Responsibilities: design and implement ML pipelines, mentor junior "
+            "team members, collaborate with stakeholders to define KPIs, and "
+            "communicate insights to leadership. 5+ years experience required."
+        )
+        assert len(long_jd) >= 200, "test setup: long_jd must be ≥200 chars"
+
         jobs_client.post(
             "/jobs/acme%7Cdata-scientist%7Cremote/save-jd",
-            data={"jd_text": "Some JD text."},
+            data={"jd_text": long_jd},
         )
         conn = sqlite3.connect(tmp_db_path)
         conn.row_factory = sqlite3.Row
@@ -2498,7 +2516,7 @@ class TestSaveJD:
         ).fetchone()
         conn.close()
         # JD text is persisted...
-        assert row["jd_full"] == "Some JD text."
+        assert row["jd_full"] == long_jd
         # ...but no rescore was triggered, so v3 scoring columns remain NULL.
         assert row["classification"] is None
         assert row["sub_scores_json"] is None

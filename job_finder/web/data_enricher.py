@@ -42,6 +42,7 @@ import logging
 from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.web.enrichment_sources import merge_apply_urls
 from job_finder.web.enrichment_tiers import (
     fetch_ddg_jds,
@@ -161,7 +162,8 @@ def enrich_job(
         if current_tier == "exhausted":
             return {}
 
-        # Auto-promote long descriptions to jd_full (DQ-02)
+        # Auto-promote long descriptions to jd_full (DQ-02) — routed through
+        # set_jd_full() (Phase 46.03) for the content-density gate.
         if (
             not job_row.get("jd_full")
             and job_row.get("description")
@@ -170,11 +172,12 @@ def enrich_job(
             job_row["jd_full"] = job_row["description"]
             if conn is not None and job_row.get("dedup_key"):
                 try:
-                    conn.execute(
-                        "UPDATE jobs SET jd_full = ? WHERE dedup_key = ? AND jd_full IS NULL",
-                        (job_row["description"][:JD_STORAGE_MAX_CHARS], job_row.get("dedup_key")),
+                    _set_jd_full(
+                        conn,
+                        job_row["dedup_key"],
+                        job_row["description"][:JD_STORAGE_MAX_CHARS],
+                        source="data_enricher",
                     )
-                    conn.commit()
                 except Exception as e:
                     logger.debug("Description promotion DB write failed: %s", e)
 

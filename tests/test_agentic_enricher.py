@@ -996,12 +996,13 @@ class TestRunAgenticBackfillIsolation:
             if os.path.exists(path):
                 os.remove(path)
 
-    def test_junk_jd_not_written_marked_agentic_exhausted(self):
+    def test_junk_jd_not_written_enrichment_tier_unchanged(self):
         """A junk JD (fails I-13 content-density gate) must not be written to the DB.
 
-        Issue #107 fix direction #2: route jd_full write through the pre-write
-        junk check (_is_jd_junk) so the m078 RAISE ABORT trigger never fires.
-        The job must be marked agentic_exhausted so it is not reselected each night.
+        Phase 46.03: set_jd_full() gates the write and logs WARN; it does NOT
+        side-effect on enrichment_tier (that wiring lands in Phase 47 with
+        JobLocation.unresolved).  enrichment_tier stays 'exhausted' so the job
+        may be retried; jd_full stays NULL so no junk reaches the scorer.
         """
         from job_finder.web.agentic_enricher import run_agentic_backfill
 
@@ -1039,8 +1040,9 @@ class TestRunAgenticBackfillIsolation:
             )
             verify_conn.close()
 
-            assert row["enrichment_tier"] == "agentic_exhausted", (
-                "Junk-JD job must be marked agentic_exhausted (not retried nightly)"
+            assert row["enrichment_tier"] == "exhausted", (
+                "Phase 46.03: set_jd_full gate hit must NOT side-effect on enrichment_tier "
+                "(enrichment_tier stays 'exhausted'; Phase 47 wires the unresolved path)"
             )
             assert row["jd_full"] is None, (
                 "Junk JD content must NOT be written to jd_full (m078 I-13 would reject it)"
