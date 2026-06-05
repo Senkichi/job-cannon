@@ -11,6 +11,7 @@ import logging
 import os
 import secrets
 import sys
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
@@ -128,6 +129,9 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     if "TESTING" in cfg:
         app.config["TESTING"] = cfg["TESTING"]
     app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+    # Record app start time in UTC ISO format (naive UTC, store-UTC-render-local arch).
+    # Exposed by /__jc_health so the launcher can detect a live post-plan instance.
+    app.config["_JF_START_TIME_UTC"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     # --- Database setup ---
     # Pass user_data_root for default runtime path, preserve test behavior for explicit config
@@ -399,5 +403,35 @@ def create_app(config_path: str = "config.yaml", config: dict | None = None) -> 
     from job_finder.web.scheduler import init_scheduler
 
     init_scheduler(app)
+
+    # --- /__jc_health — identity probe endpoint ---
+    # Registered directly on ``app`` (not via a blueprint) so its availability
+    # does not depend on any single blueprint's successful registration once the
+    # app is up. The ``"app": "job-cannon"`` field is the load-bearing identity
+    # marker checked by ``probe_existing_jc()`` in __main__.py.
+    #
+    # Caveat: this does NOT make the endpoint reachable if create_app() itself
+    # raises during blueprint registration — that case yields no Flask server
+    # at all, and the launcher's HTTP probe falls through to the psutil cmdline
+    # check. This caveat is exactly why the psutil fallback exists.
+    try:
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as _pkg_version
+
+        _app_version: str | None = _pkg_version("job-cannon")
+    except (PackageNotFoundError, Exception):
+        _app_version = None
+
+    @app.route("/__jc_health")
+    def __jc_health():  # type: ignore[return-value]
+        return (
+            {
+                "app": "job-cannon",
+                "version": _app_version,
+                "pid": os.getpid(),
+                "start_time_utc": app.config.get("_JF_START_TIME_UTC", ""),
+            },
+            200,
+        )
 
     return app
