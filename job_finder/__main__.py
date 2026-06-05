@@ -11,10 +11,13 @@ running ``uv run job-cannon`` is not stranded at the Werkzeug log line.
 Disable with ``JOB_CANNON_NO_BROWSER=1`` for headless / CI use.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
-import sys  # noqa: F401 — tests patch `job_finder.__main__.sys.argv`; argparse reads through this module reference
+import signal
+import sys
 import threading
 import webbrowser
 
@@ -72,6 +75,54 @@ def _open_browser(url: str) -> None:
         logger.warning("Could not open browser at %s: %s", url, exc)
 
 
+def _install_terminal_shutdown(app) -> None:
+    """Register signal and console-control handlers for clean terminal-mode shutdown.
+
+    Handles:
+    - POSIX: SIGINT, SIGTERM, and SIGHUP (terminal close sends SIGHUP)
+    - Windows: SIGINT, SIGTERM via signal module + SetConsoleCtrlHandler
+      for CTRL_CLOSE_EVENT (terminal close), which bypasses Python signals
+
+    Both the ``try/finally`` in main() AND these handlers are needed:
+    - Werkzeug catches ``KeyboardInterrupt`` internally, so SIGINT returns
+      control to main() and the ``finally`` fires runtime_shutdown().
+    - Terminal close (CTRL_CLOSE_EVENT on Windows) bypasses Python signals;
+      SetConsoleCtrlHandler is the only path that fires cleanup there.
+    """
+    from job_finder.web._runtime import runtime_shutdown
+
+    def _signal_handler(signum, frame):
+        runtime_shutdown()
+        sys.exit(0)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _signal_handler)
+        except (OSError, ValueError):
+            # Can happen in child threads or restricted environments
+            pass
+
+    # SIGHUP — terminal close on POSIX (not available on Windows)
+    if hasattr(signal, "SIGHUP"):
+        try:
+            signal.signal(signal.SIGHUP, _signal_handler)
+        except (OSError, ValueError):
+            pass
+
+    # Windows: SetConsoleCtrlHandler covers CTRL_CLOSE_EVENT (terminal close),
+    # which does NOT trigger Python signal handlers.
+    try:
+        import win32api  # type: ignore[import]  # pywin32 transitive dep
+
+        def _ctrl_handler(ctrl_type):
+            runtime_shutdown()
+            return True  # tell Windows we handled it
+
+        win32api.SetConsoleCtrlHandler(_ctrl_handler, True)
+    except ImportError:
+        pass  # pywin32 not available — fine on non-Windows and some Windows configs
+
+
 def main() -> None:
     """Resolve config, build the Flask app, and start the dev server."""
     # SHORT-CIRCUIT: parse --help / --version BEFORE any config / Flask imports.
@@ -92,15 +143,22 @@ def main() -> None:
     cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
     server = cfg.get("server", {})
-    host = server.get("host", DEFAULT_SERVER_HOST)
+    bind_host = server.get("host", DEFAULT_SERVER_HOST)
     port = server.get("port", DEFAULT_SERVER_PORT)
     debug = server.get("debug", DEFAULT_SERVER_DEBUG)
+
+    # Bind-host / client-host split (§7.3): wildcard binds must not leak
+    # ``http://0.0.0.0:5000`` into any user-visible URL or HTTP probe.
+    if bind_host in ("0.0.0.0", "::", ""):  # noqa: S104
+        client_host = "127.0.0.1"
+    else:
+        client_host = bind_host
+    url = f"http://{client_host}:{port}"
 
     # F2: surface the URL before any Werkzeug noise and (unless opted out)
     # kick off a delayed browser open. The print() lands in stdout before
     # logging is fully attached — this is the one user-facing print in the
     # whole project, justified because the alternative is a stranded user.
-    url = f"http://{host}:{port}"
     no_browser = bool(os.environ.get("JOB_CANNON_NO_BROWSER"))
 
     print(f"Job Cannon is starting on {url}")
@@ -109,19 +167,31 @@ def main() -> None:
         # webbrowser.open is documented as thread-safe; firing from a Timer
         # avoids racing app.run() and keeps the open non-blocking. We use
         # use_reloader=False below, so this Timer fires exactly once.
-        threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,)).start()
+        # daemon=True: if the main thread exits before the Timer fires (e.g.
+        # very fast crash at startup), the Timer thread does not keep the
+        # process alive.
+        timer = threading.Timer(_BROWSER_OPEN_DELAY_SEC, _open_browser, args=(url,))
+        timer.daemon = True
+        timer.start()
 
-    app.run(
-        host=host,
-        port=port,
-        debug=debug,
-        use_reloader=False,
-        # threaded=True is required for the SSE live-update stream (/events):
-        # each open EventSource holds one worker thread for the life of the
-        # connection, and the single-threaded default would let one stream
-        # block every other request. Safe at single-user/local scale.
-        threaded=True,
-    )
+    _install_terminal_shutdown(app)
+
+    from job_finder.web._runtime import runtime_shutdown
+
+    try:
+        app.run(
+            host=bind_host,
+            port=port,
+            debug=debug,
+            use_reloader=False,
+            # threaded=True is required for the SSE live-update stream (/events):
+            # each open EventSource holds one worker thread for the life of the
+            # connection, and the single-threaded default would let one stream
+            # block every other request. Safe at single-user/local scale.
+            threaded=True,
+        )
+    finally:
+        runtime_shutdown()
 
 
 if __name__ == "__main__":
