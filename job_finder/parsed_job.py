@@ -124,35 +124,10 @@ _TITLE_LOCATION_BLEED_RE = re.compile(
 # I-13: jd_full content density gate
 # ---------------------------------------------------------------------------
 
-_MIN_JD_LENGTH: int = 200  # characters, post-strip
-
-# Shell / auth-wall prefix patterns mirroring tg_jobs_jd_full_junk trigger.
-# TODO Phase 46.03: replace with import from job_finder.db._jd_full when merged.
-_JD_JUNK_PREFIXES: tuple[str, ...] = (
-    "sign in",
-    "loading",
-    "open roles at",
-    "skip to content",
-    "cookie",
-    "privacy policy",
-    "404",
-)
-
-
-def _is_jd_junk(text: str) -> bool:
-    """Return True if jd_full content fails the I-13 density gate.
-
-    Mirrors the logic in the tg_jobs_jd_full_junk DB trigger (m078) and the
-    set_jd_full() helper from Phase 46.03. Two failure modes:
-    - Text shorter than _MIN_JD_LENGTH after stripping whitespace.
-    - Text whose first 200 chars (lowercased) start with a junk prefix.
-    """
-    stripped = text.strip()
-    if len(stripped) < _MIN_JD_LENGTH:
-        return True
-    prefix = stripped[:200].lower()
-    return any(prefix.startswith(p) for p in _JD_JUNK_PREFIXES)
-
+# Phase 46.03: junk-detection logic now lives in job_finder.db._jd_full.
+# Re-exported here so existing ``from job_finder.parsed_job import _is_jd_junk``
+# call sites keep working without changes.
+from job_finder.db._jd_full import _is_jd_junk as _is_jd_junk
 
 # ---------------------------------------------------------------------------
 # I-09 helper: cross-field title/locations_raw bleed

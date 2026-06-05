@@ -27,7 +27,7 @@ import time
 from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
-from job_finder.parsed_job import _is_jd_junk
+from job_finder.db._jd_full import set_jd_full as _set_jd_full
 
 logger = logging.getLogger(__name__)
 
@@ -665,57 +665,47 @@ def run_agentic_backfill(
                     elapsed = time.time() - t0
 
                     if jd:
-                        # I-13 pre-write gate: check jd_full against the content-density
-                        # floor before the raw UPDATE so the m078 trigger (RAISE ABORT)
-                        # never fires. Mirrors _is_jd_junk() in parsed_job.py.
-                        # Junk JDs are marked agentic_exhausted so the job is not
-                        # reselected on subsequent nightly runs.
-                        if _is_jd_junk(jd):
-                            logger.warning(
-                                "  -> JUNK JD (%d chars) for [%d/%d] %s @ %s "
-                                "— skipping write, marking agentic_exhausted",
-                                len(jd),
-                                i,
-                                total,
-                                title,
-                                company,
+                        # Route the jd_full write through the content-density gate
+                        # (Phase 46.03).  set_jd_full logs WARN on gate hit and
+                        # returns False without writing; the enrichment_tier sibling
+                        # field is updated separately in a second UPDATE below so
+                        # the optimistic concurrency check (WHERE enrichment_tier =
+                        # 'exhausted') remains on the tier field, not jd_full.
+                        rows_updated = 0
+                        with standalone_connection(db_path) as write_conn:
+                            jd_written = _set_jd_full(
+                                write_conn,
+                                dedup_key,
+                                jd[:JD_STORAGE_MAX_CHARS],
+                                source="agentic_enricher",
                             )
-                            with standalone_connection(db_path) as write_conn:
-                                write_conn.execute(
-                                    "UPDATE jobs SET enrichment_tier = 'agentic_exhausted' "
+                            if jd_written:
+                                # Per-job write connection: open, UPDATE with optimistic
+                                # concurrency check, close.  The WHERE clause prevents
+                                # overwriting state changed by another process between
+                                # our initial SELECT and this write.
+                                # DEFECT 001 FIX: capture rowcount INSIDE the `with`
+                                # block before the connection closes.
+                                cursor = write_conn.execute(
+                                    "UPDATE jobs SET enrichment_tier = 'agentic' "
                                     "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
                                     (dedup_key,),
                                 )
                                 write_conn.commit()
-                        else:
-                            # Per-job write connection: open, UPDATE with optimistic concurrency
-                            # check, close. The WHERE clause prevents overwriting state changed
-                            # by another process between our initial SELECT and this write.
-                            # DEFECT 001 FIX: capture rowcount INSIDE the `with` block as a plain
-                            # int before the connection closes. Reading cursor.rowcount after
-                            # standalone_connection.__exit__() is implementation-defined behaviour.
-                            with standalone_connection(db_path) as write_conn:
-                                cursor = write_conn.execute(
-                                    "UPDATE jobs SET jd_full = ?, enrichment_tier = 'agentic' "
-                                    "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
-                                    (jd, dedup_key),
-                                )
-                                write_conn.commit()
-                                rows_updated = cursor.rowcount  # read while connection is open
+                                rows_updated = cursor.rowcount
 
-                            if rows_updated == 0:
-                                # Another process advanced enrichment_tier between our SELECT
-                                # and this UPDATE. Log WARNING so the operator can manually
-                                # persist the JD if needed (we have it in memory here).
-                                logger.warning(
-                                    "Agentic: optimistic concurrency miss for dedup_key=%s "
-                                    "(JD found, %d chars, but tier changed — not persisted)",
-                                    dedup_key,
-                                    len(jd),
-                                )
-                            else:
-                                enriched_count += 1
-                                logger.info("  -> FOUND %d chars (%.1fs)", len(jd), elapsed)
+                        if jd_written and rows_updated == 0:
+                            # Another process advanced enrichment_tier between our
+                            # SELECT and this UPDATE.  jd_full was still persisted.
+                            logger.warning(
+                                "Agentic: optimistic concurrency miss for dedup_key=%s "
+                                "(JD found, %d chars, but tier changed — tier not updated)",
+                                dedup_key,
+                                len(jd),
+                            )
+                        elif jd_written:
+                            enriched_count += 1
+                            logger.info("  -> FOUND %d chars (%.1fs)", len(jd), elapsed)
                     else:
                         # Mark as agentic-exhausted so we don't retry.
                         # If rowcount == 0 here, another process already advanced the tier

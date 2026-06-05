@@ -23,6 +23,8 @@ from job_finder.models import Job
 from job_finder.web.location_canonical import JobLocation
 from job_finder.web.location_canonical import to_json as _locations_to_json
 
+from ._jd_full import _is_jd_junk as _jd_is_junk
+from ._jd_full import set_jd_full as _set_jd_full
 from ._persistence import update_pipeline_status
 
 if TYPE_CHECKING:
@@ -372,12 +374,14 @@ def upsert_job(
         if merged_description != existing["description"]:
             canonical_changed = True
 
-        # Eager jd_full promotion
-        jd_full_clause = ""
-        jd_full_value: tuple = ()
-        if not existing["jd_full"] and merged_description and len(merged_description) > 200:
-            jd_full_clause = ", jd_full = ?"
-            jd_full_value = (merged_description[:JD_STORAGE_MAX_CHARS],)
+        # Eager jd_full promotion — routed through set_jd_full() after the main UPDATE.
+        # Pre-compute the flag now so canonical_changed is set correctly before the UPDATE.
+        _jd_promote = (
+            not existing["jd_full"]
+            and bool(merged_description)
+            and not _jd_is_junk(merged_description)
+        )
+        if _jd_promote:
             canonical_changed = True
 
         # Salary change detection (COALESCE writes new value when non-NULL)
@@ -418,7 +422,7 @@ def upsert_job(
                     workplace_type = COALESCE(NULLIF(?, 'UNSPECIFIED'), workplace_type, 'UNSPECIFIED'),
                     primary_country_code = COALESCE(?, primary_country_code),
                     company_id = COALESCE(?, company_id),
-                    posted_date = COALESCE(?, posted_date){unresolved_clause}{jd_full_clause}
+                    posted_date = COALESCE(?, posted_date){unresolved_clause}
                 WHERE dedup_key = ?""",
                 (
                     json.dumps(sources),
@@ -437,7 +441,6 @@ def upsert_job(
                     company_id,
                     pd_str,
                     *unresolved_value,
-                    *jd_full_value,
                     parsed.dedup_key,
                 ),
             )
@@ -447,6 +450,15 @@ def upsert_job(
             # write. Surface it as IngestionRejected carrying the invariant code.
             conn.rollback()
             raise IngestionRejected(_parse_invariant(e), str(e)) from e
+
+        # Route jd_full promotion through the content-density gate.
+        if _jd_promote and merged_description:
+            _set_jd_full(
+                conn,
+                parsed.dedup_key,
+                merged_description[:JD_STORAGE_MAX_CHARS],
+                source="upsert_job",
+            )
 
         # Auto-reopen: if an archived job re-appears in ingestion, treat
         # re-appearance as proof the job is live again.
@@ -477,13 +489,9 @@ def upsert_job(
         first_seen = pd_str or now
 
         initial_location_col = ", ".join(_incoming_locs_raw)
-        initial_jd_full = None
-        if parsed.description and len(parsed.description) > 200:
-            initial_jd_full = parsed.description[:JD_STORAGE_MAX_CHARS]
-
-        # Note: parsed.jd_full is not yet written to the DB directly (the eager
-        # promotion above covers the common case; a dedicated jd_full write path
-        # lands in a later phase). The m078 I-13 trigger backstops any write.
+        # jd_full is written via set_jd_full() after the INSERT so the
+        # content-density gate (I-13) is applied consistently.  The INSERT
+        # always writes NULL; set_jd_full promotes it if the text passes.
 
         norm_salary_min, norm_salary_max = _normalize_salary(parsed.salary_min, parsed.salary_max)
         try:
@@ -512,7 +520,7 @@ def upsert_job(
                     _score,
                     json.dumps(_score_breakdown),
                     json.dumps(_incoming_locs_raw),
-                    initial_jd_full,
+                    None,  # jd_full — written via set_jd_full() after INSERT
                     "heuristic",
                     locations_json,
                     workplace_type_col,
@@ -528,6 +536,15 @@ def upsert_job(
             # write. Surface it as IngestionRejected carrying the invariant code.
             conn.rollback()
             raise IngestionRejected(_parse_invariant(e), str(e)) from e
+
+        # Route jd_full write through the content-density gate (Phase 46.03).
+        if parsed.description:
+            _set_jd_full(
+                conn,
+                parsed.dedup_key,
+                parsed.description[:JD_STORAGE_MAX_CHARS],
+                source="upsert_job",
+            )
 
         return UpsertResult(
             kind="inserted",

@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
 from job_finder.db import derive_classification
+from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.json_utils import utc_now_iso
 from job_finder.secrets import get_secret
 from job_finder.web.ats_platforms._platforms_ashby import SCANNER as _ASHBY_SCANNER
@@ -516,17 +517,23 @@ def _upsert_one_ats_api_job(
             company_id=company_id,
         )
 
-        # Promote ATS description to jd_full (DQ-03)
-        # Strip HTML to prevent CSS soup from inflating AI scores
+        # Promote ATS description to jd_full (DQ-03) — only when jd_full is NULL,
+        # preserving any richer description already written by a prior enricher.
+        # Routed through set_jd_full() (Phase 46.03) for the content-density gate.
         raw_desc = job_dict.get("description") or ""
         clean_desc = strip_html_to_text(raw_desc) if "<" in raw_desc else raw_desc
-        if len(clean_desc) > 200:
+        if clean_desc:
             try:
-                conn.execute(
-                    "UPDATE jobs SET jd_full = COALESCE(jd_full, ?) WHERE dedup_key = ?",
-                    (clean_desc[:JD_STORAGE_MAX_CHARS], job.dedup_key),
-                )
-                conn.commit()
+                existing_jd = conn.execute(
+                    "SELECT jd_full FROM jobs WHERE dedup_key = ?", (job.dedup_key,)
+                ).fetchone()
+                if existing_jd is not None and not existing_jd[0]:
+                    _set_jd_full(
+                        conn,
+                        job.dedup_key,
+                        clean_desc[:JD_STORAGE_MAX_CHARS],
+                        source="ats_scanner_run",
+                    )
             except Exception as e:
                 logger.warning(
                     "Failed to promote ATS description to jd_full for %s: %s",
