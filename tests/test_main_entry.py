@@ -7,11 +7,29 @@ as the opt-out switch.
 We don't actually call ``main()`` end-to-end (it would block on
 ``app.run()``); instead we exercise ``_open_browser`` directly and verify
 the URL-banner / timer-scheduling logic via patching.
+
+Issue #38 note: the existing tests that call ``main()`` need the new
+already-running detection steps mocked to ``no-op`` (probe=None, port free,
+lock acquired) so they reach the ``create_app`` path rather than exiting early.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from job_finder import __main__ as main_mod
+from job_finder.web._pidfile import AcquireResult
+
+# Standard already-running no-ops for tests that exercise create_app + app.run.
+_PROBE_NONE = patch("job_finder.__main__.probe_existing_jc", return_value=None)
+_PORT_FREE = patch("job_finder.__main__._port_is_listening", return_value=False)
+_LOCK_ACQUIRED = patch(
+    "job_finder.web._pidfile.acquire_pidfile",
+    return_value=AcquireResult(acquired=True),
+)
+_DATA_ROOT = patch(
+    "job_finder.web.user_data_dirs.user_data_root",
+    return_value=Path("/tmp/jc-test-entry"),
+)
 
 
 def test_open_browser_calls_webbrowser_open():
@@ -48,6 +66,10 @@ def test_main_no_browser_env_var_skips_timer_and_message(monkeypatch, capsys):
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer") as mock_timer,
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        _PROBE_NONE,
+        _PORT_FREE,
+        _LOCK_ACQUIRED,
+        _DATA_ROOT,
     ):
         main_mod.main()
 
@@ -70,6 +92,10 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.threading.Timer", return_value=fake_timer) as mock_timer_class,
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        _PROBE_NONE,
+        _PORT_FREE,
+        _LOCK_ACQUIRED,
+        _DATA_ROOT,
     ):
         main_mod.main()
 
@@ -102,6 +128,10 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
         patch("job_finder.config.load_config", return_value=cfg),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        _PROBE_NONE,
+        _PORT_FREE,
+        _LOCK_ACQUIRED,
+        _DATA_ROOT,
     ):
         main_mod.main()
 
@@ -124,6 +154,10 @@ def test_main_passes_use_reloader_false(monkeypatch):
         patch("job_finder.config.load_config", return_value={}),
         patch("job_finder.web.create_app", return_value=fake_app),
         patch("job_finder.__main__.sys.argv", ["job-cannon"]),
+        _PROBE_NONE,
+        _PORT_FREE,
+        _LOCK_ACQUIRED,
+        _DATA_ROOT,
     ):
         main_mod.main()
 

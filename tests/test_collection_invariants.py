@@ -26,7 +26,7 @@ Calibration history:
                (post-R2.1+R2.2 cleanup, pre-R2.5 surface tests). Margin: 9.
 """
 
-EXPECTED_COLLECTED_FLOOR = 2130
+EXPECTED_COLLECTED_FLOOR = 2190  # updated +63 tests: test_main_pidfile(13) + test_main_already_running(41) + test_jc_health_endpoint(9)
 
 # Below this count we assume a subset run (single file, single test, --co
 # subset) and the floor is not meaningful. The full suite collects ~2140;
