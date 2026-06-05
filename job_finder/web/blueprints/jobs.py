@@ -32,6 +32,7 @@ from job_finder.db import (
     update_pipeline_status,
     upsert_job,
 )
+from job_finder.db._jd_full import set_jd_full as _set_jd_full
 from job_finder.models import Job
 from job_finder.secrets import get_secret
 from job_finder.web._http_constants import _HEADERS, _TIMEOUT
@@ -716,12 +717,8 @@ def paste_jd(dedup_key: str):
     # ingestion (JD_STORAGE_MAX_CHARS; well above the scorer's own prompt cap).
     jd_text = jd_text[:JD_STORAGE_MAX_CHARS]
 
-    # Store the JD text
-    conn.execute(
-        "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
-        (jd_text, dedup_key),
-    )
-    conn.commit()
+    # Store the JD text via the sanctioned set_jd_full() write path (Phase 46.03).
+    _set_jd_full(conn, dedup_key, jd_text, source="jobs_manual_edit")
 
     try:
         log_activity(
@@ -917,11 +914,8 @@ def save_jd(dedup_key: str):
     # ingestion (JD_STORAGE_MAX_CHARS; well above the scorer's own prompt cap).
     jd_text = jd_text[:JD_STORAGE_MAX_CHARS]
 
-    conn.execute(
-        "UPDATE jobs SET jd_full = ? WHERE dedup_key = ?",
-        (jd_text, dedup_key),
-    )
-    conn.commit()
+    # Store the JD text via the sanctioned set_jd_full() write path (Phase 46.03).
+    _set_jd_full(conn, dedup_key, jd_text, source="jobs_manual_edit")
 
     try:
         log_activity(

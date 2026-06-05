@@ -266,6 +266,19 @@ class ProviderCascadeExhaustedError(RuntimeError):
     """
 
 
+class ProviderUnavailable(RuntimeError):
+    """Raised when a provider is marked unavailable at startup.
+
+    Caught by the existing cascade catch tuples at lines ~315 and ~693 via
+    the ``RuntimeError`` base class — no catch-tuple changes needed.
+
+    Currently used to signal that Ollama was probed at startup and found
+    neither running nor installable (``_jf_ollama_unavailable=True`` in
+    live config). The cascade skips the provider and falls through to the
+    next entry.
+    """
+
+
 def is_supported_provider_name(name: str) -> bool:
     """Return True if name is a registered provider in _SUPPORTED_PROVIDERS."""
     return name in _SUPPORTED_PROVIDERS
@@ -504,6 +517,8 @@ def _make_adapter(
 
         return GeminiProvider(config=config)
     if provider_name == "ollama":
+        if config.get("_jf_ollama_unavailable"):
+            raise ProviderUnavailable("ollama marked unavailable at startup")
         return OllamaProvider(config=config)
     if provider_name == "openrouter":
         from job_finder.web.providers.openrouter_provider import OpenRouterProvider

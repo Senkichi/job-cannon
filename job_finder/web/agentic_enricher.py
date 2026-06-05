@@ -27,6 +27,7 @@ import time
 from typing import Any
 
 from job_finder.config import JD_STORAGE_MAX_CHARS
+from job_finder.db._jd_full import set_jd_full as _set_jd_full
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,31 @@ _SEARCH_DELAY_S = 1.5  # Between DDG searches to avoid rate limits
 # (8000) because the validator prompt already consumes tokens and we want to leave
 # room for the model's JSON response without truncating mid-reasoning.
 _VALIDATE_MAX_CHARS = 6000
+
+
+# Social-surface URL path patterns — path-level complement to domain_policy's hostname-level
+# blocklist. linkedin.com/jobs/ is a valid JD source; linkedin.com/posts/ is a social post
+# that reliably yields junk content. These patterns are matched against the full URL string
+# (lowercase) so the path can be checked without a urlparse() call per URL.
+_SOCIAL_POST_URL_PATTERNS: tuple[str, ...] = (
+    "linkedin.com/posts/",
+    "linkedin.com/feed/",
+    "twitter.com/status/",
+    "x.com/status/",
+    "facebook.com/permalink/",
+    "threads.net/t/",
+)
+
+
+def _is_social_post_url(url: str) -> bool:
+    """Return True if *url* points to a social-media post (not a JD page).
+
+    Path-level filter, complementing the hostname-level is_blocked_domain().
+    linkedin.com/jobs/ pages are valid JD sources and are intentionally NOT
+    filtered — only social-content path shapes (posts, feeds, status) are blocked.
+    """
+    url_lower = url.lower()
+    return any(pattern in url_lower for pattern in _SOCIAL_POST_URL_PATTERNS)
 
 
 # System prompt for query generation
@@ -125,7 +151,7 @@ def _rank_urls(search_results: list[dict]) -> list[str]:
     urls = []
     for r in search_results:
         href = r.get("href", "")
-        if not href or href in seen or is_blocked_domain(href):
+        if not href or href in seen or is_blocked_domain(href) or _is_social_post_url(href):
             continue
         seen.add(href)
         urls.append(href)
@@ -615,65 +641,96 @@ def run_agentic_backfill(
 
         try:
             for i, row in enumerate(rows, 1):
-                job = dict(row)
-                title = job.get("title", "?")[:55]
-                company = job.get("company", "?")[:25]
-                dedup_key = job.get("dedup_key")
+                # Initialise before the inner try so the except block can always
+                # reference them in log messages even if row parsing fails.
+                title = "?"
+                company = "?"
+                try:
+                    job = dict(row)
+                    title = job.get("title", "?")[:55]
+                    company = job.get("company", "?")[:25]
+                    dedup_key = job.get("dedup_key")
 
-                logger.info("[%d/%d] %s @ %s", i, total, title, company)
+                    logger.info("[%d/%d] %s @ %s", i, total, title, company)
 
-                t0 = time.time()
-                # Per-job conn: the outer conn from line 576's `with` block
-                # was closed at `.fetchall()`; reusing it here broke the
-                # cascade cost-recording write ("Cannot operate on a closed
-                # database"). Open a fresh short-lived conn scoped to this
-                # one job — matches the write_conn pattern below and keeps
-                # the per-operation hold the module-level note prescribes.
-                with standalone_connection(db_path) as enrich_conn:
-                    jd = enrich_single_job(job, page, conn=enrich_conn, config=config)
-                elapsed = time.time() - t0
+                    t0 = time.time()
+                    # Per-job conn: the outer conn from line 576's `with` block
+                    # was closed at `.fetchall()`; reusing it here broke the
+                    # cascade cost-recording write ("Cannot operate on a closed
+                    # database"). Open a fresh short-lived conn scoped to this
+                    # one job — matches the write_conn pattern below and keeps
+                    # the per-operation hold the module-level note prescribes.
+                    with standalone_connection(db_path) as enrich_conn:
+                        jd = enrich_single_job(job, page, conn=enrich_conn, config=config)
+                    elapsed = time.time() - t0
 
-                if jd:
-                    # Per-job write connection: open, UPDATE with optimistic concurrency
-                    # check, close. The WHERE clause prevents overwriting state changed
-                    # by another process between our initial SELECT and this write.
-                    # DEFECT 001 FIX: capture rowcount INSIDE the `with` block as a plain
-                    # int before the connection closes. Reading cursor.rowcount after
-                    # standalone_connection.__exit__() is implementation-defined behaviour.
-                    with standalone_connection(db_path) as write_conn:
-                        cursor = write_conn.execute(
-                            "UPDATE jobs SET jd_full = ?, enrichment_tier = 'agentic' "
-                            "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
-                            (jd, dedup_key),
-                        )
-                        write_conn.commit()
-                        rows_updated = cursor.rowcount  # read while connection is open
+                    if jd:
+                        # Route the jd_full write through the content-density gate
+                        # (Phase 46.03).  set_jd_full logs WARN on gate hit and
+                        # returns False without writing; the enrichment_tier sibling
+                        # field is updated separately in a second UPDATE below so
+                        # the optimistic concurrency check (WHERE enrichment_tier =
+                        # 'exhausted') remains on the tier field, not jd_full.
+                        rows_updated = 0
+                        with standalone_connection(db_path) as write_conn:
+                            jd_written = _set_jd_full(
+                                write_conn,
+                                dedup_key,
+                                jd[:JD_STORAGE_MAX_CHARS],
+                                source="agentic_enricher",
+                            )
+                            if jd_written:
+                                # Per-job write connection: open, UPDATE with optimistic
+                                # concurrency check, close.  The WHERE clause prevents
+                                # overwriting state changed by another process between
+                                # our initial SELECT and this write.
+                                # DEFECT 001 FIX: capture rowcount INSIDE the `with`
+                                # block before the connection closes.
+                                cursor = write_conn.execute(
+                                    "UPDATE jobs SET enrichment_tier = 'agentic' "
+                                    "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
+                                    (dedup_key,),
+                                )
+                                write_conn.commit()
+                                rows_updated = cursor.rowcount
 
-                    if rows_updated == 0:
-                        # Another process advanced enrichment_tier between our SELECT
-                        # and this UPDATE. Log WARNING so the operator can manually
-                        # persist the JD if needed (we have it in memory here).
-                        logger.warning(
-                            "Agentic: optimistic concurrency miss for dedup_key=%s "
-                            "(JD found, %d chars, but tier changed — not persisted)",
-                            dedup_key,
-                            len(jd),
-                        )
+                        if jd_written and rows_updated == 0:
+                            # Another process advanced enrichment_tier between our
+                            # SELECT and this UPDATE.  jd_full was still persisted.
+                            logger.warning(
+                                "Agentic: optimistic concurrency miss for dedup_key=%s "
+                                "(JD found, %d chars, but tier changed — tier not updated)",
+                                dedup_key,
+                                len(jd),
+                            )
+                        elif jd_written:
+                            enriched_count += 1
+                            logger.info("  -> FOUND %d chars (%.1fs)", len(jd), elapsed)
                     else:
-                        enriched_count += 1
-                        logger.info("  -> FOUND %d chars (%.1fs)", len(jd), elapsed)
-                else:
-                    # Mark as agentic-exhausted so we don't retry.
-                    # If rowcount == 0 here, another process already advanced the tier
-                    # — skip silently (no data was found anyway, so no recovery needed).
-                    with standalone_connection(db_path) as write_conn:
-                        write_conn.execute(
-                            "UPDATE jobs SET enrichment_tier = 'agentic_exhausted' "
-                            "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
-                            (dedup_key,),
-                        )
-                        write_conn.commit()
-                    logger.info("  -> NOT FOUND (%.1fs)", elapsed)
+                        # Mark as agentic-exhausted so we don't retry.
+                        # If rowcount == 0 here, another process already advanced the tier
+                        # — skip silently (no data was found anyway, so no recovery needed).
+                        with standalone_connection(db_path) as write_conn:
+                            write_conn.execute(
+                                "UPDATE jobs SET enrichment_tier = 'agentic_exhausted' "
+                                "WHERE dedup_key = ? AND enrichment_tier = 'exhausted'",
+                                (dedup_key,),
+                            )
+                            write_conn.commit()
+                        logger.info("  -> NOT FOUND (%.1fs)", elapsed)
+
+                except Exception as exc:
+                    # Per-job isolation: one job's failure (IntegrityError from m078
+                    # trigger, Playwright error, DB lock, …) must never abort the batch.
+                    # Mirrors data_enricher's per-row exception handling pattern.
+                    logger.warning(
+                        "[%d/%d] Per-job error for %s @ %s — skipping: %s",
+                        i,
+                        total,
+                        title,
+                        company,
+                        exc,
+                    )
 
         finally:
             browser.close()

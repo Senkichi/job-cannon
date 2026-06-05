@@ -88,7 +88,12 @@ def test_main_default_schedules_browser_open(monkeypatch, capsys):
 
 
 def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
-    """The URL banner uses host/port from config, not just the defaults."""
+    """The URL banner uses the client-host and port from config.
+
+    When bind_host is a wildcard (0.0.0.0), the URL banner must show
+    127.0.0.1 (not 0.0.0.0 — that's not a browser URL). app.run() still
+    receives the original bind_host for the actual bind.
+    """
     monkeypatch.setenv("JOB_CANNON_NO_BROWSER", "1")  # silence the timer
 
     cfg = {"server": {"host": "0.0.0.0", "port": 8080, "debug": False}}
@@ -101,7 +106,9 @@ def test_main_respects_server_overrides_in_config(monkeypatch, capsys):
         main_mod.main()
 
     captured = capsys.readouterr()
-    assert "http://0.0.0.0:8080" in captured.out
+    # Banner shows client-accessible URL (127.0.0.1, not 0.0.0.0)
+    assert "http://127.0.0.1:8080" in captured.out
+    # app.run still uses the original bind_host so the socket binds to all interfaces
     fake_app.run.assert_called_once_with(
         host="0.0.0.0", port=8080, debug=False, use_reloader=False, threaded=True
     )

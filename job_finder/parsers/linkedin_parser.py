@@ -233,7 +233,10 @@ def _parse_block(block: str, email_date: datetime | None) -> Job | None:
         location=location,
         source="linkedin",
         source_url=clean_url,
-        source_id=source_id,
+        # source_id not persisted: the LinkedIn job ID is used only to build a
+        # clean URL above. In practice it is not per-job-stable here (the same ID
+        # has been observed across distinct postings), so it is not a valid
+        # contract source_id (I-11).
         salary_min=salary_min,
         salary_max=salary_max,
         posted_date=email_date,

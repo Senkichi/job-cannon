@@ -102,10 +102,9 @@ class TestSerpAPIFormatAudit:
         assert job.location == "San Francisco, CA"
         assert job.source == "serpapi"
         assert job.source_url == "https://www.linkedin.com/jobs/view/123456"
-        assert (
-            job.source_id
-            == "eyJqb2JfdGl0bGUiOiJTZW5pb3IgRGF0YSBTY2llbnRpc3QiLCJjb21wYW55X25hbWUiOiJBY21lIENvcnAifQ=="
-        )
+        # SerpAPI job_id is a search-result token, not a per-job-stable platform
+        # ID, so no source_id is persisted (I-11 contract).
+        assert not job.source_id
 
     def test_parse_result_salary_k_dash_format(self):
         """Salary '$150K\u2013$200K a year' (en-dash) parses to 150000/200000."""

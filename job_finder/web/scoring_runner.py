@@ -14,6 +14,7 @@ from job_finder.json_utils import utc_now_iso
 from job_finder.web.exclusion_filter import should_exclude
 from job_finder.web.expiry_checker import EXPIRED as _EXPIRED
 from job_finder.web.expiry_checker import check_job_liveness
+from job_finder.web.legitimacy_scanner import scan_legitimacy
 from job_finder.web.scoring_orchestrator import (
     score_and_persist_job,
 )
@@ -124,6 +125,29 @@ def run_scoring(
                     )
                     summary["skipped_dead"] += 1
                     continue
+
+                # Legitimacy scan — Phase 49.07.  Run BEFORE
+                # score_and_persist_job so that persist_job_assessment
+                # reads the updated legitimacy_note from the DB row when
+                # it calls derive_classification.  The UPDATE uses
+                # "AND legitimacy_note IS NULL" to preserve any manually-
+                # set note (e.g. admin override via /admin/review).
+                jd_text = job.get("jd_full") or ""
+                if jd_text:
+                    leg_note = scan_legitimacy(jd_text)
+                    if leg_note:
+                        conn.execute(
+                            "UPDATE jobs SET legitimacy_note = ?"
+                            " WHERE dedup_key = ? AND legitimacy_note IS NULL",
+                            (leg_note, dedup_key),
+                        )
+                        conn.commit()
+                        logger.info(
+                            "run_scoring: legitimacy_scanner flagged '%s' @ '%s' — %s",
+                            job.get("title"),
+                            job.get("company"),
+                            leg_note,
+                        )
 
                 result = score_and_persist_job(job, conn, config)
 

@@ -908,3 +908,234 @@ class TestEnrichOneJob:
         assert enrich_one_job({"title": "", "company": "Acme"}, None, {}) == {}
         assert enrich_one_job({"title": "DS", "company": ""}, None, {}) == {}
         assert enrich_one_job({}, None, {}) == {}
+
+
+# ---------------------------------------------------------------------------
+# TestRunAgenticBackfill — per-job isolation and junk-JD gate (issue #107)
+# ---------------------------------------------------------------------------
+
+
+class TestRunAgenticBackfillIsolation:
+    """Per-job exception isolation and I-13 junk-gate pre-write check."""
+
+    def _setup_playwright_mocks(self):
+        """Return (mock_playwright_mod, mock_pw_ctx) for sys.modules patching."""
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        mock_pw_ctx.__exit__ = MagicMock(return_value=False)
+        mock_playwright_mod = MagicMock()
+        mock_playwright_mod.sync_playwright.return_value = mock_pw_ctx
+        return mock_playwright_mod, mock_pw_ctx
+
+    def test_per_job_exception_does_not_abort_batch(self):
+        """One job's exception (e.g. IntegrityError from m078 I-13) must not abort the batch.
+
+        Issue #107 root cause: the loop had no per-job try/except, so a single
+        IntegrityError propagated out and left 47/50 jobs unprocessed.
+
+        Setup: 2 exhausted jobs — job 1 raises RuntimeError during enrich,
+        job 2 returns a valid JD. Expect result == 1 (job 2 enriched).
+        """
+        from job_finder.web.agentic_enricher import run_agentic_backfill
+
+        path, conn = _make_migrated_db()
+        try:
+            _insert_job(conn, "acme|job1|remote", title="Job One", enrichment_tier="exhausted")
+            _insert_job(
+                conn, "acme|job2|remote", title="Job Two", enrichment_tier="exhausted", score=0.1
+            )
+            conn.close()
+
+            long_jd = "Full job description text for the second job. " * 20
+
+            call_count = [0]
+
+            def _enrich_side_effect(job, page, *, conn, config):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise RuntimeError("Simulated per-job failure (e.g. IntegrityError from I-13)")
+                return long_jd
+
+            mock_playwright_mod, _ = self._setup_playwright_mocks()
+
+            with (
+                patch.dict("sys.modules", {"playwright.sync_api": mock_playwright_mod}),
+                patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                patch(
+                    "job_finder.web.agentic_enricher.enrich_single_job",
+                    side_effect=_enrich_side_effect,
+                ),
+            ):
+                mock_browser.return_value = (MagicMock(), MagicMock())
+                result = run_agentic_backfill(path, {}, limit=10)
+
+            assert result == 1, (
+                f"Expected 1 job enriched (job 2 should survive job 1's exception), got {result}"
+            )
+            assert call_count[0] == 2, (
+                f"enrich_single_job should be called twice, got {call_count[0]}"
+            )
+
+            verify_conn = sqlite3.connect(path)
+            verify_conn.row_factory = sqlite3.Row
+            rows = {
+                r["dedup_key"]: dict(r)
+                for r in verify_conn.execute(
+                    "SELECT dedup_key, enrichment_tier, jd_full FROM jobs"
+                ).fetchall()
+            }
+            verify_conn.close()
+
+            # Job 2 must have been enriched despite job 1's failure
+            assert rows["acme|job2|remote"]["enrichment_tier"] == "agentic", (
+                "Job 2 must be marked 'agentic' even though job 1 raised an exception"
+            )
+            assert rows["acme|job2|remote"]["jd_full"] == long_jd
+
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_junk_jd_not_written_enrichment_tier_unchanged(self):
+        """A junk JD (fails I-13 content-density gate) must not be written to the DB.
+
+        Phase 46.03: set_jd_full() gates the write and logs WARN; it does NOT
+        side-effect on enrichment_tier (that wiring lands in Phase 47 with
+        JobLocation.unresolved).  enrichment_tier stays 'exhausted' so the job
+        may be retried; jd_full stays NULL so no junk reaches the scorer.
+        """
+        from job_finder.web.agentic_enricher import run_agentic_backfill
+
+        path, conn = _make_migrated_db()
+        try:
+            _insert_job(conn, "acme|ds|remote", enrichment_tier="exhausted")
+            conn.close()
+
+            # Junk JD: too short to pass _is_jd_junk (< 200 chars post-strip).
+            # This is the exact content shape that would hit the m078 I-13 trigger
+            # on a raw UPDATE, causing IntegrityError before the fix.
+            junk_jd = "sign in to view this job"
+
+            mock_playwright_mod, _ = self._setup_playwright_mocks()
+
+            with (
+                patch.dict("sys.modules", {"playwright.sync_api": mock_playwright_mod}),
+                patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                patch(
+                    "job_finder.web.agentic_enricher.enrich_single_job",
+                    return_value=junk_jd,
+                ),
+            ):
+                mock_browser.return_value = (MagicMock(), MagicMock())
+                result = run_agentic_backfill(path, {}, limit=10)
+
+            assert result == 0, "Junk JD must not count as a successful enrichment"
+
+            verify_conn = sqlite3.connect(path)
+            verify_conn.row_factory = sqlite3.Row
+            row = dict(
+                verify_conn.execute(
+                    "SELECT enrichment_tier, jd_full FROM jobs WHERE dedup_key = 'acme|ds|remote'"
+                ).fetchone()
+            )
+            verify_conn.close()
+
+            assert row["enrichment_tier"] == "exhausted", (
+                "Phase 46.03: set_jd_full gate hit must NOT side-effect on enrichment_tier "
+                "(enrichment_tier stays 'exhausted'; Phase 47 wires the unresolved path)"
+            )
+            assert row["jd_full"] is None, (
+                "Junk JD content must NOT be written to jd_full (m078 I-13 would reject it)"
+            )
+
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_per_job_exception_warning_logged(self, caplog):
+        """Per-job exception must produce a WARNING log entry with job identity."""
+        import logging
+
+        from job_finder.web.agentic_enricher import run_agentic_backfill
+
+        path, conn = _make_migrated_db()
+        try:
+            _insert_job(
+                conn, "acme|ds|remote", title="Data Scientist", enrichment_tier="exhausted"
+            )
+            conn.close()
+
+            mock_playwright_mod, _ = self._setup_playwright_mocks()
+
+            with caplog.at_level(logging.WARNING, logger="job_finder.web.agentic_enricher"):
+                with (
+                    patch.dict("sys.modules", {"playwright.sync_api": mock_playwright_mod}),
+                    patch("job_finder.web.agentic_enricher._create_browser") as mock_browser,
+                    patch(
+                        "job_finder.web.agentic_enricher.enrich_single_job",
+                        side_effect=RuntimeError("Simulated IntegrityError"),
+                    ),
+                ):
+                    mock_browser.return_value = (MagicMock(), MagicMock())
+                    run_agentic_backfill(path, {}, limit=10)
+
+            warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+            assert any("Per-job error" in msg or "Simulated" in msg for msg in warning_messages), (
+                f"Expected a per-job WARNING log, got: {warning_messages}"
+            )
+
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+
+# ---------------------------------------------------------------------------
+# _is_social_post_url() and _rank_urls() — social-surface URL filtering (#107)
+# ---------------------------------------------------------------------------
+
+
+class TestSocialPostUrlFilter:
+    """Social-post URL path patterns are filtered by _rank_urls (issue #107 fix #4)."""
+
+    def test_linkedin_posts_url_is_social(self):
+        from job_finder.web.agentic_enricher import _is_social_post_url
+
+        assert _is_social_post_url(
+            "https://www.linkedin.com/posts/lindsaybrothers_senior-product-manager"
+        )
+
+    def test_linkedin_jobs_url_is_not_social(self):
+        """linkedin.com/jobs/ is a valid JD source and must NOT be filtered."""
+        from job_finder.web.agentic_enricher import _is_social_post_url
+
+        assert not _is_social_post_url("https://www.linkedin.com/jobs/view/123456/")
+
+    def test_twitter_status_url_is_social(self):
+        from job_finder.web.agentic_enricher import _is_social_post_url
+
+        assert _is_social_post_url("https://twitter.com/status/123456789")
+        assert _is_social_post_url("https://x.com/status/123456789")
+
+    def test_non_social_urls_not_filtered(self):
+        from job_finder.web.agentic_enricher import _is_social_post_url
+
+        assert not _is_social_post_url("https://boards.greenhouse.io/acme/jobs/1")
+        assert not _is_social_post_url("https://lever.co/acme/data-scientist")
+        assert not _is_social_post_url("https://www.acme.com/careers/data-scientist")
+
+    def test_rank_urls_excludes_linkedin_posts(self):
+        """_rank_urls must not return linkedin.com/posts/ URLs in candidate pool."""
+        from job_finder.web.agentic_enricher import _rank_urls
+
+        search_results = [
+            {"href": "https://www.linkedin.com/posts/someone_senior-product-manager-xyz"},
+            {"href": "https://boards.greenhouse.io/acme/jobs/ds-123"},
+        ]
+        urls = _rank_urls(search_results)
+
+        assert "https://www.linkedin.com/posts/someone_senior-product-manager-xyz" not in urls, (
+            "linkedin.com/posts/ URL must be filtered by _rank_urls"
+        )
+        assert "https://boards.greenhouse.io/acme/jobs/ds-123" in urls, (
+            "Greenhouse ATS URL must still be included"
+        )

@@ -139,9 +139,11 @@ class TestTrueUpParser:
         jobs = parse_trueup_alert(SAMPLE_TRUEUP_HTML)
         assert all("trueup.io/ls/click" in j.source_url for j in jobs)
 
-    def test_source_id_not_empty(self):
+    def test_source_id_not_persisted(self):
+        # TrueUp links expose only the SendGrid `upn` token (per-recipient, not
+        # per-job), so no source_id is persisted (I-11 contract).
         jobs = parse_trueup_alert(SAMPLE_TRUEUP_HTML)
-        assert all(j.source_id for j in jobs)
+        assert all(not j.source_id for j in jobs)
 
     def test_no_salary(self):
         """TrueUp doesn't include salary info."""

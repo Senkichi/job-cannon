@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Literal
 
 from job_finder.config import get_company_denylist, load_config
 from job_finder.normalizers import normalize_company, normalize_title
+from job_finder.web.careers_crawler._title_filters import clean_title, is_metadata_blob
 from job_finder.web.location_canonical import JobLocation
 
 if TYPE_CHECKING:
@@ -123,35 +124,10 @@ _TITLE_LOCATION_BLEED_RE = re.compile(
 # I-13: jd_full content density gate
 # ---------------------------------------------------------------------------
 
-_MIN_JD_LENGTH: int = 200  # characters, post-strip
-
-# Shell / auth-wall prefix patterns mirroring tg_jobs_jd_full_junk trigger.
-# TODO Phase 46.03: replace with import from job_finder.db._jd_full when merged.
-_JD_JUNK_PREFIXES: tuple[str, ...] = (
-    "sign in",
-    "loading",
-    "open roles at",
-    "skip to content",
-    "cookie",
-    "privacy policy",
-    "404",
-)
-
-
-def _is_jd_junk(text: str) -> bool:
-    """Return True if jd_full content fails the I-13 density gate.
-
-    Mirrors the logic in the tg_jobs_jd_full_junk DB trigger (m078) and the
-    set_jd_full() helper from Phase 46.03. Two failure modes:
-    - Text shorter than _MIN_JD_LENGTH after stripping whitespace.
-    - Text whose first 200 chars (lowercased) start with a junk prefix.
-    """
-    stripped = text.strip()
-    if len(stripped) < _MIN_JD_LENGTH:
-        return True
-    prefix = stripped[:200].lower()
-    return any(prefix.startswith(p) for p in _JD_JUNK_PREFIXES)
-
+# Phase 46.03: junk-detection logic now lives in job_finder.db._jd_full.
+# Re-exported here so existing ``from job_finder.parsed_job import _is_jd_junk``
+# call sites keep working without changes.
+from job_finder.db._jd_full import _is_jd_junk as _is_jd_junk
 
 # ---------------------------------------------------------------------------
 # I-09 helper: cross-field title/locations_raw bleed
@@ -281,7 +257,9 @@ class ParsedJob:
         Reasons from I-08 / I-09 / I-13 accumulate in ``unresolved_reasons``.
         If I-10 or I-07 raise, no UnresolvedParsedJob is returned.
 
-        Title cleaning (_clean_title) is intentionally deferred to Phase 48.01.
+        Title cleaning (``clean_title``) and metadata-blob detection
+        (``is_metadata_blob``) also run here (Phase 48.01), universally
+        across every ingestion path.
         """
         sm: dict = source_meta or {}
 
@@ -295,12 +273,40 @@ class ParsedJob:
         unresolved_reasons: list[str] = []
         raw_title: str = job.title
 
-        # I-08: title metadata blob (Blue State paren-close shape)
-        if _TITLE_LOCATION_BLEED_RE.search(job.title):
+        # ── Title cleaning + metadata-blob detection (Phase 48.01) ──────────
+        # Layering (both run on raw_title; see comment for why):
+        #
+        #   1. is_metadata_blob — catches long concatenated blobs, phrase
+        #      markers ("job title", "apply by", etc.), dollar amounts, and
+        #      req-ID pipe patterns.  Runs on the raw title BEFORE clean_title
+        #      normalises it, because clean_title strips req-ID markers via
+        #      _REQID_PREFIX_RE before is_metadata_blob can see them.
+        #
+        #   2. I-08 (_TITLE_LOCATION_BLEED_RE) — catches the Blue State
+        #      paren-close shape (")NY", ")CA").  These titles are too short
+        #      to trip is_metadata_blob.  Also runs on the raw title BEFORE
+        #      clean_title strips the state-code suffix via _NOSEP_TRAIL_LOC_RE,
+        #      which would otherwise remove exactly what I-08 needs to detect.
+        #
+        #   3. clean_title normalises trailing location/state-code text for all
+        #      downstream storage: title field, dedup_key, and I-09.
+        #
+        # Both I-08 and is_metadata_blob map to the same reason code
+        # 'title_metadata_blob'; the distinction is an implementation detail.
+
+        if is_metadata_blob(raw_title):
             unresolved_reasons.append("title_metadata_blob")
 
+        # I-08: title location bleed (Blue State paren-close shape)
+        if "title_metadata_blob" not in unresolved_reasons and _TITLE_LOCATION_BLEED_RE.search(
+            raw_title
+        ):
+            unresolved_reasons.append("title_metadata_blob")
+
+        cleaned_title: str = clean_title(raw_title)
+
         # I-09: title cross-field bleed (location token after paren-close)
-        if _has_title_cross_field_bleed(job.title, locations_raw):
+        if _has_title_cross_field_bleed(cleaned_title, locations_raw):
             if "title_cross_field_bleed" not in unresolved_reasons:
                 unresolved_reasons.append("title_cross_field_bleed")
 
@@ -323,8 +329,8 @@ class ParsedJob:
             unresolved_reasons.append("jd_full_junk")
             clean_jd_full = None  # row still written, but jd_full cleared
 
-        # Derive canonical dedup_key from validated company + title
-        dedup_key = f"{normalize_company(job.company)}|{normalize_title(job.title)}"
+        # Derive canonical dedup_key from validated company + cleaned title
+        dedup_key = f"{normalize_company(job.company)}|{normalize_title(cleaned_title)}"
 
         # Denormalize structured location fields from locations_structured[0]
         workplace_type = (
@@ -338,7 +344,7 @@ class ParsedJob:
         source_id: str | None = job.source_id if job.source_id else None
 
         common_kwargs: dict = {
-            "title": job.title,
+            "title": cleaned_title,
             "company": job.company,
             "dedup_key": dedup_key,
             "location": job.location,

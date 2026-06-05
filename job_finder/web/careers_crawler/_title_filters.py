@@ -245,6 +245,32 @@ def _clean_title(tag, raw_text: str) -> str:
     return cleaned.strip() or raw_text
 
 
+def clean_title(title: str) -> str:
+    """String-only variant of the HTML-aware _clean_title().
+
+    Applies regex-based location suffix stripping (strategy 3 from the
+    HTML-aware ``_clean_title``) without needing a BeautifulSoup tag.
+    Called from ``ParsedJob.from_job()`` to normalize titles from all
+    ingestion paths before downstream field storage and I-09 bleed checks.
+
+    For HTML-context extraction (where a BeautifulSoup ``<a>`` tag is
+    available), use ``_clean_title()`` which has higher precision via
+    heading/first-child strategies.
+    """
+    cleaned = _LOCATION_SUFFIX_RE.sub("", title)
+    cleaned = _strip_city_suffix_guarded(cleaned)
+    cleaned = _REQID_PREFIX_RE.sub("", cleaned)
+    cleaned = _NOSEP_TRAIL_LOC_RE.sub("", cleaned)
+    cleaned = _strip_leading_logo_letters(cleaned)
+    return cleaned.strip() or title
+
+
+#: Public alias for ``_is_metadata_blob``.
+#: Imported by ``ParsedJob.from_job`` for universal metadata-blob detection
+#: across every ingestion path (Phase 48.01).
+is_metadata_blob = _is_metadata_blob
+
+
 def _strip_city_suffix_guarded(text: str) -> str:
     """Apply _CITY_SUFFIX_RE only when the text BEFORE the dash looks like a
     real job title — short + ALLCAPS prefixes are almost always brand

@@ -17,6 +17,7 @@ from job_finder.web.ats_platforms._registry import (
     PlatformScanner,
     _http_get_json,
 )
+from job_finder.web.description_formatter import html_to_plain_text
 from job_finder.web.location_canonical import (
     JobLocation,
     WorkplaceType,
@@ -144,7 +145,11 @@ def _posting_to_job(posting: dict, _slug: str) -> dict:
     if not location and posting.get("isRemote"):
         location = "Remote"
 
-    description = posting.get("descriptionPlain") or posting.get("descriptionHtml") or ""
+    # descriptionPlain is already clean; only the descriptionHtml fallback needs
+    # lossless HTML→text conversion (JD Layer 2 step 2b).
+    description = posting.get("descriptionPlain") or ""
+    if not description:
+        description = html_to_plain_text(posting.get("descriptionHtml") or "")
 
     # ── source_id (F-04: was missing on 98.4% of Ashby rows) ─────────────────
     posting_id = posting.get("id")

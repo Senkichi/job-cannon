@@ -83,12 +83,13 @@ class TestParseResult:
         assert job is not None
         assert job.source_url == link
 
-    def test_source_id_extracted_from_link_fragment(self, source):
+    def test_source_id_not_persisted(self, source):
+        # The Google-Jobs docid is a search-result token, not a per-job-stable
+        # platform ID, so no source_id is persisted (I-11 contract).
         link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer"
         job = source._parse_result(_result(link=link))
         assert job is not None
-        # fragment docid%3DABC123%3D%3D → decoded: "docid=ABC123==" → extracted: "ABC123=="
-        assert job.source_id == "ABC123=="
+        assert not job.source_id
 
     def test_missing_title_returns_none(self, source):
         result = _result()
@@ -206,32 +207,6 @@ class TestPostingAgeParsing:
 
     def test_empty_extensions_returns_none(self, source):
         assert source._parse_posting_age([]) is None
-
-
-# ---------------------------------------------------------------------------
-# Test: docid extraction from URL fragment
-# ---------------------------------------------------------------------------
-
-
-class TestExtractDocid:
-    def test_extracts_from_standard_link(self, source):
-        link = "https://www.google.com/search?gl=us&hl=en&q=DS&udm=8#vhid=vt%3D20/docid%3DABC123%3D%3D&vssid=jobs-detail-viewer"
-        assert source._extract_docid(link) == "ABC123=="
-
-    def test_empty_url_returns_empty_string(self, source):
-        assert source._extract_docid("") == ""
-
-    def test_url_without_fragment_returns_empty_string(self, source):
-        link = "https://www.google.com/search?q=data+scientist"
-        assert source._extract_docid(link) == ""
-
-    def test_encoded_docid_decoded(self, source):
-        link = "https://www.google.com/search?udm=8#vhid=vt%3D20/docid%3D_lTbCUIJ6iKqxDCVAAAAAA%3D%3D&vssid=jobs-detail-viewer"
-        assert source._extract_docid(link) == "_lTbCUIJ6iKqxDCVAAAAAA=="
-
-    def test_fragment_without_docid_returns_empty_string(self, source):
-        link = "https://www.google.com/search?udm=8#vhid=vt%3D20&vssid=jobs-detail-viewer"
-        assert source._extract_docid(link) == ""
 
 
 # ---------------------------------------------------------------------------

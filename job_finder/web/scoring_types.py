@@ -7,9 +7,6 @@ Provides:
               success from budget_exceeded, error, and skipped outcomes.
     unwrap_scoring_result -- Helper to extract the data dict from a ScoringResult,
               returning None for any non-success status.
-    build_description_snippet -- Intelligent JD truncation with skill-keyword
-              summary and requirements-section extraction. Migrated here from
-              the deleted haiku_scorer.py (Plan 4 COLLAPSE-01).
     build_comp_context -- Compensation-summary string built from comp_data_json
               (Ashby/Lever ATS payloads). Migrated from the deleted haiku_scorer.py
               (Plan 4 COLLAPSE-01).
@@ -21,7 +18,6 @@ Usage:
 """
 
 import json
-import re
 from typing import Literal, NamedTuple, TypedDict
 
 
@@ -136,62 +132,3 @@ def build_comp_context(job_row: dict) -> str | None:
         if comp_min and comp_max:
             parts.append(f"{currency} {comp_min:,}-{comp_max:,}")
     return "; ".join(parts) if parts else None
-
-
-def build_description_snippet(
-    description: str,
-    profile_skills: list[str],
-    max_chars: int = 2000,
-) -> str:
-    """Intelligent snippet builder: 1200-char head + skill summary + requirements.
-
-    Replaces the legacy 500-char truncation. Surfaces requirements/qualifications
-    sections and skill-keyword counts from the full posting without sending the
-    entire JD to the model.
-
-    DEPRECATED — do NOT wire this into the scoring path. The 2026-06-03 JD-length
-    investigation found this regex *whitelists* requirements-flavored sections and
-    so silently drops Responsibilities / Location / Compensation (starving
-    domain_match / location_fit / comp_fit). JDs are structured too variably for a
-    regex window. The scorer now sends jd_full whole (job_scorer._build_user_message);
-    superfluous-content removal belongs in upstream extraction (trafilatura + ATS
-    JSON — "Layer 2"), not here. Retained only until Layer 2 lands.
-    """
-    if not description:
-        return ""
-
-    snippet = description[:1200].strip()
-
-    description_lower = description.lower()
-    skill_matches: dict[str, int] = {}
-    for skill in profile_skills:
-        if not skill:
-            continue
-        count = description_lower.count(skill.lower())
-        if count > 0:
-            skill_matches[skill] = count
-
-    if skill_matches:
-        matches_str = ", ".join(
-            f"{skill} ({count}x)"
-            for skill, count in sorted(skill_matches.items(), key=lambda x: -x[1])
-        )
-        keyword_summary = f"\n\n[Skill keyword matches in full posting: {matches_str}]"
-    else:
-        keyword_summary = "\n\n[No candidate skill keywords found in full posting text]"
-
-    remaining_chars = max_chars - len(snippet) - len(keyword_summary)
-    if remaining_chars > 200 and len(description) > 1200:
-        req_pattern = re.compile(
-            r"(requirements|qualifications|what you.ll bring|what we.re looking for|"
-            r"about you|your background|skills|experience required|must.have)",
-            re.IGNORECASE,
-        )
-        match = req_pattern.search(description, 800)
-        if match:
-            req_start = max(0, match.start() - 20)
-            req_section = description[req_start : req_start + remaining_chars].strip()
-            if req_section and req_section not in snippet:
-                snippet += f"\n\n[...Requirements section:]\n{req_section}"
-
-    return (snippet + keyword_summary)[:max_chars]

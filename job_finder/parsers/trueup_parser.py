@@ -22,7 +22,6 @@ jobs" link requires HTTP requests which are out of scope.
 import logging
 import re
 from datetime import datetime
-from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -123,7 +122,10 @@ def _parse_current_layout(soup: BeautifulSoup, email_date: datetime | None) -> l
                 location=card["location"],
                 source="trueup",
                 source_url=card["url"],
-                source_id=_extract_source_id(card["url"]),
+                # No source_id: TrueUp email links expose only the SendGrid `upn`
+                # tracking token (per-recipient, not per-job), so it cannot serve
+                # as a stable platform ID. Left empty per I-11 contract. ATS
+                # scanners supply the real per-job source_id downstream.
                 posted_date=email_date,
             )
         )
@@ -240,7 +242,7 @@ def _parse_legacy_layout(soup: BeautifulSoup, email_date: datetime | None) -> li
                 location=card.get("location", "Unknown"),
                 source="trueup",
                 source_url=source_url,
-                source_id=_extract_source_id(source_url),
+                # No source_id (see above): TrueUp `upn` token is not per-job.
                 posted_date=email_date,
             )
         )
@@ -318,33 +320,3 @@ def _legacy_extract_location(container, title: str, company: str) -> str:
         if re.match(r"^[A-Z\s,/]+$", text) and "," in text:
             return text
     return "Unknown"
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_source_id(url: str) -> str:
-    """Extract a stable source_id from a job URL.
-
-    For current-layout TrueUp links (direct to ATS) we try common ATS
-    job-id query params (``gh_jid`` for Greenhouse, ``jobId`` for several
-    Workday flavors) before falling back to the last path segment. For
-    legacy click-tracker URLs the ``upn`` parameter was unique per job.
-    """
-    try:
-        parsed = urlparse(url)
-        qs = parse_qs(parsed.query)
-        for key in ("upn", "gh_jid", "jobId", "job_id", "id"):
-            if qs.get(key):
-                return qs[key][0][:64]
-    except Exception:
-        logger.debug("trueup source_id extraction failed", exc_info=True)
-    try:
-        parts = urlparse(url).path.rstrip("/").split("/")
-        if parts:
-            return parts[-1][:64]
-    except Exception:
-        pass
-    return ""

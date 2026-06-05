@@ -64,6 +64,26 @@ def strip_html_to_text(text: str) -> str:
     return text.strip()
 
 
+def html_to_plain_text(raw: str) -> str:
+    """Lossless HTML → plain-text for ATS description fragments (JD Layer 2).
+
+    ATS APIs return the JD body already isolated (no page nav/header/footer), so
+    the goal is a faithful HTML→text conversion that drops NOTHING — unlike the
+    trafilatura-based ``html_extract.html_to_clean_text`` used for full crawled
+    pages, whose recall/precision heuristics are tuned for boilerplate removal,
+    not for terse standalone fragments.
+
+    Greenhouse's ``content`` arrives as entity-escaped HTML (``&lt;p&gt;…``), so
+    we unescape first to turn the encoded tags back into real tags, then
+    ``strip_html_to_text`` converts block tags to newlines / ``<li>`` to bullets
+    and removes the tags while preserving section + list structure. Plain-text
+    input passes through unchanged.
+    """
+    if not raw:
+        return ""
+    return strip_html_to_text(_html.unescape(raw))
+
+
 def _is_header(line: str) -> bool:
     """Check if a line is a section header (markdown or plain text)."""
     stripped = line.strip()
