@@ -175,11 +175,11 @@ class TestTitleFilterUniversalBlobs:
 
 
 class TestShimPathMetadataBlob:
-    """Confirms the Job→ParsedJob.from_job shim propagates title_metadata_blob
-    through upsert_job to UpsertResult.unresolved_reasons.
+    """Confirms title_metadata_blob propagates from ParsedJob.from_job through
+    upsert_job to UpsertResult.unresolved_reasons (Phase 48.07: shim removed).
     """
 
-    def test_shim_upsert_job_metadata_blob_title(self):
+    def test_from_job_upsert_metadata_blob_title(self):
         """Job with metadata-blob title → UpsertResult.unresolved_reasons includes 'title_metadata_blob'."""
         from job_finder.db import upsert_job
         from job_finder.web.db_migrate import run_migrations
@@ -197,20 +197,14 @@ class TestShimPathMetadataBlob:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             with (
-                # Patch module-level imports in parsed_job (used by from_job)
                 patch("job_finder.parsed_job.load_config", return_value={}),
                 patch(
                     "job_finder.parsed_job.get_company_denylist",
                     return_value=frozenset(),
                 ),
-                # Patch dynamic imports in the upsert_job shim block
-                patch("job_finder.config.load_config", return_value={}),
-                patch(
-                    "job_finder.config.get_company_denylist",
-                    return_value=frozenset(),
-                ),
             ):
-                result = upsert_job(conn, job)
+                parsed = ParsedJob.from_job(job)
+                result = upsert_job(conn, parsed)
             conn.close()
 
             assert "title_metadata_blob" in result.unresolved_reasons, (

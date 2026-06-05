@@ -19,6 +19,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 # ---------------------------------------------------------------------------
@@ -430,7 +431,7 @@ class TestFirstSeenEmailDate:
 
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
-            result = upsert_job(conn, job)
+            result = upsert_job(conn, ParsedJob.from_job(job))
             conn.close()
 
             assert result.kind == "inserted"
@@ -474,7 +475,7 @@ class TestFirstSeenEmailDate:
 
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
-            upsert_job(conn, job)
+            upsert_job(conn, ParsedJob.from_job(job))
             after = datetime.now(UTC).replace(tzinfo=None)
             conn.close()
 
@@ -527,7 +528,7 @@ class TestSmartUpsertJobMerge:
                 source="linkedin",
                 source_url="https://linkedin.com/jobs/1",
             )
-            upsert_job(db, job)
+            upsert_job(db, ParsedJob.from_job(job))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -568,8 +569,8 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            upsert_job(db, job1)
-            upsert_job(db, job2)
+            upsert_job(db, ParsedJob.from_job(job1))
+            upsert_job(db, ParsedJob.from_job(job2))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -606,8 +607,8 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            upsert_job(db, job1)
-            upsert_job(db, job2)
+            upsert_job(db, ParsedJob.from_job(job1))
+            upsert_job(db, ParsedJob.from_job(job2))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -642,8 +643,8 @@ class TestSmartUpsertJobMerge:
                 source="glassdoor",
                 source_url="https://glassdoor.com/jobs/2",
             )
-            upsert_job(db, job1)
-            upsert_job(db, job2)
+            upsert_job(db, ParsedJob.from_job(job1))
+            upsert_job(db, ParsedJob.from_job(job2))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -682,8 +683,8 @@ class TestSmartUpsertJobMerge:
                 source_url="https://glassdoor.com/jobs/2",
                 description=short_desc,  # Substring of first
             )
-            upsert_job(db, job1)
-            upsert_job(db, job2)
+            upsert_job(db, ParsedJob.from_job(job1))
+            upsert_job(db, ParsedJob.from_job(job2))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -724,8 +725,8 @@ class TestSmartUpsertJobMerge:
                 source_url="https://glassdoor.com/jobs/2",
                 description=desc2,
             )
-            upsert_job(db, job1)
-            upsert_job(db, job2)
+            upsert_job(db, ParsedJob.from_job(job1))
+            upsert_job(db, ParsedJob.from_job(job2))
             db.close()
 
             conn = sqlite3.connect(path)
@@ -1771,7 +1772,7 @@ class TestUpsertScoringProviderNotLeaked:
         conn = sqlite3.connect(migrated_db_path)
         conn.row_factory = sqlite3.Row
         try:
-            result = upsert_job(conn, job)
+            result = upsert_job(conn, ParsedJob.from_job(job))
             assert result.kind == "inserted"
             row = conn.execute(
                 "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
@@ -1814,7 +1815,7 @@ class TestUpsertScoringProviderNotLeaked:
         conn.row_factory = sqlite3.Row
         try:
             # INSERT (scoring_provider=NULL via 7.7 fix)
-            upsert_job(conn, job)
+            upsert_job(conn, ParsedJob.from_job(job))
             # Simulate a real scoring attribution via the legitimate writer path.
             # The real LLM writer co-writes sub_scores_json + classification with
             # the model tag (m078 I-04/I-05 require them when scoring_model is set).
@@ -1825,7 +1826,7 @@ class TestUpsertScoringProviderNotLeaked:
             )
             conn.commit()
             # Re-upsert (UPDATE branch fires because the row exists)
-            upsert_job(conn, job)
+            upsert_job(conn, ParsedJob.from_job(job))
             row = conn.execute(
                 "SELECT scoring_provider, scoring_model FROM jobs WHERE dedup_key = ?",
                 (job.dedup_key,),

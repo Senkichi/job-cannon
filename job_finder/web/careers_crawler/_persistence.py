@@ -37,6 +37,7 @@ def _upsert_and_log(
     """Upsert discovered jobs and update company timestamps."""
     from job_finder.db import upsert_job
     from job_finder.models import Job
+    from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
 
     company_jobs_found = len(jobs)
     company_jobs_new = 0
@@ -55,7 +56,11 @@ def _upsert_and_log(
                     salary_max=None,
                     description=scraped_job.get("description", ""),
                 )
-                result = upsert_job(upsert_conn, job, company_id=company_id)
+                try:
+                    parsed = ParsedJob.from_job(job)
+                except DenylistedCompanyError:
+                    continue
+                result = upsert_job(upsert_conn, parsed, company_id=company_id)
                 if result.kind == "inserted":
                     summary["jobs_new"] += 1
                     company_jobs_new += 1

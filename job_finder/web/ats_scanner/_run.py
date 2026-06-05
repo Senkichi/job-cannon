@@ -509,11 +509,18 @@ def _upsert_one_ats_api_job(
             posted_date=job_dict.get("posted_date"),
         )
         from job_finder.db import upsert_job
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        _locs = job_dict.get("locations_structured")
+        _source_meta = {"locations_structured": _locs} if _locs else None
+        try:
+            parsed = ParsedJob.from_job(job, source_meta=_source_meta)
+        except DenylistedCompanyError:
+            return
 
         result = upsert_job(
             scan_conn,
-            job,
-            locations_structured=job_dict.get("locations_structured"),
+            parsed,
             company_id=company_id,
         )
 

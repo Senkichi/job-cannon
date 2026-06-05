@@ -662,6 +662,7 @@ class TestAutoReopen:
 
         from job_finder.db import upsert_job
         from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
         from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
@@ -676,27 +677,28 @@ class TestAutoReopen:
             source="linkedin",
             source_url="https://linkedin.com/jobs/1",
         )
-        upsert_job(conn, job)
+        parsed = ParsedJob.from_job(job)
+        upsert_job(conn, parsed)
         conn.execute(
             "UPDATE jobs SET pipeline_status = 'archived' WHERE dedup_key = ?",
-            (job.dedup_key,),
+            (parsed.dedup_key,),
         )
         conn.commit()
 
         # Re-ingest the same job (simulates re-appearance in Gmail/SerpAPI)
-        result = upsert_job(conn, job)
+        result = upsert_job(conn, ParsedJob.from_job(job))
         assert result.kind != "inserted"  # existing job, not new
 
         row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
-            (job.dedup_key,),
+            (parsed.dedup_key,),
         ).fetchone()
         assert row["pipeline_status"] == "discovered"
 
         # Verify evidence was recorded in pipeline_events
         event = conn.execute(
             "SELECT evidence, source FROM pipeline_events WHERE job_id = ? ORDER BY timestamp DESC LIMIT 1",
-            (job.dedup_key,),
+            (parsed.dedup_key,),
         ).fetchone()
         assert event["evidence"] == "re_appeared"
         assert event["source"] == "ingestion"
@@ -709,6 +711,7 @@ class TestAutoReopen:
 
         from job_finder.db import upsert_job
         from job_finder.models import Job
+        from job_finder.parsed_job import ParsedJob
         from job_finder.web.db_migrate import run_migrations
 
         run_migrations(tmp_db_path)
@@ -722,18 +725,19 @@ class TestAutoReopen:
             source="linkedin",
             source_url="https://linkedin.com/jobs/1",
         )
-        upsert_job(conn, job)
+        parsed = ParsedJob.from_job(job)
+        upsert_job(conn, parsed)
         conn.execute(
             "UPDATE jobs SET pipeline_status = 'reviewing' WHERE dedup_key = ?",
-            (job.dedup_key,),
+            (parsed.dedup_key,),
         )
         conn.commit()
 
-        upsert_job(conn, job)
+        upsert_job(conn, ParsedJob.from_job(job))
 
         row = conn.execute(
             "SELECT pipeline_status FROM jobs WHERE dedup_key = ?",
-            (job.dedup_key,),
+            (parsed.dedup_key,),
         ).fetchone()
         assert row["pipeline_status"] == "reviewing"  # unchanged
 

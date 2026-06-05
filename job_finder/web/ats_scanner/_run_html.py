@@ -146,7 +146,13 @@ def _scan_one_company_via_html(
                         salary_max=None,
                         description=scraped_job.get("description", ""),
                     )
-                    result = upsert_job(html_conn, job, company_id=miss_company_id)
+                    from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+                    try:
+                        parsed = ParsedJob.from_job(job)
+                    except DenylistedCompanyError:
+                        continue
+                    result = upsert_job(html_conn, parsed, company_id=miss_company_id)
                     if result.kind == "inserted":
                         summary["jobs_new"] += 1
                         all_new_job_keys.append(job.dedup_key)

@@ -665,7 +665,13 @@ def _score_and_persist(
             summary["jobs_scored"] += 1
 
         # Persist (upsert handles dedup by dedup_key)
-        result = upsert_job(conn, job)
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        try:
+            parsed = ParsedJob.from_job(job)
+        except DenylistedCompanyError:
+            return
+        result = upsert_job(conn, parsed)
         if result.kind == "inserted":
             summary["jobs_new"] += 1
             new_job_keys.append(job.dedup_key)

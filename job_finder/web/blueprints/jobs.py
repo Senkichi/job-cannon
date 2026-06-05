@@ -439,8 +439,20 @@ def add_from_listing():
             200,
         )
 
+    from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
     try:
-        upsert_result = upsert_job(conn, job)
+        parsed = ParsedJob.from_job(job)
+    except DenylistedCompanyError as e:
+        return (
+            render_template(
+                "jobs/_add_listing_manual_result.html",
+                error=str(e),
+            ),
+            200,
+        )
+    try:
+        upsert_result = upsert_job(conn, parsed)
     except Exception as e:
         logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
         return (
