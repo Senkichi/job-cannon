@@ -142,6 +142,12 @@ def main() -> None:
 
     cfg = load_config(allow_missing=True)
     app = create_app(config=cfg)
+
+    from job_finder.web import _process_lifecycle
+
+    # install_kill_on_exit returns None by design — the Job Object handle is
+    # retained in module state inside _process_lifecycle_win32.  Idempotent.
+    _process_lifecycle.install_kill_on_exit()
     server = cfg.get("server", {})
     bind_host = server.get("host", DEFAULT_SERVER_HOST)
     port = server.get("port", DEFAULT_SERVER_PORT)

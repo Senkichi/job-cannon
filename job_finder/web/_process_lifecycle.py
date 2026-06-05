@@ -1,51 +1,59 @@
-"""Process lifecycle façade stub.
+"""Process lifecycle dispatcher — platform-specific subprocess cleanup.
 
-Commit A (Issue #37) ships the public interface; real OS-level reap mechanisms
-arrive in Commit C (Issue #39). The stub is not a no-op for ``register_owned_process``:
-Issue #3's POSIX impl reuses the same ``_owned_procs`` list, so list population
-semantics must be correct from day one.
+Replaces the Commit-A stub façade (Issue #37).  Public API is preserved
+exactly so existing callers (scheduler/_ollama.py, etc.) need no changes:
 
-Public surface
---------------
-install_kill_on_exit() -> None
-    No-op stub. Replaced by Issue #39 (Windows Job Object).
+    install_kill_on_exit() -> None
+    register_owned_process(proc) -> None
+    make_pdeathsig_preexec_fn() -> callable | None
 
-register_owned_process(proc) -> None
-    Appends proc to the module-level _owned_procs list. Issue #39 reuses
-    this list for ``_terminate_owned`` — do NOT make this a true no-op.
+Windows
+    Job Object with ``KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK`` assigned to
+    the current process.  Per-Popen tracking is unnecessary — Job Object
+    inheritance reaps all descendants transitively — so
+    ``register_owned_process`` and ``make_pdeathsig_preexec_fn`` are no-ops.
 
-make_pdeathsig_preexec_fn() -> callable | None
-    Returns None (harmless preexec_fn for POSIX Popen). Replaced by
-    Issue #39 (prctl PR_SET_PDEATHSIG).
+POSIX (Linux / macOS)
+    atexit + SIGTERM/SIGINT/SIGHUP handlers that terminate every tracked
+    Popen with a grace period.  Linux also provides a real
+    ``make_pdeathsig_preexec_fn()`` (prctl PR_SET_PDEATHSIG) so spawned
+    children receive SIGTERM on our death, with a fork-race close guard.
+
+Other platforms
+    Graceful no-ops.  The app still functions; only unclean-kill reap is
+    absent.
 """
 
 from __future__ import annotations
 
-import subprocess
+import logging
+import sys
 
-_owned_procs: list[subprocess.Popen] = []
+logger = logging.getLogger(__name__)
 
+if sys.platform == "win32":
+    from ._process_lifecycle_win32 import install_kill_on_exit
 
-def install_kill_on_exit() -> None:
-    """No-op stub. Issue #39 replaces this with Windows Job Object install."""
-    return
+    # Windows: Job Object inheritance handles subprocess reap transitively.
+    # Keep Commit-A no-op stubs so importers do not break.
+    def register_owned_process(proc) -> None: ...
 
+    def make_pdeathsig_preexec_fn():
+        return None
 
-def register_owned_process(proc: subprocess.Popen) -> None:
-    """Append *proc* to the module-level owned-process list.
+elif sys.platform in ("linux", "darwin"):
+    from ._process_lifecycle_posix import (
+        install_kill_on_exit,
+        make_pdeathsig_preexec_fn,
+        register_owned_process,
+    )
 
-    Issue #39's ``_terminate_owned`` function iterates this same list.
-    Registration must happen at spawn time (Commit A) so Commit C can
-    reuse it without changing call-sites.
-    """
-    _owned_procs.append(proc)
+else:
 
+    def install_kill_on_exit() -> None:
+        logger.debug("Process lifecycle: no implementation for platform %s", sys.platform)
 
-def make_pdeathsig_preexec_fn():
-    """Return None (harmless preexec_fn value for POSIX Popen).
+    def register_owned_process(proc) -> None: ...
 
-    Issue #39 replaces this with a real ``prctl(PR_SET_PDEATHSIG, SIGTERM)``
-    closure on Linux. Returning None means ``subprocess.Popen(preexec_fn=None)``
-    which is the default and entirely safe.
-    """
-    return None
+    def make_pdeathsig_preexec_fn():
+        return None
