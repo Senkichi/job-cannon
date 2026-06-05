@@ -23,6 +23,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -54,6 +55,10 @@ def _make_job(*, title: str = "Senior Eng", score: float = 50.0) -> Job:
     return j
 
 
+def _make_parsed(*, title: str = "Senior Eng", score: float = 50.0) -> ParsedJob:
+    return ParsedJob.from_job(_make_job(title=title, score=score))
+
+
 def _read_provider(conn: sqlite3.Connection, dedup_key: str) -> str | None:
     r = conn.execute(
         "SELECT scoring_provider FROM jobs WHERE dedup_key = ?", (dedup_key,)
@@ -63,19 +68,19 @@ def _read_provider(conn: sqlite3.Connection, dedup_key: str) -> str | None:
 
 class TestInsertTagsHeuristic:
     def test_new_row_tagged_heuristic(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(title="a"))
+        upsert_job(conn, _make_parsed(title="a"))
         assert _read_provider(conn, "testco|a") == "heuristic"
 
     def test_zero_score_still_tagged(self, conn: sqlite3.Connection):
         # Heuristic 0.0 (title-exclusion hit) is a real score, not absence.
-        upsert_job(conn, _make_job(title="b", score=0.0))
+        upsert_job(conn, _make_parsed(title="b", score=0.0))
         assert _read_provider(conn, "testco|b") == "heuristic"
 
 
 class TestUpdateLeavesProviderAlone:
     def test_reinsert_preserves_llm_tag(self, conn: sqlite3.Connection):
         # First insert: heuristic tag lands.
-        upsert_job(conn, _make_job(title="c"))
+        upsert_job(conn, _make_parsed(title="c"))
         # Simulate LLM persist_job_assessment marking the row. The real writer
         # co-writes sub_scores_json + classification alongside the model tag
         # (m078 I-04/I-05 require them when scoring_model is set).
@@ -87,7 +92,7 @@ class TestUpdateLeavesProviderAlone:
         )
         conn.commit()
         # Re-upsert (simulates re-ingestion of the same job).
-        upsert_job(conn, _make_job(title="c"))
+        upsert_job(conn, _make_parsed(title="c"))
         # LLM tag must survive — the UPDATE path does NOT touch
         # scoring_provider.
         assert _read_provider(conn, "testco|c") == "ollama"
