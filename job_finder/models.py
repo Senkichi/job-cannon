@@ -40,6 +40,19 @@ class Job:
 
         self.company = strip_legal_entity_prefix(self.company)
 
+        # Coerce posted_date from string → datetime (issue #108).
+        # ATS-API platforms (Lever, Greenhouse, Ashby, SmartRecruiters, …) emit
+        # posted_date as an ISO-8601 string; normalise here so every downstream
+        # caller (e.g. upsert_job calling .isoformat()) can rely on the field
+        # being a datetime (or None) and never receiving an AttributeError.
+        # On an unparseable string we fall back to None rather than raising,
+        # because the job itself is valid — only the date is unusable.
+        if isinstance(self.posted_date, str):
+            try:
+                self.posted_date = datetime.fromisoformat(self.posted_date)
+            except ValueError:
+                self.posted_date = None
+
     # Dedup key
     @staticmethod
     def normalized_dedup_key(company: str, title: str, location: str = "") -> str:

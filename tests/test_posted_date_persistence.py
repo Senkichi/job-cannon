@@ -122,3 +122,52 @@ class TestPostedDatePersistence:
 
         pd = _read_pd(conn, job_first.dedup_key)
         assert pd == _DT_B.isoformat()
+
+    def test_ats_api_string_posted_date_coerced_and_persisted(self, conn: sqlite3.Connection):
+        """Regression #108: ATS-API string posted_date must be coerced and persisted.
+
+        Lever/Greenhouse/Ashby/SmartRecruiters emit posted_date as an ISO-8601
+        string (e.g. datetime(...).isoformat()). Job.__post_init__ must coerce it
+        to datetime so upsert_job can call .isoformat() without AttributeError.
+        """
+        job = Job(
+            title="ATS API Engineer",
+            company="GreenhouseCo",
+            location="Remote",
+            source="Greenhouse",
+            source_url="https://boards.greenhouse.io/test/jobs/1",
+            description="x" * 250,
+            # Exactly the shape that Lever, Greenhouse, Ashby emit: ISO string not datetime
+            posted_date="2026-06-01T00:00:00+00:00",
+        )
+        # __post_init__ must have coerced this to a datetime
+        assert isinstance(job.posted_date, datetime), (
+            "Job.__post_init__ must coerce posted_date strings to datetime; "
+            f"got {type(job.posted_date)!r} instead"
+        )
+
+        # Must not raise: AttributeError: 'str' object has no attribute 'isoformat'
+        result = upsert_job(conn, job)
+        assert result.kind == "inserted"
+
+        pd = _read_pd(conn, job.dedup_key)
+        assert pd is not None
+        assert pd.startswith("2026-06-01")
+
+    def test_ats_api_unparseable_posted_date_falls_back_to_none(self, conn: sqlite3.Connection):
+        """Regression #108: An unparseable posted_date string degrades to None, not an error."""
+        job = Job(
+            title="Bad Date Engineer",
+            company="BadDateCo",
+            location="Remote",
+            source="Greenhouse",
+            source_url="https://boards.greenhouse.io/test/jobs/2",
+            description="x" * 250,
+            posted_date="not-a-date",  # garbage input — should silently become None
+        )
+        assert job.posted_date is None
+
+        # Job must still persist; the bad date is simply dropped
+        result = upsert_job(conn, job)
+        assert result.kind == "inserted"
+        assert _read_pd(conn, job.dedup_key) is None
