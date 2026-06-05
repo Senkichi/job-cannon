@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from job_finder.db import upsert_job
+from job_finder.parsed_job import ParsedJob
 from job_finder.db._jobs import _normalize_salary
 from job_finder.models import Job
 from job_finder.web.db_migrate import run_migrations
@@ -57,6 +58,10 @@ def _make_job(*, smin: int | None, smax: int | None, title: str = "Senior Eng") 
         salary_min=smin,
         salary_max=smax,
     )
+
+
+def _make_parsed(*, smin: int | None, smax: int | None, title: str = "Senior Eng") -> ParsedJob:
+    return ParsedJob.from_job(_make_job(smin=smin, smax=smax, title=title))
 
 
 def _read_salary(conn: sqlite3.Connection, dedup_key: str) -> tuple[int | None, int | None]:
@@ -118,19 +123,19 @@ class TestNormalizeSalaryPure:
 
 class TestUpsertInsertNormalizes:
     def test_insert_inverted_swaps(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(smin=75, smax=62, title="a"))
+        upsert_job(conn, _make_parsed(smin=75, smax=62, title="a"))
         assert _read_salary(conn, "testco|a") == (62, 75)
 
     def test_insert_extreme_inversion_nulls_both(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(smin=140_000, smax=2_000, title="b"))
+        upsert_job(conn, _make_parsed(smin=140_000, smax=2_000, title="b"))
         assert _read_salary(conn, "testco|b") == (None, None)
 
     def test_insert_well_ordered_unchanged(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(smin=120_000, smax=150_000, title="c"))
+        upsert_job(conn, _make_parsed(smin=120_000, smax=150_000, title="c"))
         assert _read_salary(conn, "testco|c") == (120_000, 150_000)
 
     def test_insert_only_one_side_preserved(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(smin=120_000, smax=None, title="d"))
+        upsert_job(conn, _make_parsed(smin=120_000, smax=None, title="d"))
         assert _read_salary(conn, "testco|d") == (120_000, None)
 
 
@@ -139,16 +144,16 @@ class TestUpsertInsertNormalizes:
 
 class TestUpsertUpdateNormalizes:
     def test_update_inverted_swaps(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(smin=100_000, smax=150_000, title="e"))
+        upsert_job(conn, _make_parsed(smin=100_000, smax=150_000, title="e"))
         # Re-upsert with inverted values (simulates a second source
         # re-asserting the same job with a buggy parse).
-        upsert_job(conn, _make_job(smin=78, smax=68, title="e"))
+        upsert_job(conn, _make_parsed(smin=78, smax=68, title="e"))
         assert _read_salary(conn, "testco|e") == (68, 78)
 
     def test_update_extreme_inversion_keeps_existing(self, conn: sqlite3.Connection):
         # COALESCE pattern in UPDATE means: when normalization returns
         # (None, None), the existing values are preserved. This is the
         # safe behavior — don't overwrite a good range with the nulls.
-        upsert_job(conn, _make_job(smin=120_000, smax=150_000, title="f"))
-        upsert_job(conn, _make_job(smin=140_000, smax=2_000, title="f"))
+        upsert_job(conn, _make_parsed(smin=120_000, smax=150_000, title="f"))
+        upsert_job(conn, _make_parsed(smin=140_000, smax=2_000, title="f"))
         assert _read_salary(conn, "testco|f") == (120_000, 150_000)
