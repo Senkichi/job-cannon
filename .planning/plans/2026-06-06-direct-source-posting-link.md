@@ -778,12 +778,12 @@ def test_query_ats_api_returns_direct_url(tmp_path):
         {"title": "Senior Data Scientist", "source_url": "https://jobs.lever.co/acme/1",
          "description": "x" * 300},
     ]
-    with patch.object(enrichment_tiers, "scan_lever", return_value=fake_postings, create=True):
-        # query_ats_api imports scan_lever lazily from ats_scanner; patch there too.
-        with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
-            result = enrichment_tiers.query_ats_api(
-                {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
-            )
+    # query_ats_api lazily imports scan_lever from job_finder.web.ats_scanner
+    # (the load-bearing patch target).
+    with patch("job_finder.web.ats_scanner.scan_lever", return_value=fake_postings):
+        result = enrichment_tiers.query_ats_api(
+            {"company_id": 1, "title": "Senior Data Scientist"}, conn, {}
+        )
     assert result.get("direct_url") == "https://jobs.lever.co/acme/1"
     assert result.get("direct_url_confidence") == "strict"
     conn.close()
@@ -908,42 +908,43 @@ from job_finder.db._direct_link import set_direct_url
 from job_finder.web.direct_link import pick_direct_link
 ```
 
-In the free tier block, immediately after sub-tier C (the `careers_result`
-handling, right before the `# Resolve what free tier found` comment at ~226),
-insert:
+**IMPORTANT — scope fix (required, not optional).** In the current source,
+`ats_result` is bound only inside `if conn is not None and job_row.get("company_id"):`
+(sub-tier B, ~line 213) and `careers_result` only inside sub-tier C (~line 219).
+Neither is guaranteed bound at the capture point. So you MUST first hoist their
+initialisation to the top of the free-tier `try` block so they are always
+defined. Make two edits:
+
+(a) At the very top of the free-tier `try` block (right after `try:` at ~line 202,
+before `# Sub-tier A: Direct URL fetch`), add:
+
+```python
+                ats_result: dict = {}
+                careers_result: dict = {}
+```
+
+Then change sub-tier B from `ats_result = query_ats_api(...)` to assign into the
+already-bound name (it already does `ats_result = query_ats_api(...)` — just
+ensure you removed any redeclaration), and likewise leave sub-tier C assigning
+`careers_result = scrape_careers(...)`. The existing `if ats_result:` /
+`if careers_result:` guards stay as-is.
+
+(b) Immediately after sub-tier C's handling and before the
+`# Resolve what free tier found` comment (~line 226), insert the capture block:
 
 ```python
                 # Capture the direct company-posting link from data the ATS
                 # scan / careers scrape already fetched (zero new network).
-                # `source_urls` is the parsed list bound at the top of the tier.
-                ats_result_local = locals().get("ats_result") or {}
-                careers_result_local = locals().get("careers_result") or {}
+                # `source_urls` is the parsed list bound at the top of the tier
+                # (~line 204); ats_result / careers_result are bound in (a).
                 if conn is not None and job_row.get("dedup_key"):
-                    direct = pick_direct_link(
-                        source_urls, ats_result_local, careers_result_local
-                    )
+                    direct = pick_direct_link(source_urls, ats_result, careers_result)
                     if direct:
                         set_direct_url(conn, job_row["dedup_key"], direct[0], direct[1])
 ```
 
-> Avoid `locals().get(...)` if it reads awkwardly in review: instead initialise
-> `ats_result = {}` and `careers_result = {}` at the top of the free-tier `try`
-> block so they are always bound, then reference them directly. Pick one
-> approach and keep it clean — the bound-initialisation version is preferred:
->
-> ```python
->             try:
->                 ats_result: dict = {}
->                 careers_result: dict = {}
->                 # Sub-tier A: Direct URL fetch
->                 ...
->                 # Sub-tier B sets ats_result; Sub-tier C sets careers_result
->                 ...
->                 if conn is not None and job_row.get("dedup_key"):
->                     direct = pick_direct_link(source_urls, ats_result, careers_result)
->                     if direct:
->                         set_direct_url(conn, job_row["dedup_key"], direct[0], direct[1])
-> ```
+> Do NOT use `locals().get(...)` — edit (a) makes both names unconditionally
+> bound, so reference them directly.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1142,13 +1143,14 @@ pause-scheduler advisory in the docstring.
 Append to `tests/test_direct_link_enrichment.py`:
 
 ```python
-def test_admin_backfill_route_returns_summary(tmp_path, monkeypatch):
-    """The admin route invokes the backfill and returns its summary JSON."""
-    from job_finder.web import create_app
-    import job_finder.web.blueprints.admin as admin_mod
+def test_admin_backfill_route_returns_summary(client, monkeypatch):
+    """The admin route invokes the backfill and returns its summary JSON.
 
-    app = create_app(config={"DB_PATH": str(tmp_path / "jobs.db")})
-    # The app factory runs migrations on the configured DB_PATH.
+    Uses the conftest `client` fixture (real create_app() over a temp DB) so
+    the route is exercised in isolation — do NOT construct a fresh app with an
+    ad-hoc DB key, which would hit the real user database.
+    """
+    import job_finder.web.blueprints.admin as admin_mod
 
     captured = {}
 
@@ -1158,19 +1160,19 @@ def test_admin_backfill_route_returns_summary(tmp_path, monkeypatch):
 
     monkeypatch.setattr(admin_mod, "backfill_direct_links", fake_backfill)
 
-    client = app.test_client()
     resp = client.post("/admin/jobs/direct-links/backfill")
     assert resp.status_code == 200
     assert resp.get_json()["resolved"] == 2
     assert captured.get("called") is True
 ```
 
-> Confirm the `create_app(config=...)` test pattern against `tests/conftest.py`
-> (the project documents `create_app()` accepting a `config=` dict for test
-> isolation). Use the existing `app`/`client` fixture from conftest if one is
-> available rather than constructing a fresh app, to inherit DB setup. Confirm
-> the admin blueprint's `url_prefix` is `/admin` (it is, per the existing
-> `/admin/jobs/...` routes) so the full path is `/admin/jobs/direct-links/backfill`.
+> Use the conftest `client` fixture (and `app`/`client` names) as they exist in
+> `tests/conftest.py`. If only an `app` fixture exists, derive the client with
+> `client = app.test_client()` inside the test. Do NOT call `create_app(config=
+> {"DB_PATH": ...})` — the factory reads the DB path from `cfg["db"]["path"]`,
+> not a top-level `DB_PATH`, so that form would run against the real user DB.
+> The admin blueprint `url_prefix` is `/admin`, so the full path is
+> `/admin/jobs/direct-links/backfill`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1179,15 +1181,19 @@ Expected: FAIL — 404 (route not registered).
 
 - [ ] **Step 3: Add the route**
 
-In `job_finder/web/blueprints/admin.py`, add the import near the top:
+In `job_finder/web/blueprints/admin.py`, add the imports near the top.
+**Note:** the existing Flask import is `from flask import Blueprint, jsonify, render_template, request` — `current_app` is NOT imported yet. Extend that line to include it, and add the two new module imports:
 
 ```python
+# Change the existing flask import line to:
+from flask import Blueprint, current_app, jsonify, render_template, request
+
+# Add:
 from job_finder.web.backfill_direct_links import backfill_direct_links
 from job_finder.web.db_helpers import get_db
 ```
 
-(`current_app`, `jsonify` are already imported.) Add the route at the end of the
-route definitions:
+Add the route at the end of the route definitions:
 
 ```python
 @admin_bp.route("/jobs/direct-links/backfill", methods=["POST"], strict_slashes=False)
