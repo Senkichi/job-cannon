@@ -75,7 +75,11 @@ def _upsert(
     locations_structured=None,
 ):
     """Convert Job->ParsedJob before calling upsert_job (shim removed Phase 48.07)."""
-    source_meta = {"locations_structured": locations_structured} if locations_structured is not None else None
+    source_meta = (
+        {"locations_structured": locations_structured}
+        if locations_structured is not None
+        else None
+    )
     parsed = ParsedJob.from_job(job, source_meta=source_meta)
     return upsert_job(conn, parsed, company_id=company_id)
 

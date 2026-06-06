@@ -54,8 +54,7 @@ def test_no_raw_job_passed_to_upsert_job() -> None:
     hits = _source_lines_with_shim()
     if hits:
         formatted = "\n".join(
-            f"  {path.relative_to(_REPO_ROOT)}:{lineno}: {line}"
-            for path, lineno, line in hits
+            f"  {path.relative_to(_REPO_ROOT)}:{lineno}: {line}" for path, lineno, line in hits
         )
         pytest.fail(
             f"Found {len(hits)} call site(s) that still pass a raw Job to upsert_job():\n"
