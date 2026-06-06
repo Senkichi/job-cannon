@@ -24,6 +24,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 from job_finder.web.location_canonical import JobLocation
 
@@ -66,6 +67,19 @@ def _make_job(
     )
 
 
+def _upsert(
+    conn: sqlite3.Connection,
+    job: Job,
+    *,
+    company_id: int | None = None,
+    locations_structured=None,
+):
+    """Convert Job->ParsedJob before calling upsert_job (shim removed Phase 48.07)."""
+    source_meta = {"locations_structured": locations_structured} if locations_structured is not None else None
+    parsed = ParsedJob.from_job(job, source_meta=source_meta)
+    return upsert_job(conn, parsed, company_id=company_id)
+
+
 # ---------- Layer-1: kwarg provided ----------
 
 
@@ -83,7 +97,7 @@ def test_layer1_provided_list_written_verbatim_and_denormalized(conn: sqlite3.Co
         )
     ]
     job = _make_job(location="San Francisco, CA")
-    result = upsert_job(conn, job, locations_structured=structured)
+    result = _upsert(conn, job, locations_structured=structured)
 
     assert result.kind == "inserted"
     row = _select_loc_cols(conn, job.dedup_key)
@@ -120,7 +134,7 @@ def test_layer1_first_entry_drives_denormalized_cols(conn: sqlite3.Connection):
         ),
     ]
     job = _make_job(location="Toronto, ON / Paris, FR")
-    upsert_job(conn, job, locations_structured=structured)
+    _upsert(conn, job, locations_structured=structured)
     row = _select_loc_cols(conn, job.dedup_key)
     assert row["workplace_type"] == "REMOTE"  # first
     assert row["primary_country_code"] == "CA"  # first
@@ -132,7 +146,7 @@ def test_layer1_first_entry_drives_denormalized_cols(conn: sqlite3.Connection):
 def test_layer2_default_parses_job_location(conn: sqlite3.Connection):
     """No kwarg → parse_locations(job.location) populates the m066 cols."""
     job = _make_job(location="Bengaluru, India")
-    upsert_job(conn, job)  # no kwarg
+    _upsert(conn, job)  # no kwarg
 
     row = _select_loc_cols(conn, job.dedup_key)
     assert row["locations_structured"] is not None
@@ -147,7 +161,7 @@ def test_layer2_empty_location_string_writes_nulls(conn: sqlite3.Connection):
     + primary_country_code stay NULL but workplace_type defaults to
     'UNSPECIFIED' (per m072 contract — column must always be populated)."""
     job = _make_job(location="")
-    upsert_job(conn, job)
+    _upsert(conn, job)
     row = _select_loc_cols(conn, job.dedup_key)
     assert row["locations_structured"] is None
     assert row["workplace_type"] == "UNSPECIFIED"
@@ -157,7 +171,7 @@ def test_layer2_empty_location_string_writes_nulls(conn: sqlite3.Connection):
 def test_layer2_multiple_locations_dropped_placeholder_writes_nulls(conn: sqlite3.Connection):
     """SPEC: 'Multiple Locations' → parser drops; cols stay NULL."""
     job = _make_job(location="Multiple Locations")
-    upsert_job(conn, job)
+    _upsert(conn, job)
     row = _select_loc_cols(conn, job.dedup_key)
     assert row["locations_structured"] is None
 
@@ -180,7 +194,7 @@ def test_legacy_location_and_locations_raw_preserved_with_kwarg(conn: sqlite3.Co
         )
     ]
     job = _make_job(location="Madrid, ES / Remote")  # legacy string differs from raw
-    upsert_job(conn, job, locations_structured=structured)
+    _upsert(conn, job, locations_structured=structured)
     row = _select_loc_cols(conn, job.dedup_key)
     # location column still mirrors the legacy split, NOT [loc.raw, ...]
     assert "Madrid" in row["location"]
@@ -206,7 +220,7 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
             unresolved=False,
         )
     ]
-    upsert_job(conn, job, locations_structured=first)
+    _upsert(conn, job, locations_structured=first)
     row_before = _select_loc_cols(conn, job.dedup_key)
     assert row_before["primary_country_code"] == "JP"
     assert row_before["workplace_type"] == "ONSITE"
@@ -224,7 +238,7 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
             unresolved=False,
         )
     ]
-    result = upsert_job(conn, job, locations_structured=second)
+    result = _upsert(conn, job, locations_structured=second)
     assert result.kind != "inserted"  # update branch
     row_after = _select_loc_cols(conn, job.dedup_key)
     assert row_after["primary_country_code"] == "US"
@@ -234,12 +248,12 @@ def test_update_branch_overwrites_structured_cols(conn: sqlite3.Connection):
 def test_update_branch_layer2_fallback_when_kwarg_none(conn: sqlite3.Connection):
     """UPDATE without kwarg also runs Layer 2 — symmetric with INSERT."""
     job = _make_job(location="Berlin, Germany")
-    upsert_job(conn, job)  # insert via Layer 2
+    _upsert(conn, job)  # insert via Layer 2
     row_before = _select_loc_cols(conn, job.dedup_key)
     assert row_before["primary_country_code"] == "DE"
 
     # Update via Layer 2 with a new location string
     job2 = _make_job(location="Madrid, Spain")
-    upsert_job(conn, job2)  # update branch (same dedup_key)
+    _upsert(conn, job2)  # update branch (same dedup_key)
     row_after = _select_loc_cols(conn, job.dedup_key)
     assert row_after["primary_country_code"] == "ES"

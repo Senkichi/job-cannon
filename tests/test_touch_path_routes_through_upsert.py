@@ -22,6 +22,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -57,17 +58,23 @@ def _make_job(
     return j
 
 
+def _upsert(conn: sqlite3.Connection, job: Job):
+    """Convert Job->ParsedJob before calling upsert_job (shim removed Phase 48.07)."""
+    parsed = ParsedJob.from_job(job)
+    return upsert_job(conn, parsed)
+
+
 def _read(conn: sqlite3.Connection, dedup_key: str, col: str):
     return conn.execute(f"SELECT {col} FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()[0]
 
 
 def test_new_source_only_is_touched(conn: sqlite3.Connection):
-    r1 = upsert_job(conn, _make_job())
+    r1 = _upsert(conn, _make_job())
     assert r1.kind == "inserted"
     last_seen_before = _read(conn, r1.dedup_key, "last_seen")
 
     # Re-ingest from a different feed: no canonical change, new source.
-    r2 = upsert_job(conn, _make_job(source="greenhouse", url="https://ex.co/2"))
+    r2 = _upsert(conn, _make_job(source="greenhouse", url="https://ex.co/2"))
     assert r2.kind == "touched"
     assert r2.dedup_key == r1.dedup_key
 
@@ -77,23 +84,23 @@ def test_new_source_only_is_touched(conn: sqlite3.Connection):
 
 
 def test_identical_reingest_is_unchanged(conn: sqlite3.Connection):
-    r1 = upsert_job(conn, _make_job())
+    r1 = _upsert(conn, _make_job())
     assert r1.kind == "inserted"
-    r2 = upsert_job(conn, _make_job())
+    r2 = _upsert(conn, _make_job())
     assert r2.kind == "unchanged"
 
 
 def test_new_salary_is_updated(conn: sqlite3.Connection):
-    r1 = upsert_job(conn, _make_job())
+    r1 = _upsert(conn, _make_job())
     assert r1.kind == "inserted"
-    r2 = upsert_job(conn, _make_job(salary_min=180_000))
+    r2 = _upsert(conn, _make_job(salary_min=180_000))
     assert r2.kind == "updated"
     assert _read(conn, r1.dedup_key, "salary_min") == 180_000
 
 
 def test_touch_preserves_unresolved_reasons(conn: sqlite3.Connection):
     """A reviewer's /admin/review state survives a subsequent touch (§8.4)."""
-    r1 = upsert_job(conn, _make_job())
+    r1 = _upsert(conn, _make_job())
     dedup_key = r1.dedup_key
 
     # Simulate a flagged-then-reviewed row: set reason codes directly.
@@ -104,18 +111,18 @@ def test_touch_preserves_unresolved_reasons(conn: sqlite3.Connection):
     conn.commit()
 
     # Re-ingest from a new feed → touched. Must NOT clobber unresolved_reasons.
-    r2 = upsert_job(conn, _make_job(source="greenhouse", url="https://ex.co/2"))
+    r2 = _upsert(conn, _make_job(source="greenhouse", url="https://ex.co/2"))
     assert r2.kind == "touched"
     assert _read(conn, dedup_key, "unresolved_reasons") == '["title_metadata_blob"]'
 
 
 def test_approved_state_survives_touch(conn: sqlite3.Connection):
     """An approved row (unresolved_reasons cleared to '[]') stays cleared."""
-    r1 = upsert_job(conn, _make_job())
+    r1 = _upsert(conn, _make_job())
     dedup_key = r1.dedup_key
     # Flagged, then approved (cleared) via /admin/review.
     conn.execute("UPDATE jobs SET unresolved_reasons = '[]' WHERE dedup_key = ?", (dedup_key,))
     conn.commit()
-    r2 = upsert_job(conn, _make_job(source="ashby", url="https://ex.co/3"))
+    r2 = _upsert(conn, _make_job(source="ashby", url="https://ex.co/3"))
     assert r2.kind == "touched"
     assert _read(conn, dedup_key, "unresolved_reasons") == "[]"

@@ -665,10 +665,13 @@ def _score_and_persist(
             summary["jobs_scored"] += 1
 
         # Persist (upsert handles dedup by dedup_key)
-        result = upsert_job(conn, job)
+        from job_finder.parsed_job import ParsedJob
+
+        parsed = ParsedJob.from_job(job)
+        result = upsert_job(conn, parsed)
         if result.kind == "inserted":
             summary["jobs_new"] += 1
-            new_job_keys.append(job.dedup_key)
+            new_job_keys.append(result.dedup_key)
         elif result.kind == "updated":
             summary["jobs_updated"] += 1
         elif result.kind == "touched":

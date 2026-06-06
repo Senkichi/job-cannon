@@ -440,7 +440,10 @@ def add_from_listing():
         )
 
     try:
-        upsert_result = upsert_job(conn, job)
+        from job_finder.parsed_job import ParsedJob
+
+        parsed = ParsedJob.from_job(job)
+        upsert_result = upsert_job(conn, parsed)
     except Exception as e:
         logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
         return (
