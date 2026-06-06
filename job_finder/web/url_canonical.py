@@ -69,7 +69,11 @@ def canonicalize_url(raw: str) -> tuple[str, str]:
         return raw, raw
     try:
         parts = urlsplit(raw)
-        kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracking_param(k)]
+        kept = [
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if not _is_tracking_param(k)
+        ]
         kept.sort()
         canonical = urlunsplit(
             (

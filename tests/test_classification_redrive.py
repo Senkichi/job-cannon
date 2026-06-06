@@ -71,9 +71,9 @@ def test_audit_reports_divergence_without_writing(conn):
     assert divergences[0].stored == "reject"
     assert divergences[0].computed == "low_signal"
     # audit must not write
-    stored = conn.execute(
-        "SELECT classification FROM jobs WHERE dedup_key='k|stale'"
-    ).fetchone()[0]
+    stored = conn.execute("SELECT classification FROM jobs WHERE dedup_key='k|stale'").fetchone()[
+        0
+    ]
     assert stored == "reject"
 
 
@@ -89,9 +89,9 @@ def test_remediate_reconciles_to_zero(conn):
     n = remediate(conn)
     assert n == 1
     assert find_divergences(conn) == []
-    stored = conn.execute(
-        "SELECT classification FROM jobs WHERE dedup_key='k|stale'"
-    ).fetchone()[0]
+    stored = conn.execute("SELECT classification FROM jobs WHERE dedup_key='k|stale'").fetchone()[
+        0
+    ]
     assert stored == "low_signal"
 
 

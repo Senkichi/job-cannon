@@ -13,7 +13,6 @@ from job_finder.web.migrations._runner import _apply_migration
 from job_finder.web.migrations.m081_salary_currency_period import MIGRATION as M081
 from job_finder.web.migrations.types import MigrationContext
 
-
 # ---------------------------------------------------------------------------
 # m081 migration — columns, CHECK, suspect backfill
 # ---------------------------------------------------------------------------
@@ -107,9 +106,7 @@ def test_m081_check_rejects_bad_currency(tmp_db_path):
     conn = sqlite3.connect(tmp_db_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO jobs (dedup_key, salary_currency) VALUES ('x', 'XYZ')"
-            )
+            conn.execute("INSERT INTO jobs (dedup_key, salary_currency) VALUES ('x', 'XYZ')")
     finally:
         conn.close()
 
@@ -120,9 +117,7 @@ def test_m081_check_rejects_bad_period(tmp_db_path):
     conn = sqlite3.connect(tmp_db_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO jobs (dedup_key, salary_period) VALUES ('x', 'fortnightly')"
-            )
+            conn.execute("INSERT INTO jobs (dedup_key, salary_period) VALUES ('x', 'fortnightly')")
     finally:
         conn.close()
 
@@ -151,7 +146,12 @@ def test_greenhouse_emits_annual_eur():
         "title": "Engineer",
         "absolute_url": "https://boards.greenhouse.io/acme/jobs/2",
         "pay_input_ranges": [
-            {"interval": "year", "min_cents": 12_000_000, "max_cents": 18_000_000, "currency": "EUR"}
+            {
+                "interval": "year",
+                "min_cents": 12_000_000,
+                "max_cents": 18_000_000,
+                "currency": "EUR",
+            }
         ],
     }
     out = _posting_to_job(posting, "acme")

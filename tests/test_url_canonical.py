@@ -12,7 +12,6 @@ from job_finder.web.migrations.m080_source_urls_canonical import MIGRATION as M0
 from job_finder.web.migrations.types import MigrationContext
 from job_finder.web.url_canonical import canonicalize_url
 
-
 # ---------------------------------------------------------------------------
 # canonicalize_url
 # ---------------------------------------------------------------------------
@@ -139,12 +138,12 @@ def test_m080_adds_column_canonicalizes_and_preserves_raw(tmp_db_path):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         assert "source_urls_raw" in cols
 
-        rows = dict(
-            (dk, (su, sur))
+        rows = {
+            dk: (su, sur)
             for dk, su, sur in conn.execute(
                 "SELECT dedup_key, source_urls, source_urls_raw FROM jobs"
             ).fetchall()
-        )
+        }
     finally:
         conn.close()
 
