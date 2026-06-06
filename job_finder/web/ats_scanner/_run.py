@@ -511,11 +511,14 @@ def _upsert_one_ats_api_job(
             posted_date=job_dict.get("posted_date"),
         )
         from job_finder.db import upsert_job
+        from job_finder.parsed_job import ParsedJob
 
+        _locs_structured = job_dict.get("locations_structured")
+        _source_meta = {"locations_structured": _locs_structured} if _locs_structured else None
+        parsed = ParsedJob.from_job(job, source_meta=_source_meta)
         result = upsert_job(
             scan_conn,
-            job,
-            locations_structured=job_dict.get("locations_structured"),
+            parsed,
             company_id=company_id,
         )
 

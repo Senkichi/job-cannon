@@ -21,6 +21,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,12 @@ def _make_job(title: str, posted_date: datetime | None) -> Job:
     )
 
 
+def _upsert(conn: sqlite3.Connection, job: Job):
+    """Convert Job->ParsedJob before calling upsert_job (shim removed Phase 48.07)."""
+    parsed = ParsedJob.from_job(job)
+    return upsert_job(conn, parsed)
+
+
 def _read_pd(conn: sqlite3.Connection, dedup_key: str) -> str | None:
     row = conn.execute("SELECT posted_date FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     assert row is not None, f"No job found with dedup_key={dedup_key!r}"
@@ -78,7 +85,7 @@ class TestPostedDatePersistence:
     def test_insert_with_posted_date_lands_in_column(self, conn: sqlite3.Connection):
         """Test 1: INSERT with a non-NULL posted_date stores it in the DB."""
         job = _make_job("Senior Eng", posted_date=_DT_A)
-        upsert_job(conn, job)
+        _upsert(conn, job)
 
         pd = _read_pd(conn, job.dedup_key)
         # datetime.isoformat() with UTC tzinfo produces '+00:00' form
@@ -87,7 +94,7 @@ class TestPostedDatePersistence:
     def test_insert_with_none_posted_date_stores_null(self, conn: sqlite3.Connection):
         """Test 2: INSERT with posted_date=None stores NULL — no synthesis from first_seen."""
         job = _make_job("Staff Eng", posted_date=None)
-        upsert_job(conn, job)
+        _upsert(conn, job)
 
         pd = _read_pd(conn, job.dedup_key)
         assert pd is None
@@ -96,13 +103,13 @@ class TestPostedDatePersistence:
         """Test 3: Re-ingest with posted_date=None preserves existing non-NULL value (COALESCE)."""
         # First ingest: sets posted_date
         job_first = _make_job("Principal Eng", posted_date=_DT_A)
-        upsert_job(conn, job_first)
+        _upsert(conn, job_first)
         assert _read_pd(conn, job_first.dedup_key) == _DT_A.isoformat()
 
         # Second ingest: same dedup_key, posted_date=None
         job_second = _make_job("Principal Eng", posted_date=None)
         assert job_second.dedup_key == job_first.dedup_key  # same job
-        upsert_job(conn, job_second)
+        _upsert(conn, job_second)
 
         # DB value must be unchanged
         pd = _read_pd(conn, job_first.dedup_key)
@@ -112,13 +119,13 @@ class TestPostedDatePersistence:
         """Test 4: Re-ingest with posted_date updates a previously-NULL row."""
         # First ingest: no posted_date
         job_first = _make_job("Director Eng", posted_date=None)
-        upsert_job(conn, job_first)
+        _upsert(conn, job_first)
         assert _read_pd(conn, job_first.dedup_key) is None
 
         # Second ingest: now we have a date
         job_second = _make_job("Director Eng", posted_date=_DT_B)
         assert job_second.dedup_key == job_first.dedup_key  # same job
-        upsert_job(conn, job_second)
+        _upsert(conn, job_second)
 
         pd = _read_pd(conn, job_first.dedup_key)
         assert pd == _DT_B.isoformat()
@@ -147,7 +154,7 @@ class TestPostedDatePersistence:
         )
 
         # Must not raise: AttributeError: 'str' object has no attribute 'isoformat'
-        result = upsert_job(conn, job)
+        result = _upsert(conn, job)
         assert result.kind == "inserted"
 
         pd = _read_pd(conn, job.dedup_key)
@@ -168,6 +175,6 @@ class TestPostedDatePersistence:
         assert job.posted_date is None
 
         # Job must still persist; the bad date is simply dropped
-        result = upsert_job(conn, job)
+        result = _upsert(conn, job)
         assert result.kind == "inserted"
         assert _read_pd(conn, job.dedup_key) is None

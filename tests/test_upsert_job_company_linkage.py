@@ -24,6 +24,7 @@ import pytest
 
 from job_finder.db import upsert_job
 from job_finder.models import Job
+from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -53,6 +54,12 @@ def _make_job(*, title: str = "Senior Eng", company: str = "TestCo") -> Job:
     )
 
 
+def _upsert(conn: sqlite3.Connection, job: Job, *, company_id: int | None = None):
+    """Convert Job->ParsedJob before calling upsert_job (shim removed Phase 48.07)."""
+    parsed = ParsedJob.from_job(job)
+    return upsert_job(conn, parsed, company_id=company_id)
+
+
 def _read_company_id(conn: sqlite3.Connection, dedup_key: str) -> int | None:
     r = conn.execute("SELECT company_id FROM jobs WHERE dedup_key = ?", (dedup_key,)).fetchone()
     return r["company_id"] if r else None
@@ -69,28 +76,28 @@ def _job_exists(conn: sqlite3.Connection, dedup_key: str) -> bool:
 
 class TestInsertCompanyId:
     def test_insert_with_company_id_attaches_fk(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(title="a"), company_id=42)
+        _upsert(conn, _make_job(title="a"), company_id=42)
         assert _read_company_id(conn, "testco|a") == 42
 
     def test_insert_without_company_id_leaves_null(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(title="b"))
+        _upsert(conn, _make_job(title="b"))
         assert _read_company_id(conn, "testco|b") is None
 
 
 class TestUpdateCompanyId:
     def test_update_attaches_company_id_when_existing_null(self, conn: sqlite3.Connection):
         # First insert: no company_id.
-        upsert_job(conn, _make_job(title="c"))
+        _upsert(conn, _make_job(title="c"))
         assert _read_company_id(conn, "testco|c") is None
         # Re-ingest with company_id (e.g. ATS scanner now knows it).
-        upsert_job(conn, _make_job(title="c"), company_id=99)
+        _upsert(conn, _make_job(title="c"), company_id=99)
         assert _read_company_id(conn, "testco|c") == 99
 
     def test_update_preserves_existing_company_id_when_new_is_none(self, conn: sqlite3.Connection):
         # First insert sets the FK.
-        upsert_job(conn, _make_job(title="d"), company_id=42)
+        _upsert(conn, _make_job(title="d"), company_id=42)
         # Re-ingest without company_id (e.g. email parser path).
-        upsert_job(conn, _make_job(title="d"))
+        _upsert(conn, _make_job(title="d"))
         # COALESCE preserves the existing FK.
         assert _read_company_id(conn, "testco|d") == 42
 
@@ -112,12 +119,14 @@ class TestDenylistRejects:
         ],
     )
     def test_denylisted_company_drops_at_boundary(self, conn: sqlite3.Connection, name: str):
-        result = upsert_job(conn, _make_job(title="x", company=name))
-        # No insert.
-        assert result.kind != "inserted"
+        # Phase 48.07: ParsedJob.from_job raises DenylistedCompanyError for denylisted companies.
+        # The shim used to catch this internally; callers now see the exception directly.
+        job = _make_job(title="x", company=name)
+        with pytest.raises(DenylistedCompanyError):
+            ParsedJob.from_job(job)
         # Verify no row landed.
         assert not _job_exists(conn, Job.normalized_dedup_key(name, "x"))
 
     def test_real_company_persists(self, conn: sqlite3.Connection):
-        upsert_job(conn, _make_job(title="y", company="Stripe"))
+        _upsert(conn, _make_job(title="y", company="Stripe"))
         assert _job_exists(conn, Job.normalized_dedup_key("Stripe", "y"))
