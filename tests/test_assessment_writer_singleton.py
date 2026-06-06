@@ -19,7 +19,9 @@ from pathlib import Path
 _JOB_FINDER_ROOT = Path(__file__).resolve().parents[1] / "job_finder"
 
 # Files permitted to lead an `UPDATE jobs SET` with a scoring-owned column.
-_ALLOWED_FILENAMES = {"_persistence.py"}
+# Phase 49.04 promoted the writer to _assessment_writer.py (the sole sanctioned
+# writer); _persistence.py now only re-exports it.
+_ALLOWED_FILENAMES = {"_assessment_writer.py"}
 
 _SCORING_WRITE_RE = re.compile(
     r"UPDATE\s+jobs\s+SET\s+(sub_scores_json|classification|scoring_model|scoring_provider)\b",
