@@ -664,8 +664,24 @@ def _score_and_persist(
             job = scored_job[0]
             summary["jobs_scored"] += 1
 
-        # Persist (upsert handles dedup by dedup_key)
-        result = upsert_job(conn, job)
+        # Persist (upsert handles dedup by dedup_key). Phase 48.07: the Job
+        # shim is gone — construct a ParsedJob here and forward scoring as
+        # explicit kwargs (score/score_breakdown are not parser-owned).
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        try:
+            parsed = ParsedJob.from_job(job)
+        except DenylistedCompanyError:
+            # Preserve the pre-48.07 shim early-return: a denylisted company
+            # is reported as "unchanged" so the per-job error counter does
+            # not fire and ingestion summary counts stay identical.
+            return
+        result = upsert_job(
+            conn,
+            parsed,
+            score=job.score,
+            score_breakdown=job.score_breakdown,
+        )
         if result.kind == "inserted":
             summary["jobs_new"] += 1
             new_job_keys.append(job.dedup_key)

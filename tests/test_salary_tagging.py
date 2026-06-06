@@ -216,7 +216,7 @@ def test_upsert_writes_currency_period(migrated_db):
         salary_currency="GBP",
         salary_period="annual",
     )
-    result = upsert_job(conn, job)
+    result = upsert_job(conn, ParsedJob.from_job(job))
     assert result.kind == "inserted"
     row = conn.execute(
         "SELECT salary_currency, salary_period FROM jobs WHERE dedup_key = ?",

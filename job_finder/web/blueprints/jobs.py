@@ -440,7 +440,22 @@ def add_from_listing():
         )
 
     try:
-        upsert_result = upsert_job(conn, job)
+        # Phase 48.07: build ParsedJob explicitly; the upsert_job Job-shim
+        # is gone. A denylist hit returns the same "could not save" path
+        # the legacy shim used to silently swallow it under "unchanged".
+        from job_finder.parsed_job import DenylistedCompanyError, ParsedJob
+
+        try:
+            parsed = ParsedJob.from_job(job)
+        except DenylistedCompanyError:
+            return (
+                render_template(
+                    "jobs/_add_listing_manual_result.html",
+                    error="That company is on your denylist.",
+                ),
+                200,
+            )
+        upsert_result = upsert_job(conn, parsed)
     except Exception as e:
         logger.error("add_from_listing: upsert failed: %s", e, exc_info=True)
         return (

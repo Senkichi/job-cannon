@@ -28,6 +28,7 @@ import pytest
 from job_finder.db import upsert_job
 from job_finder.db._jobs import _normalize_salary
 from job_finder.models import Job
+from job_finder.parsed_job import ParsedJob, UnresolvedParsedJob
 from job_finder.web.db_migrate import run_migrations
 
 
@@ -46,16 +47,21 @@ def conn() -> Iterator[sqlite3.Connection]:
         path.unlink(missing_ok=True)
 
 
-def _make_job(*, smin: int | None, smax: int | None, title: str = "Senior Eng") -> Job:
-    return Job(
-        title=title,
-        company="TestCo",
-        location="San Francisco, CA",
-        source="lever",
-        source_url=f"https://example.com/j/{title}",
-        description="x" * 250,
-        salary_min=smin,
-        salary_max=smax,
+def _make_job(
+    *, smin: int | None, smax: int | None, title: str = "Senior Eng"
+) -> ParsedJob | UnresolvedParsedJob:
+    """Build a ParsedJob via from_job — post-48.07 caller boundary."""
+    return ParsedJob.from_job(
+        Job(
+            title=title,
+            company="TestCo",
+            location="San Francisco, CA",
+            source="lever",
+            source_url=f"https://example.com/j/{title}",
+            description="x" * 250,
+            salary_min=smin,
+            salary_max=smax,
+        )
     )
 
 

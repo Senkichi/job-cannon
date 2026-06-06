@@ -170,18 +170,22 @@ class TestTitleFilterUniversalBlobs:
 
 
 # ---------------------------------------------------------------------------
-# Shim path: Job → upsert_job → UpsertResult.unresolved_reasons
+# Caller boundary: Job → ParsedJob.from_job → upsert_job → unresolved_reasons
 # ---------------------------------------------------------------------------
 
 
-class TestShimPathMetadataBlob:
-    """Confirms the Job→ParsedJob.from_job shim propagates title_metadata_blob
-    through upsert_job to UpsertResult.unresolved_reasons.
+class TestCallerBoundaryMetadataBlob:
+    """Confirms ParsedJob.from_job propagates title_metadata_blob through
+    upsert_job to UpsertResult.unresolved_reasons.
+
+    Phase 48.07: the former Job-shim path lives at the caller boundary now
+    — every caller constructs ParsedJob explicitly before invoking upsert_job.
     """
 
-    def test_shim_upsert_job_metadata_blob_title(self):
-        """Job with metadata-blob title → UpsertResult.unresolved_reasons includes 'title_metadata_blob'."""
+    def test_caller_boundary_metadata_blob_title(self):
+        """Job → ParsedJob.from_job → upsert_job carries 'title_metadata_blob'."""
         from job_finder.db import upsert_job
+        from job_finder.parsed_job import ParsedJob
         from job_finder.web.db_migrate import run_migrations
 
         fd, path = tempfile.mkstemp(suffix=".db")
@@ -203,14 +207,9 @@ class TestShimPathMetadataBlob:
                     "job_finder.parsed_job.get_company_denylist",
                     return_value=frozenset(),
                 ),
-                # Patch dynamic imports in the upsert_job shim block
-                patch("job_finder.config.load_config", return_value={}),
-                patch(
-                    "job_finder.config.get_company_denylist",
-                    return_value=frozenset(),
-                ),
             ):
-                result = upsert_job(conn, job)
+                parsed = ParsedJob.from_job(job)
+                result = upsert_job(conn, parsed)
             conn.close()
 
             assert "title_metadata_blob" in result.unresolved_reasons, (

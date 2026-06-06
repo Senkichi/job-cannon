@@ -1,14 +1,20 @@
-"""Contract tests for upsert_job Phase 47.02.
+"""Contract tests for upsert_job (Phase 47.02 + Phase 48.07).
 
 Verifies:
   1. ParsedJob insert → kind="inserted", row lands in DB.
   2. ParsedJob with salary change on re-ingest → kind="updated".
   3. ParsedJob identical re-ingest → kind="unchanged".
-  4. Job (shim path) → equivalent insert behavior.
+  4. ParsedJob built via from_job(Job(...)) → equivalent insert + touch
+     behavior (the call shape every caller now uses post-48.07).
   5. UnresolvedParsedJob → row written; result.unresolved_reasons propagated.
   6. bool(UpsertResult) raises TypeError (D-19 requirement).
 
-Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md §11 commit 47.02
+Phase 48.07 removed the Job→ParsedJob shim from upsert_job itself; the
+former "Job shim" cases now go through ParsedJob.from_job() at the
+caller boundary. The behavioral expectations are unchanged.
+
+Reference: .planning/specs/2026-05-29-ingestion-contract-enforcement.md
+§11 commit 47.02; §12 commit 48.07.
 """
 
 from __future__ import annotations
@@ -137,12 +143,12 @@ def test_parsed_job_unchanged_on_identical_reingest(conn: sqlite3.Connection) ->
 
 
 # ---------------------------------------------------------------------------
-# 4. Job shim path
+# 4. Caller-boundary conversion: ParsedJob.from_job(Job(...))
 # ---------------------------------------------------------------------------
 
 
-def test_job_shim_insert(conn: sqlite3.Connection) -> None:
-    """Passing a legacy Job object (shim path) produces kind='inserted' and the row is written."""
+def test_from_job_insert(conn: sqlite3.Connection) -> None:
+    """The post-48.07 caller shape: Job → ParsedJob.from_job → upsert_job."""
     job = Job(
         title="Data Scientist",
         company="ShimTestCo",
@@ -150,15 +156,16 @@ def test_job_shim_insert(conn: sqlite3.Connection) -> None:
         source="serpapi",
         source_url="https://serpapi.com/jobs/shim-test",
     )
-    result = upsert_job(conn, job)
+    parsed = ParsedJob.from_job(job)
+    result = upsert_job(conn, parsed)
 
     assert result.kind == "inserted"
     assert result.dedup_key == job.dedup_key
     assert _row_exists(conn, job.dedup_key)
 
 
-def test_job_shim_touch(conn: sqlite3.Connection) -> None:
-    """Shim path: re-ingesting the same Job with only a new source returns kind='touched'.
+def test_from_job_touch(conn: sqlite3.Connection) -> None:
+    """Re-ingesting the same dedup_key with only a new source returns kind='touched'.
 
     Per D-15 (Phase 47.09), a re-sighting that adds a source but changes no
     canonical field is the touch path, not an update.
@@ -170,7 +177,7 @@ def test_job_shim_touch(conn: sqlite3.Connection) -> None:
         source="linkedin",
         source_url="https://linkedin.com/jobs/shim-update",
     )
-    r1 = upsert_job(conn, job)
+    r1 = upsert_job(conn, ParsedJob.from_job(job))
     assert r1.kind == "inserted"
 
     job2 = Job(
@@ -180,7 +187,7 @@ def test_job_shim_touch(conn: sqlite3.Connection) -> None:
         source="dataforseo",  # new source only, no canonical change → "touched"
         source_url="https://dataforseo.com/jobs/shim-update",
     )
-    r2 = upsert_job(conn, job2)
+    r2 = upsert_job(conn, ParsedJob.from_job(job2))
     assert r2.kind == "touched"
 
 
